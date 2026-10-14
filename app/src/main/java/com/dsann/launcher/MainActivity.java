@@ -95,20 +95,33 @@ public class MainActivity extends Activity {
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             gestureDownX = event.getX();
             gestureDownY = event.getY();
+            return super.dispatchTouchEvent(event);
         }
-        boolean handled = super.dispatchTouchEvent(event);
         if (event.getAction() == MotionEvent.ACTION_UP) {
             float dx = event.getX() - gestureDownX;
             float dy = event.getY() - gestureDownY;
-            if (Math.abs(dy) > dp(65) && Math.abs(dy) > Math.abs(dx)) {
-                if (!drawerOpen && dy < 0) { showDrawer(); return true; }
-                if (drawerOpen && dy > 0) { showHome(); return true; }
-            } else if (!drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy)) {
-                if (dx < 0) nextPage(); else previousPage();
+            boolean verticalSwipe = Math.abs(dy) > dp(65) && Math.abs(dy) > Math.abs(dx)
+                    && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0));
+            boolean horizontalSwipe = !drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy);
+            if (verticalSwipe || horizontalSwipe) {
+                // Cancel the child click before handling a swipe, otherwise a swipe
+                // beginning on an icon can accidentally launch that app on ACTION_UP.
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                super.dispatchTouchEvent(cancel);
+                cancel.recycle();
+                if (verticalSwipe) {
+                    if (!drawerOpen && dy < 0) showDrawer();
+                    else showHome();
+                } else if (dx < 0) {
+                    nextPage();
+                } else {
+                    previousPage();
+                }
                 return true;
             }
         }
-        return handled;
+        return super.dispatchTouchEvent(event);
     }
 
     @Override protected void onResume() {
