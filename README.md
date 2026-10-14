@@ -1,42 +1,33 @@
 # My Launcher
 
-A lightweight Android home-screen launcher starter project by **Debarghya Sannigrahi**.
+Android home-screen launcher maintained by Debarghya Sannigrahi.
 
-## Current features
+## Features
 
-- Home-screen launcher entry; select My Launcher as the default Home app in system settings.
-- App grid populated from launchable apps installed on the device.
-- Tap an app icon to launch it.
-- Dark, simple interface with no third-party runtime dependencies.
+- Home-screen shortcuts and an app drawer opened by swiping up.
+- Additional home pages when a page reaches its shortcut capacity.
+- Horizontal swipe navigation with a page transition animation.
+- 12-hour clock and optional date display.
+- Home customization: grid columns, icon size, date visibility, and custom wallpaper.
+- Long-press app actions: App info, Uninstall, Add to Home, Remove from Home, and shortcut ordering.
+- Android 6.0 (API 23) minimum; Java implementation.
 
-## Compatibility
+## Build
 
-- Minimum Android version: Android 6.0 (API 23)
-- Target SDK: API 28
-- Language: Java
-- Build: Android Gradle Plugin 8.6.1, Gradle 8.7, JDK 17
+GitHub Actions builds a debug APK and a signed release APK when changes are pushed to `launcher-app`.
 
-The build tools run on GitHub Actions with JDK 17; the APK declares minSdk 23, so it is intended to install on Android 6.0 and newer.
+1. Open the [Build Launcher APK workflow](https://github.com/DS-ann/PhoneBridge/actions/workflows/build-launcher.yml).
+2. Select the latest successful run.
+3. Download **My-Launcher-debug-APK** for the debug build or **My-Launcher-release-signed-APK** for the signed release.
+4. Extract the downloaded artifact ZIP and install the APK.
 
-## Build APK on GitHub
+To use it as the device home screen, open Android's default Home app settings and select **My Launcher**.
 
-1. Open the Actions tab.
-2. Select Build Launcher APK.
-3. Push a commit to launcher-app or run the workflow manually with Run workflow.
-4. Open the successful workflow run and download the My-Launcher-debug-APK artifact.
-5. Extract the ZIP to get app-debug.apk.
+## Project files
 
-## Install and test
+- `app/src/main/java/com/dsann/launcher/MainActivity.java` — launcher behavior and UI.
+- `app/src/main/AndroidManifest.xml` — app and Home intent filters.
+- `app/src/main/res/values/` — app label and theme.
+- `.github/workflows/build-launcher.yml` — build, signing verification, and APK artifact upload.
 
-Install the APK, then open Android's Home app settings and choose My Launcher as the default Home app. Use the device's Home button to test it.
-
-## Project layout
-
-- app/src/main/java/com/dsann/launcher/MainActivity.java — launcher UI and app launching.
-- app/src/main/AndroidManifest.xml — launcher/Home intent filters and app visibility query.
-- app/build.gradle, build.gradle, settings.gradle — Android build configuration.
-- .github/workflows/build-launcher.yml — builds and uploads the debug APK.
-
-## Notes
-
-This is an initial functional launcher foundation, not a polished production launcher. Widgets, wallpaper picker, search, favorites, and customization can be added later.
+The CI build verifies compilation and release APK signing. It does not replace testing on a physical device; gesture behavior and device-specific wallpaper picker behavior still require runtime verification.
