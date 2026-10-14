@@ -2,6 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseKeystorePath = System.getenv('BATTERYPULSE_KEYSTORE_PATH')
+
 android {
     namespace 'com.dsann.launcher'
     compileSdk 35
@@ -12,6 +14,28 @@ android {
         versionCode 1
         versionName '1.0.0'
     }
+
+    signingConfigs {
+        if (releaseKeystorePath != null && !releaseKeystorePath.isEmpty()) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword System.getenv('BATTERYPULSE_STORE_PASSWORD')
+                keyAlias System.getenv('BATTERYPULSE_KEY_ALIAS')
+                keyPassword System.getenv('BATTERYPULSE_KEY_PASSWORD')
+                storeType 'PKCS12'
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (releaseKeystorePath != null && !releaseKeystorePath.isEmpty()) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
