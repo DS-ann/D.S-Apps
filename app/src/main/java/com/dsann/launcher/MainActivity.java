@@ -964,7 +964,7 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(40), 1f);
             cp.setMargins(dp(2), 0, dp(2), dp(8));
             choicesRow.addView(chip, cp);
-            chip.setOnClickListener(v -> onSelect.accept(value));
+            chip.setOnClickListener(v -> onSelect.onSelect(value));
         }
         panel.addView(choicesRow);
     }
