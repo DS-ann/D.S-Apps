@@ -304,14 +304,19 @@ public class MainActivity extends Activity {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setPadding(dp(18), dp(12), dp(18), dp(12));
-        hero.setBackground(roundRect(new int[]{Color.rgb(49, 73, 143), Color.rgb(91, 65, 157)}, dp(22)));
+        // A smoked-glass black panel: translucent enough to let the wallpaper subtly show through.
+        hero.setBackground(roundRect(new int[]{Color.argb(188, 17, 20, 27), Color.argb(168, 8, 10, 15)}, dp(22)));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
         hp.topMargin = dp(8);
         homeScreen.addView(hero, hp);
         clockText = text("--:--", 40, Color.WHITE, true);
         clockText.setIncludeFontPadding(false);
+        clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+        clockText.setLetterSpacing(0.055f);
         hero.addView(clockText);
-        dateText = text("", 13, Color.rgb(226, 228, 250), false);
+        dateText = text("", 13, Color.rgb(190, 201, 218), false);
+        dateText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.MEDIUM));
+        dateText.setLetterSpacing(0.075f);
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
         dp.topMargin = dp(3);
         hero.addView(dateText, dp);
