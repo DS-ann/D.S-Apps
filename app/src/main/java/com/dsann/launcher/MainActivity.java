@@ -154,12 +154,20 @@ public class MainActivity extends Activity {
         });
         allApps = result;
         drawerApps = new ArrayList<>(result);
-        boolean removedMissingApps = homePackages.removeIf(p -> findApp(p) == null);
+        boolean removedMissingApps = false;
+        // Avoid Collection.removeIf: it is not available on every Android 6 runtime.
+        for (int i = homePackages.size() - 1; i >= 0; i--) {
+            if (findApp(homePackages.get(i)) == null) {
+                homePackages.remove(i);
+                removedMissingApps = true;
+            }
+        }
         if (removedMissingApps) {
             persistHomeApps();
             int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
             if (currentPage >= requiredPages) currentPage = requiredPages - 1;
             rebuildPages();
+            if (root != null) renderHomePages(false);
         }
         if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
     }
