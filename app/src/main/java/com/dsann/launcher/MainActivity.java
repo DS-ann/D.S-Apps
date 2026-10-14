@@ -44,12 +44,22 @@ public class MainActivity extends Activity {
     private static final String KEY_COLUMNS = "home_columns";
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
+    private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
+    private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
+    private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
+    private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
+    private static final String KEY_SHOW_PAGE_INDICATOR = "show_page_indicator";
+    private static final String KEY_SHOW_BRAND = "show_brand";
+    private static final String KEY_DRAWER_DESCENDING = "drawer_descending";
+    private static final String KEY_DRAWER_SPACING = "drawer_spacing";
+    private static final String KEY_COLOR_THEME = "color_theme";
+    private static final String KEY_24_HOUR = "24_hour_clock";
     private static final String KEY_WALLPAPER_URI = "wallpaper_uri";
     private static final String KEY_ICON_X = "icon_x_";
     private static final String KEY_ICON_Y = "icon_y_";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int COLUMNS = 4;
-    private static final int PAGE_CAPACITY = 20;
+    private static final int HOME_ROWS = 5;
     private final int BG = Color.rgb(10, 13, 24);
     private final Handler handler = new Handler();
     private PackageManager packageManager;
@@ -58,6 +68,7 @@ public class MainActivity extends Activity {
     private AppWidgetHost widgetHost;
     private FrameLayout root;
     private LinearLayout homeScreen;
+    private TextView brandText;
     private LinearLayout pagesStrip;
     private FrameLayout pageViewport;
     private LinearLayout drawerScreen;
@@ -193,7 +204,8 @@ public class MainActivity extends Activity {
         List<ResolveInfo> result = packageManager.queryIntentActivities(query, 0);
         Collections.sort(result, new Comparator<ResolveInfo>() {
             @Override public int compare(ResolveInfo a, ResolveInfo b) {
-                return a.loadLabel(packageManager).toString().compareToIgnoreCase(b.loadLabel(packageManager).toString());
+                int order = a.loadLabel(packageManager).toString().compareToIgnoreCase(b.loadLabel(packageManager).toString());
+                return prefs != null && prefs.getBoolean(KEY_DRAWER_DESCENDING, false) ? -order : order;
             }
         });
         allApps = result;
@@ -208,7 +220,7 @@ public class MainActivity extends Activity {
         }
         if (removedMissingApps) {
             persistHomeApps();
-            int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
+            int requiredPages = Math.max(1, (homePackages.size() + pageCapacity() - 1) / pageCapacity());
             if (currentPage >= requiredPages) currentPage = requiredPages - 1;
             rebuildPages();
             if (root != null) renderHomePages(false);
@@ -246,8 +258,9 @@ public class MainActivity extends Activity {
 
     private void rebuildPages() {
         pages.clear();
-        for (int i = 0; i < homePackages.size(); i += PAGE_CAPACITY)
-            pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + PAGE_CAPACITY, homePackages.size()))));
+        int capacity = pageCapacity();
+        for (int i = 0; i < homePackages.size(); i += capacity)
+            pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + capacity, homePackages.size()))));
         if (pages.isEmpty()) pages.add(new ArrayList<String>());
         // Keep the current empty page when the user has just swiped past a full page,
         // but discard stale page indexes after shortcuts are removed.
@@ -273,6 +286,7 @@ public class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView brand = text("D.Sannigrahi", 12, Color.rgb(210, 220, 255), true);
+        brandText = brand;
         brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.ITALIC));
         brand.setLetterSpacing(0.035f);
         header.addView(brand, new LinearLayout.LayoutParams(0, dp(32), 1f));
@@ -319,14 +333,13 @@ public class MainActivity extends Activity {
         drawerScreen = new LinearLayout(this);
         drawerScreen.setOrientation(LinearLayout.VERTICAL);
         drawerScreen.setPadding(dp(18), dp(18), dp(18), dp(8));
-        drawerScreen.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(15, 20, 36), Color.rgb(10, 13, 24)}));
+        drawerScreen.setBackground(drawerBackground());
         TextView title = text("Apps", 28, Color.WHITE, true);
         drawerScreen.addView(title, new LinearLayout.LayoutParams(-1, dp(48)));
         drawerGrid = new GridView(this);
-        drawerGrid.setNumColumns(COLUMNS);
-        drawerGrid.setVerticalSpacing(dp(8));
-        drawerGrid.setHorizontalSpacing(dp(4));
+        drawerGrid.setNumColumns(getDrawerColumns());
+        drawerGrid.setVerticalSpacing(dp(prefs.getInt(KEY_DRAWER_SPACING, 8)));
+        drawerGrid.setHorizontalSpacing(dp(prefs.getInt(KEY_DRAWER_SPACING, 8) / 2));
         drawerGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         drawerGrid.setSelector(android.R.color.transparent);
         drawerAdapter = new AppAdapter(true);
@@ -344,7 +357,8 @@ public class MainActivity extends Activity {
         pagesStrip.removeAllViews();
         rebuildPages();
         int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
-        int columns = prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS);
+        int columns = getHomeColumns();
+        int rows = HOME_ROWS;
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
             FrameLayout page = new FrameLayout(this);
             page.setClipChildren(false);
@@ -354,30 +368,25 @@ public class MainActivity extends Activity {
                 if (findApp(packageName) == null) continue;
                 View cell = new AppAdapter(false, pagePackages).getView(itemIndex, null, page);
                 cell.setTag("launcher_app_cell");
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(82), dp(88), Gravity.TOP | Gravity.LEFT);
-                float defaultX = (itemIndex % columns) / (float) Math.max(1, columns - 1);
-                float defaultY = (itemIndex / columns) / 4.0f;
-                float x = prefs.getFloat(KEY_ICON_X + packageName, defaultX);
-                float y = prefs.getFloat(KEY_ICON_Y + packageName, defaultY);
-                lp.leftMargin = Math.max(0, Math.min(Math.max(0, pageWidth - dp(82)), Math.round(x * Math.max(0, pageWidth - dp(82)))));
                 int fallbackHeight = Math.max(dp(360), getResources().getDisplayMetrics().heightPixels - dp(260));
                 int pageHeight = pageViewport.getHeight() > dp(100) ? pageViewport.getHeight() : fallbackHeight;
-                lp.topMargin = Math.max(0, Math.min(Math.max(0, pageHeight - dp(88)), Math.round(y * Math.max(0, pageHeight - dp(88)))));
+                int cellWidth = Math.max(dp(1), pageWidth / columns);
+                int cellHeight = Math.max(dp(1), pageHeight / rows);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
+                int defaultCol = itemIndex % columns;
+                int defaultRow = (itemIndex / columns) % rows;
+                float savedX = prefs.getFloat(KEY_ICON_X + packageName, defaultCol / (float) Math.max(1, columns - 1));
+                float savedY = prefs.getFloat(KEY_ICON_Y + packageName, defaultRow / (float) Math.max(1, rows - 1));
+                int col = Math.max(0, Math.min(columns - 1, Math.round(savedX * Math.max(1, columns - 1))));
+                int row = Math.max(0, Math.min(rows - 1, Math.round(savedY * Math.max(1, rows - 1))));
+                lp.leftMargin = col * cellWidth;
+                lp.topMargin = row * cellHeight;
                 page.addView(cell, lp);
-                final View positionedCell = cell;
-                final float normalizedX = x;
-                final float normalizedY = y;
-                page.post(() -> {
-                    if (positionedCell.getParent() != page) return;
-                    FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) positionedCell.getLayoutParams();
-                    actual.leftMargin = Math.max(0, Math.min(Math.max(0, page.getWidth() - positionedCell.getWidth()), Math.round(normalizedX * Math.max(0, page.getWidth() - positionedCell.getWidth()))));
-                    actual.topMargin = Math.max(0, Math.min(Math.max(0, page.getHeight() - positionedCell.getHeight()), Math.round(normalizedY * Math.max(0, page.getHeight() - positionedCell.getHeight()))));
-                    positionedCell.setLayoutParams(actual);
-                });
                 installHomeIconTouch(cell, packageName);
             }
             pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
         }
+        pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? View.VISIBLE : View.GONE);
         pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
         pagesStrip.setTranslationX(-currentPage * pageWidth);
         if (animate) {
@@ -456,15 +465,48 @@ public class MainActivity extends Activity {
                 if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 if (iconDragging) {
                     FrameLayout page = (FrameLayout) view.getParent();
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
-                    float nx = (float) lp.leftMargin / Math.max(1, page.getWidth() - view.getWidth());
-                    float ny = (float) lp.topMargin / Math.max(1, page.getHeight() - view.getHeight());
-                    prefs.edit().putFloat(KEY_ICON_X + packageName, nx).putFloat(KEY_ICON_Y + packageName, ny).apply();
+                    int columns = getHomeColumns();
+                    int rows = HOME_ROWS;
+                    int cellWidth = Math.max(1, page.getWidth() / columns);
+                    int cellHeight = Math.max(1, page.getHeight() / rows);
+                    FrameLayout.LayoutParams dragged = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    int targetCol = Math.max(0, Math.min(columns - 1, (dragged.leftMargin + view.getWidth() / 2) / cellWidth));
+                    int targetRow = Math.max(0, Math.min(rows - 1, (dragged.topMargin + view.getHeight() / 2) / cellHeight));
+                    int sourceCol = Math.max(0, Math.min(columns - 1, Math.round((float) iconOriginalLeft / cellWidth)));
+                    int sourceRow = Math.max(0, Math.min(rows - 1, Math.round((float) iconOriginalTop / cellHeight)));
+                    View occupant = null;
+                    String otherPackage = null;
+                    for (int i = 0; i < page.getChildCount(); i++) {
+                        View candidate = page.getChildAt(i);
+                        if (candidate == view || !(candidate.getTag() instanceof String)) continue;
+                        String candidateTag = (String) candidate.getTag();
+                        if (!candidateTag.startsWith("launcher_app:")) continue;
+                        FrameLayout.LayoutParams candidateLp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
+                        int candidateCol = Math.max(0, Math.min(columns - 1, Math.round((float) candidateLp.leftMargin / cellWidth)));
+                        int candidateRow = Math.max(0, Math.min(rows - 1, Math.round((float) candidateLp.topMargin / cellHeight)));
+                        if (candidateCol == targetCol && candidateRow == targetRow) {
+                            occupant = candidate;
+                            otherPackage = candidateTag.substring("launcher_app:".length());
+                            break;
+                        }
+                    }
+                    if (occupant != null) {
+                        FrameLayout.LayoutParams otherLp = (FrameLayout.LayoutParams) occupant.getLayoutParams();
+                        otherLp.leftMargin = sourceCol * cellWidth;
+                        otherLp.topMargin = sourceRow * cellHeight;
+                        occupant.setLayoutParams(otherLp);
+                        saveIconSlot(otherPackage, sourceCol, sourceRow, columns);
+                    }
+                    dragged.leftMargin = targetCol * cellWidth;
+                    dragged.topMargin = targetRow * cellHeight;
+                    view.setLayoutParams(dragged);
+                    saveIconSlot(packageName, targetCol, targetRow, columns);
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
                     iconDragging = false;
                     iconDragArmed = false;
                     activeDragView = null;
                     activeDragPackage = null;
+                    renderHomePages(true);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP && longPressTriggered) {
@@ -492,7 +534,7 @@ public class MainActivity extends Activity {
             return;
         }
         // A new page is created only when the current page has reached capacity.
-        if (pages.get(currentPage).size() >= PAGE_CAPACITY) {
+        if (pages.get(currentPage).size() >= pageCapacity()) {
             currentPage++;
             renderHomePages(true);
         }
@@ -756,8 +798,11 @@ public class MainActivity extends Activity {
                 prefs.edit().remove(KEY_WALLPAPER_URI).apply();
             }
         }
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
+        int theme = prefs == null ? 0 : prefs.getInt(KEY_COLOR_THEME, 0);
+        if (theme == 1) root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(5, 35, 52), Color.rgb(7, 65, 84), BG}));
+        else if (theme == 2) root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(43, 19, 69), Color.rgb(65, 39, 104), BG}));
+        else if (theme == 3) root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(42, 46, 58), Color.rgb(25, 29, 39), BG}));
+        else root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
         return false;
     }
 
@@ -771,9 +816,10 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
-        clockText.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(now));
+        clockText.setText(new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mm a", Locale.getDefault()).format(now));
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
+        applyBrandVisibility();
     }
 
     private TextView text(String value, float size, int color, boolean bold) {
@@ -822,7 +868,7 @@ public class MainActivity extends Activity {
                 cell.setPadding(dp(2), dp(7), dp(2), dp(7));
                 icon = new ImageView(MainActivity.this);
                 icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+                int iconSize = prefs == null ? 48 : prefs.getInt(drawer ? KEY_DRAWER_ICON_SIZE : KEY_ICON_SIZE, 48);
                 LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize));
                 ip.gravity = Gravity.CENTER;
                 cell.addView(icon, ip);
@@ -835,45 +881,217 @@ public class MainActivity extends Activity {
             ResolveInfo app = items().get(position);
             icon.setImageDrawable(app.loadIcon(packageManager));
             label.setText(app.loadLabel(packageManager));
-            cell.setTag("launcher_app_cell");
+            label.setVisibility(prefs.getBoolean(drawer ? KEY_SHOW_DRAWER_LABELS : KEY_SHOW_HOME_LABELS, true) ? View.VISIBLE : View.GONE);
+            cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
             cell.setOnClickListener(v -> launchApp(app));
             cell.setOnLongClickListener(v -> { showAppOptions(app, !drawer); return true; });
             return cell;
         }
     }
 
+    private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
+    private int getDrawerColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS))); }
+    private int pageCapacity() { return getHomeColumns() * HOME_ROWS; }
+
+    private void saveIconSlot(String packageName, int col, int row, int columns) {
+        prefs.edit().putFloat(KEY_ICON_X + packageName, col / (float) Math.max(1, columns - 1))
+                .putFloat(KEY_ICON_Y + packageName, row / (float) Math.max(1, HOME_ROWS - 1)).apply();
+    }
+
+    private GradientDrawable drawerBackground() {
+        int theme = prefs == null ? 0 : prefs.getInt(KEY_COLOR_THEME, 0);
+        if (theme == 1) return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(8, 43, 63), Color.rgb(8, 17, 31)});
+        if (theme == 2) return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(49, 24, 76), Color.rgb(12, 13, 29)});
+        if (theme == 3) return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(36, 42, 55), Color.rgb(12, 15, 23)});
+        return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(15, 20, 36), Color.rgb(10, 13, 24)});
+    }
+
+    private void addSection(LinearLayout panel, String title) {
+        TextView header = text(title.toUpperCase(Locale.getDefault()), 11, Color.rgb(146, 171, 239), true);
+        header.setLetterSpacing(0.10f);
+        header.setPadding(dp(4), dp(15), dp(4), dp(7));
+        panel.addView(header, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private void addSettingRow(LinearLayout panel, String icon, String title, String detail, Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackground(roundRect(new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, dp(15)));
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+        rp.bottomMargin = dp(6);
+        TextView glyph = text(icon, 19, Color.rgb(177, 198, 255), true);
+        glyph.setGravity(Gravity.CENTER);
+        row.addView(glyph, new LinearLayout.LayoutParams(dp(34), dp(38)));
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setPadding(dp(9), 0, 0, 0);
+        copy.addView(text(title, 14, Color.WHITE, true));
+        TextView sub = text(detail, 11, Color.rgb(176, 187, 213), false);
+        sub.setPadding(0, dp(2), 0, 0);
+        copy.addView(sub);
+        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.setOnClickListener(v -> action.run());
+        panel.addView(row, rp);
+    }
+
+    private void addChoiceRow(LinearLayout panel, String title, int selected, String[] choices, java.util.function.IntConsumer onSelect) {
+        TextView heading = text(title, 14, Color.WHITE, true);
+        heading.setPadding(dp(4), dp(5), dp(4), dp(8));
+        panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout choicesRow = new LinearLayout(this);
+        choicesRow.setGravity(Gravity.CENTER_VERTICAL);
+        for (int i = 0; i < choices.length; i++) {
+            final int value = i;
+            TextView chip = text(choices[i], 12, i == selected ? Color.WHITE : Color.rgb(196, 205, 228), i == selected);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(5), dp(10), dp(5), dp(10));
+            chip.setBackground(roundRect(i == selected ? new int[]{Color.rgb(73, 99, 177), Color.rgb(73, 74, 157)} : new int[]{Color.rgb(34, 41, 62), Color.rgb(28, 34, 51)}, dp(12)));
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+            cp.setMargins(dp(2), 0, dp(2), dp(8));
+            choicesRow.addView(chip, cp);
+            chip.setOnClickListener(v -> onSelect.accept(value));
+        }
+        panel.addView(choicesRow);
+    }
+
     private void showCustomizationMenu() {
-        String[] labels = {"3 columns", "4 columns", "5 columns", "Show / hide date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home layout"};
-        String[] icons = {"▦", "▦", "▦", "◷", "−", "+", "▧", "▣", "↺", "⌂"};
-        showActionDialog("Customize Home", icons, labels, (dialog, which) -> {
-            if (which < 3) prefs.edit().putInt(KEY_COLUMNS, which == 0 ? 3 : which == 1 ? 4 : 5).apply();
-            else if (which == 3) prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
-            else if (which == 4 || which == 5) {
-                int size = prefs.getInt(KEY_ICON_SIZE, 48) + (which == 4 ? -6 : 6);
-                prefs.edit().putInt(KEY_ICON_SIZE, Math.max(32, Math.min(72, size))).apply();
-            } else if (which == 6) {
-                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                pick.addCategory(Intent.CATEGORY_OPENABLE);
-                pick.setType("image/*");
-                pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                try { startActivityForResult(pick, REQUEST_WALLPAPER); }
-                catch (Exception e) { Toast.makeText(this, "No image picker is available", Toast.LENGTH_LONG).show(); }
-                return;
-            } else if (which == 7) {
-                try { startActivity(new Intent(Intent.ACTION_SET_WALLPAPER)); }
-                catch (Exception e) { Toast.makeText(this, "System wallpaper picker unavailable", Toast.LENGTH_SHORT).show(); }
-                return;
-            } else if (which == 8) {
-                prefs.edit().remove(KEY_WALLPAPER_URI).apply();
-                applyHomeWallpaper();
-            } else {
-                homePackages.clear();
-                prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS).remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE).apply();
-                currentPage = 0;
-                restoreHomeApps();
-            }
-            updateClock();
-            renderHomePages(true);
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(16), dp(12), dp(16), dp(14));
+        panel.setBackground(roundRect(new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, dp(24)));
+        TextView title = text("Home Studio", 23, Color.WHITE, true);
+        title.setPadding(dp(4), dp(5), dp(4), dp(3));
+        panel.addView(title);
+        TextView subtitle = text("Personalize your home and app drawer", 12, Color.rgb(179, 191, 221), false);
+        subtitle.setPadding(dp(4), 0, dp(4), dp(7));
+        panel.addView(subtitle);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(content, new android.widget.ScrollView.LayoutParams(-1, -2));
+
+        addSection(content, "Home screen");
+        addChoiceRow(content, "Home columns", getHomeColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
+            prefs.edit().putInt(KEY_COLUMNS, value + 3).remove(KEY_ICON_X).remove(KEY_ICON_Y).apply();
+            currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
+            renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
         });
+        addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+            prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
+            renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
+            prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
+            renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "◷", "Date under the clock", prefs.getBoolean(KEY_SHOW_DATE, true) ? "Visible" : "Hidden", () -> {
+            prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
+            updateClock(); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "◫", "Page indicator", prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? "Visible" : "Hidden", () -> {
+            prefs.edit().putBoolean(KEY_SHOW_PAGE_INDICATOR, !prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)).apply();
+            renderHomePages(false); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "D", "Launcher signature", prefs.getBoolean(KEY_SHOW_BRAND, true) ? "Visible" : "Hidden", () -> {
+            prefs.edit().putBoolean(KEY_SHOW_BRAND, !prefs.getBoolean(KEY_SHOW_BRAND, true)).apply();
+            applyBrandVisibility(); dialog.dismiss(); showCustomizationMenu();
+        });
+
+        addSection(content, "App drawer");
+        addChoiceRow(content, "Drawer columns", getDrawerColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
+            prefs.edit().putInt(KEY_DRAWER_COLUMNS, value + 3).apply();
+            drawerGrid.setNumColumns(getDrawerColumns()); drawerAdapter.notifyDataSetChanged();
+            dialog.dismiss(); showCustomizationMenu();
+        });
+        addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+            prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
+            drawerAdapter.notifyDataSetChanged(); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "Aa", "App names in drawer", prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true) ? "Visible" : "Hidden", () -> {
+            prefs.edit().putBoolean(KEY_SHOW_DRAWER_LABELS, !prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true)).apply();
+            drawerAdapter.notifyDataSetChanged(); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "A↕", "Sort order", prefs.getBoolean(KEY_DRAWER_DESCENDING, false) ? "Z to A" : "A to Z", () -> {
+            prefs.edit().putBoolean(KEY_DRAWER_DESCENDING, !prefs.getBoolean(KEY_DRAWER_DESCENDING, false)).apply();
+            loadApps(); drawerAdapter.notifyDataSetChanged(); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "☷", "Drawer spacing", prefs.getInt(KEY_DRAWER_SPACING, 8) <= 5 ? "Compact" : "Comfortable", () -> {
+            int spacing = prefs.getInt(KEY_DRAWER_SPACING, 8) <= 5 ? 10 : 4;
+            prefs.edit().putInt(KEY_DRAWER_SPACING, spacing).apply();
+            drawerGrid.setVerticalSpacing(dp(spacing)); drawerGrid.setHorizontalSpacing(dp(spacing / 2));
+            dialog.dismiss(); showCustomizationMenu();
+        });
+
+        addSection(content, "Appearance");
+        addChoiceRow(content, "Color theme", prefs.getInt(KEY_COLOR_THEME, 0), new String[]{"Midnight", "Ocean", "Violet", "Graphite"}, value -> {
+            prefs.edit().putInt(KEY_COLOR_THEME, value).apply();
+            drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
+            dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "12/24", "Clock format", prefs.getBoolean(KEY_24_HOUR, false) ? "24-hour" : "12-hour", () -> {
+            prefs.edit().putBoolean(KEY_24_HOUR, !prefs.getBoolean(KEY_24_HOUR, false)).apply();
+            updateClock(); dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "▧", "Choose photo wallpaper", "Select an image from this device", () -> {
+            dialog.dismiss();
+            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE); pick.setType("image/*");
+            pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            try { startActivityForResult(pick, REQUEST_WALLPAPER); }
+            catch (Exception e) { Toast.makeText(this, "No image picker is available", Toast.LENGTH_LONG).show(); }
+        });
+        addSettingRow(content, "▣", "System wallpaper picker", "Open Android wallpaper settings", () -> {
+            dialog.dismiss();
+            try { startActivity(new Intent(Intent.ACTION_SET_WALLPAPER)); }
+            catch (Exception e) { Toast.makeText(this, "System wallpaper picker unavailable", Toast.LENGTH_SHORT).show(); }
+        });
+        addSettingRow(content, "↺", "Reset wallpaper", "Restore the selected color theme", () -> {
+            prefs.edit().remove(KEY_WALLPAPER_URI).apply(); applyHomeWallpaper();
+            dialog.dismiss(); showCustomizationMenu();
+        });
+
+        addSection(content, "Manage layout");
+        addSettingRow(content, "＋", "Add apps to Home", "Choose shortcuts for the home screen", () -> { dialog.dismiss(); showAddApps(); });
+        addSettingRow(content, "⌂", "Reset Home layout", "Restore default shortcuts and grid", () -> {
+            homePackages.clear();
+            prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS).remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE)
+                    .remove(KEY_SHOW_HOME_LABELS).remove(KEY_SHOW_PAGE_INDICATOR).remove(KEY_ICON_X).remove(KEY_ICON_Y).apply();
+            currentPage = 0; restoreHomeApps(); renderHomePages(true);
+            dialog.dismiss(); showCustomizationMenu();
+        });
+        addSettingRow(content, "⟲", "Reset all customizations", "Restore launcher defaults", () -> {
+            prefs.edit().clear().apply();
+            homePackages.clear(); currentPage = 0; restoreHomeApps();
+            applyHomeWallpaper(); drawerScreen.setBackground(drawerBackground());
+            drawerGrid.setNumColumns(getDrawerColumns()); drawerGrid.setVerticalSpacing(dp(8)); drawerGrid.setHorizontalSpacing(dp(4));
+            applyBrandVisibility(); loadApps(); renderHomePages(true); dialog.dismiss();
+        });
+
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        dialog.setContentView(panel);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams wp = dialog.getWindow().getAttributes();
+            wp.dimAmount = 0.60f; dialog.getWindow().setAttributes(wp);
+        }
+        dialog.show();
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(480)),
+                Math.min(getResources().getDisplayMetrics().heightPixels - dp(70), dp(720)));
+        panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(190).start();
+    }
+
+    private int sizeChoiceIndex(int size) {
+        if (size <= 40) return 0;
+        if (size <= 48) return 1;
+        if (size <= 56) return 2;
+        return 3;
+    }
+
+    private void applyBrandVisibility() {
+        if (brandText != null) brandText.setVisibility(prefs.getBoolean(KEY_SHOW_BRAND, true) ? View.VISIBLE : View.GONE);
     }
 }
