@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
+    private interface IntAction { void onSelect(int value); }
     private final int BG = Color.rgb(10, 13, 24);
     private final Handler handler = new Handler();
     private PackageManager packageManager;
@@ -367,7 +368,7 @@ public class MainActivity extends Activity {
                 String packageName = pagePackages.get(itemIndex);
                 if (findApp(packageName) == null) continue;
                 View cell = new AppAdapter(false, pagePackages).getView(itemIndex, null, page);
-                cell.setTag("launcher_app_cell");
+                cell.setTag("launcher_app:" + packageName);
                 int fallbackHeight = Math.max(dp(360), getResources().getDisplayMetrics().heightPixels - dp(260));
                 int pageHeight = pageViewport.getHeight() > dp(100) ? pageViewport.getHeight() : fallbackHeight;
                 int cellWidth = Math.max(dp(1), pageWidth / columns);
@@ -734,7 +735,7 @@ public class MainActivity extends Activity {
     private boolean touchStartedOnAppCell(float rawX, float rawY) {
         View target = findViewAt(root, (int) rawX, (int) rawY);
         while (target != null) {
-            if ("launcher_app_cell".equals(target.getTag())) return true;
+            if ("launcher_app_cell".equals(target.getTag()) || (target.getTag() instanceof String && ((String) target.getTag()).startsWith("launcher_app:"))) return true;
             if (target == root) break;
             android.view.ViewParent parent = target.getParent();
             target = parent instanceof View ? (View) parent : null;
@@ -879,6 +880,11 @@ public class MainActivity extends Activity {
                 cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
             }
             ResolveInfo app = items().get(position);
+            int iconSize = prefs == null ? 48 : prefs.getInt(drawer ? KEY_DRAWER_ICON_SIZE : KEY_ICON_SIZE, 48);
+            ViewGroup.LayoutParams iconLp = icon.getLayoutParams();
+            if (iconLp != null && (iconLp.width != dp(iconSize) || iconLp.height != dp(iconSize))) {
+                iconLp.width = dp(iconSize); iconLp.height = dp(iconSize); icon.setLayoutParams(iconLp);
+            }
             icon.setImageDrawable(app.loadIcon(packageManager));
             label.setText(app.loadLabel(packageManager));
             label.setVisibility(prefs.getBoolean(drawer ? KEY_SHOW_DRAWER_LABELS : KEY_SHOW_HOME_LABELS, true) ? View.VISIBLE : View.GONE);
@@ -892,6 +898,14 @@ public class MainActivity extends Activity {
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
     private int getDrawerColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS))); }
     private int pageCapacity() { return getHomeColumns() * HOME_ROWS; }
+
+    private void clearIconPositions() {
+        SharedPreferences.Editor editor = prefs.edit();
+        for (String key : prefs.getAll().keySet()) {
+            if (key.startsWith(KEY_ICON_X) || key.startsWith(KEY_ICON_Y)) editor.remove(key);
+        }
+        editor.apply();
+    }
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
         prefs.edit().putFloat(KEY_ICON_X + packageName, col / (float) Math.max(1, columns - 1))
@@ -935,7 +949,7 @@ public class MainActivity extends Activity {
         panel.addView(row, rp);
     }
 
-    private void addChoiceRow(LinearLayout panel, String title, int selected, String[] choices, java.util.function.IntConsumer onSelect) {
+    private void addChoiceRow(LinearLayout panel, String title, int selected, String[] choices, IntAction onSelect) {
         TextView heading = text(title, 14, Color.WHITE, true);
         heading.setPadding(dp(4), dp(5), dp(4), dp(8));
         panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
@@ -974,7 +988,8 @@ public class MainActivity extends Activity {
 
         addSection(content, "Home screen");
         addChoiceRow(content, "Home columns", getHomeColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
-            prefs.edit().putInt(KEY_COLUMNS, value + 3).remove(KEY_ICON_X).remove(KEY_ICON_Y).apply();
+            prefs.edit().putInt(KEY_COLUMNS, value + 3).apply();
+            clearIconPositions();
             currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
             renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
         });
@@ -1057,7 +1072,8 @@ public class MainActivity extends Activity {
         addSettingRow(content, "⌂", "Reset Home layout", "Restore default shortcuts and grid", () -> {
             homePackages.clear();
             prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS).remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE)
-                    .remove(KEY_SHOW_HOME_LABELS).remove(KEY_SHOW_PAGE_INDICATOR).remove(KEY_ICON_X).remove(KEY_ICON_Y).apply();
+                    .remove(KEY_SHOW_HOME_LABELS).remove(KEY_SHOW_PAGE_INDICATOR).apply();
+            clearIconPositions();
             currentPage = 0; restoreHomeApps(); renderHomePages(true);
             dialog.dismiss(); showCustomizationMenu();
         });
