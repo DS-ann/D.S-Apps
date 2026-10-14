@@ -315,7 +315,7 @@ public class MainActivity extends Activity {
         clockText.setLetterSpacing(0.055f);
         hero.addView(clockText);
         dateText = text("", 13, Color.rgb(190, 201, 218), false);
-        dateText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.MEDIUM));
+        dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
         dateText.setLetterSpacing(0.075f);
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
         dp.topMargin = dp(3);
