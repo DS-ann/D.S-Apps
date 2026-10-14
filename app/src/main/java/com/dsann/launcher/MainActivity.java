@@ -68,7 +68,6 @@ public class MainActivity extends Activity {
     private final List<String> homePackages = new ArrayList<>();
     private final List<List<String>> pages = new ArrayList<>();
     private int currentPage = 0;
-    private int extraPages = 0;
     private float gestureDownX, gestureDownY;
     private boolean drawerOpen = false;
     private final Runnable clockUpdater = new Runnable() {
@@ -191,8 +190,10 @@ public class MainActivity extends Activity {
         for (int i = 0; i < homePackages.size(); i += PAGE_CAPACITY)
             pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + PAGE_CAPACITY, homePackages.size()))));
         if (pages.isEmpty()) pages.add(new ArrayList<String>());
-        while (extraPages > 0 && pages.size() < ((homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY) + extraPages) pages.add(new ArrayList<String>());
-        if (currentPage >= pages.size()) currentPage = pages.size() - 1;
+        // Keep the current empty page when the user has just swiped past a full page,
+        // but discard stale page indexes after shortcuts are removed.
+        if (currentPage > pages.size()) currentPage = pages.size() - 1;
+        while (pages.size() <= currentPage) pages.add(new ArrayList<String>());
     }
 
     private void buildInterface() {
@@ -330,7 +331,6 @@ public class MainActivity extends Activity {
         }
         // A new page is created only when the current page has reached capacity.
         if (pages.get(currentPage).size() >= PAGE_CAPACITY) {
-            extraPages++;
             currentPage++;
             renderHomePages(true);
         }
@@ -445,7 +445,7 @@ public class MainActivity extends Activity {
                 applyHomeWallpaper();
             } else {
                 homePackages.clear(); prefs.edit().remove(KEY_HOME_APPS).apply();
-                currentPage = 0; extraPages = 0; restoreHomeApps();
+                currentPage = 0; restoreHomeApps();
             }
             updateClock(); renderHomePages(true);
         }).show();
