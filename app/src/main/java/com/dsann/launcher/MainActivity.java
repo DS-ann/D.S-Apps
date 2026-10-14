@@ -384,6 +384,9 @@ public class MainActivity extends Activity {
         java.util.ArrayList<String> actions = new java.util.ArrayList<>();
         actions.add("App info");
         actions.add("Uninstall");
+        int homeIndex = homePackages.indexOf(app.activityInfo.packageName);
+        if (fromHome && homeIndex > 0) actions.add("Move earlier");
+        if (fromHome && homeIndex >= 0 && homeIndex < homePackages.size() - 1) actions.add("Move later");
         if (fromHome) actions.add("Remove from Home");
         else actions.add("Add to Home");
         new android.app.AlertDialog.Builder(this).setTitle(app.loadLabel(packageManager))
@@ -398,6 +401,16 @@ public class MainActivity extends Activity {
                         startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.activityInfo.packageName)));
                     } catch (Exception e) {
                         Toast.makeText(this, "Uninstall isn't available for this app", Toast.LENGTH_SHORT).show();
+                    }
+                } else if (action.equals("Move earlier") || action.equals("Move later")) {
+                    int from = homePackages.indexOf(app.activityInfo.packageName);
+                    int to = from + (action.equals("Move earlier") ? -1 : 1);
+                    if (from >= 0 && to >= 0 && to < homePackages.size()) {
+                        Collections.swap(homePackages, from, to);
+                        persistHomeApps();
+                        rebuildPages();
+                        currentPage = to / PAGE_CAPACITY;
+                        renderHomePages(true);
                     }
                 } else if (action.equals("Remove from Home")) {
                     homePackages.remove(app.activityInfo.packageName);
