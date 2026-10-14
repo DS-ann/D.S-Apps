@@ -11,6 +11,9 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
+import android.net.Uri;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -42,6 +45,8 @@ public class MainActivity extends Activity {
     private static final String KEY_COLUMNS = "home_columns";
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
+    private static final String KEY_WALLPAPER_URI = "wallpaper_uri";
+    private static final int REQUEST_WALLPAPER = 7301;
     private static final int COLUMNS = 4;
     private static final int PAGE_CAPACITY = 20;
     private final int BG = Color.rgb(10, 13, 24);
@@ -180,8 +185,7 @@ public class MainActivity extends Activity {
 
     private void buildInterface() {
         root = new FrameLayout(this);
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
+        applyHomeWallpaper();
         homeScreen = new LinearLayout(this);
         homeScreen.setOrientation(LinearLayout.VERTICAL);
         homeScreen.setPadding(dp(20), dp(14), dp(20), dp(8));
@@ -393,19 +397,83 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomizationMenu() {
-        String[] options = {"3 columns", "4 columns", "5 columns", "Toggle date", "Smaller icons", "Larger icons", "Reset home"};
+        String[] options = {"3 columns", "4 columns", "5 columns", "Toggle date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home"};
         new android.app.AlertDialog.Builder(this).setTitle("Home customization").setItems(options, (dialog, which) -> {
             if (which < 3) prefs.edit().putInt(KEY_COLUMNS, which == 0 ? 3 : which == 1 ? 4 : 5).apply();
             else if (which == 3) prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
             else if (which == 4 || which == 5) {
                 int size = prefs.getInt(KEY_ICON_SIZE, 48) + (which == 4 ? -6 : 6);
                 prefs.edit().putInt(KEY_ICON_SIZE, Math.max(32, Math.min(72, size))).apply();
+            } else if (which == 6) {
+                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                pick.addCategory(Intent.CATEGORY_OPENABLE);
+                pick.setType("image/*");
+                startActivityForResult(pick, REQUEST_WALLPAPER);
+                return;
+            } else if (which == 7) {
+                try { startActivity(new Intent(Intent.ACTION_SET_WALLPAPER)); }
+                catch (Exception e) { Toast.makeText(this, "System wallpaper picker unavailable", Toast.LENGTH_SHORT).show(); }
+                return;
+            } else if (which == 8) {
+                prefs.edit().remove(KEY_WALLPAPER_URI).apply();
+                applyHomeWallpaper();
             } else {
                 homePackages.clear(); prefs.edit().remove(KEY_HOME_APPS).apply();
                 currentPage = 0; extraPages = 0; restoreHomeApps();
             }
             updateClock(); renderHomePages(true);
         }).show();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_WALLPAPER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        try {
+            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            if ((flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
+                catch (Exception ignored) {}
+            }
+            prefs.edit().putString(KEY_WALLPAPER_URI, uri.toString()).apply();
+            applyHomeWallpaper();
+        } catch (Exception e) {
+            Toast.makeText(this, "Couldn't set that wallpaper", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void applyHomeWallpaper() {
+        if (root == null) return;
+        String saved = prefs == null ? null : prefs.getString(KEY_WALLPAPER_URI, null);
+        if (saved != null && !saved.isEmpty()) {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try {
+                Uri uri = Uri.parse(saved);
+                try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                    if (in != null) BitmapFactory.decodeStream(in, null, bounds);
+                }
+                int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+                int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+                int sample = 1;
+                while (bounds.outWidth / (sample * 2) >= screenW && bounds.outHeight / (sample * 2) >= screenH) sample *= 2;
+                BitmapFactory.Options decode = new BitmapFactory.Options();
+                decode.inSampleSize = sample;
+                try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                    android.graphics.Bitmap bitmap = in == null ? null : BitmapFactory.decodeStream(in, null, decode);
+                    if (bitmap != null) {
+                        BitmapDrawable wallpaper = new BitmapDrawable(getResources(), bitmap);
+                        wallpaper.setGravity(Gravity.FILL);
+                        root.setBackground(wallpaper);
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {
+                prefs.edit().remove(KEY_WALLPAPER_URI).apply();
+            }
+        }
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
     }
 
     private void startAppDrag(View view, ResolveInfo app, boolean fromHome) {
