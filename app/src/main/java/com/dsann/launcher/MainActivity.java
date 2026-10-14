@@ -440,7 +440,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomizationMenu() {
-        String[] options = {"3 columns", "4 columns", "5 columns", "Toggle date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home"};
+        String[] options = {"3 columns", "4 columns", "5 columns", "Toggle date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home layout"};
         new android.app.AlertDialog.Builder(this).setTitle("Home customization").setItems(options, (dialog, which) -> {
             if (which < 3) prefs.edit().putInt(KEY_COLUMNS, which == 0 ? 3 : which == 1 ? 4 : 5).apply();
             else if (which == 3) prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
@@ -461,8 +461,11 @@ public class MainActivity extends Activity {
                 prefs.edit().remove(KEY_WALLPAPER_URI).apply();
                 applyHomeWallpaper();
             } else {
-                homePackages.clear(); prefs.edit().remove(KEY_HOME_APPS).apply();
-                currentPage = 0; restoreHomeApps();
+                homePackages.clear();
+                prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS)
+                        .remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE).apply();
+                currentPage = 0;
+                restoreHomeApps();
             }
             updateClock(); renderHomePages(true);
         }).show();
