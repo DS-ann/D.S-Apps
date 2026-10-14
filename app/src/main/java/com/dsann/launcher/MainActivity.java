@@ -5,7 +5,6 @@ import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
-import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -20,7 +19,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.Gravity;
 import android.view.MotionEvent;
-import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
@@ -58,6 +56,7 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private LinearLayout homeScreen;
     private LinearLayout pagesStrip;
+    private FrameLayout pageViewport;
     private LinearLayout drawerScreen;
     private GridView drawerGrid;
     private TextView clockText;
@@ -234,11 +233,18 @@ public class MainActivity extends Activity {
         dp.topMargin = dp(3);
         hero.addView(dateText, dp);
 
-        pagesStrip = new LinearLayout(this);
-        pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
+        pageViewport = new FrameLayout(this);
+        pageViewport.setClipChildren(true);
+        pageViewport.setClipToPadding(true);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, 0, 1f);
         pp.topMargin = dp(12);
-        homeScreen.addView(pagesStrip, pp);
+        homeScreen.addView(pageViewport, pp);
+
+        // The viewport stays fixed while the page strip moves inside it.
+        pagesStrip = new LinearLayout(this);
+        pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
+        pagesStrip.setClipChildren(false);
+        pageViewport.addView(pagesStrip, new FrameLayout.LayoutParams(-2, -1, Gravity.TOP | Gravity.LEFT));
 
         pageIndicator = text("", 11, Color.rgb(210, 220, 255), false);
         pageIndicator.setGravity(Gravity.CENTER);
@@ -270,13 +276,6 @@ public class MainActivity extends Activity {
             showAppOptions(drawerApps.get(position), false);
             return true;
         });
-        drawerGrid.setOnDragListener((v, event) -> {
-            if (event.getAction() == DragEvent.ACTION_DROP && event.getClipData() != null) {
-                addToHome(event.getClipData().getItemAt(0).getText().toString());
-                showHome();
-            }
-            return true;
-        });
         root.addView(drawerScreen, new FrameLayout.LayoutParams(-1, -1));
     }
 
@@ -298,27 +297,12 @@ public class MainActivity extends Activity {
                 if (app != null) showAppOptions(app, true);
                 return true;
             });
-            grid.setOnDragListener((v, event) -> {
-                if (event.getAction() == DragEvent.ACTION_DROP && event.getClipData() != null) {
-                    String pkg = event.getClipData().getItemAt(0).getText().toString();
-                    int from = homePackages.indexOf(pkg);
-                    int target = grid.pointToPosition((int) event.getX(), (int) event.getY());
-                    if (from >= 0 && target >= 0) {
-                        target = Math.min(homePackages.size() - 1, idx * PAGE_CAPACITY + target);
-                        homePackages.remove(from);
-                        target = Math.min(target, homePackages.size());
-                        homePackages.add(target, pkg);
-                        persistHomeApps(); rebuildPages(); currentPage = Math.min(idx, pages.size() - 1); renderHomePages(true);
-                    } else if (from < 0) addToHome(pkg);
-                    return true;
-                }
-                return true;
-            });
-            pagesStrip.addView(grid, new LinearLayout.LayoutParams(-1, -1));
+            int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
+            pagesStrip.addView(grid, new LinearLayout.LayoutParams(pageWidth, -1));
         }
         pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
-        if (currentPage > 0) pagesStrip.setTranslationX(-currentPage * getResources().getDisplayMetrics().widthPixels);
-        else pagesStrip.setTranslationX(0);
+        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
+        pagesStrip.setTranslationX(-currentPage * pageWidth);
         if (animate) {
             pagesStrip.setRotationY(-12f);
             pagesStrip.animate().rotationY(0f).setDuration(220).start();
@@ -490,21 +474,6 @@ public class MainActivity extends Activity {
         }
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
-    }
-
-    private void startAppDrag(View view, ResolveInfo app, boolean fromHome) {
-        ClipData data = ClipData.newPlainText("launcher-package", app.activityInfo.packageName);
-        boolean started;
-        if (android.os.Build.VERSION.SDK_INT >= 24) {
-            started = view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
-        } else {
-            started = view.startDrag(data, new View.DragShadowBuilder(view), null, 0);
-        }
-        if (!started) showAppOptions(app, fromHome);
-        else view.setOnDragListener((v, event) -> {
-            if (event.getAction() == DragEvent.ACTION_DRAG_ENDED && !event.getResult()) showAppOptions(app, fromHome);
-            return true;
-        });
     }
 
     private void launchApp(ResolveInfo app) {
