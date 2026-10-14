@@ -15,6 +15,11 @@ android {
         versionName '1.0.0'
     }
 
+    lint {
+        // Keep the deliberately low target SDK for legacy launcher behavior and Android 6 compatibility.
+        disable 'ExpiredTargetSdkVersion'
+    }
+
     signingConfigs {
         if (releaseKeystorePath != null && !releaseKeystorePath.isEmpty()) {
             release {
