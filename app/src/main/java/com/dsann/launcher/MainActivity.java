@@ -188,6 +188,7 @@ public class MainActivity extends Activity {
         root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
         buildHomeChrome();
         buildDrawer();
+        pagesStrip.setOnLongClickListener(v -> { showCustomizationMenu(); return true; });
         setContentView(root);
         renderHomePages(false);
         showHome();
@@ -364,6 +365,53 @@ public class MainActivity extends Activity {
         new android.app.AlertDialog.Builder(this).setTitle("Add to Home").setItems(labels, (dialog, which) -> {
             addToHome(available.get(which).activityInfo.packageName);
         }).show();
+    }
+
+    private void showAppOptions(ResolveInfo app, boolean fromHome) {
+        java.util.ArrayList<String> actions = new java.util.ArrayList<>();
+        actions.add("App info");
+        actions.add("Uninstall");
+        if (fromHome) actions.add("Remove from Home");
+        new android.app.AlertDialog.Builder(this).setTitle(app.loadLabel(packageManager))
+            .setItems(actions.toArray(new String[0]), (dialog, which) -> {
+                String action = actions.get(which);
+                if (action.equals("App info")) {
+                    Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    i.setData(android.net.Uri.parse("package:" + app.activityInfo.packageName));
+                    startActivity(i);
+                } else if (action.equals("Uninstall")) {
+                    startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.activityInfo.packageName)));
+                } else {
+                    homePackages.remove(app.activityInfo.packageName);
+                    persistHomeApps(); rebuildPages(); renderHomePages(false);
+                }
+            }).show();
+    }
+
+    private void showCustomizationMenu() {
+        String[] options = {"3 columns", "4 columns", "5 columns", "Toggle date", "Smaller icons", "Larger icons", "Reset home"};
+        new android.app.AlertDialog.Builder(this).setTitle("Home customization").setItems(options, (dialog, which) -> {
+            if (which < 3) prefs.edit().putInt(KEY_COLUMNS, which == 0 ? 3 : which == 1 ? 4 : 5).apply();
+            else if (which == 3) prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
+            else if (which == 4 || which == 5) {
+                int size = prefs.getInt(KEY_ICON_SIZE, 48) + (which == 4 ? -6 : 6);
+                prefs.edit().putInt(KEY_ICON_SIZE, Math.max(32, Math.min(72, size))).apply();
+            } else {
+                homePackages.clear(); prefs.edit().remove(KEY_HOME_APPS).apply();
+                currentPage = 0; extraPages = 0; restoreHomeApps();
+            }
+            updateClock(); renderHomePages(true);
+        }).show();
+    }
+
+    private void startAppDrag(View view, ResolveInfo app, boolean fromHome) {
+        ClipData data = ClipData.newPlainText("launcher-package", app.activityInfo.packageName);
+        boolean started = view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
+        if (!started) showAppOptions(app, fromHome);
+        else view.setOnDragListener((v, event) -> {
+            if (event.getAction() == DragEvent.ACTION_DRAG_ENDED && !event.getResult()) showAppOptions(app, fromHome);
+            return true;
+        });
     }
 
     private void launchApp(ResolveInfo app) {
