@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     private boolean longPressTriggered = false;
     private boolean iconDragArmed = false;
     private boolean iconDragging = false;
+    private boolean iconMovedTooEarly = false;
     private float iconTouchRawX, iconTouchRawY;
     private int iconOriginalLeft, iconOriginalTop;
     private View activeDragView;
@@ -351,6 +352,16 @@ public class MainActivity extends Activity {
                 int pageHeight = pageViewport.getHeight() > dp(100) ? pageViewport.getHeight() : fallbackHeight;
                 lp.topMargin = Math.max(0, Math.min(Math.max(0, pageHeight - dp(88)), Math.round(y * Math.max(0, pageHeight - dp(88)))));
                 page.addView(cell, lp);
+                final View positionedCell = cell;
+                final float normalizedX = x;
+                final float normalizedY = y;
+                page.post(() -> {
+                    if (positionedCell.getParent() != page) return;
+                    FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) positionedCell.getLayoutParams();
+                    actual.leftMargin = Math.max(0, Math.min(Math.max(0, page.getWidth() - positionedCell.getWidth()), Math.round(normalizedX * Math.max(0, page.getWidth() - positionedCell.getWidth()))));
+                    actual.topMargin = Math.max(0, Math.min(Math.max(0, page.getHeight() - positionedCell.getHeight()), Math.round(normalizedY * Math.max(0, page.getHeight() - positionedCell.getHeight()))));
+                    positionedCell.setLayoutParams(actual);
+                });
                 installHomeIconTouch(cell, packageName);
             }
             pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
@@ -380,6 +391,7 @@ public class MainActivity extends Activity {
                 iconTouchRawY = event.getRawY();
                 iconDragArmed = false;
                 iconDragging = false;
+                iconMovedTooEarly = false;
                 activeDragView = view;
                 activeDragPackage = packageName;
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
@@ -404,7 +416,13 @@ public class MainActivity extends Activity {
             if (action == MotionEvent.ACTION_MOVE) {
                 float dx = event.getRawX() - iconTouchRawX;
                 float dy = event.getRawY() - iconTouchRawY;
-                if (!iconDragging && iconDragArmed && (Math.abs(dx) > dp(8) || Math.abs(dy) > dp(8))) {
+                boolean moved = Math.abs(dx) > dp(8) || Math.abs(dy) > dp(8);
+                if (!iconDragArmed && moved) {
+                    iconMovedTooEarly = true;
+                    if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
+                    if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
+                }
+                if (!iconDragging && iconDragArmed && moved) {
                     iconDragging = true;
                     if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                     view.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(100).start();
@@ -442,7 +460,7 @@ public class MainActivity extends Activity {
                     activeDragPackage = null;
                     return true;
                 }
-                if (action == MotionEvent.ACTION_UP) {
+                if (action == MotionEvent.ACTION_UP && !iconMovedTooEarly) {
                     ResolveInfo app = findApp(packageName);
                     if (app != null) launchApp(app);
                 }
