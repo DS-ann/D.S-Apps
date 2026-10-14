@@ -654,17 +654,38 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQUEST_WALLPAPER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
+        java.io.File savedImage = new java.io.File(getFilesDir(), "launcher_wallpaper_image");
+        java.io.File tempImage = new java.io.File(getFilesDir(), "launcher_wallpaper_image.tmp");
         try {
-            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            if ((flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
-                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
-                catch (Exception ignored) {}
+            // Copy picker content into app-private storage so the image remains readable
+            // even when the document provider grants only temporary URI access.
+            try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(tempImage)) {
+                if (in == null) throw new java.io.IOException("No image stream");
+                byte[] buffer = new byte[16384];
+                int count;
+                while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
             }
-            prefs.edit().putString(KEY_WALLPAPER_URI, uri.toString()).apply();
+            BitmapFactory.Options check = new BitmapFactory.Options();
+            check.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(tempImage.getAbsolutePath(), check);
+            if (check.outWidth <= 0 || check.outHeight <= 0) throw new java.io.IOException("Unreadable image");
+            if (savedImage.exists() && !savedImage.delete()) throw new java.io.IOException("Cannot replace saved image");
+            if (!tempImage.renameTo(savedImage)) {
+                try (java.io.InputStream in = new java.io.FileInputStream(tempImage);
+                     java.io.FileOutputStream out = new java.io.FileOutputStream(savedImage)) {
+                    byte[] buffer = new byte[16384];
+                    int count;
+                    while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+                }
+                tempImage.delete();
+            }
+            prefs.edit().putString(KEY_WALLPAPER_URI, Uri.fromFile(savedImage).toString()).apply();
             if (applyHomeWallpaper()) Toast.makeText(this, "Home wallpaper updated", Toast.LENGTH_SHORT).show();
-            else Toast.makeText(this, "Couldn't read that image. Choose another one.", Toast.LENGTH_LONG).show();
+            else Toast.makeText(this, "Couldn't apply this image. Try a smaller image.", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(this, "Couldn't set that wallpaper", Toast.LENGTH_SHORT).show();
+            tempImage.delete();
+            Toast.makeText(this, "Couldn't read that image. Try selecting a locally saved copy.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -696,6 +717,13 @@ public class MainActivity extends Activity {
         return view;
     }
 
+    private java.io.InputStream openWallpaperStream(Uri uri) throws java.io.IOException {
+        if ("file".equalsIgnoreCase(uri.getScheme())) {
+            return new java.io.FileInputStream(new java.io.File(uri.getPath()));
+        }
+        return getContentResolver().openInputStream(uri);
+    }
+
     private boolean applyHomeWallpaper() {
         if (root == null) return false;
         String saved = prefs == null ? null : prefs.getString(KEY_WALLPAPER_URI, null);
@@ -704,7 +732,7 @@ public class MainActivity extends Activity {
             bounds.inJustDecodeBounds = true;
             try {
                 Uri uri = Uri.parse(saved);
-                try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                try (java.io.InputStream in = openWallpaperStream(uri)) {
                     if (in != null) BitmapFactory.decodeStream(in, null, bounds);
                 }
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new java.io.IOException("Image could not be decoded");
@@ -714,7 +742,7 @@ public class MainActivity extends Activity {
                 while (bounds.outWidth / (sample * 2) >= screenW && bounds.outHeight / (sample * 2) >= screenH) sample *= 2;
                 BitmapFactory.Options decode = new BitmapFactory.Options();
                 decode.inSampleSize = sample;
-                try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                try (java.io.InputStream in = openWallpaperStream(uri)) {
                     android.graphics.Bitmap bitmap = in == null ? null : BitmapFactory.decodeStream(in, null, decode);
                     if (bitmap != null) {
                         BitmapDrawable wallpaper = new BitmapDrawable(getResources(), bitmap);
