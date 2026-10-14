@@ -255,10 +255,14 @@ public class MainActivity extends Activity {
         drawerGrid.setAdapter(drawerAdapter);
         drawerScreen.addView(drawerGrid, new LinearLayout.LayoutParams(-1, 0, 1f));
         drawerGrid.setOnItemLongClickListener((parent, view, position, id) -> {
-            ResolveInfo app = drawerApps.get(position);
-            addToHome(app.activityInfo.packageName);
-            Toast.makeText(this, "Added to Home", Toast.LENGTH_SHORT).show();
-            showHome();
+            startAppDrag(view, drawerApps.get(position), false);
+            return true;
+        });
+        drawerGrid.setOnDragListener((v, event) -> {
+            if (event.getAction() == DragEvent.ACTION_DROP && event.getClipData() != null) {
+                addToHome(event.getClipData().getItemAt(0).getText().toString());
+                showHome();
+            }
             return true;
         });
         root.addView(drawerScreen, new FrameLayout.LayoutParams(-1, -1));
@@ -475,7 +479,8 @@ public class MainActivity extends Activity {
                 cell.setPadding(dp(2), dp(7), dp(2), dp(7));
                 icon = new ImageView(MainActivity.this);
                 icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(48), dp(48));
+                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize));
                 ip.gravity = Gravity.CENTER;
                 cell.addView(icon, ip);
                 label = text("", 10, Color.rgb(236, 239, 249), false);
