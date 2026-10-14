@@ -210,7 +210,15 @@ public class MainActivity extends Activity {
             }
         });
         allApps = result;
-        drawerApps = new ArrayList<>(result);
+        drawerApps = new ArrayList<>();
+        // The launcher is a system-facing app, not a user app shortcut: keep it
+        // discoverable by PackageManager for internal lookups, but hide it from its own drawer.
+        String launcherPackage = getPackageName();
+        for (ResolveInfo app : result) {
+            if (app.activityInfo != null && !launcherPackage.equals(app.activityInfo.packageName)) {
+                drawerApps.add(app);
+            }
+        }
         boolean removedMissingApps = false;
         // Avoid Collection.removeIf: it is not available on every Android 6 runtime.
         for (int i = homePackages.size() - 1; i >= 0; i--) {
