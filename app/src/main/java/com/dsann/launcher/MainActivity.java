@@ -192,7 +192,9 @@ public class MainActivity extends Activity {
         root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
         buildHomeChrome();
         buildDrawer();
+        // Keep customization discoverable with a dedicated button.
         pagesStrip.setOnLongClickListener(v -> { showCustomizationMenu(); return true; });
+        homeScreen.setOnLongClickListener(v -> { showCustomizationMenu(); return true; });
         setContentView(root);
         renderHomePages(false);
         showHome();
@@ -207,8 +209,14 @@ public class MainActivity extends Activity {
         header.addView(brand, new LinearLayout.LayoutParams(0, dp(32), 1f));
         TextView edit = text("＋", 26, Color.WHITE, false);
         edit.setGravity(Gravity.CENTER);
+        edit.setContentDescription("Add apps to Home");
         edit.setOnClickListener(v -> showAddApps());
         header.addView(edit, new LinearLayout.LayoutParams(dp(42), dp(38)));
+        TextView settings = text("⚙", 22, Color.WHITE, false);
+        settings.setGravity(Gravity.CENTER);
+        settings.setContentDescription("Home customization");
+        settings.setOnClickListener(v -> showCustomizationMenu());
+        header.addView(settings, new LinearLayout.LayoutParams(dp(42), dp(38)));
         homeScreen.addView(header);
 
         LinearLayout hero = new LinearLayout(this);
@@ -259,7 +267,7 @@ public class MainActivity extends Activity {
         drawerGrid.setAdapter(drawerAdapter);
         drawerScreen.addView(drawerGrid, new LinearLayout.LayoutParams(-1, 0, 1f));
         drawerGrid.setOnItemLongClickListener((parent, view, position, id) -> {
-            startAppDrag(view, drawerApps.get(position), false);
+            showAppOptions(drawerApps.get(position), false);
             return true;
         });
         drawerGrid.setOnDragListener((v, event) -> {
@@ -287,7 +295,7 @@ public class MainActivity extends Activity {
             grid.setAdapter(new AppAdapter(false, pages.get(pageIndex)));
             grid.setOnItemLongClickListener((parent, view, position, id) -> {
                 ResolveInfo app = findApp(pages.get(idx).get(position));
-                if (app != null) startAppDrag(view, app, true);
+                if (app != null) showAppOptions(app, true);
                 return true;
             });
             grid.setOnDragListener((v, event) -> {
@@ -380,6 +388,7 @@ public class MainActivity extends Activity {
         actions.add("App info");
         actions.add("Uninstall");
         if (fromHome) actions.add("Remove from Home");
+        else actions.add("Add to Home");
         new android.app.AlertDialog.Builder(this).setTitle(app.loadLabel(packageManager))
             .setItems(actions.toArray(new String[0]), (dialog, which) -> {
                 String action = actions.get(which);
@@ -388,10 +397,17 @@ public class MainActivity extends Activity {
                     i.setData(android.net.Uri.parse("package:" + app.activityInfo.packageName));
                     startActivity(i);
                 } else if (action.equals("Uninstall")) {
-                    startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.activityInfo.packageName)));
-                } else {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.activityInfo.packageName)));
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Uninstall isn't available for this app", Toast.LENGTH_SHORT).show();
+                    }
+                } else if (action.equals("Remove from Home")) {
                     homePackages.remove(app.activityInfo.packageName);
                     persistHomeApps(); rebuildPages(); renderHomePages(false);
+                } else {
+                    addToHome(app.activityInfo.packageName);
+                    showHome();
                 }
             }).show();
     }
@@ -478,7 +494,12 @@ public class MainActivity extends Activity {
 
     private void startAppDrag(View view, ResolveInfo app, boolean fromHome) {
         ClipData data = ClipData.newPlainText("launcher-package", app.activityInfo.packageName);
-        boolean started = view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
+        boolean started;
+        if (android.os.Build.VERSION.SDK_INT >= 24) {
+            started = view.startDragAndDrop(data, new View.DragShadowBuilder(view), null, 0);
+        } else {
+            started = view.startDrag(data, new View.DragShadowBuilder(view), null, 0);
+        }
         if (!started) showAppOptions(app, fromHome);
         else view.setOnDragListener((v, event) -> {
             if (event.getAction() == DragEvent.ACTION_DRAG_ENDED && !event.getResult()) showAppOptions(app, fromHome);
