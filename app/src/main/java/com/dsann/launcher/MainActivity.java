@@ -995,7 +995,11 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomizationMenu() {
-        Dialog dialog = new Dialog(this);
+        showCustomizationMenu(null, 0, true);
+    }
+
+    private void showCustomizationMenu(Dialog existingDialog, int restoreScrollY, boolean animateOpening) {
+        Dialog dialog = existingDialog == null ? new Dialog(this) : existingDialog;
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(16), dp(12), dp(16), dp(14));
@@ -1016,63 +1020,63 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_COLUMNS, value + 3).apply();
             clearIconPositions();
             currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
-            renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
+            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
-            renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
+            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
-            renderHomePages(true); dialog.dismiss(); showCustomizationMenu();
+            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◷", "Date under the clock", prefs.getBoolean(KEY_SHOW_DATE, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
-            updateClock(); dialog.dismiss(); showCustomizationMenu();
+            updateClock(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◫", "Page indicator", prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_PAGE_INDICATOR, !prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)).apply();
-            renderHomePages(false); dialog.dismiss(); showCustomizationMenu();
+            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "D", "Launcher signature", prefs.getBoolean(KEY_SHOW_BRAND, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_BRAND, !prefs.getBoolean(KEY_SHOW_BRAND, true)).apply();
-            applyBrandVisibility(); dialog.dismiss(); showCustomizationMenu();
+            applyBrandVisibility(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
         addSection(content, "App drawer");
         addChoiceRow(content, "Drawer columns", getDrawerColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_COLUMNS, value + 3).apply();
             drawerGrid.setNumColumns(getDrawerColumns()); drawerAdapter.notifyDataSetChanged();
-            dialog.dismiss(); showCustomizationMenu();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
-            drawerAdapter.notifyDataSetChanged(); dialog.dismiss(); showCustomizationMenu();
+            drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "Aa", "App names in drawer", prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_DRAWER_LABELS, !prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true)).apply();
-            drawerAdapter.notifyDataSetChanged(); dialog.dismiss(); showCustomizationMenu();
+            drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "A↕", "Sort order", prefs.getBoolean(KEY_DRAWER_DESCENDING, false) ? "Z to A" : "A to Z", () -> {
             prefs.edit().putBoolean(KEY_DRAWER_DESCENDING, !prefs.getBoolean(KEY_DRAWER_DESCENDING, false)).apply();
-            loadApps(); drawerAdapter.notifyDataSetChanged(); dialog.dismiss(); showCustomizationMenu();
+            loadApps(); drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "☷", "Drawer spacing", prefs.getInt(KEY_DRAWER_SPACING, 8) <= 5 ? "Compact" : "Comfortable", () -> {
             int spacing = prefs.getInt(KEY_DRAWER_SPACING, 8) <= 5 ? 10 : 4;
             prefs.edit().putInt(KEY_DRAWER_SPACING, spacing).apply();
             drawerGrid.setVerticalSpacing(dp(spacing)); drawerGrid.setHorizontalSpacing(dp(spacing / 2));
-            dialog.dismiss(); showCustomizationMenu();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
         addSection(content, "Appearance");
         addChoiceRow(content, "Color theme", prefs.getInt(KEY_COLOR_THEME, 0), new String[]{"Midnight", "Ocean", "Violet", "Graphite"}, value -> {
             prefs.edit().putInt(KEY_COLOR_THEME, value).apply();
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
-            dialog.dismiss(); showCustomizationMenu();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "12/24", "Clock format", prefs.getBoolean(KEY_24_HOUR, false) ? "24-hour" : "12-hour", () -> {
             prefs.edit().putBoolean(KEY_24_HOUR, !prefs.getBoolean(KEY_24_HOUR, false)).apply();
-            updateClock(); dialog.dismiss(); showCustomizationMenu();
+            updateClock(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "▧", "Choose photo wallpaper", "Select an image from this device", () -> {
             dialog.dismiss();
@@ -1089,7 +1093,7 @@ public class MainActivity extends Activity {
         });
         addSettingRow(content, "↺", "Reset wallpaper", "Restore the selected color theme", () -> {
             prefs.edit().remove(KEY_WALLPAPER_URI).apply(); applyHomeWallpaper();
-            dialog.dismiss(); showCustomizationMenu();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
         addSection(content, "Manage layout");
@@ -1100,14 +1104,14 @@ public class MainActivity extends Activity {
                     .remove(KEY_SHOW_HOME_LABELS).remove(KEY_SHOW_PAGE_INDICATOR).apply();
             clearIconPositions();
             currentPage = 0; restoreHomeApps(); renderHomePages(true);
-            dialog.dismiss(); showCustomizationMenu();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "⟲", "Reset all customizations", "Restore launcher defaults", () -> {
             prefs.edit().clear().apply();
             homePackages.clear(); currentPage = 0; restoreHomeApps();
             applyHomeWallpaper(); drawerScreen.setBackground(drawerBackground());
             drawerGrid.setNumColumns(getDrawerColumns()); drawerGrid.setVerticalSpacing(dp(8)); drawerGrid.setHorizontalSpacing(dp(4));
-            applyBrandVisibility(); loadApps(); renderHomePages(true); dialog.dismiss();
+            applyBrandVisibility(); loadApps(); renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -1118,11 +1122,15 @@ public class MainActivity extends Activity {
             android.view.WindowManager.LayoutParams wp = dialog.getWindow().getAttributes();
             wp.dimAmount = 0.60f; dialog.getWindow().setAttributes(wp);
         }
-        dialog.show();
+        boolean wasShowing = dialog.isShowing();
+        if (!wasShowing) dialog.show();
         if (dialog.getWindow() != null) dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(480)),
                 Math.min(getResources().getDisplayMetrics().heightPixels - dp(70), dp(720)));
-        panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
-        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(190).start();
+        if (restoreScrollY > 0) scroll.post(() -> scroll.scrollTo(0, restoreScrollY));
+        if (animateOpening && !wasShowing) {
+            panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
+            panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(190).start();
+        }
     }
 
     private int sizeChoiceIndex(int size) {
