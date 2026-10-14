@@ -155,6 +155,18 @@ public class MainActivity extends Activity {
         return super.dispatchTouchEvent(event);
     }
 
+    @Override public void onBackPressed() {
+        // Back closes the app drawer first. On the launcher home screen, consume
+        // Back instead of letting the task fall through to system overview.
+        if (drawerOpen) {
+            showHome();
+            return;
+        }
+        handler.removeCallbacks(homeLongPress);
+        // Stay on the home screen; the system Recents action belongs to the
+        // navigation bar/gesture, not the Back button.
+    }
+
     @Override protected void onResume() {
         super.onResume();
         handler.removeCallbacks(clockUpdater);
