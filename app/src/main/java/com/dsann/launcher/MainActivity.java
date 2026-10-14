@@ -69,6 +69,16 @@ public class MainActivity extends Activity {
     private final List<List<String>> pages = new ArrayList<>();
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
+    private float longPressDownX, longPressDownY;
+    private boolean longPressTriggered = false;
+    private final Runnable homeLongPress = new Runnable() {
+        @Override public void run() {
+            if (!drawerOpen && root != null) {
+                longPressTriggered = true;
+                showCustomizationMenu();
+            }
+        }
+    };
     private boolean drawerOpen = false;
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
@@ -94,9 +104,19 @@ public class MainActivity extends Activity {
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             gestureDownX = event.getX();
             gestureDownY = event.getY();
+            longPressDownX = event.getX();
+            longPressDownY = event.getY();
+            longPressTriggered = false;
+            handler.removeCallbacks(homeLongPress);
+            if (!drawerOpen && !touchStartedOnAppCell(event.getRawX(), event.getRawY())) handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
         }
+        if (event.getAction() == MotionEvent.ACTION_MOVE) {
+            if (Math.abs(event.getX() - longPressDownX) > dp(12) || Math.abs(event.getY() - longPressDownY) > dp(12)) handler.removeCallbacks(homeLongPress);
+        }
+        if (event.getAction() == MotionEvent.ACTION_CANCEL || event.getAction() == MotionEvent.ACTION_UP) handler.removeCallbacks(homeLongPress);
         if (event.getAction() == MotionEvent.ACTION_UP) {
+            if (longPressTriggered) return true;
             float dx = event.getX() - gestureDownX;
             float dy = event.getY() - gestureDownY;
             boolean verticalSwipe = Math.abs(dy) > dp(65) && Math.abs(dy) > Math.abs(dx)
@@ -220,9 +240,6 @@ public class MainActivity extends Activity {
         root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
         buildHomeChrome();
         buildDrawer();
-        // Keep customization discoverable with a dedicated button.
-        pagesStrip.setOnLongClickListener(v -> { showCustomizationMenu(); return true; });
-        homeScreen.setOnLongClickListener(v -> { showCustomizationMenu(); return true; });
         setContentView(root);
         renderHomePages(false);
         showHome();
@@ -235,16 +252,6 @@ public class MainActivity extends Activity {
         brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.ITALIC));
         brand.setLetterSpacing(0.035f);
         header.addView(brand, new LinearLayout.LayoutParams(0, dp(32), 1f));
-        TextView edit = text("＋", 26, Color.WHITE, false);
-        edit.setGravity(Gravity.CENTER);
-        edit.setContentDescription("Add apps to Home");
-        edit.setOnClickListener(v -> showAddApps());
-        header.addView(edit, new LinearLayout.LayoutParams(dp(42), dp(38)));
-        TextView settings = text("⚙", 22, Color.WHITE, false);
-        settings.setGravity(Gravity.CENTER);
-        settings.setContentDescription("Home customization");
-        settings.setOnClickListener(v -> showCustomizationMenu());
-        header.addView(settings, new LinearLayout.LayoutParams(dp(42), dp(38)));
         homeScreen.addView(header);
 
         LinearLayout hero = new LinearLayout(this);
@@ -321,11 +328,6 @@ public class MainActivity extends Activity {
             grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
             grid.setSelector(android.R.color.transparent);
             grid.setAdapter(new AppAdapter(false, pages.get(pageIndex)));
-            grid.setOnItemLongClickListener((parent, view, position, id) -> {
-                ResolveInfo app = findApp(pages.get(idx).get(position));
-                if (app != null) showAppOptions(app, true);
-                return true;
-            });
             int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
             pagesStrip.addView(grid, new LinearLayout.LayoutParams(pageWidth, -1));
         }
@@ -451,7 +453,9 @@ public class MainActivity extends Activity {
                 Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 pick.addCategory(Intent.CATEGORY_OPENABLE);
                 pick.setType("image/*");
-                startActivityForResult(pick, REQUEST_WALLPAPER);
+                pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                try { startActivityForResult(pick, REQUEST_WALLPAPER); }
+                catch (Exception e) { Toast.makeText(this, "No image picker is available", Toast.LENGTH_LONG).show(); }
                 return;
             } else if (which == 7) {
                 try { startActivity(new Intent(Intent.ACTION_SET_WALLPAPER)); }
@@ -482,14 +486,43 @@ public class MainActivity extends Activity {
                 catch (Exception ignored) {}
             }
             prefs.edit().putString(KEY_WALLPAPER_URI, uri.toString()).apply();
-            applyHomeWallpaper();
+            if (applyHomeWallpaper()) Toast.makeText(this, "Home wallpaper updated", Toast.LENGTH_SHORT).show();
+            else Toast.makeText(this, "Couldn't read that image. Choose another one.", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Toast.makeText(this, "Couldn't set that wallpaper", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void applyHomeWallpaper() {
-        if (root == null) return;
+    private boolean touchStartedOnAppCell(float rawX, float rawY) {
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            if ("launcher_app_cell".equals(target.getTag())) return true;
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return false;
+    }
+
+    private View findViewAt(View view, int rawX, int rawY) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return null;
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        int localX = rawX - location[0];
+        int localY = rawY - location[1];
+        if (localX < 0 || localY < 0 || localX >= view.getWidth() || localY >= view.getHeight()) return null;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                View found = findViewAt(group.getChildAt(i), rawX, rawY);
+                if (found != null) return found;
+            }
+        }
+        return view;
+    }
+
+    private boolean applyHomeWallpaper() {
+        if (root == null) return false;
         String saved = prefs == null ? null : prefs.getString(KEY_WALLPAPER_URI, null);
         if (saved != null && !saved.isEmpty()) {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
@@ -499,6 +532,7 @@ public class MainActivity extends Activity {
                 try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
                     if (in != null) BitmapFactory.decodeStream(in, null, bounds);
                 }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new java.io.IOException("Image could not be decoded");
                 int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
                 int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
                 int sample = 1;
@@ -511,15 +545,17 @@ public class MainActivity extends Activity {
                         BitmapDrawable wallpaper = new BitmapDrawable(getResources(), bitmap);
                         wallpaper.setGravity(Gravity.FILL);
                         root.setBackground(wallpaper);
-                        return;
+                        return true;
                     }
                 }
+                throw new java.io.IOException("Image could not be decoded");
             } catch (Exception ignored) {
                 prefs.edit().remove(KEY_WALLPAPER_URI).apply();
             }
         }
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
+        return false;
     }
 
     private void launchApp(ResolveInfo app) {
@@ -596,7 +632,9 @@ public class MainActivity extends Activity {
             ResolveInfo app = items().get(position);
             icon.setImageDrawable(app.loadIcon(packageManager));
             label.setText(app.loadLabel(packageManager));
+            cell.setTag("launcher_app_cell");
             cell.setOnClickListener(v -> launchApp(app));
+            cell.setOnLongClickListener(v -> { showAppOptions(app, !drawer); return true; });
             return cell;
         }
     }
