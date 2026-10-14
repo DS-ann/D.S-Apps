@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# Only build the latest launcher commit; older builds are superseded on rapid fixes.
+concurrency:
+  group: launcher-app-build
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build and sign Launcher APK
