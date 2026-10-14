@@ -53,9 +53,6 @@ jobs:
           chmod 600 "$RUNNER_TEMP/batterypulse-release.p12"
           echo "BatteryPulse PKCS12 keystore validated."
 
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
-
       - name: Build signed release APK
         env:
           BATTERYPULSE_KEYSTORE_PATH: ${{ runner.temp }}/batterypulse-release.p12
@@ -73,14 +70,6 @@ jobs:
           test -x "$APK_SIGNER"
           "$APK_SIGNER" verify --verbose "$APK"
           echo "Signed launcher release APK verified."
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: My-Launcher-debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
 
       - name: Upload signed release APK
         uses: actions/upload-artifact@v4
