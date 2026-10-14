@@ -17,6 +17,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
@@ -38,6 +39,9 @@ public class MainActivity extends Activity {
     private static final int HOST_ID = 1407;
     private static final String PREFS = "ds_launcher_prefs";
     private static final String KEY_HOME_APPS = "home_apps";
+    private static final String KEY_COLUMNS = "home_columns";
+    private static final String KEY_SHOW_DATE = "show_date";
+    private static final String KEY_ICON_SIZE = "icon_size";
     private static final int COLUMNS = 4;
     private static final int PAGE_CAPACITY = 20;
     private final int BG = Color.rgb(10, 13, 24);
@@ -266,7 +270,7 @@ public class MainActivity extends Activity {
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
             final int idx = pageIndex;
             GridView grid = new GridView(this);
-            grid.setNumColumns(COLUMNS);
+            grid.setNumColumns(prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS));
             grid.setVerticalSpacing(dp(8));
             grid.setHorizontalSpacing(dp(4));
             grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
@@ -372,7 +376,8 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
-        clockText.setText(new SimpleDateFormat("HH:mm", Locale.getDefault()).format(now));
+        clockText.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(now));
+        dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
     }
 
