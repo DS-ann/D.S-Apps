@@ -154,6 +154,13 @@ public class MainActivity extends Activity {
         });
         allApps = result;
         drawerApps = new ArrayList<>(result);
+        boolean removedMissingApps = homePackages.removeIf(p -> findApp(p) == null);
+        if (removedMissingApps) {
+            persistHomeApps();
+            int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
+            if (currentPage >= requiredPages) currentPage = requiredPages - 1;
+            rebuildPages();
+        }
         if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
     }
 
@@ -414,6 +421,8 @@ public class MainActivity extends Activity {
                     }
                 } else if (action.equals("Remove from Home")) {
                     homePackages.remove(app.activityInfo.packageName);
+                    int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
+                    if (currentPage >= requiredPages) currentPage = requiredPages - 1;
                     persistHomeApps(); rebuildPages(); renderHomePages(false);
                 } else {
                     addToHome(app.activityInfo.packageName);
