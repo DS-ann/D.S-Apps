@@ -299,12 +299,17 @@ public class MainActivity extends Activity {
     }
 
     private void nextPage() {
-        if (currentPage + 1 >= pages.size()) {
-            // Swiping beyond the last page creates a new blank home page.
+        if (currentPage + 1 < pages.size()) {
+            currentPage++;
+            renderHomePages(true);
+            return;
+        }
+        // A new page is created only when the current page has reached capacity.
+        if (pages.get(currentPage).size() >= PAGE_CAPACITY) {
             extraPages++;
             currentPage++;
-        } else currentPage++;
-        renderHomePages(true);
+            renderHomePages(true);
+        }
     }
 
     private void previousPage() {
@@ -423,7 +428,7 @@ public class MainActivity extends Activity {
             ResolveInfo app = items().get(position);
             icon.setImageDrawable(app.loadIcon(packageManager));
             label.setText(app.loadLabel(packageManager));
-            cell.setOnClickListener(v -> { if (!drawer) launchApp(app); });
+            cell.setOnClickListener(v -> launchApp(app));
             return cell;
         }
     }
