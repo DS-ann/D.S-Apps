@@ -386,6 +386,31 @@ public class MainActivity extends Activity {
                 installHomeIconTouch(cell, packageName);
             }
             pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
+            page.post(() -> {
+                if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
+                int actualCellWidth = Math.max(1, page.getWidth() / columns);
+                int actualCellHeight = Math.max(1, page.getHeight() / rows);
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View child = page.getChildAt(childIndex);
+                    Object childTag = child.getTag();
+                    if (!(childTag instanceof String) || !((String) childTag).startsWith("launcher_app:")) continue;
+                    String childPackage = ((String) childTag).substring("launcher_app:".length());
+                    int orderIndex = pagePackages.indexOf(childPackage);
+                    if (orderIndex < 0) continue;
+                    int defaultCol = orderIndex % columns;
+                    int defaultRow = (orderIndex / columns) % rows;
+                    float savedX = prefs.getFloat(KEY_ICON_X + childPackage, defaultCol / (float) Math.max(1, columns - 1));
+                    float savedY = prefs.getFloat(KEY_ICON_Y + childPackage, defaultRow / (float) Math.max(1, rows - 1));
+                    int col = Math.max(0, Math.min(columns - 1, Math.round(savedX * Math.max(1, columns - 1))));
+                    int row = Math.max(0, Math.min(rows - 1, Math.round(savedY * Math.max(1, rows - 1))));
+                    FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
+                    actual.width = actualCellWidth;
+                    actual.height = actualCellHeight;
+                    actual.leftMargin = col * actualCellWidth;
+                    actual.topMargin = row * actualCellHeight;
+                    child.setLayoutParams(actual);
+                }
+            });
         }
         pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? View.VISIBLE : View.GONE);
         pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
