@@ -60,8 +60,9 @@ public class MainActivity extends Activity {
     private final List<String> homePackages = new ArrayList<>();
     private final List<List<String>> pages = new ArrayList<>();
     private int currentPage = 0;
+    private int extraPages = 0;
+    private float gestureDownX, gestureDownY;
     private boolean drawerOpen = false;
-    private float downX, downY;
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
             updateClock();
@@ -80,6 +81,26 @@ public class MainActivity extends Activity {
         loadApps();
         restoreHomeApps();
         buildInterface();
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            gestureDownX = event.getX();
+            gestureDownY = event.getY();
+        }
+        boolean handled = super.dispatchTouchEvent(event);
+        if (event.getAction() == MotionEvent.ACTION_UP) {
+            float dx = event.getX() - gestureDownX;
+            float dy = event.getY() - gestureDownY;
+            if (Math.abs(dy) > dp(65) && Math.abs(dy) > Math.abs(dx)) {
+                if (!drawerOpen && dy < 0) { showDrawer(); return true; }
+                if (drawerOpen && dy > 0) { showHome(); return true; }
+            } else if (!drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy)) {
+                if (dx < 0) nextPage(); else previousPage();
+                return true;
+            }
+        }
+        return handled;
     }
 
     @Override protected void onResume() {
@@ -147,8 +168,9 @@ public class MainActivity extends Activity {
     private void rebuildPages() {
         pages.clear();
         for (int i = 0; i < homePackages.size(); i += PAGE_CAPACITY)
-            pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + PAGE_CAPACITY, homePackages.size())));
+            pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + PAGE_CAPACITY, homePackages.size()))));
         if (pages.isEmpty()) pages.add(new ArrayList<String>());
+        while (extraPages > 0 && pages.size() < ((homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY) + extraPages) pages.add(new ArrayList<String>());
         if (currentPage >= pages.size()) currentPage = pages.size() - 1;
     }
 
@@ -165,21 +187,6 @@ public class MainActivity extends Activity {
         setContentView(root);
         renderHomePages(false);
         showHome();
-        root.setOnTouchListener(new View.OnTouchListener() {
-            @Override public boolean onTouch(View v, MotionEvent e) {
-                if (e.getAction() == MotionEvent.ACTION_DOWN) { downX = e.getX(); downY = e.getY(); return true; }
-                if (e.getAction() == MotionEvent.ACTION_UP) {
-                    float dx = e.getX() - downX, dy = e.getY() - downY;
-                    if (!drawerOpen && downY - e.getY() > dp(65) && Math.abs(dy) > Math.abs(dx)) { showDrawer(); return true; }
-                    if (drawerOpen && e.getY() - downY > dp(65) && Math.abs(dy) > Math.abs(dx)) { showHome(); return true; }
-                    if (!drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy)) {
-                        if (dx < 0) nextPage(); else previousPage();
-                        return true;
-                    }
-                }
-                return true;
-            }
-        });
     }
 
     private void buildHomeChrome() {
@@ -293,9 +300,9 @@ public class MainActivity extends Activity {
 
     private void nextPage() {
         if (currentPage + 1 >= pages.size()) {
-            // Swiping to the next page creates it automatically.
-            pages.add(new ArrayList<String>());
-            currentPage = pages.size() - 1;
+            // Swiping beyond the last page creates a new blank home page.
+            extraPages++;
+            currentPage++;
         } else currentPage++;
         renderHomePages(true);
     }
