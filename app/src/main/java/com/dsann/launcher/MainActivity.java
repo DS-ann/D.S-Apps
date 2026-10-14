@@ -5,34 +5,27 @@ import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,35 +35,33 @@ import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int REQUEST_PICK_WIDGET = 701;
-    private static final int REQUEST_BIND_WIDGET = 702;
-    private static final int REQUEST_CONFIGURE_WIDGET = 703;
-    private static final int REQUEST_WALLPAPER_IMAGE = 704;
     private static final int HOST_ID = 1407;
-    private static final String PREFS = "nova_launcher_prefs";
-    private static final String KEY_WALLPAPER = "wallpaper_style";
-    private static final String KEY_IMAGE_URI = "wallpaper_image_uri";
-    private static final String KEY_WIDGETS = "widget_ids";
-
+    private static final String PREFS = "ds_launcher_prefs";
+    private static final String KEY_HOME_APPS = "home_apps";
+    private static final int COLUMNS = 4;
+    private static final int PAGE_CAPACITY = 20;
     private final int BG = Color.rgb(10, 13, 24);
-    private final int MUTED = Color.rgb(157, 169, 194);
     private final Handler handler = new Handler();
     private PackageManager packageManager;
+    private SharedPreferences prefs;
     private AppWidgetManager widgetManager;
     private AppWidgetHost widgetHost;
-    private SharedPreferences prefs;
-    private LinearLayout homeRoot;
-    private LinearLayout widgetContainer;
-    private GridView appGrid;
-    private EditText searchBox;
+    private FrameLayout root;
+    private LinearLayout homeScreen;
+    private LinearLayout pagesStrip;
+    private LinearLayout drawerScreen;
+    private GridView drawerGrid;
     private TextView clockText;
     private TextView dateText;
+    private TextView pageIndicator;
+    private AppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
-    private List<ResolveInfo> visibleApps = new ArrayList<>();
-    private AppAdapter adapter;
-    private boolean customizationOpen = false;
-    private boolean widgetListening = false;
-    private final List<Integer> widgetIds = new ArrayList<>();
+    private List<ResolveInfo> drawerApps = new ArrayList<>();
+    private final List<String> homePackages = new ArrayList<>();
+    private final List<List<String>> pages = new ArrayList<>();
+    private int currentPage = 0;
+    private boolean drawerOpen = false;
+    private float downX, downY;
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
             updateClock();
@@ -78,190 +69,286 @@ public class MainActivity extends Activity {
         }
     };
 
-    @Override protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
         packageManager = getPackageManager();
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, HOST_ID);
-        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
-        buildHome();
         loadApps();
-        updateClock();
-        restoreWidgetIds();
-        restoreWallpaper();
-    }
-
-    private void buildHome() {
-        homeRoot = new LinearLayout(this);
-        homeRoot.setOrientation(LinearLayout.VERTICAL);
-        homeRoot.setPadding(dp(20), dp(18), dp(20), dp(8));
-        applyWallpaperBackground();
-
-        LinearLayout topRow = new LinearLayout(this);
-        topRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand = text("NOVA", 13, Color.WHITE, true);
-        brand.setLetterSpacing(0.18f);
-        TextView status = text("LIGHTWEIGHT  •  FAST", 9, MUTED, true);
-        status.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        topRow.addView(brand, new LinearLayout.LayoutParams(0, dp(28), 1f));
-        topRow.addView(status, new LinearLayout.LayoutParams(-2, dp(28)));
-        homeRoot.addView(topRow);
-        installLongPress(topRow);
-        installLongPress(brand);
-        installLongPress(status);
-
-        LinearLayout hero = new LinearLayout(this);
-        hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(dp(20), dp(18), dp(20), dp(18));
-        hero.setBackground(roundRect(new int[]{Color.rgb(49, 73, 143), Color.rgb(91, 65, 157)}, dp(24)));
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
-        hp.topMargin = dp(16);
-        homeRoot.addView(hero, hp);
-        TextView greeting = text("YOUR SPACE. YOUR PACE.", 10, Color.rgb(222, 229, 255), true);
-        greeting.setLetterSpacing(0.12f);
-        hero.addView(greeting);
-        clockText = text("--:--", 42, Color.WHITE, true);
-        clockText.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
-        cp.topMargin = dp(5);
-        hero.addView(clockText, cp);
-        dateText = text("", 13, Color.rgb(226, 228, 250), false);
-        LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-1, -2);
-        dateParams.topMargin = dp(4);
-        hero.addView(dateText, dateParams);
-        installLongPress(hero);
-        installLongPress(greeting);
-        installLongPress(clockText);
-        installLongPress(dateText);
-
-        widgetContainer = new LinearLayout(this);
-        widgetContainer.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams widgetsParams = new LinearLayout.LayoutParams(-1, -2);
-        widgetsParams.topMargin = dp(8);
-        homeRoot.addView(widgetContainer, widgetsParams);
-        installLongPress(widgetContainer);
-
-        LinearLayout search = new LinearLayout(this);
-        search.setGravity(Gravity.CENTER_VERTICAL);
-        search.setPadding(dp(14), 0, dp(12), 0);
-        search.setBackground(roundRect(new int[]{Color.rgb(28, 34, 51), Color.rgb(23, 29, 45)}, dp(17)));
-        TextView searchIcon = text("⌕", 27, Color.rgb(157, 174, 255), false);
-        searchIcon.setGravity(Gravity.CENTER);
-        search.addView(searchIcon, new LinearLayout.LayoutParams(dp(28), dp(48)));
-        searchBox = new EditText(this);
-        searchBox.setSingleLine(true);
-        searchBox.setTextSize(14);
-        searchBox.setTextColor(Color.WHITE);
-        searchBox.setHintTextColor(Color.rgb(132, 144, 169));
-        searchBox.setHint("Search your apps");
-        searchBox.setBackgroundColor(Color.TRANSPARENT);
-        searchBox.setPadding(dp(8), 0, 0, 0);
-        searchBox.setSelectAllOnFocus(false);
-        search.addView(searchBox, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, -2);
-        searchParams.topMargin = dp(12);
-        homeRoot.addView(search, searchParams);
-        installLongPress(searchIcon);
-
-        LinearLayout section = new LinearLayout(this);
-        section.setGravity(Gravity.CENTER_VERTICAL);
-        TextView sectionTitle = text("YOUR APPS", 12, Color.WHITE, true);
-        sectionTitle.setLetterSpacing(0.12f);
-        section.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(42), 1f));
-        TextView count = text("TAP TO OPEN", 9, MUTED, true);
-        section.addView(count);
-        LinearLayout.LayoutParams sectionParams = new LinearLayout.LayoutParams(-1, -2);
-        sectionParams.topMargin = dp(2);
-        homeRoot.addView(section, sectionParams);
-        installLongPress(section);
-        installLongPress(sectionTitle);
-        installLongPress(count);
-
-        appGrid = new GridView(this);
-        appGrid.setNumColumns(4);
-        appGrid.setVerticalSpacing(dp(8));
-        appGrid.setHorizontalSpacing(dp(4));
-        appGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        appGrid.setSelector(android.R.color.transparent);
-        appGrid.setClipToPadding(false);
-        homeRoot.addView(appGrid, new LinearLayout.LayoutParams(-1, 0, 1f));
-
-        TextView footer = text("HOLD HOME FOR 3 SECONDS TO CUSTOMIZE", 8, Color.rgb(132, 145, 174), true);
-        footer.setGravity(Gravity.CENTER);
-        footer.setLetterSpacing(0.06f);
-        footer.setPadding(0, dp(9), 0, dp(6));
-        homeRoot.addView(footer);
-        installLongPress(footer);
-        setContentView(homeRoot);
-
-        adapter = new AppAdapter();
-        appGrid.setAdapter(adapter);
-        searchBox.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                filterApps(s == null ? "" : s.toString());
-            }
-            @Override public void afterTextChanged(Editable e) {}
-        });
-    }
-
-    private void installLongPress(final View view) {
-        final Runnable openCustomization = new Runnable() {
-            @Override public void run() {
-                if (!customizationOpen && !isFinishing()) {
-                    view.setTag("long_press_triggered");
-                    showCustomization();
-                }
-            }
-        };
-        view.setOnTouchListener(new View.OnTouchListener() {
-            float downX, downY;
-            @Override public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        downX = event.getX();
-                        downY = event.getY();
-                        handler.postDelayed(openCustomization, 3000L);
-                        break;
-                    case MotionEvent.ACTION_MOVE:
-                        if (Math.abs(event.getX() - downX) > dp(14) ||
-                                Math.abs(event.getY() - downY) > dp(14)) handler.removeCallbacks(openCustomization);
-                        break;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        handler.removeCallbacks(openCustomization);
-                        view.setTag(null);
-                        break;
-                }
-                return false;
-            }
-        });
+        restoreHomeApps();
+        buildInterface();
     }
 
     @Override protected void onResume() {
         super.onResume();
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
-        if (appGrid != null && !customizationOpen) loadApps();
-        if (widgetHost != null && !widgetListening) {
-            try { widgetHost.startListening(); widgetListening = true; } catch (Exception ignored) {}
-        }
+        loadApps();
+        if (!drawerOpen && root != null) renderHomePages(false);
+        try { widgetHost.startListening(); } catch (Exception ignored) {}
     }
 
     @Override protected void onPause() {
         handler.removeCallbacks(clockUpdater);
-        if (widgetHost != null && widgetListening) {
-            try { widgetHost.stopListening(); } catch (Exception ignored) {}
-            widgetListening = false;
-        }
+        try { widgetHost.stopListening(); } catch (Exception ignored) {}
         super.onPause();
     }
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
+    }
+
+    private void loadApps() {
+        Intent query = new Intent(Intent.ACTION_MAIN, null);
+        query.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> result = packageManager.queryIntentActivities(query, 0);
+        Collections.sort(result, new Comparator<ResolveInfo>() {
+            @Override public int compare(ResolveInfo a, ResolveInfo b) {
+                return a.loadLabel(packageManager).toString().compareToIgnoreCase(b.loadLabel(packageManager).toString());
+            }
+        });
+        allApps = result;
+        drawerApps = new ArrayList<>(result);
+        if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+    }
+
+    private void restoreHomeApps() {
+        homePackages.clear();
+        String saved = prefs.getString(KEY_HOME_APPS, "");
+        if (saved != null && !saved.isEmpty()) {
+            for (String p : saved.split("\\n")) if (!p.isEmpty() && findApp(p) != null && !homePackages.contains(p)) homePackages.add(p);
+        }
+        if (homePackages.isEmpty()) {
+            // A few familiar shortcuts make the first page useful; all apps remain in the drawer.
+            for (ResolveInfo app : allApps) {
+                String p = app.activityInfo.packageName;
+                if (!p.equals(getPackageName()) && homePackages.size() < 8 && !homePackages.contains(p)) homePackages.add(p);
+            }
+        }
+        rebuildPages();
+        persistHomeApps();
+    }
+
+    private void persistHomeApps() {
+        StringBuilder s = new StringBuilder();
+        for (String p : homePackages) { if (s.length() > 0) s.append('\n'); s.append(p); }
+        prefs.edit().putString(KEY_HOME_APPS, s.toString()).apply();
+    }
+
+    private ResolveInfo findApp(String packageName) {
+        for (ResolveInfo app : allApps) if (app.activityInfo.packageName.equals(packageName)) return app;
+        return null;
+    }
+
+    private void rebuildPages() {
+        pages.clear();
+        for (int i = 0; i < homePackages.size(); i += PAGE_CAPACITY)
+            pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + PAGE_CAPACITY, homePackages.size())));
+        if (pages.isEmpty()) pages.add(new ArrayList<String>());
+        if (currentPage >= pages.size()) currentPage = pages.size() - 1;
+    }
+
+    private void buildInterface() {
+        root = new FrameLayout(this);
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
+        homeScreen = new LinearLayout(this);
+        homeScreen.setOrientation(LinearLayout.VERTICAL);
+        homeScreen.setPadding(dp(20), dp(14), dp(20), dp(8));
+        root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
+        buildHomeChrome();
+        buildDrawer();
+        setContentView(root);
+        renderHomePages(false);
+        showHome();
+        root.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_DOWN) { downX = e.getX(); downY = e.getY(); return true; }
+                if (e.getAction() == MotionEvent.ACTION_UP) {
+                    float dx = e.getX() - downX, dy = e.getY() - downY;
+                    if (!drawerOpen && downY - e.getY() > dp(65) && Math.abs(dy) > Math.abs(dx)) { showDrawer(); return true; }
+                    if (drawerOpen && e.getY() - downY > dp(65) && Math.abs(dy) > Math.abs(dx)) { showHome(); return true; }
+                    if (!drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy)) {
+                        if (dx < 0) nextPage(); else previousPage();
+                        return true;
+                    }
+                }
+                return true;
+            }
+        });
+    }
+
+    private void buildHomeChrome() {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView brand = text("D.Sannigrahi", 12, Color.rgb(210, 220, 255), true);
+        brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.ITALIC));
+        brand.setLetterSpacing(0.035f);
+        header.addView(brand, new LinearLayout.LayoutParams(0, dp(32), 1f));
+        TextView edit = text("＋", 26, Color.WHITE, false);
+        edit.setGravity(Gravity.CENTER);
+        edit.setOnClickListener(v -> showAddApps());
+        header.addView(edit, new LinearLayout.LayoutParams(dp(42), dp(38)));
+        homeScreen.addView(header);
+
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setPadding(dp(18), dp(12), dp(18), dp(12));
+        hero.setBackground(roundRect(new int[]{Color.rgb(49, 73, 143), Color.rgb(91, 65, 157)}, dp(22)));
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
+        hp.topMargin = dp(8);
+        homeScreen.addView(hero, hp);
+        clockText = text("--:--", 40, Color.WHITE, true);
+        clockText.setIncludeFontPadding(false);
+        hero.addView(clockText);
+        dateText = text("", 13, Color.rgb(226, 228, 250), false);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
+        dp.topMargin = dp(3);
+        hero.addView(dateText, dp);
+
+        pagesStrip = new LinearLayout(this);
+        pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, 0, 1f);
+        pp.topMargin = dp(12);
+        homeScreen.addView(pagesStrip, pp);
+
+        pageIndicator = text("", 11, Color.rgb(210, 220, 255), false);
+        pageIndicator.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, dp(28));
+        homeScreen.addView(pageIndicator, ip);
+        TextView drawerHint = text("Swipe up for all apps", 11, Color.rgb(180, 194, 224), false);
+        drawerHint.setGravity(Gravity.CENTER);
+        homeScreen.addView(drawerHint, new LinearLayout.LayoutParams(-1, dp(28)));
+    }
+
+    private void buildDrawer() {
+        drawerScreen = new LinearLayout(this);
+        drawerScreen.setOrientation(LinearLayout.VERTICAL);
+        drawerScreen.setPadding(dp(18), dp(18), dp(18), dp(8));
+        drawerScreen.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(15, 20, 36), Color.rgb(10, 13, 24)}));
+        TextView title = text("Apps", 28, Color.WHITE, true);
+        drawerScreen.addView(title, new LinearLayout.LayoutParams(-1, dp(48)));
+        TextView sub = text("Touch and hold an app to add it to Home", 12, Color.rgb(157, 169, 194), false);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(28));
+        drawerScreen.addView(sub, sp);
+        drawerGrid = new GridView(this);
+        drawerGrid.setNumColumns(COLUMNS);
+        drawerGrid.setVerticalSpacing(dp(8));
+        drawerGrid.setHorizontalSpacing(dp(4));
+        drawerGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        drawerGrid.setSelector(android.R.color.transparent);
+        drawerAdapter = new AppAdapter(true);
+        drawerGrid.setAdapter(drawerAdapter);
+        drawerScreen.addView(drawerGrid, new LinearLayout.LayoutParams(-1, 0, 1f));
+        drawerGrid.setOnItemLongClickListener((parent, view, position, id) -> {
+            ResolveInfo app = drawerApps.get(position);
+            addToHome(app.activityInfo.packageName);
+            Toast.makeText(this, "Added to Home", Toast.LENGTH_SHORT).show();
+            showHome();
+            return true;
+        });
+        root.addView(drawerScreen, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void renderHomePages(boolean animate) {
+        if (pagesStrip == null) return;
+        pagesStrip.removeAllViews();
+        rebuildPages();
+        for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+            final int idx = pageIndex;
+            GridView grid = new GridView(this);
+            grid.setNumColumns(COLUMNS);
+            grid.setVerticalSpacing(dp(8));
+            grid.setHorizontalSpacing(dp(4));
+            grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+            grid.setSelector(android.R.color.transparent);
+            grid.setAdapter(new AppAdapter(false, pages.get(pageIndex)));
+            grid.setOnItemLongClickListener((parent, view, position, id) -> {
+                ResolveInfo app = findApp(pages.get(idx).get(position));
+                if (app != null) {
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle(app.loadLabel(packageManager))
+                            .setItems(new String[]{"Remove from Home", "Open app"}, (dialog, which) -> {
+                                if (which == 0) { homePackages.remove(app.activityInfo.packageName); persistHomeApps(); rebuildPages(); renderHomePages(false); }
+                                else launchApp(app);
+                            }).show();
+                }
+                return true;
+            });
+            pagesStrip.addView(grid, new LinearLayout.LayoutParams(-1, -1));
+        }
+        pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
+        if (currentPage > 0) pagesStrip.setTranslationX(-currentPage * getResources().getDisplayMetrics().widthPixels);
+        else pagesStrip.setTranslationX(0);
+        if (animate) {
+            pagesStrip.setRotationY(-12f);
+            pagesStrip.animate().rotationY(0f).setDuration(220).start();
+        } else pagesStrip.setRotationY(0f);
+    }
+
+    private void nextPage() {
+        if (currentPage + 1 >= pages.size()) {
+            // Swiping to the next page creates it automatically.
+            pages.add(new ArrayList<String>());
+            currentPage = pages.size() - 1;
+        } else currentPage++;
+        renderHomePages(true);
+    }
+
+    private void previousPage() {
+        if (currentPage > 0) { currentPage--; renderHomePages(true); }
+    }
+
+    private void showHome() {
+        drawerOpen = false;
+        drawerScreen.setVisibility(View.GONE);
+        homeScreen.setVisibility(View.VISIBLE);
+        homeScreen.animate().alpha(1f).setDuration(130).start();
+    }
+
+    private void showDrawer() {
+        drawerOpen = true;
+        drawerScreen.setAlpha(0f);
+        drawerScreen.setVisibility(View.VISIBLE);
+        homeScreen.setVisibility(View.GONE);
+        drawerScreen.animate().alpha(1f).setDuration(180).start();
+        loadApps();
+    }
+
+    private void addToHome(String packageName) {
+        if (!homePackages.contains(packageName)) {
+            homePackages.add(packageName);
+            persistHomeApps();
+            rebuildPages();
+            currentPage = pages.size() - 1;
+            renderHomePages(true);
+        }
+    }
+
+    private void showAddApps() {
+        final List<ResolveInfo> available = new ArrayList<>();
+        for (ResolveInfo app : allApps) if (!homePackages.contains(app.activityInfo.packageName)) available.add(app);
+        if (available.isEmpty()) {
+            Toast.makeText(this, "All apps are already on Home", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[available.size()];
+        for (int i = 0; i < available.size(); i++) labels[i] = available.get(i).loadLabel(packageManager).toString();
+        new android.app.AlertDialog.Builder(this).setTitle("Add to Home").setItems(labels, (dialog, which) -> {
+            addToHome(available.get(which).activityInfo.packageName);
+        }).show();
+    }
+
+    private void launchApp(ResolveInfo app) {
+        Intent intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
+        if (intent != null) {
+            try { startActivity(intent); } catch (Exception e) { Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show(); }
+        }
     }
 
     private void updateClock() {
@@ -271,309 +358,36 @@ public class MainActivity extends Activity {
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
     }
 
-    private void loadApps() {
-        Intent query = new Intent(Intent.ACTION_MAIN, null);
-        query.addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> result = packageManager.queryIntentActivities(query, 0);
-        Collections.sort(result, new Comparator<ResolveInfo>() {
-            @Override public int compare(ResolveInfo a, ResolveInfo b) {
-                return a.loadLabel(packageManager).toString().compareToIgnoreCase(
-                        b.loadLabel(packageManager).toString());
-            }
-        });
-        allApps = result;
-        filterApps(searchBox == null ? "" : searchBox.getText().toString());
-    }
-
-    private void filterApps(String query) {
-        String needle = query.trim().toLowerCase(Locale.getDefault());
-        visibleApps = new ArrayList<>();
-        for (ResolveInfo app : allApps) {
-            String label = app.loadLabel(packageManager).toString().toLowerCase(Locale.getDefault());
-            if (needle.length() == 0 || label.contains(needle)) visibleApps.add(app);
-        }
-        if (adapter != null) adapter.notifyDataSetChanged();
-    }
-
-    private void showCustomization() {
-        customizationOpen = true;
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(22), dp(26), dp(22), dp(24));
-        page.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(13, 18, 34), BG, Color.rgb(15, 19, 31)}));
-        scroll.addView(page);
-        TextView eyebrow = text("NOVA  /  HOME STUDIO", 10, Color.rgb(157, 174, 255), true);
-        eyebrow.setLetterSpacing(0.12f);
-        page.addView(eyebrow);
-        TextView heading = text("Make it yours.", 30, Color.WHITE, true);
-        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, -2);
-        headingParams.topMargin = dp(8);
-        page.addView(heading, headingParams);
-        TextView intro = text("Personalize your home screen without heavy extras.", 14, MUTED, false);
-        LinearLayout.LayoutParams introParams = new LinearLayout.LayoutParams(-1, -2);
-        introParams.topMargin = dp(6);
-        page.addView(intro, introParams);
-
-        addSectionLabel(page, "WALLPAPERS");
-        addAction(page, "Midnight blue", "Deep blue gradient", new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), Color.rgb(10, 13, 24)}, new Runnable() {
-            @Override public void run() { saveWallpaper(0, null); returnHome(); }
-        });
-        addAction(page, "Violet horizon", "Blue-to-purple gradient", new int[]{Color.rgb(37, 33, 90), Color.rgb(85, 49, 126), Color.rgb(15, 19, 31)}, new Runnable() {
-            @Override public void run() { saveWallpaper(1, null); returnHome(); }
-        });
-        addAction(page, "Emerald night", "Dark teal glow", new int[]{Color.rgb(8, 43, 47), Color.rgb(18, 76, 76), Color.rgb(10, 13, 24)}, new Runnable() {
-            @Override public void run() { saveWallpaper(2, null); returnHome(); }
-        });
-        addAction(page, "Choose a photo", "Use an image from your device", null, new Runnable() {
-            @Override public void run() {
-                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                pick.addCategory(Intent.CATEGORY_OPENABLE);
-                pick.setType("image/*");
-                pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                try { startActivityForResult(pick, REQUEST_WALLPAPER_IMAGE); }
-                catch (Exception e) { Toast.makeText(MainActivity.this, "No image picker available", Toast.LENGTH_SHORT).show(); }
-            }
-        });
-
-        addSectionLabel(page, "HOME SCREEN WIDGETS");
-        TextView widgetHelp = text("Add clock, calendar, weather and other widgets supported by your installed apps.", 13, MUTED, false);
-        page.addView(widgetHelp);
-        addAction(page, "＋  Add widget", "Choose from installed widget providers", new int[]{Color.rgb(45, 64, 120), Color.rgb(73, 54, 120)}, new Runnable() {
-            @Override public void run() { launchWidgetPicker(); }
-        });
-        addAction(page, "Done", "Return to your home screen", new int[]{Color.rgb(33, 42, 61), Color.rgb(26, 32, 48)}, new Runnable() {
-            @Override public void run() { returnHome(); }
-        });
-        setContentView(scroll);
-    }
-
-    private void addSectionLabel(LinearLayout page, String title) {
-        TextView label = text(title, 10, Color.rgb(157, 174, 255), true);
-        label.setLetterSpacing(0.13f);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-        p.topMargin = dp(26);
-        p.bottomMargin = dp(10);
-        page.addView(label, p);
-    }
-
-    private void addAction(LinearLayout page, String title, String subtitle, int[] colors, final Runnable action) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(14), dp(16), dp(14));
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setBackground(roundRect(colors == null
-                ? new int[]{Color.rgb(30, 37, 56), Color.rgb(23, 29, 45)} : colors, dp(17)));
-        TextView name = text(title, 15, Color.WHITE, true);
-        card.addView(name);
-        TextView detail = text(subtitle, 12, Color.rgb(190, 199, 220), false);
-        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
-        detailParams.topMargin = dp(4);
-        card.addView(detail, detailParams);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-        p.bottomMargin = dp(9);
-        page.addView(card, p);
-        card.setClickable(true);
-        card.setFocusable(true);
-        card.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { action.run(); }
-        });
-    }
-
-    private void saveWallpaper(int style, String imageUri) {
-        prefs.edit().putInt(KEY_WALLPAPER, style)
-                .putString(KEY_IMAGE_URI, imageUri == null ? "" : imageUri).apply();
-        Toast.makeText(this, "Wallpaper updated", Toast.LENGTH_SHORT).show();
-    }
-
-    private void applyWallpaperBackground() {
-        if (homeRoot == null) return;
-        int style = prefs == null ? 0 : prefs.getInt(KEY_WALLPAPER, 0);
-        String imageUri = prefs == null ? "" : prefs.getString(KEY_IMAGE_URI, "");
-        if (imageUri != null && imageUri.length() > 0) {
-            try {
-                Bitmap bitmap = decodeSampledBitmap(Uri.parse(imageUri), getResources().getDisplayMetrics().widthPixels,
-                        getResources().getDisplayMetrics().heightPixels);
-                if (bitmap != null) {
-                    homeRoot.setBackground(new BitmapDrawable(getResources(), bitmap));
-                    return;
-                }
-            } catch (Exception ignored) {}
-        }
-        int[] colors;
-        if (style == 1) colors = new int[]{Color.rgb(37, 33, 90), Color.rgb(85, 49, 126), Color.rgb(15, 19, 31)};
-        else if (style == 2) colors = new int[]{Color.rgb(8, 43, 47), Color.rgb(18, 76, 76), Color.rgb(10, 13, 24)};
-        else colors = new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG};
-        homeRoot.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, colors));
-    }
-
-    private void restoreWallpaper() { applyWallpaperBackground(); }
-
-    private Bitmap decodeSampledBitmap(Uri uri, int reqWidth, int reqHeight) throws Exception {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        InputStream first = getContentResolver().openInputStream(uri);
-        if (first == null) return null;
-        try { BitmapFactory.decodeStream(first, null, bounds); } finally { first.close(); }
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inSampleSize = 1;
-        while (bounds.outHeight / opts.inSampleSize > reqHeight * 1.5 ||
-                bounds.outWidth / opts.inSampleSize > reqWidth * 1.5) opts.inSampleSize *= 2;
-        opts.inPreferredConfig = Bitmap.Config.RGB_565;
-        InputStream second = getContentResolver().openInputStream(uri);
-        if (second == null) return null;
-        try { return BitmapFactory.decodeStream(second, null, opts); } finally { second.close(); }
-    }
-
-    private void returnHome() {
-        customizationOpen = false;
-        buildHome();
-        loadApps();
-        updateClock();
-        restoreWidgets();
-        applyWallpaperBackground();
-    }
-
-    private void launchWidgetPicker() {
-        int appWidgetId = widgetHost.allocateAppWidgetId();
-        Intent pick = new Intent(AppWidgetManager.ACTION_APPWIDGET_PICK);
-        pick.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
-        try { startActivityForResult(pick, REQUEST_PICK_WIDGET); }
-        catch (Exception e) {
-            widgetHost.deleteAppWidgetId(appWidgetId);
-            Toast.makeText(this, "Widget picker unavailable on this device", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_WALLPAPER_IMAGE) {
-            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-                Uri uri = data.getData();
-                try {
-                    getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    saveWallpaper(3, uri.toString());
-                    returnHome();
-                } catch (Exception e) {
-                    Toast.makeText(this, "Could not use that image", Toast.LENGTH_SHORT).show();
-                }
-            }
-            return;
-        }
-        if (requestCode == REQUEST_PICK_WIDGET) {
-            if (resultCode == RESULT_OK && data != null) {
-                int id = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
-                if (id >= 0) {
-                    AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
-                    if (info != null && info.configure != null) {
-                        Intent configure = new Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
-                        configure.setComponent(info.configure);
-                        configure.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
-                        try { startActivityForResult(configure, REQUEST_CONFIGURE_WIDGET); }
-                        catch (Exception e) { finishAddingWidget(id); }
-                    } else finishAddingWidget(id);
-                }
-            } else if (data != null) {
-                int id = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
-                if (id >= 0) widgetHost.deleteAppWidgetId(id);
-            }
-            return;
-        }
-        if (requestCode == REQUEST_BIND_WIDGET) {
-            if (resultCode == RESULT_OK && data != null) {
-                finishAddingWidget(data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1));
-            } else if (data != null) {
-                int id = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
-                if (id >= 0) widgetHost.deleteAppWidgetId(id);
-            }
-            return;
-        }
-        if (requestCode == REQUEST_CONFIGURE_WIDGET && data != null) {
-            int id = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
-            if (resultCode == RESULT_OK) finishAddingWidget(id);
-            else if (id >= 0) widgetHost.deleteAppWidgetId(id);
-        }
-    }
-
-    private void finishAddingWidget(int id) {
-        if (id < 0) return;
-        AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
-        if (info == null) {
-            widgetHost.deleteAppWidgetId(id);
-            Toast.makeText(this, "Could not add this widget", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!widgetIds.contains(id)) widgetIds.add(id);
-        persistWidgetIds();
-        if (customizationOpen) returnHome();
-        else restoreWidgets();
-    }
-
-    private void restoreWidgetIds() {
-        widgetIds.clear();
-        String saved = prefs.getString(KEY_WIDGETS, "");
-        if (saved != null && !saved.isEmpty()) {
-            for (String part : saved.split(",")) {
-                try {
-                    int id = Integer.parseInt(part);
-                    if (widgetManager.getAppWidgetInfo(id) != null) widgetIds.add(id);
-                    else widgetHost.deleteAppWidgetId(id);
-                } catch (Exception ignored) {}
-            }
-        }
-        persistWidgetIds();
-        restoreWidgets();
-    }
-
-    private void persistWidgetIds() {
-        StringBuilder value = new StringBuilder();
-        for (Integer id : widgetIds) {
-            if (value.length() > 0) value.append(',');
-            value.append(id);
-        }
-        prefs.edit().putString(KEY_WIDGETS, value.toString()).apply();
-    }
-
-    private void restoreWidgets() {
-        if (widgetContainer == null) return;
-        widgetContainer.removeAllViews();
-        for (Integer id : new ArrayList<>(widgetIds)) {
-            try {
-                AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
-                if (info == null) continue;
-                AppWidgetHostView hostView = widgetHost.createView(this, id, info);
-                hostView.setAppWidget(id, info);
-                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-                p.bottomMargin = dp(8);
-                widgetContainer.addView(hostView, p);
-            } catch (Exception ignored) {}
-        }
-    }
-
     private TextView text(String value, float size, int color, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return view;
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextSize(size);
+        v.setTextColor(color);
+        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return v;
     }
 
-    private GradientDrawable roundRect(int[] colors, int radiusDp) {
-        GradientDrawable shape = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors);
-        shape.setCornerRadius(dp(radiusDp));
-        return shape;
+    private GradientDrawable roundRect(int[] colors, int radius) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors);
+        d.setCornerRadius(dp(radius));
+        return d;
     }
 
-    private int dp(float value) {
-        return (int)(value * getResources().getDisplayMetrics().density + 0.5f);
-    }
+    private int dp(float value) { return (int)(value * getResources().getDisplayMetrics().density + 0.5f); }
 
     private class AppAdapter extends BaseAdapter {
-        @Override public int getCount() { return visibleApps == null ? 0 : visibleApps.size(); }
-        @Override public Object getItem(int position) { return visibleApps.get(position); }
+        private final boolean drawer;
+        private final List<String> fixedPackages;
+        AppAdapter(boolean drawer) { this(drawer, null); }
+        AppAdapter(boolean drawer, List<String> fixedPackages) { this.drawer = drawer; this.fixedPackages = fixedPackages; }
+        private List<ResolveInfo> items() {
+            if (drawer) return drawerApps;
+            List<ResolveInfo> out = new ArrayList<>();
+            if (fixedPackages != null) for (String p : fixedPackages) { ResolveInfo app = findApp(p); if (app != null) out.add(app); }
+            return out;
+        }
+        @Override public int getCount() { return items().size(); }
+        @Override public Object getItem(int position) { return items().get(position); }
         @Override public long getItemId(int position) { return position; }
         @Override public View getView(int position, View recycled, ViewGroup parent) {
             LinearLayout cell;
@@ -597,29 +411,12 @@ public class MainActivity extends Activity {
                 label.setGravity(Gravity.CENTER);
                 label.setMaxLines(2);
                 label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(32));
-                lp.topMargin = dp(5);
-                cell.addView(label, lp);
-                cell.setBackground(roundRect(new int[]{Color.argb(18, 255, 255, 255),
-                        Color.argb(5, 255, 255, 255)}, dp(15)));
+                cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
             }
-            final ResolveInfo info = visibleApps.get(position);
-            icon.setImageDrawable(info.loadIcon(packageManager));
-            label.setText(info.loadLabel(packageManager));
-            cell.setContentDescription(info.loadLabel(packageManager));
-            cell.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View view) {
-                    Intent launch = packageManager.getLaunchIntentForPackage(info.activityInfo.packageName);
-                    if (launch != null) {
-                        try {
-                            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            startActivity(launch);
-                        } catch (Exception e) {
-                            Toast.makeText(MainActivity.this, "Unable to open app", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                }
-            });
+            ResolveInfo app = items().get(position);
+            icon.setImageDrawable(app.loadIcon(packageManager));
+            label.setText(app.loadLabel(packageManager));
+            cell.setOnClickListener(v -> { if (!drawer) launchApp(app); });
             return cell;
         }
     }
