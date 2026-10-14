@@ -1,6 +1,7 @@
 package com.dsann.launcher;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
@@ -44,6 +45,8 @@ public class MainActivity extends Activity {
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
     private static final String KEY_WALLPAPER_URI = "wallpaper_uri";
+    private static final String KEY_ICON_X = "icon_x_";
+    private static final String KEY_ICON_Y = "icon_y_";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int COLUMNS = 4;
     private static final int PAGE_CAPACITY = 20;
@@ -71,6 +74,14 @@ public class MainActivity extends Activity {
     private float gestureDownX, gestureDownY;
     private float longPressDownX, longPressDownY;
     private boolean longPressTriggered = false;
+    private boolean iconDragArmed = false;
+    private boolean iconDragging = false;
+    private float iconTouchRawX, iconTouchRawY;
+    private int iconOriginalLeft, iconOriginalTop;
+    private View activeDragView;
+    private String activeDragPackage;
+    private Runnable iconArmDrag;
+    private Runnable iconShowOptions;
     private final Runnable homeLongPress = new Runnable() {
         @Override public void run() {
             if (!drawerOpen && root != null) {
@@ -319,25 +330,129 @@ public class MainActivity extends Activity {
         if (pagesStrip == null) return;
         pagesStrip.removeAllViews();
         rebuildPages();
+        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
+        int columns = prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS);
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
-            final int idx = pageIndex;
-            GridView grid = new GridView(this);
-            grid.setNumColumns(prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS));
-            grid.setVerticalSpacing(dp(8));
-            grid.setHorizontalSpacing(dp(4));
-            grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-            grid.setSelector(android.R.color.transparent);
-            grid.setAdapter(new AppAdapter(false, pages.get(pageIndex)));
-            int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
-            pagesStrip.addView(grid, new LinearLayout.LayoutParams(pageWidth, -1));
+            FrameLayout page = new FrameLayout(this);
+            page.setClipChildren(false);
+            List<String> pagePackages = pages.get(pageIndex);
+            for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
+                String packageName = pagePackages.get(itemIndex);
+                if (findApp(packageName) == null) continue;
+                View cell = new AppAdapter(false, pagePackages).getView(itemIndex, null, page);
+                cell.setTag("launcher_app_cell");
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(82), dp(88), Gravity.TOP | Gravity.LEFT);
+                float defaultX = (itemIndex % columns) / (float) Math.max(1, columns - 1);
+                float defaultY = (itemIndex / columns) / 4.0f;
+                float x = prefs.getFloat(KEY_ICON_X + packageName, defaultX);
+                float y = prefs.getFloat(KEY_ICON_Y + packageName, defaultY);
+                lp.leftMargin = Math.max(0, Math.min(Math.max(0, pageWidth - dp(82)), Math.round(x * Math.max(0, pageWidth - dp(82)))));
+                int fallbackHeight = Math.max(dp(360), getResources().getDisplayMetrics().heightPixels - dp(260));
+                int pageHeight = pageViewport.getHeight() > dp(100) ? pageViewport.getHeight() : fallbackHeight;
+                lp.topMargin = Math.max(0, Math.min(Math.max(0, pageHeight - dp(88)), Math.round(y * Math.max(0, pageHeight - dp(88)))));
+                page.addView(cell, lp);
+                installHomeIconTouch(cell, packageName);
+            }
+            pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
         }
         pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
-        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
         pagesStrip.setTranslationX(-currentPage * pageWidth);
         if (animate) {
-            pagesStrip.setRotationY(-12f);
-            pagesStrip.animate().rotationY(0f).setDuration(220).start();
-        } else pagesStrip.setRotationY(0f);
+            pagesStrip.setRotationY(-18f);
+            pagesStrip.setScaleX(0.94f);
+            pagesStrip.animate().rotationY(0f).scaleX(1f).setDuration(360).start();
+        } else {
+            pagesStrip.setRotationY(0f);
+            pagesStrip.setScaleX(1f);
+        }
+    }
+
+    private void installHomeIconTouch(View cell, String packageName) {
+        cell.setOnClickListener(v -> {
+            ResolveInfo app = findApp(packageName);
+            if (!iconDragging && !longPressTriggered && app != null) launchApp(app);
+        });
+        cell.setOnLongClickListener(null);
+        cell.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                iconTouchRawX = event.getRawX();
+                iconTouchRawY = event.getRawY();
+                iconDragArmed = false;
+                iconDragging = false;
+                activeDragView = view;
+                activeDragPackage = packageName;
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                iconOriginalLeft = lp.leftMargin;
+                iconOriginalTop = lp.topMargin;
+                if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
+                if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
+                iconArmDrag = () -> {
+                    if (activeDragView == view) iconDragArmed = true;
+                };
+                iconShowOptions = () -> {
+                    if (activeDragView == view && !iconDragging) {
+                        longPressTriggered = true;
+                        ResolveInfo app = findApp(packageName);
+                        if (app != null) showAppOptions(app, true);
+                    }
+                };
+                handler.postDelayed(iconArmDrag, 1000L);
+                handler.postDelayed(iconShowOptions, 2000L);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                float dx = event.getRawX() - iconTouchRawX;
+                float dy = event.getRawY() - iconTouchRawY;
+                if (!iconDragging && iconDragArmed && (Math.abs(dx) > dp(8) || Math.abs(dy) > dp(8))) {
+                    iconDragging = true;
+                    if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
+                    view.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(100).start();
+                    view.bringToFront();
+                }
+                if (iconDragging) {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    FrameLayout page = (FrameLayout) view.getParent();
+                    int maxX = Math.max(0, page.getWidth() - view.getWidth());
+                    int maxY = Math.max(0, page.getHeight() - view.getHeight());
+                    lp.leftMargin = Math.max(0, Math.min(maxX, iconOriginalLeft + Math.round(dx)));
+                    lp.topMargin = Math.max(0, Math.min(maxY, iconOriginalTop + Math.round(dy)));
+                    view.setLayoutParams(lp);
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
+                if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
+                if (iconDragging) {
+                    FrameLayout page = (FrameLayout) view.getParent();
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    float nx = (float) lp.leftMargin / Math.max(1, page.getWidth() - view.getWidth());
+                    float ny = (float) lp.topMargin / Math.max(1, page.getHeight() - view.getHeight());
+                    prefs.edit().putFloat(KEY_ICON_X + packageName, nx).putFloat(KEY_ICON_Y + packageName, ny).apply();
+                    view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
+                    iconDragging = false;
+                    iconDragArmed = false;
+                    activeDragView = null;
+                    activeDragPackage = null;
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP && longPressTriggered) {
+                    activeDragView = null;
+                    activeDragPackage = null;
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP) {
+                    ResolveInfo app = findApp(packageName);
+                    if (app != null) launchApp(app);
+                }
+                iconDragArmed = false;
+                activeDragView = null;
+                activeDragPackage = null;
+                return true;
+            }
+            return iconDragging;
+        });
     }
 
     private void nextPage() {
@@ -359,18 +474,35 @@ public class MainActivity extends Activity {
 
     private void showHome() {
         drawerOpen = false;
-        drawerScreen.setVisibility(View.GONE);
+        drawerScreen.animate().cancel();
+        homeScreen.animate().cancel();
         homeScreen.setVisibility(View.VISIBLE);
-        homeScreen.animate().alpha(1f).setDuration(130).start();
+        homeScreen.setAlpha(0.82f);
+        homeScreen.setScaleX(0.96f);
+        homeScreen.setScaleY(0.96f);
+        homeScreen.setTranslationY(dp(24));
+        drawerScreen.animate().alpha(0f).translationY(dp(40)).scaleX(0.96f).scaleY(0.96f)
+                .rotationX(-7f).setDuration(260).withEndAction(() -> drawerScreen.setVisibility(View.GONE)).start();
+        homeScreen.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
+                .setDuration(340).start();
     }
 
     private void showDrawer() {
         drawerOpen = true;
-        drawerScreen.setAlpha(0f);
-        drawerScreen.setVisibility(View.VISIBLE);
-        homeScreen.setVisibility(View.GONE);
-        drawerScreen.animate().alpha(1f).setDuration(180).start();
         loadApps();
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        drawerScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setAlpha(0f);
+        drawerScreen.setScaleX(0.92f);
+        drawerScreen.setScaleY(0.92f);
+        drawerScreen.setTranslationY(getResources().getDisplayMetrics().heightPixels * 0.16f);
+        drawerScreen.setRotationX(10f);
+        drawerScreen.setPivotY(0f);
+        homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).translationY(-dp(22))
+                .setDuration(250).withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
+        drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).rotationX(0f)
+                .setDuration(420).start();
     }
 
     private void addToHome(String packageName) {
@@ -398,52 +530,263 @@ public class MainActivity extends Activity {
     }
 
     private void showAppOptions(ResolveInfo app, boolean fromHome) {
-        java.util.ArrayList<String> actions = new java.util.ArrayList<>();
-        actions.add("App info");
-        actions.add("Uninstall");
+        List<String> labels = new ArrayList<>();
+        List<String> icons = new ArrayList<>();
+        List<String> actions = new ArrayList<>();
+        labels.add("App info"); icons.add("ⓘ"); actions.add("App info");
+        labels.add("Uninstall"); icons.add("⌫"); actions.add("Uninstall");
         int homeIndex = homePackages.indexOf(app.activityInfo.packageName);
-        if (fromHome && homeIndex > 0) actions.add("Move earlier");
-        if (fromHome && homeIndex >= 0 && homeIndex < homePackages.size() - 1) actions.add("Move later");
-        if (fromHome) actions.add("Remove from Home");
-        else actions.add("Add to Home");
-        new android.app.AlertDialog.Builder(this).setTitle(app.loadLabel(packageManager))
-            .setItems(actions.toArray(new String[0]), (dialog, which) -> {
-                String action = actions.get(which);
-                if (action.equals("App info")) {
-                    Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-                    i.setData(android.net.Uri.parse("package:" + app.activityInfo.packageName));
-                    startActivity(i);
-                } else if (action.equals("Uninstall")) {
-                    try {
-                        startActivity(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.activityInfo.packageName)));
-                    } catch (Exception e) {
-                        Toast.makeText(this, "Uninstall isn't available for this app", Toast.LENGTH_SHORT).show();
-                    }
-                } else if (action.equals("Move earlier") || action.equals("Move later")) {
-                    int from = homePackages.indexOf(app.activityInfo.packageName);
-                    int to = from + (action.equals("Move earlier") ? -1 : 1);
-                    if (from >= 0 && to >= 0 && to < homePackages.size()) {
-                        Collections.swap(homePackages, from, to);
-                        persistHomeApps();
-                        rebuildPages();
-                        currentPage = to / PAGE_CAPACITY;
-                        renderHomePages(true);
-                    }
-                } else if (action.equals("Remove from Home")) {
-                    homePackages.remove(app.activityInfo.packageName);
-                    int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
-                    if (currentPage >= requiredPages) currentPage = requiredPages - 1;
-                    persistHomeApps(); rebuildPages(); renderHomePages(false);
-                } else {
-                    addToHome(app.activityInfo.packageName);
-                    showHome();
+        if (fromHome && homeIndex > 0) { labels.add("Move earlier"); icons.add("↑"); actions.add("Move earlier"); }
+        if (fromHome && homeIndex >= 0 && homeIndex < homePackages.size() - 1) { labels.add("Move later"); icons.add("↓"); actions.add("Move later"); }
+        if (fromHome) { labels.add("Remove from Home"); icons.add("−"); actions.add("Remove from Home"); }
+        else { labels.add("Add to Home"); icons.add("+"); actions.add("Add to Home"); }
+        showActionDialog(app.loadLabel(packageManager).toString(), icons.toArray(new String[0]), labels.toArray(new String[0]), (dialog, which) -> {
+            String action = actions.get(which);
+            if (action.equals("App info")) {
+                Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                i.setData(Uri.parse("package:" + app.activityInfo.packageName));
+                startActivity(i);
+            } else if (action.equals("Uninstall")) {
+                try { startActivity(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + app.activityInfo.packageName))); }
+                catch (Exception e) { Toast.makeText(this, "Uninstall isn't available for this app", Toast.LENGTH_SHORT).show(); }
+            } else if (action.equals("Move earlier") || action.equals("Move later")) {
+                int from = homePackages.indexOf(app.activityInfo.packageName);
+                int to = from + (action.equals("Move earlier") ? -1 : 1);
+                if (from >= 0 && to >= 0 && to < homePackages.size()) {
+                    Collections.swap(homePackages, from, to);
+                    persistHomeApps();
+                    rebuildPages();
+                    currentPage = to / PAGE_CAPACITY;
+                    renderHomePages(true);
                 }
-            }).show();
+            } else if (action.equals("Remove from Home")) {
+                homePackages.remove(app.activityInfo.packageName);
+                prefs.edit().remove(KEY_ICON_X + app.activityInfo.packageName).remove(KEY_ICON_Y + app.activityInfo.packageName).apply();
+                int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
+                if (currentPage >= requiredPages) currentPage = requiredPages - 1;
+                persistHomeApps(); rebuildPages(); renderHomePages(false);
+            } else {
+                addToHome(app.activityInfo.packageName);
+                showHome();
+            }
+        });
     }
 
-    private void showCustomizationMenu() {
-        String[] options = {"3 columns", "4 columns", "5 columns", "Toggle date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home layout"};
-        new android.app.AlertDialog.Builder(this).setTitle("Home customization").setItems(options, (dialog, which) -> {
+    private void showActionDialog(String title, String[] icons, String[] labels, android.content.DialogInterface.OnClickListener listener) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(16), dp(18), dp(16));
+        panel.setBackground(roundRect(new int[]{Color.rgb(28, 35, 59), Color.rgb(15, 19, 34)}, dp(24)));
+        TextView heading = text(title, 20, Color.WHITE, true);
+        heading.setPadding(dp(4), dp(4), dp(4), dp(12));
+        panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        for (int i = 0; i < labels.length; i++) {
+            final int index = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(7), dp(12), dp(7));
+            row.setBackground(roundRect(new int[]{Color.rgb(42, 51, 79), Color.rgb(31, 38, 61)}, dp(15)));
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(54));
+            rowParams.topMargin = dp(5);
+            TextView glyph = text(icons[i], 21, Color.rgb(178, 198, 255), true);
+            glyph.setGravity(Gravity.CENTER);
+            glyph.setBackground(roundRect(new int[]{Color.rgb(65, 83, 139), Color.rgb(51, 57, 112)}, dp(12)));
+            row.addView(glyph, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            TextView label = text(labels[i], 15, Color.rgb(245, 247, 255), false);
+            label.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -1, 1f);
+            labelParams.leftMargin = dp(12);
+            row.addView(label, labelParams);
+            row.setOnClickListener(v -> {
+                dialog.dismiss();
+                listener.onClick(dialog, index);
+            });
+            panel.addView(row, rowParams);
+        }
+        dialog.setContentView(panel);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams params = dialog.getWindow().getAttributes();
+            params.dimAmount = 0.58f;
+            dialog.getWindow().setAttributes(params);
+        }
+        dialog.show();
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - dp(36), -2);
+        panel.setAlpha(0f);
+        panel.setScaleX(0.94f);
+        panel.setScaleY(0.94f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_WALLPAPER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        try {
+            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            if ((flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
+                catch (Exception ignored) {}
+            }
+            prefs.edit().putString(KEY_WALLPAPER_URI, uri.toString()).apply();
+            if (applyHomeWallpaper()) Toast.makeText(this, "Home wallpaper updated", Toast.LENGTH_SHORT).show();
+            else Toast.makeText(this, "Couldn't read that image. Choose another one.", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Couldn't set that wallpaper", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean touchStartedOnAppCell(float rawX, float rawY) {
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            if ("launcher_app_cell".equals(target.getTag())) return true;
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return false;
+    }
+
+    private View findViewAt(View view, int rawX, int rawY) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return null;
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        int localX = rawX - location[0];
+        int localY = rawY - location[1];
+        if (localX < 0 || localY < 0 || localX >= view.getWidth() || localY >= view.getHeight()) return null;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                View found = findViewAt(group.getChildAt(i), rawX, rawY);
+                if (found != null) return found;
+            }
+        }
+        return view;
+    }
+
+    private boolean applyHomeWallpaper() {
+        if (root == null) return false;
+        String saved = prefs == null ? null : prefs.getString(KEY_WALLPAPER_URI, null);
+        if (saved != null && !saved.isEmpty()) {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try {
+                Uri uri = Uri.parse(saved);
+                try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                    if (in != null) BitmapFactory.decodeStream(in, null, bounds);
+                }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new java.io.IOException("Image could not be decoded");
+                int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+                int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+                int sample = 1;
+                while (bounds.outWidth / (sample * 2) >= screenW && bounds.outHeight / (sample * 2) >= screenH) sample *= 2;
+                BitmapFactory.Options decode = new BitmapFactory.Options();
+                decode.inSampleSize = sample;
+                try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+                    android.graphics.Bitmap bitmap = in == null ? null : BitmapFactory.decodeStream(in, null, decode);
+                    if (bitmap != null) {
+                        BitmapDrawable wallpaper = new BitmapDrawable(getResources(), bitmap);
+                        wallpaper.setGravity(Gravity.FILL);
+                        root.setBackground(wallpaper);
+                        return true;
+                    }
+                }
+                throw new java.io.IOException("Image could not be decoded");
+            } catch (Exception ignored) {
+                prefs.edit().remove(KEY_WALLPAPER_URI).apply();
+            }
+        }
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
+        return false;
+    }
+
+    private void launchApp(ResolveInfo app) {
+        Intent intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
+        if (intent != null) {
+            try { startActivity(intent); } catch (Exception e) { Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show(); }
+        }
+    }
+
+    private void updateClock() {
+        if (clockText == null || dateText == null) return;
+        Date now = new Date();
+        clockText.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(now));
+        dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
+        dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
+    }
+
+    private TextView text(String value, float size, int color, boolean bold) {
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextSize(size);
+        v.setTextColor(color);
+        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return v;
+    }
+
+    private GradientDrawable roundRect(int[] colors, int radius) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors);
+        d.setCornerRadius(dp(radius));
+        return d;
+    }
+
+    private int dp(float value) { return (int)(value * getResources().getDisplayMetrics().density + 0.5f); }
+
+    private class AppAdapter extends BaseAdapter {
+        private final boolean drawer;
+        private final List<String> fixedPackages;
+        AppAdapter(boolean drawer) { this(drawer, null); }
+        AppAdapter(boolean drawer, List<String> fixedPackages) { this.drawer = drawer; this.fixedPackages = fixedPackages; }
+        private List<ResolveInfo> items() {
+            if (drawer) return drawerApps;
+            List<ResolveInfo> out = new ArrayList<>();
+            if (fixedPackages != null) for (String p : fixedPackages) { ResolveInfo app = findApp(p); if (app != null) out.add(app); }
+            return out;
+        }
+        @Override public int getCount() { return items().size(); }
+        @Override public Object getItem(int position) { return items().get(position); }
+        @Override public long getItemId(int position) { return position; }
+        @Override public View getView(int position, View recycled, ViewGroup parent) {
+            LinearLayout cell;
+            ImageView icon;
+            TextView label;
+            if (recycled instanceof LinearLayout) {
+                cell = (LinearLayout) recycled;
+                icon = (ImageView) cell.getChildAt(0);
+                label = (TextView) cell.getChildAt(1);
+            } else {
+                cell = new LinearLayout(MainActivity.this);
+                cell.setOrientation(LinearLayout.VERTICAL);
+                cell.setGravity(Gravity.CENTER);
+                cell.setPadding(dp(2), dp(7), dp(2), dp(7));
+                icon = new ImageView(MainActivity.this);
+                icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize));
+                ip.gravity = Gravity.CENTER;
+                cell.addView(icon, ip);
+                label = text("", 10, Color.rgb(236, 239, 249), false);
+                label.setGravity(Gravity.CENTER);
+                label.setMaxLines(2);
+                label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
+            }
+            ResolveInfo app = items().get(position);
+            icon.setImageDrawable(app.loadIcon(packageManager));
+            label.setText(app.loadLabel(packageManager));
+            cell.setTag("launcher_app_cell");
+            cell.setOnClickListener(v -> launchApp(app));
+            cell.setOnLongClickListener(v -> { showAppOptions(app, !drawer); return true; });
+            return cell;
+        }
+    }
+}    private void showCustomizationMenu() {
+        String[] labels = {"3 columns", "4 columns", "5 columns", "Show / hide date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home layout"};
+        String[] icons = {"▦", "▦", "▦", "◷", "−", "+", "▧", "▣", "↺", "⌂"};
+        showActionDialog("Customize Home", icons, labels, (dialog, which) -> {
             if (which < 3) prefs.edit().putInt(KEY_COLUMNS, which == 0 ? 3 : which == 1 ? 4 : 5).apply();
             else if (which == 3) prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
             else if (which == 4 || which == 5) {
@@ -466,13 +809,13 @@ public class MainActivity extends Activity {
                 applyHomeWallpaper();
             } else {
                 homePackages.clear();
-                prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS)
-                        .remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE).apply();
+                prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS).remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE).apply();
                 currentPage = 0;
                 restoreHomeApps();
             }
-            updateClock(); renderHomePages(true);
-        }).show();
+            updateClock();
+            renderHomePages(true);
+        });
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
