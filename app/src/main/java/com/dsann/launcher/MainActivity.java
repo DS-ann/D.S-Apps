@@ -240,9 +240,6 @@ public class MainActivity extends Activity {
                 new int[]{Color.rgb(15, 20, 36), Color.rgb(10, 13, 24)}));
         TextView title = text("Apps", 28, Color.WHITE, true);
         drawerScreen.addView(title, new LinearLayout.LayoutParams(-1, dp(48)));
-        TextView sub = text("Touch and hold an app to add it to Home", 12, Color.rgb(157, 169, 194), false);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(28));
-        drawerScreen.addView(sub, sp);
         drawerGrid = new GridView(this);
         drawerGrid.setNumColumns(COLUMNS);
         drawerGrid.setVerticalSpacing(dp(8));
@@ -280,9 +277,18 @@ public class MainActivity extends Activity {
                 if (app != null) {
                     new android.app.AlertDialog.Builder(this)
                             .setTitle(app.loadLabel(packageManager))
-                            .setItems(new String[]{"Remove from Home", "Open app"}, (dialog, which) -> {
-                                if (which == 0) { homePackages.remove(app.activityInfo.packageName); persistHomeApps(); rebuildPages(); renderHomePages(false); }
-                                else launchApp(app);
+                            .setItems(new String[]{"Move earlier", "Move later", "Remove from Home", "Open app"}, (dialog, which) -> {
+                                int itemIndex = homePackages.indexOf(app.activityInfo.packageName);
+                                if (which == 0 && itemIndex > 0) {
+                                    Collections.swap(homePackages, itemIndex, itemIndex - 1);
+                                    persistHomeApps(); rebuildPages(); renderHomePages(true);
+                                } else if (which == 1 && itemIndex >= 0 && itemIndex < homePackages.size() - 1) {
+                                    Collections.swap(homePackages, itemIndex, itemIndex + 1);
+                                    persistHomeApps(); rebuildPages(); renderHomePages(true);
+                                } else if (which == 2) {
+                                    homePackages.remove(app.activityInfo.packageName);
+                                    persistHomeApps(); rebuildPages(); renderHomePages(false);
+                                } else if (which == 3) launchApp(app);
                             }).show();
                 }
                 return true;
