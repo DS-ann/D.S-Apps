@@ -279,22 +279,22 @@ public class MainActivity extends Activity {
             grid.setAdapter(new AppAdapter(false, pages.get(pageIndex)));
             grid.setOnItemLongClickListener((parent, view, position, id) -> {
                 ResolveInfo app = findApp(pages.get(idx).get(position));
-                if (app != null) {
-                    new android.app.AlertDialog.Builder(this)
-                            .setTitle(app.loadLabel(packageManager))
-                            .setItems(new String[]{"Move earlier", "Move later", "Remove from Home", "Open app"}, (dialog, which) -> {
-                                int itemIndex = homePackages.indexOf(app.activityInfo.packageName);
-                                if (which == 0 && itemIndex > 0) {
-                                    Collections.swap(homePackages, itemIndex, itemIndex - 1);
-                                    persistHomeApps(); rebuildPages(); renderHomePages(true);
-                                } else if (which == 1 && itemIndex >= 0 && itemIndex < homePackages.size() - 1) {
-                                    Collections.swap(homePackages, itemIndex, itemIndex + 1);
-                                    persistHomeApps(); rebuildPages(); renderHomePages(true);
-                                } else if (which == 2) {
-                                    homePackages.remove(app.activityInfo.packageName);
-                                    persistHomeApps(); rebuildPages(); renderHomePages(false);
-                                } else if (which == 3) launchApp(app);
-                            }).show();
+                if (app != null) startAppDrag(view, app, true);
+                return true;
+            });
+            grid.setOnDragListener((v, event) -> {
+                if (event.getAction() == DragEvent.ACTION_DROP && event.getClipData() != null) {
+                    String pkg = event.getClipData().getItemAt(0).getText().toString();
+                    int from = homePackages.indexOf(pkg);
+                    int target = grid.pointToPosition((int) event.getX(), (int) event.getY());
+                    if (from >= 0 && target >= 0) {
+                        target = Math.min(homePackages.size() - 1, idx * PAGE_CAPACITY + target);
+                        homePackages.remove(from);
+                        target = Math.min(target, homePackages.size());
+                        homePackages.add(target, pkg);
+                        persistHomeApps(); rebuildPages(); currentPage = Math.min(idx, pages.size() - 1); renderHomePages(true);
+                    } else if (from < 0) addToHome(pkg);
+                    return true;
                 }
                 return true;
             });
