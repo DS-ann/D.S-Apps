@@ -783,7 +783,8 @@ public class MainActivity extends Activity {
             return cell;
         }
     }
-}    private void showCustomizationMenu() {
+
+    private void showCustomizationMenu() {
         String[] labels = {"3 columns", "4 columns", "5 columns", "Show / hide date", "Smaller icons", "Larger icons", "Choose wallpaper", "System wallpaper picker", "Reset wallpaper", "Reset home layout"};
         String[] icons = {"▦", "▦", "▦", "◷", "−", "+", "▧", "▣", "↺", "⌂"};
         showActionDialog("Customize Home", icons, labels, (dialog, which) -> {
