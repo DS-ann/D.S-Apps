@@ -654,13 +654,13 @@ public class MainActivity extends Activity {
                     Collections.swap(homePackages, from, to);
                     persistHomeApps();
                     rebuildPages();
-                    currentPage = to / PAGE_CAPACITY;
+                    currentPage = to / pageCapacity();
                     renderHomePages(true);
                 }
             } else if (action.equals("Remove from Home")) {
                 homePackages.remove(app.activityInfo.packageName);
                 prefs.edit().remove(KEY_ICON_X + app.activityInfo.packageName).remove(KEY_ICON_Y + app.activityInfo.packageName).apply();
-                int requiredPages = Math.max(1, (homePackages.size() + PAGE_CAPACITY - 1) / PAGE_CAPACITY);
+                int requiredPages = Math.max(1, (homePackages.size() + pageCapacity() - 1) / pageCapacity());
                 if (currentPage >= requiredPages) currentPage = requiredPages - 1;
                 persistHomeApps(); rebuildPages(); renderHomePages(false);
             } else {
