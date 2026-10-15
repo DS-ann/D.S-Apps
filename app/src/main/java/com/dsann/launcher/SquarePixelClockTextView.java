@@ -60,7 +60,13 @@ public final class SquarePixelClockTextView extends TextView {
             super.onDraw(canvas);
             return;
         }
-        String value = getText() == null ? "" : getText().toString();
+        String rawValue = getText() == null ? "" : getText().toString();
+        StringBuilder visible = new StringBuilder();
+        for (int i = 0; i < rawValue.length(); i++) {
+            char ch = rawValue.charAt(i);
+            if ((ch >= '0' && ch <= '9') || ch == ':') visible.append(ch);
+        }
+        String value = visible.toString();
         if (value.length() == 0) return;
         float cell = getTextSize() / 9.0f;
         float block = cell * 0.82f;
