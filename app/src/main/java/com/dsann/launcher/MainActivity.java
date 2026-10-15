@@ -50,6 +50,9 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_SIZE = "icon_size";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
+    private static final String KEY_HOME_FONT_SIZE = "home_font_size";
+    private static final String KEY_DRAWER_FONT_SIZE = "drawer_font_size";
+    private static final String KEY_CLOCK_STYLE = "clock_style";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
     private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
     private static final String KEY_SHOW_PAGE_INDICATOR = "show_page_indicator";
@@ -332,6 +335,7 @@ public class MainActivity extends Activity {
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
         clockText.setLetterSpacing(0.055f);
+        applyClockStyle();
         hero.addView(clockText);
         dateText = text("", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
@@ -1076,12 +1080,46 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void applyClockStyle() {
+        if (clockText == null) return;
+        int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+        clockText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+        switch (style) {
+            case 1: // Terminal: classic monospace, compact tracking.
+                clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+                clockText.setTextSize(38);
+                clockText.setLetterSpacing(0.015f);
+                clockText.setTextColor(Color.rgb(139, 255, 184));
+                break;
+            case 2: // Clean: simple modern system sans.
+                clockText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+                clockText.setTextSize(42);
+                clockText.setLetterSpacing(0.005f);
+                clockText.setTextColor(Color.WHITE);
+                break;
+            case 3: // Wide: futuristic spaced digits.
+                clockText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+                clockText.setTextSize(40);
+                clockText.setLetterSpacing(0.11f);
+                clockText.setTextColor(Color.rgb(120, 218, 255));
+                break;
+            default: // Tech: bold digital-style face with subtle cool glow.
+                clockText.setTypeface(Typeface.create("sans-serif-monospace", Typeface.BOLD));
+                clockText.setTextSize(40);
+                clockText.setLetterSpacing(0.045f);
+                clockText.setTextColor(Color.rgb(218, 235, 255));
+                clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(110, 57, 157, 255));
+                break;
+        }
+    }
+
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
         clockText.setText(new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mm a", Locale.getDefault()).format(now));
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
+        applyClockStyle();
         applyBrandVisibility();
     }
 
@@ -1149,6 +1187,8 @@ public class MainActivity extends Activity {
             }
             icon.setImageDrawable(app.loadIcon(packageManager));
             label.setText(app.loadLabel(packageManager));
+            int fontChoice = prefs.getInt(drawer ? KEY_DRAWER_FONT_SIZE : KEY_HOME_FONT_SIZE, drawer ? 1 : 1);
+            label.setTextSize(new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))]);
             label.setVisibility(prefs.getBoolean(drawer ? KEY_SHOW_DRAWER_LABELS : KEY_SHOW_HOME_LABELS, true) ? View.VISIBLE : View.GONE);
             cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
             cell.setOnClickListener(v -> launchApp(app));
@@ -1284,6 +1324,10 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
             renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
+        addChoiceRow(content, "Home app font size", prefs.getInt(KEY_HOME_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+            prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
+            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
         addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
             renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
@@ -1311,6 +1355,10 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
+        addChoiceRow(content, "App drawer font size", prefs.getInt(KEY_DRAWER_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+            prefs.edit().putInt(KEY_DRAWER_FONT_SIZE, value).apply();
+            drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
         addSettingRow(content, "Aa", "App names in drawer", prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_DRAWER_LABELS, !prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true)).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
@@ -1330,6 +1378,11 @@ public class MainActivity extends Activity {
         addChoiceRow(content, "Color theme", prefs.getInt(KEY_COLOR_THEME, 0), new String[]{"Midnight", "Ocean", "Violet", "Graphite"}, value -> {
             prefs.edit().putInt(KEY_COLOR_THEME, value).apply();
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Tech", "Terminal", "Clean", "Wide"}, value -> {
+            prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
+            applyClockStyle();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "12/24", "Clock format", prefs.getBoolean(KEY_24_HOUR, false) ? "24-hour" : "12-hour", () -> {
