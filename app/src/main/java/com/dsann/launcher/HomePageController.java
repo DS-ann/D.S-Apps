@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -58,17 +59,26 @@ final class HomePageController {
         this.homeRows = homeRows;
     }
 
+    private void clearFocusRecursively(View view) {
+        if (view == null) return;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            // Walk backwards in case a custom view changes its children while focus clears.
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                clearFocusRecursively(group.getChildAt(i));
+            }
+        }
+        if (view.hasFocus()) view.clearFocus();
+    }
+
     void renderHomePages(boolean animate) {
         if (host.getPagesStrip() == null) return;
-        // Android 6 / some OEM ViewGroup implementations can crash while removing
-        // a focused AppWidgetHostView during a page rebuild. Clear focus through the
-        // existing page tree before detaching any page children.
+        // Clear focus from the actual focused descendant before detaching page trees.
+        // Clearing only the strip and each page is insufficient when focus belongs to
+        // an AppWidgetHostView nested inside a widget container.
         LinearLayout strip = host.getPagesStrip();
+        clearFocusRecursively(strip);
         strip.clearFocus();
-        for (int i = 0; i < strip.getChildCount(); i++) {
-            View pageChild = strip.getChildAt(i);
-            if (pageChild != null) pageChild.clearFocus();
-        }
         strip.removeAllViews();
         int pageWidth = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(activity, 40));
         int columns = host.getHomeColumns();
