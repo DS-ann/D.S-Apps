@@ -236,6 +236,11 @@ public class MainActivity extends Activity {
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            // A resize outline is transient edit chrome. Dismiss it on the next tap
+            // anywhere in the launcher, while preserving direct touches on its handle.
+            if (widgetInteractionController != null) {
+                widgetInteractionController.clearEditChromeOutsideTouch(event.getRawX(), event.getRawY());
+            }
             gestureDownX = event.getX();
             gestureDownY = event.getY();
             longPressDownX = event.getX();
