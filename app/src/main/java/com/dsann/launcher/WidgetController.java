@@ -23,11 +23,11 @@ final class WidgetController {
         options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
         try { manager.updateAppWidgetOptions(widgetId, options); } catch (Exception ignored) {}
         try {
-            // The four-dimension overload was added after Android 6 (API 23).
-            // Calling it unconditionally can throw NoSuchMethodError on older devices.
+            // Use the AppWidgetHostView API available to the project's compile SDK.
+            // Widget size options are already applied through AppWidgetManager above.
             if (Build.VERSION.SDK_INT >= 31) {
                 hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp);
-            } else {
+            } else if (Build.VERSION.SDK_INT >= 16) {
                 hostView.updateAppWidgetSize(options, widthDp, heightDp);
             }
         } catch (Exception ignored) {}
