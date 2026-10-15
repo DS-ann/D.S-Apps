@@ -384,6 +384,7 @@ public class MainActivity extends Activity {
                     @Override public ResolveInfo findApp(String packageName) { return MainActivity.this.findApp(packageName); }
                     @Override public void installHomeIconTouch(View cell, String packageName) { MainActivity.this.installHomeIconTouch(cell, packageName); }
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
+                    @Override public void syncWidgetViewsToPages() { MainActivity.this.syncWidgetViewsToPages(); }
                     @Override public void launchApp(ResolveInfo app) { MainActivity.this.launchApp(app); }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome) { MainActivity.this.showAppOptions(app, onHome); }
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
@@ -1098,6 +1099,60 @@ public class MainActivity extends Activity {
 
     private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
         WidgetController.saveGeometry(prefs, KEY_WIDGET_IDS, widgetId, pageIndex, container);
+    }
+
+    /**
+     * Reparent existing widget containers to the normalized model page without destroying
+     * their AppWidgetHostView instances. Android Launcher3 follows the same principle of
+     * preserving workspace items while page membership changes.
+     */
+    private void syncWidgetViewsToPages() {
+        if (pagesStrip == null || pagesStrip.getChildCount() == 0) return;
+        String stored = prefs.getString(KEY_WIDGET_IDS, "");
+        for (int pageIndex = pagesStrip.getChildCount() - 1; pageIndex >= 0; pageIndex--) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout sourcePage = (FrameLayout) pageView;
+            for (int childIndex = sourcePage.getChildCount() - 1; childIndex >= 0; childIndex--) {
+                View child = sourcePage.getChildAt(childIndex);
+                Object rawTag = child.getTag();
+                if (!(rawTag instanceof String)
+                        || !((String) rawTag).startsWith("launcher_widget:")) continue;
+                int widgetId;
+                try {
+                    widgetId = Integer.parseInt(((String) rawTag).substring("launcher_widget:".length()));
+                } catch (NumberFormatException ignored) {
+                    sourcePage.removeViewAt(childIndex);
+                    continue;
+                }
+                int targetPageIndex = -1;
+                if (stored != null) {
+                    for (String entry : stored.split("\\n")) {
+                        String[] parts = entry.split(":");
+                        if (parts.length != 2) continue;
+                        try {
+                            if (Integer.parseInt(parts[0].trim()) == widgetId) {
+                                targetPageIndex = Integer.parseInt(parts[1].trim());
+                                break;
+                            }
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+                if (targetPageIndex < 0) {
+                    sourcePage.removeViewAt(childIndex);
+                    continue;
+                }
+                targetPageIndex = Math.max(0, Math.min(pages.size() - 1, targetPageIndex));
+                if (targetPageIndex == pageIndex || targetPageIndex >= pagesStrip.getChildCount()) continue;
+                FrameLayout targetPage = (FrameLayout) pagesStrip.getChildAt(targetPageIndex);
+                if (child.hasFocus()) child.clearFocus();
+                ViewGroup parent = (ViewGroup) child.getParent();
+                ViewGroup.LayoutParams oldParams = child.getLayoutParams();
+                parent.removeView(child);
+                targetPage.addView(child, oldParams);
+                child.bringToFront();
+            }
+        }
     }
 
     private void restoreWidgetsOnPages() {
