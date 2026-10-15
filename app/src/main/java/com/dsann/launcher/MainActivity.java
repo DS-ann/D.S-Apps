@@ -37,6 +37,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -58,6 +59,10 @@ public class MainActivity extends Activity {
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
     private static final String KEY_DRAWER_FONT_SIZE = "drawer_font_size";
     private static final String KEY_CLOCK_STYLE = "clock_style";
+    private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
+    private static final String KEY_ANIMATION_SPEED = "animation_speed";
+    private static final String KEY_CLOCK_SIZE = "clock_size";
+    private static final String KEY_CLOCK_POSITION = "clock_position";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
     private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
     private static final String KEY_SHOW_PAGE_INDICATOR = "show_page_indicator";
@@ -277,15 +282,15 @@ public class MainActivity extends Activity {
                     face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
                     if (i == currentPage) {
                         face.setPivotX(progress < 0f ? face.getWidth() : 0f);
-                        face.setRotationY(-progress * 90f);
+                        face.setRotationY(-progress * getPageRotationDegrees());
                         face.setAlpha(1f - Math.min(0.18f, Math.abs(progress) * 0.18f));
                     } else if (i == currentPage + 1 && progress < 0f) {
                         face.setPivotX(0f);
-                        face.setRotationY((1f + progress) * -90f);
+                        face.setRotationY((1f + progress) * -getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
                         face.setPivotX(face.getWidth());
-                        face.setRotationY((1f - progress) * 90f);
+                        face.setRotationY((1f - progress) * getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else {
                         face.setRotationY(0f);
@@ -556,6 +561,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
         dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
+        applyClockPositionAndSize();
         applyClockPanelColor(false);
 
         pageViewport = new FrameLayout(this);
@@ -749,7 +755,7 @@ public class MainActivity extends Activity {
                 if (!iconDragging && iconDragArmed && moved) {
                     iconDragging = true;
                     if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
-                    view.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(100).start();
+                    view.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(animationDuration(100)).start();
                     view.bringToFront();
                 }
                 if (iconDragging) {
@@ -876,7 +882,7 @@ public class MainActivity extends Activity {
                     ensurePageExists(committedPage);
                     currentPage = committedPage;
                     view.setTranslationX(0f);
-                    view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
+                    view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(140)).start();
                     iconDragging = false;
                     iconDragArmed = false;
                     activeDragView = null;
@@ -948,7 +954,7 @@ public class MainActivity extends Activity {
             if (animate) {
                 page.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                 page.animate().rotationY(0f).alpha(1f)
-                        .setDuration(240L)
+                        .setDuration(animationDuration(240L))
                         .setInterpolator(new android.view.animation.DecelerateInterpolator())
                         .withEndAction(() -> page.setLayerType(View.LAYER_TYPE_NONE, null))
                         .start();
@@ -1130,7 +1136,7 @@ public class MainActivity extends Activity {
         panel.setAlpha(0f);
         panel.setScaleX(0.94f);
         panel.setScaleY(0.94f);
-        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(animationDuration(180)).start();
     }
 
     private void beginWidgetPicker() { beginWidgetPicker(currentPage); }
@@ -1619,7 +1625,7 @@ public class MainActivity extends Activity {
             hero.setBackground(next);
             next.setAlpha(0);
             android.animation.ValueAnimator fade = android.animation.ValueAnimator.ofInt(0, 255);
-            fade.setDuration(260L);
+            fade.setDuration(animationDuration(260L));
             fade.addUpdateListener(a -> next.setAlpha((Integer) a.getAnimatedValue()));
             fade.start();
         } else {
@@ -1675,7 +1681,7 @@ public class MainActivity extends Activity {
                 child.setLayoutParams(lp);
                 child.setTranslationX(LauncherUiUtils.dp(this, 5));
                 child.setTranslationY(LauncherUiUtils.dp(this, 3));
-                child.animate().translationX(0f).translationY(0f).setDuration(150L).start();
+                child.animate().translationX(0f).translationY(0f).setDuration(animationDuration(150L)).start();
                 occupied[bestRow][bestCol] = true;
                 saveIconSlot(pkg, bestCol, bestRow, columns);
             }
@@ -1830,6 +1836,26 @@ public class MainActivity extends Activity {
             applyBrandVisibility(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
+        addSection(content, "Clock and motion");
+        addSliderRow(content, "Page rotation", 50, 180, getPageRotationDegrees(), "°", value -> {
+            prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "Launcher animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
+            prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addSliderRow(content, "Clock size", 50, 120, getClockSize(), " sp", value -> {
+            prefs.edit().putInt(KEY_CLOCK_SIZE, value).apply();
+            applyClockPositionAndSize();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
+            prefs.edit().putInt(KEY_CLOCK_POSITION, value).apply();
+            applyClockPositionAndSize();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+
         addSection(content, "App drawer");
         addChoiceRow(content, "Drawer columns", getDrawerColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_COLUMNS, value + 3).apply();
@@ -1944,8 +1970,102 @@ public class MainActivity extends Activity {
         if (restoreScrollY > 0) scroll.post(() -> scroll.scrollTo(0, restoreScrollY));
         if (animateOpening && !wasShowing) {
             panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
-            panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(190).start();
+            panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(animationDuration(190)).start();
         }
+    }
+
+    private int getPageRotationDegrees() {
+        return Math.max(50, Math.min(180, prefs == null ? 90 : prefs.getInt(KEY_PAGE_ROTATION, 90)));
+    }
+
+    private int getClockSize() {
+        return Math.max(50, Math.min(120, prefs == null ? 78 : prefs.getInt(KEY_CLOCK_SIZE, 78)));
+    }
+
+    private int getClockPosition() {
+        return Math.max(0, Math.min(2, prefs == null ? 2 : prefs.getInt(KEY_CLOCK_POSITION, 2)));
+    }
+
+    private long animationDuration(long baseMillis) {
+        int speed = prefs == null ? 1 : prefs.getInt(KEY_ANIMATION_SPEED, 1);
+        float multiplier = speed == 0 ? 1.5f : (speed == 2 ? 0.65f : 1f);
+        return Math.max(60L, Math.round(baseMillis * multiplier));
+    }
+
+    private int clockGravity() {
+        int position = getClockPosition();
+        return position == 0 ? Gravity.LEFT : (position == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.RIGHT);
+    }
+
+    private void applyClockPositionAndSize() {
+        if (clockPanel == null || clockText == null) return;
+        int alignment = clockGravity();
+        LinearLayout.LayoutParams panelParams = (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
+        panelParams.gravity = alignment;
+        clockPanel.setLayoutParams(panelParams);
+        clockPanel.setGravity(alignment);
+        View parent = (View) clockText.getParent();
+        if (parent instanceof LinearLayout) ((LinearLayout) parent).setGravity(alignment | Gravity.CENTER_VERTICAL);
+        clockText.setGravity(alignment | Gravity.CENTER_VERTICAL);
+        if (dateText != null) dateText.setGravity(alignment);
+        int size = getClockSize();
+        clockText.setTextSize(size);
+        int height = LauncherUiUtils.dp(this, Math.round(size * 1.46f));
+        ViewGroup.LayoutParams clockParams = clockText.getLayoutParams();
+        if (clockParams != null) {
+            clockParams.height = height;
+            clockText.setLayoutParams(clockParams);
+        }
+        if (parent instanceof View) {
+            ViewGroup.LayoutParams rowParams = ((View) parent).getLayoutParams();
+            if (rowParams != null) {
+                rowParams.height = height;
+                ((View) parent).setLayoutParams(rowParams);
+            }
+        }
+        if (amPmText != null) {
+            ViewGroup.LayoutParams amPmParams = amPmText.getLayoutParams();
+            if (amPmParams != null) {
+                amPmParams.height = height;
+                amPmText.setLayoutParams(amPmParams);
+            }
+        }
+        clockText.invalidate();
+    }
+
+    private interface IntSliderAction { void onChange(int value); }
+
+    private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
+            String suffix, IntSliderAction action) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7));
+        block.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, LauncherUiUtils.dp(this, 14)));
+        LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
+        blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+        TextView label = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
+        TextView valueLabel = LauncherUiUtils.text(this, current + suffix, 12, Color.rgb(177, 198, 255), true);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
+        heading.addView(valueLabel);
+        block.addView(heading);
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(max - min);
+        seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 38)));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int value = min + progress;
+                valueLabel.setText(value + suffix);
+                if (fromUser) action.onChange(value);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        panel.addView(block, blockParams);
     }
 
     private int sizeChoiceIndex(int size) {
