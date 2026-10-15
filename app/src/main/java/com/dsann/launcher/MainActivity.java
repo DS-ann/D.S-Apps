@@ -1323,29 +1323,23 @@ public class MainActivity extends Activity {
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
 
-        // Parallax is a layered depth transition: the workspace strip moves normally,
-        // while the outgoing and incoming pages travel at different rates and scale apart.
-        // Page instances remain attached, so live widgets are not detached during the swipe.
+        // Parallax uses one strip translation plus subtle depth cues. Avoid moving
+        // the strip and both child pages independently, which doubled the work and
+        // made the effect feel laggy on lower-powered devices with live widgets.
         if (effect == 2) {
             pagesStrip.setTranslationX(-from * width - direction * width * progress);
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
-            outgoing.setRotationY(direction * 5f * progress);
-            outgoing.setTranslationX(-direction * width * 0.30f * progress);
-            outgoing.setTranslationY(-height * 0.025f * progress);
-            outgoing.setScaleX(1f - 0.12f * progress);
-            outgoing.setScaleY(1f - 0.07f * progress);
-            outgoing.setAlpha(1f - 0.28f * progress);
+            outgoing.setScaleX(1f - 0.045f * progress);
+            outgoing.setScaleY(1f - 0.025f * progress);
+            outgoing.setAlpha(1f - 0.12f * progress);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
                 View incoming = pagesStrip.getChildAt(to);
                 incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setRotationY(-direction * 5f * (1f - progress));
-                incoming.setTranslationX(direction * width * 0.30f * (1f - progress));
-                incoming.setTranslationY(height * 0.025f * (1f - progress));
-                incoming.setScaleX(0.88f + 0.12f * progress);
-                incoming.setScaleY(0.93f + 0.07f * progress);
-                incoming.setAlpha(0.72f + 0.28f * progress);
+                incoming.setScaleX(0.955f + 0.045f * progress);
+                incoming.setScaleY(0.975f + 0.025f * progress);
+                incoming.setAlpha(0.88f + 0.12f * progress);
             }
             return;
         }
@@ -1355,7 +1349,7 @@ public class MainActivity extends Activity {
             // 3D Cube: rotate each face around the shared vertical edge with depth separation.
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
-            outgoing.setRotationY(direction * 90f * progress);
+            outgoing.setRotationY(direction * 78f * progress);
             outgoing.setTranslationZ(-density * 28f * progress);
             outgoing.setTranslationX(-direction * width * 0.04f * progress);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
@@ -1363,7 +1357,7 @@ public class MainActivity extends Activity {
                 incoming.setCameraDistance(10000f * density);
                 incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setRotationY(-direction * 90f * (1f - progress));
+                incoming.setRotationY(-direction * 78f * (1f - progress));
                 incoming.setTranslationZ(density * 28f * progress);
                 incoming.setTranslationX(direction * width * 0.04f * (1f - progress));
             }
@@ -1371,7 +1365,7 @@ public class MainActivity extends Activity {
             // Page Flip: hinge from the top edge on the X axis, like a turning sheet.
             outgoing.setPivotX(width * 0.5f);
             outgoing.setPivotY(0f);
-            outgoing.setRotationX(direction * 82f * progress);
+            outgoing.setRotationX(direction * 68f * progress);
             outgoing.setRotationY(direction * 5f * progress);
             outgoing.setScaleX(1f - 0.04f * progress);
             outgoing.setAlpha(1f - 0.22f * progress);
@@ -1380,7 +1374,7 @@ public class MainActivity extends Activity {
                 incoming.setCameraDistance(10000f * density);
                 incoming.setPivotX(incoming.getWidth() * 0.5f);
                 incoming.setPivotY(0f);
-                incoming.setRotationX(-direction * 82f * (1f - progress));
+                incoming.setRotationX(-direction * 68f * (1f - progress));
                 incoming.setRotationY(-direction * 5f * (1f - progress));
                 incoming.setScaleX(0.96f + 0.04f * progress);
                 incoming.setAlpha(0.78f + 0.22f * progress);
@@ -2619,6 +2613,8 @@ public class MainActivity extends Activity {
     private void applyClockPositionAndSize() {
         if (clockPanel == null || clockText == null) return;
         int alignment = clockGravity();
+        final float lengthScale = getClockLength() / 100f;
+        final float breadthScale = getClockBreadth() / 100f;
         LinearLayout.LayoutParams panelParams = (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
         panelParams.gravity = alignment;
         clockPanel.setLayoutParams(panelParams);
@@ -2626,7 +2622,7 @@ public class MainActivity extends Activity {
         if (clockGroup != null) {
             FrameLayout.LayoutParams groupParams = (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.CENTER_VERTICAL;
-            groupParams.height = LauncherUiUtils.dp(this, Math.round(114f * getClockBreadth() / 100f));
+            groupParams.height = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
             float measuredClockWidth = clockText.getPaint().measureText(clockText.getText().toString());
             groupParams.width = Math.max(LauncherUiUtils.dp(this, 38),
                     (int) Math.ceil(measuredClockWidth * lengthScale) + LauncherUiUtils.dp(this, 20));
@@ -2636,8 +2632,6 @@ public class MainActivity extends Activity {
         if (dateText != null) dateText.setGravity(alignment);
         // Keep the typography base fixed; the two controls independently stretch the
         // visible clock horizontally (length) and vertically (breadth).
-        final float lengthScale = getClockLength() / 100f;
-        final float breadthScale = getClockBreadth() / 100f;
         clockText.setTextSize(78f);
         clockText.setPivotX(0f);
         clockText.setPivotY(0f);
