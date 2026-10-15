@@ -802,6 +802,32 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Unable to open this contact shortcut", Toast.LENGTH_LONG).show();
             }
         });
+        // Contact shortcuts are launcher-owned tiles, not AppWidgetHostViews, so
+        // provide the same long-press options explicitly.
+        tile.setOnLongClickListener(v -> {
+            showActionDialog(prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"),
+                    new String[]{"↔", "−", "↻"},
+                    new String[]{"Move to other page", "Remove shortcut", "Recreate contact shortcut"},
+                    (dialog, which) -> {
+                if (which == 0) {
+                    int pageCount = pagesStrip == null ? 1 : Math.max(1, pagesStrip.getChildCount());
+                    int targetPage = (prefs.getInt(KEY_SHORTCUT_PAGE, 0) == 0 && pageCount > 1) ? 1 : 0;
+                    prefs.edit().putInt(KEY_SHORTCUT_PAGE, targetPage).apply();
+                    currentPage = targetPage;
+                    renderHomePages(false);
+                    showPage(targetPage, true);
+                } else if (which == 1) {
+                    prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
+                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON).apply();
+                    renderHomePages(false);
+                } else if (which == 2) {
+                    prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
+                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON).apply();
+                    beginWidgetPicker(currentPage);
+                }
+            });
+            return true;
+        });
     }
 
     private void restoreDockApps() {
@@ -1912,10 +1938,18 @@ public class MainActivity extends Activity {
                 {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
         int[] tone = tones[phase];
-        int side = Color.argb(149, tone[0], tone[1], tone[2]);
-        int centre = Color.argb(0, tone[0], tone[1], tone[2]);
-        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT,
-                new int[] {side, Color.argb(63, tone[0], tone[1], tone[2]), centre});
+        // Two complementary colour fields meet at the centre: cool teal/blue on
+        // the left and the existing phase-driven violet/blue on the right.
+        int leftR = Math.max(55, Math.min(220, tone[0] * 2 / 3));
+        int leftG = Math.max(150, Math.min(225, tone[1] + 28));
+        int leftB = Math.max(170, Math.min(240, tone[2] + 18));
+        int leftEdge = Color.argb(125, leftR, leftG, leftB);
+        int rightEdge = Color.argb(149, tone[0], tone[1], tone[2]);
+        int leftMid = Color.argb(72, leftR, leftG, leftB);
+        int rightMid = Color.argb(76, tone[0], tone[1], tone[2]);
+        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[] {leftEdge, leftMid, Color.argb(22, 125, 155, 235),
+                        rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         if (animate) {
             hero.setBackground(next);
@@ -2325,11 +2359,18 @@ public class MainActivity extends Activity {
             }
         }
         if (amPmText != null) {
+            // Scale the marker proportionally with the clock. The minimum clock
+            // size (50) maps to a compact 7sp label; the maximum remains readable.
+            float markerSp = 7f + (size - 50) * (5f / 70f);
+            amPmText.setTextSize(markerSp);
             ViewGroup.LayoutParams amPmParams = amPmText.getLayoutParams();
             if (amPmParams != null) {
                 amPmParams.height = height;
+                amPmParams.width = LauncherUiUtils.dp(this, Math.max(18, Math.round(size * 0.34f)));
                 amPmText.setLayoutParams(amPmParams);
             }
+            amPmText.setPadding(LauncherUiUtils.dp(this, Math.max(2, Math.round(size * 0.045f))),
+                    0, 0, 0);
         }
         clockText.invalidate();
     }
