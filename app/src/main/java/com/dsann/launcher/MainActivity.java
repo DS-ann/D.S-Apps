@@ -71,6 +71,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_WIDGET_BIND = 7303;
     private static final int REQUEST_WIDGET_CONFIGURE = 7304;
     private int pendingWidgetId = -1;
+    private AppWidgetProviderInfo pendingWidgetInfo;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
     private interface IntAction { void onSelect(int value); }
@@ -131,8 +132,12 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, HOST_ID);
-        getWindow().setStatusBarColor(BG);
+        // Let the wallpaper flow behind the status bar so it feels like launcher chrome,
+        // while retaining the system icons and reserving their inset for launcher content.
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(BG);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         loadApps();
         restoreHomeApps();
         buildInterface();
@@ -293,6 +298,16 @@ public class MainActivity extends Activity {
             pages.get(pageIndex).add(packageName);
         }
         if (pages.isEmpty()) pages.add(new ArrayList<String>());
+        // Preserve pages that contain only widgets, including after a launcher restart.
+        String widgetEntries = prefs.getString(KEY_WIDGET_IDS, "");
+        if (!widgetEntries.isEmpty()) {
+            for (String entry : widgetEntries.split("\\n")) {
+                String[] parts = entry.split(":");
+                if (parts.length != 2) continue;
+                try { ensurePageExists(Math.max(0, Math.min(20, Integer.parseInt(parts[1])))); }
+                catch (NumberFormatException ignored) {}
+            }
+        }
         // Keep the current empty page when the user has just swiped past a full page,
         // but discard stale page indexes after shortcuts are removed.
         if (currentPage > pages.size()) currentPage = pages.size() - 1;
@@ -306,9 +321,14 @@ public class MainActivity extends Activity {
         homeScreen.setOrientation(LinearLayout.VERTICAL);
         homeScreen.setPadding(dp(20), dp(14), dp(20), dp(8));
         root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            homeScreen.setPadding(dp(20), dp(14) + insets.getSystemWindowInsetTop(), dp(20), dp(8));
+            return insets;
+        });
         buildHomeChrome();
         buildDrawer();
         setContentView(root);
+        root.requestApplyInsets();
         renderHomePages(false);
         showHome();
     }
@@ -533,13 +553,16 @@ public class MainActivity extends Activity {
                     FrameLayout page = (FrameLayout) view.getParent();
                     int[] releaseLocation = new int[2];
                     page.getLocationOnScreen(releaseLocation);
-                    boolean moveToNextPage = event.getRawX() > releaseLocation[0] + page.getWidth() - dp(18)
-                            && currentPage == pages.size() - 1;
+                    FrameLayout.LayoutParams dragged = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    // Detect the edge from both the finger and the icon bounds. Touch events
+                    // can be clipped by the icon cell before the finger reaches the screen edge.
+                    boolean atRightEdge = event.getRawX() >= releaseLocation[0] + page.getWidth() - dp(48)
+                            || dragged.leftMargin + view.getWidth() >= page.getWidth() - dp(48);
+                    boolean moveToNextPage = atRightEdge;
                     int columns = getHomeColumns();
                     int rows = HOME_ROWS;
                     int cellWidth = Math.max(1, page.getWidth() / columns);
                     int cellHeight = Math.max(1, page.getHeight() / rows);
-                    FrameLayout.LayoutParams dragged = (FrameLayout.LayoutParams) view.getLayoutParams();
                     int targetCol = Math.max(0, Math.min(columns - 1, (dragged.leftMargin + view.getWidth() / 2) / cellWidth));
                     int targetRow = Math.max(0, Math.min(rows - 1, (dragged.topMargin + view.getHeight() / 2) / cellHeight));
                     int sourceCol = Math.max(0, Math.min(columns - 1, Math.round((float) iconOriginalLeft / cellWidth)));
@@ -572,17 +595,18 @@ public class MainActivity extends Activity {
                     view.setLayoutParams(dragged);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     if (moveToNextPage) {
-                        prefs.edit().putInt(KEY_ICON_PAGE + packageName, currentPage + 1)
+                        int destinationPage = currentPage + 1;
+                        prefs.edit().putInt(KEY_ICON_PAGE + packageName, destinationPage)
                                 .putFloat(KEY_ICON_X + packageName, 0f)
-                                .putFloat(KEY_ICON_Y + packageName, 0f).apply();
-                        currentPage++;
+                                .putFloat(KEY_ICON_Y + packageName, targetRow / (float) Math.max(1, rows - 1)).apply();
+                        currentPage = destinationPage;
                     }
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
                     iconDragging = false;
                     iconDragArmed = false;
                     activeDragView = null;
                     activeDragPackage = null;
-                    renderHomePages(true);
+                    renderHomePages(false);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP && longPressTriggered) {
@@ -780,45 +804,101 @@ public class MainActivity extends Activity {
     }
 
     private void beginWidgetPicker() {
+        List<AppWidgetProviderInfo> providers = new ArrayList<>(widgetManager.getInstalledProviders());
+        Collections.sort(providers, new Comparator<AppWidgetProviderInfo>() {
+            @Override public int compare(AppWidgetProviderInfo a, AppWidgetProviderInfo b) {
+                String left = a == null ? "" : String.valueOf(a.loadLabel(packageManager));
+                String right = b == null ? "" : String.valueOf(b.loadLabel(packageManager));
+                return left.compareToIgnoreCase(right);
+            }
+        });
+        List<AppWidgetProviderInfo> available = new ArrayList<>();
+        for (AppWidgetProviderInfo info : providers) if (info != null && info.provider != null) available.add(info);
+        if (available.isEmpty()) {
+            Toast.makeText(this, "No installed app widgets are available", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels = new String[available.size()];
+        String[] icons = new String[available.size()];
+        for (int i = 0; i < available.size(); i++) {
+            AppWidgetProviderInfo info = available.get(i);
+            labels[i] = String.valueOf(info.loadLabel(packageManager));
+            icons[i] = "▦";
+        }
+        showActionDialog("Choose a widget", icons, labels, (dialog, which) -> beginBindingWidget(available.get(which)));
+    }
+
+    private void beginBindingWidget(AppWidgetProviderInfo info) {
         try {
             pendingWidgetId = widgetHost.allocateAppWidgetId();
-            Intent pick = new Intent(AppWidgetManager.ACTION_APPWIDGET_PICK);
-            pick.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
-            startActivityForResult(pick, REQUEST_WIDGET_PICK);
+            pendingWidgetInfo = info;
+            Bundle options = new Bundle();
+            if (widgetManager.bindAppWidgetIdIfAllowed(pendingWidgetId, info.provider, options)) {
+                configureOrAddWidget(info);
+                return;
+            }
+            Intent bind = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
+            bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+            bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider);
+            bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_OPTIONS, options);
+            startActivityForResult(bind, REQUEST_WIDGET_BIND);
         } catch (Exception e) {
-            if (pendingWidgetId >= 0) widgetHost.deleteAppWidgetId(pendingWidgetId);
-            pendingWidgetId = -1;
-            Toast.makeText(this, "No widget picker is available", Toast.LENGTH_LONG).show();
+            discardPendingWidget();
+            Toast.makeText(this, "Couldn't start widget setup", Toast.LENGTH_LONG).show();
         }
     }
 
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_WIDGET_PICK || requestCode == REQUEST_WIDGET_BIND || requestCode == REQUEST_WIDGET_CONFIGURE) {
-            if (resultCode != RESULT_OK || pendingWidgetId < 0) {
-                if (pendingWidgetId >= 0) widgetHost.deleteAppWidgetId(pendingWidgetId);
-                pendingWidgetId = -1;
-                return;
-            }
-            if (data != null) pendingWidgetId = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
-            AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(pendingWidgetId);
-            if (info == null) { widgetHost.deleteAppWidgetId(pendingWidgetId); pendingWidgetId = -1; return; }
-            if (requestCode == REQUEST_WIDGET_PICK) {
-                Intent bind = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
-                bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
-                bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider);
-                startActivityForResult(bind, REQUEST_WIDGET_BIND);
-                return;
-            }
-            if (info.configure != null && requestCode != REQUEST_WIDGET_CONFIGURE) {
+    private void configureOrAddWidget(AppWidgetProviderInfo info) {
+        if (info == null || pendingWidgetId < 0) return;
+        if (info.configure != null) {
+            try {
                 Intent configure = new Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
                 configure.setComponent(info.configure);
                 configure.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
                 startActivityForResult(configure, REQUEST_WIDGET_CONFIGURE);
                 return;
+            } catch (Exception ignored) {}
+        }
+        addWidgetToCurrentPage(info, pendingWidgetId);
+        pendingWidgetId = -1;
+        pendingWidgetInfo = null;
+    }
+
+    private void discardPendingWidget() {
+        if (pendingWidgetId >= 0) {
+            try { widgetHost.deleteAppWidgetId(pendingWidgetId); } catch (Exception ignored) {}
+        }
+        pendingWidgetId = -1;
+        pendingWidgetInfo = null;
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_WIDGET_BIND || requestCode == REQUEST_WIDGET_CONFIGURE) {
+            if (resultCode != RESULT_OK || pendingWidgetId < 0) {
+                discardPendingWidget();
+                return;
+            }
+            AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(pendingWidgetId);
+            if (info == null) info = pendingWidgetInfo;
+            if (info == null) {
+                discardPendingWidget();
+                Toast.makeText(this, "The selected widget could not be bound", Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (requestCode == REQUEST_WIDGET_BIND) {
+                AppWidgetProviderInfo boundInfo = widgetManager.getAppWidgetInfo(pendingWidgetId);
+                if (boundInfo == null) {
+                    discardPendingWidget();
+                    Toast.makeText(this, "Widget permission was not granted", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                configureOrAddWidget(boundInfo);
+                return;
             }
             addWidgetToCurrentPage(info, pendingWidgetId);
             pendingWidgetId = -1;
+            pendingWidgetInfo = null;
             return;
         }
         if (requestCode != REQUEST_WALLPAPER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
@@ -951,10 +1031,14 @@ public class MainActivity extends Activity {
     }
 
     private void addWidgetToCurrentPage(AppWidgetProviderInfo info, int widgetId) {
-        if (pagesStrip == null || currentPage < 0 || currentPage >= pagesStrip.getChildCount()) {
+        if (pagesStrip == null) {
             Toast.makeText(this, "Open the home screen and try again", Toast.LENGTH_SHORT).show();
             return;
         }
+        rebuildPages();
+        ensurePageExists(Math.max(0, currentPage));
+        renderHomePages(false);
+        if (currentPage < 0 || currentPage >= pagesStrip.getChildCount()) currentPage = Math.max(0, pagesStrip.getChildCount() - 1);
         FrameLayout page = (FrameLayout) pagesStrip.getChildAt(currentPage);
         AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
         widget.setAppWidget(widgetId, info);
@@ -962,12 +1046,14 @@ public class MainActivity extends Activity {
                 Math.max(dp(100), page.getHeight() / 4), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = dp(8); lp.topMargin = dp(8);
         widget.setTag("launcher_widget:" + widgetId);
+        widget.setFocusable(true);
         page.addView(widget, lp);
         widget.bringToFront();
         String stored = prefs.getString(KEY_WIDGET_IDS, "");
         String entry = widgetId + ":" + currentPage;
         if (!stored.contains(entry)) prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
         Toast.makeText(this, "Widget added to this page", Toast.LENGTH_SHORT).show();
+        widgetHost.startListening();
     }
 
     private void restoreWidgetsOnPages() {
