@@ -2795,16 +2795,18 @@ public class MainActivity extends Activity {
         }
         final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-        // Only the custom LED renderer had a clipping issue at large sizes.
-        // Preserve the full requested scaling for every other clock style.
-        final float lengthScale = sevenSegment
-                ? Math.min(requestedLengthScale, maxContentWidth / naturalClockWidth)
-                : requestedLengthScale;
+        // Clamp every clock style to the usable screen width. Scaling the TextView
+        // beyond its parent width clips the glyphs on large settings (not only in
+        // the custom LED renderer). Reserve a little room for the AM/PM marker too.
+        final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
+        final int clockWidthBudget = Math.max(1,
+                maxContentWidth - markerWidth - LauncherUiUtils.dp(this, 4));
+        final float lengthScale = Math.min(requestedLengthScale,
+                clockWidthBudget / naturalClockWidth);
         final int renderedClockWidth = Math.max(1,
                 (int) Math.ceil(naturalClockWidth * lengthScale));
         final int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
-        final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
         final int naturalWidthPx = Math.max(1, (int) Math.ceil(naturalClockWidth));
         final int clockWithMarkerWidth = renderedClockWidth + markerWidth + LauncherUiUtils.dp(this, 2);
         final int contentWidth = Math.min(maxContentWidth,
