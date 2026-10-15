@@ -2619,17 +2619,31 @@ public class MainActivity extends Activity {
         panelParams.gravity = alignment;
         clockPanel.setLayoutParams(panelParams);
         clockPanel.setGravity(alignment);
+        int scaledClockWidth = Math.max(LauncherUiUtils.dp(this, 38),
+                (int) Math.ceil(clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale)
+                        + LauncherUiUtils.dp(this, 20));
+        int dateWidth = dateText == null ? 0
+                : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()))
+                        + LauncherUiUtils.dp(this, 20);
+        // The gradient card follows the larger of the scaled clock and date, instead
+        // of staying screen-wide while only the digits change size.
+        int contentWidth = Math.max(scaledClockWidth, dateWidth);
         if (clockGroup != null) {
             FrameLayout.LayoutParams groupParams = (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.CENTER_VERTICAL;
             groupParams.height = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
-            float measuredClockWidth = clockText.getPaint().measureText(clockText.getText().toString());
-            groupParams.width = Math.max(LauncherUiUtils.dp(this, 38),
-                    (int) Math.ceil(measuredClockWidth * lengthScale) + LauncherUiUtils.dp(this, 20));
+            groupParams.width = contentWidth;
             clockGroup.setLayoutParams(groupParams);
         }
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        if (dateText != null) dateText.setGravity(alignment);
+        if (dateText != null) {
+            dateText.setGravity(alignment);
+            ViewGroup.LayoutParams dateParams = dateText.getLayoutParams();
+            if (dateParams != null) {
+                dateParams.width = contentWidth;
+                dateText.setLayoutParams(dateParams);
+            }
+        }
         // Keep the typography base fixed; the two controls independently stretch the
         // visible clock horizontally (length) and vertically (breadth).
         clockText.setTextSize(78f);
