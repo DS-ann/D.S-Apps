@@ -211,16 +211,15 @@ final class WidgetInteractionController {
                     }
                     FrameLayout activePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
-                    int[] viewportLocation = new int[2];
-                    View viewport = strip == null || strip.getParent() == null ? activePage : (View) strip.getParent();
-                    viewport.getLocationOnScreen(viewportLocation);
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    int maxX = Math.max(0, viewport.getWidth() - container.getWidth());
-                    int maxY = Math.max(0, activePage.getHeight() - container.getHeight());
-                    current.leftMargin = Math.max(0, Math.min(maxX,
-                            Math.round(event.getRawX() - viewportLocation[0] - container.getWidth() / 2f)));
                     int[] pageLocation = new int[2];
                     activePage.getLocationOnScreen(pageLocation);
+                    int maxX = Math.max(0, activePage.getWidth() - container.getWidth());
+                    int maxY = Math.max(0, activePage.getHeight() - container.getHeight());
+                    // Store coordinates relative to the still-attached source page, not the viewport.
+                    // Remove the temporary cross-page translation before calculating layout margins.
+                    current.leftMargin = Math.max(0, Math.min(maxX,
+                            Math.round(event.getRawX() - pageLocation[0] - container.getTranslationX() - container.getWidth() / 2f)));
                     current.topMargin = Math.max(0, Math.min(maxY,
                             Math.round(event.getRawY() - pageLocation[1] - container.getHeight() / 2f)));
                     container.setLayoutParams(current);
