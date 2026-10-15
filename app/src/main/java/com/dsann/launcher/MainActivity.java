@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
     private FrameLayout pageViewport;
     private LinearLayout dockContainer;
     private final List<String> dockPackages = new ArrayList<>();
-    private static final int DOCK_CAPACITY = 4;
+    private static final int DOCK_CAPACITY = 2;
     private LinearLayout drawerScreen;
     private GridView drawerGrid;
     private TextView clockText;
@@ -422,6 +422,9 @@ public class MainActivity extends Activity {
         clockText.setText("--:--");
         clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(52); // 30% larger than the previous 40sp clock
+        // Give the custom pixel renderer a stable drawing canvas. WRAP_CONTENT can
+        // measure against the regular font metrics and clip custom glyphs on some devices.
+        clockText.setLayoutParams(new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
@@ -525,21 +528,24 @@ public class MainActivity extends Activity {
             dockLayoutParams.height = desiredHeight;
             dockContainer.setLayoutParams(dockLayoutParams);
         }
-        for (int slot = 0; slot < DOCK_CAPACITY; slot++) {
-            if (slot == 2) {
+        // Two app shortcuts maximum, with the app-drawer hint kept centered between them.
+        for (int slot = 0; slot < 3; slot++) {
+            if (slot == 1) {
                 TextView drawerHint = LauncherUiUtils.text(this, "Swipe up for all apps", 11,
                         Color.rgb(180, 194, 224), false);
                 drawerHint.setGravity(Gravity.CENTER);
                 drawerHint.setSingleLine(true);
                 drawerHint.setIncludeFontPadding(false);
                 dockContainer.addView(drawerHint, new LinearLayout.LayoutParams(0, -1, 1f));
+                continue;
             }
 
             FrameLayout slotView = new FrameLayout(this);
             slotView.setBackgroundColor(Color.TRANSPARENT);
             LinearLayout.LayoutParams slotParams = new LinearLayout.LayoutParams(0, -1, 1f);
-            if (slot < dockPackages.size()) {
-                final String packageName = dockPackages.get(slot);
+            int packageIndex = slot == 0 ? 0 : 1;
+            if (packageIndex < dockPackages.size()) {
+                final String packageName = dockPackages.get(packageIndex);
                 ResolveInfo app = findApp(packageName);
                 if (app != null) {
                     ImageView icon = new ImageView(this);
