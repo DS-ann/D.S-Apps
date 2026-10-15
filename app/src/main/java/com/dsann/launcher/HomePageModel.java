@@ -138,7 +138,7 @@ final class HomePageModel {
         for (int i = 0; i < widgetIds.size(); i++) {
             int oldPage = Math.min(rawCount - 1, widgetPages.get(i));
             int newPage = remap[oldPage];
-            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\\n');
+            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\n');
             normalizedWidgets.append(widgetIds.get(i)).append(':').append(newPage);
         }
         edit.putString(widgetIdsKey, normalizedWidgets.toString());
