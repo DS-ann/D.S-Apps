@@ -280,16 +280,16 @@ public class MainActivity extends Activity {
                     View face = pagesStrip.getChildAt(i);
                     face.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                     face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
+                    // Rotate every page around its centre rather than an outer edge.
+                    face.setPivotX(face.getWidth() / 2f);
+                    face.setPivotY(face.getHeight() / 2f);
                     if (i == currentPage) {
-                        face.setPivotX(progress < 0f ? face.getWidth() : 0f);
                         face.setRotationY(-progress * getPageRotationDegrees());
                         face.setAlpha(1f - Math.min(0.18f, Math.abs(progress) * 0.18f));
                     } else if (i == currentPage + 1 && progress < 0f) {
-                        face.setPivotX(0f);
                         face.setRotationY((1f + progress) * -getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
-                        face.setPivotX(face.getWidth());
                         face.setRotationY((1f - progress) * getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else {
