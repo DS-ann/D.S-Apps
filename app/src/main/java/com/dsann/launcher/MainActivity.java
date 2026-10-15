@@ -300,16 +300,17 @@ public class MainActivity extends Activity {
                         ? pageViewport.getWidth()
                         : Math.max(1, getResources().getDisplayMetrics().widthPixels
                                 - LauncherUiUtils.dp(this, 40));
-                float proposed = -currentPage * pageWidth + dx;
-                float clamped = Math.max(-pageWidth, Math.min(0f, proposed));
-                pagesStrip.setTranslationX(clamped);
+                float proposed = -currentPage * (float) pageWidth + dx;
+                float minTranslation = -Math.max(0, pagesStrip.getChildCount() - 1) * (float) pageWidth;
+                float clamped = Math.max(minTranslation, Math.min(0f, proposed));
+                float effectiveDx = clamped + currentPage * (float) pageWidth;
 
                 // Low-overhead cylinder-like page turn: the strip follows the finger,
                 // while the current and incoming faces rotate around their centre Y axes.
                 // No per-icon animators or forced hardware layers are created.
-                float progress = Math.max(-1f, Math.min(1f, dx / (float) pageWidth));
+                float progress = Math.max(-1f, Math.min(1f, effectiveDx / (float) pageWidth));
                 float angle = getPageRotationDegrees();
-                pagesStrip.setTranslationX(-currentPage * (float) pageWidth + dx);
+                pagesStrip.setTranslationX(clamped);
                 int first = Math.max(0, currentPage - 1);
                 int last = Math.min(pagesStrip.getChildCount() - 1, currentPage + 1);
                 for (int i = first; i <= last; i++) {
