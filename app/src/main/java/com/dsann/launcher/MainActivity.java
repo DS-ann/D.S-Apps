@@ -2766,9 +2766,9 @@ public class MainActivity extends Activity {
         final int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
+        final int naturalWidthPx = Math.min(maxContentWidth, Math.max(1, (int) Math.ceil(naturalClockWidth)));
         final int contentWidth = Math.min(maxContentWidth,
-                Math.max(renderedClockWidth + markerWidth, dateWidth)
-                        + LauncherUiUtils.dp(this, 4));
+                Math.max(naturalWidthPx, dateWidth) + LauncherUiUtils.dp(this, 4));
         final int rowHeight = Math.max(1,
                 LauncherUiUtils.dp(this, Math.round(114f * breadthScale)));
 
@@ -2806,6 +2806,12 @@ public class MainActivity extends Activity {
         clockText.setPivotY(0f);
         clockText.setScaleX(lengthScale);
         clockText.setScaleY(breadthScale);
+        // Scale around the left edge, then compensate so center/right aligned
+        // clocks stay aligned by their visible edge rather than their unscaled box.
+        float horizontalScaleOffset = Math.max(0f, naturalClockWidth - renderedClockWidth);
+        clockText.setTranslationX(alignment == Gravity.RIGHT
+                ? horizontalScaleOffset
+                : (alignment == Gravity.CENTER_HORIZONTAL ? horizontalScaleOffset * 0.5f : 0f));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
@@ -2836,9 +2842,9 @@ public class MainActivity extends Activity {
                 markerParams.height = LauncherUiUtils.dp(this, 12);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
                 int clockLeft = alignment == Gravity.RIGHT
-                        ? contentWidth - renderedClockWidth
+                        ? naturalWidthPx - renderedClockWidth
                         : (alignment == Gravity.CENTER_HORIZONTAL
-                            ? (contentWidth - renderedClockWidth) / 2 : 0);
+                            ? (naturalWidthPx - renderedClockWidth) / 2 : 0);
                 markerParams.leftMargin = Math.max(0,
                         clockLeft + renderedClockWidth - markerParams.width);
                 // The marker follows the scaled clock's bottom edge, independent
