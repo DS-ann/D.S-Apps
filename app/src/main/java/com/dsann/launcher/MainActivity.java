@@ -862,7 +862,7 @@ public class MainActivity extends Activity {
         // provide the same long-press options explicitly.
         tile.setOnLongClickListener(v -> {
             showActionDialog(prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"),
-                    new String[]{"↔", "−", "↻"},
+                    new String[]{"↔", "−", "×", "↻"},
                     new String[]{"Move to other page", "Resize shortcut", "Remove shortcut", "Recreate contact shortcut"},
                     (dialog, which) -> {
                 if (which == 0) {
