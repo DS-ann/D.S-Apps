@@ -1105,6 +1105,13 @@ public class MainActivity extends Activity {
                 clockText.setLetterSpacing(0.065f);
                 clockText.setTextColor(Color.rgb(225, 237, 255));
                 break;
+            case 4: // Terminal Digital: bold fixed-width terminal glyphs with phosphor-green readout.
+                clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+                clockText.setTextSize(39);
+                clockText.setLetterSpacing(0.09f);
+                clockText.setTextColor(Color.rgb(125, 255, 150));
+                clockText.setShadowLayer(dp(3), 0f, 0f, Color.argb(95, 60, 255, 100));
+                break;
             default: // Digital: fixed-width digital readout with bold squared-off glyphs.
                 clockText.setTypeface(Typeface.create("sans-serif-monospace", Typeface.BOLD));
                 clockText.setTextSize(40);
@@ -1382,7 +1389,7 @@ public class MainActivity extends Activity {
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal"}, value -> {
+        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
             applyClockStyle();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
