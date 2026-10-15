@@ -240,10 +240,10 @@ public class MainActivity extends Activity {
             float dy = event.getY() - gestureDownY;
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65) && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
-            // Page swipes are recognized only when the gesture began on empty workspace,
-            // never on an app or widget touch target.
-            boolean horizontalSwipe = !gestureStartedOnAppCell
-                    && Math.abs(dx) > LauncherUiUtils.dp(this, 65)
+            // A horizontal swipe must work from every workspace surface, including app
+            // icons and interactive widgets. The gesture wins on ACTION_UP and sends
+            // ACTION_CANCEL to the child so it cannot launch an app or keep a drag active.
+            boolean horizontalSwipe = Math.abs(dx) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dx) > Math.abs(dy);
             if (verticalSwipe || horizontalSwipe) {
                 // Cancel the child click before handling a swipe, otherwise a swipe
@@ -447,12 +447,11 @@ public class MainActivity extends Activity {
         clockRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         clockRow.setClipChildren(false);
         clockRow.setClipToPadding(false);
-        clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
+        clockText = new SevenSegmentClockTextView(this);
         clockText.setText("--:--");
         clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(52);
-        // Keep the pixel clock at its natural time width; a full-width TextView
-        // made the custom glyphs scale unpredictably and could leave them clipped.
+        // A fixed digital display area keeps the seven-segment glyphs stable.
         clockText.setLayoutParams(new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 185), LauncherUiUtils.dp(this, 76)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
@@ -464,10 +463,10 @@ public class MainActivity extends Activity {
         amPmText.setTextColor(Color.WHITE);
         amPmText.setTextSize(10);
         amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
+        amPmText.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         amPmText.setIncludeFontPadding(false);
-        amPmText.setPadding(LauncherUiUtils.dp(this, 3), 0, 0, LauncherUiUtils.dp(this, 18));
-        clockRow.addView(amPmText, new LinearLayout.LayoutParams(-2, LauncherUiUtils.dp(this, 76)));
+        amPmText.setPadding(LauncherUiUtils.dp(this, 4), 0, 0, 0);
+        clockRow.addView(amPmText, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 25), LauncherUiUtils.dp(this, 76)));
         hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76)));
         dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
@@ -849,6 +848,7 @@ public class MainActivity extends Activity {
     private void showPage(int requestedPage, boolean animate) {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
+        int previousPage = currentPage;
         currentPage = Math.max(0, Math.min(lastPage, requestedPage));
         if (pagesStrip == null) return;
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
@@ -858,10 +858,14 @@ public class MainActivity extends Activity {
         float targetX = -currentPage * pageWidth;
         pagesStrip.animate().cancel();
         if (animate) {
-            pagesStrip.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
-            pagesStrip.setRotationY(currentPage > 0 ? 3f : -3f);
-            pagesStrip.animate().translationX(targetX).rotationY(0f)
-                    .setDuration(220L).start();
+            pagesStrip.setCameraDistance(10000f * getResources().getDisplayMetrics().density);
+            // Rotate slightly away from the incoming direction, then settle flat as
+            // the strip slides into place. Keep the angle restrained to avoid clipping.
+            float rotationStart = currentPage > previousPage ? -7f : 7f;
+            pagesStrip.setRotationY(rotationStart);
+            pagesStrip.setScaleX(0.985f);
+            pagesStrip.animate().translationX(targetX).rotationY(0f).scaleX(1f)
+                    .setDuration(300L).start();
         } else {
             pagesStrip.setTranslationX(targetX);
             pagesStrip.setRotationY(0f);
@@ -1752,7 +1756,7 @@ public class MainActivity extends Activity {
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "Square Pixel"}, value -> {
+        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "7-Segment Digital"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
             applyClockStyle();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
