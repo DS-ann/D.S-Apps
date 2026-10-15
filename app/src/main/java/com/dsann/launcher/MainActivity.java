@@ -2550,8 +2550,16 @@ public class MainActivity extends Activity {
     }
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
+        int slotHeight = LauncherUiUtils.dp(this,
+                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int usableHeight = pageViewport != null && pageViewport.getHeight() > 0
+                ? pageViewport.getHeight()
+                : Math.max(slotHeight, getResources().getDisplayMetrics().heightPixels
+                        - LauncherUiUtils.dp(this, 260));
+        int rows = Math.max(1, usableHeight / slotHeight);
+        int safeRow = Math.max(0, Math.min(rows - 1, row));
         prefs.edit().putFloat(KEY_ICON_X + packageName, col / (float) Math.max(1, columns - 1))
-                .putFloat(KEY_ICON_Y + packageName, row / (float) Math.max(1, HOME_ROWS - 1)).apply();
+                .putFloat(KEY_ICON_Y + packageName, safeRow / (float) Math.max(1, rows - 1)).apply();
     }
 
     private GradientDrawable drawerBackground() {
