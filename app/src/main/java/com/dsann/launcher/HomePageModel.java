@@ -29,7 +29,6 @@ final class HomePageModel {
             int columns, int rows) {
         columns = Math.max(1, columns);
         rows = Math.max(1, rows);
-        capacity = Math.max(1, capacity);
 
         List<String> packages = new ArrayList<>();
         if (homePackages != null) {
