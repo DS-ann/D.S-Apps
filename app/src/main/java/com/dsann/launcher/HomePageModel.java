@@ -42,7 +42,7 @@ final class HomePageModel {
             int page = Math.max(0, prefs.getInt(iconPagePrefix + name, 0));
             int col = Math.max(1, columns);
             while (rawPages.size() <= page) rawPages.add(new ArrayList<String>());
-            if (rawPages.get(page).size() >= capacity) {
+            while (rawPages.get(page).size() >= capacity) {
                 page++;
                 while (rawPages.size() <= page) rawPages.add(new ArrayList<String>());
             }
