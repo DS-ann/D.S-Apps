@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_WIDGET_CONFIGURE = 7304;
     private int pendingWidgetId = -1;
     private AppWidgetProviderInfo pendingWidgetInfo;
+    private int pendingWidgetTargetPage = 0;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
     private interface IntAction { void onSelect(int value); }
@@ -898,17 +899,19 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void addToHome(String packageName) {
+    private void addToHome(String packageName) { addToHome(packageName, currentPage); }
+
+    private void addToHome(String packageName, int requestedPage) {
         if (packageName == null || packageName.equals(getPackageName()) || homePackages.contains(packageName)) return;
-        // New shortcuts are added only to screen 2. Existing shortcuts never migrate.
+        int targetPage = Math.max(0, Math.min(1, requestedPage));
         homePackages.add(packageName);
-        prefs.edit().putInt(KEY_ICON_PAGE + packageName, 1).apply();
+        prefs.edit().putInt(KEY_ICON_PAGE + packageName, targetPage).apply();
         persistHomeApps();
         rebuildPages();
-        currentPage = 1;
-        ensurePageExists(1);
+        currentPage = targetPage;
+        ensurePageExists(targetPage);
         renderHomePages(false);
-        showPage(1, false);
+        showPage(targetPage, false);
     }
 
     private void showSecondPageMenu() {
@@ -916,12 +919,15 @@ public class MainActivity extends Activity {
                 new String[]{"Add widget", "Add apps"}, (dialog, which) -> {
             currentPage = 1;
             showPage(1, false);
-            if (which == 0) beginWidgetPicker();
-            else if (which == 1) showAddApps();
+            if (which == 0) beginWidgetPicker(1);
+            else if (which == 1) showAddApps(1);
         });
     }
 
-    private void showAddApps() {
+    private void showAddApps() { showAddApps(currentPage); }
+
+    private void showAddApps(int requestedPage) {
+        final int destinationPage = Math.max(0, Math.min(1, requestedPage));
         final List<ResolveInfo> available = new ArrayList<>();
         for (ResolveInfo app : allApps) {
             String packageName = app.activityInfo.packageName;
@@ -934,7 +940,7 @@ public class MainActivity extends Activity {
         String[] labels = new String[available.size()];
         for (int i = 0; i < available.size(); i++) labels[i] = available.get(i).loadLabel(packageManager).toString();
         new android.app.AlertDialog.Builder(this).setTitle("Add to Home").setItems(labels, (dialog, which) -> {
-            addToHome(available.get(which).activityInfo.packageName);
+            addToHome(available.get(which).activityInfo.packageName, destinationPage);
         }).show();
     }
 
@@ -1028,7 +1034,10 @@ public class MainActivity extends Activity {
         panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
     }
 
-    private void beginWidgetPicker() {
+    private void beginWidgetPicker() { beginWidgetPicker(currentPage); }
+
+    private void beginWidgetPicker(int requestedPage) {
+        pendingWidgetTargetPage = Math.max(0, Math.min(1, requestedPage));
         new WidgetPickerDialog(this, widgetManager, packageManager,
                 info -> beginBindingWidget(info)).show();
     }
@@ -1064,7 +1073,7 @@ public class MainActivity extends Activity {
                 return;
             } catch (Exception ignored) {}
         }
-        addWidgetToCurrentPage(info, pendingWidgetId);
+        addWidgetToPage(info, pendingWidgetId, pendingWidgetTargetPage)
         pendingWidgetId = -1;
         pendingWidgetInfo = null;
     }
@@ -1202,17 +1211,17 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void addWidgetToCurrentPage(AppWidgetProviderInfo info, int widgetId) {
+    private void addWidgetToPage(AppWidgetProviderInfo info, int widgetId, int requestedPage) {
         if (pagesStrip == null || info == null) {
             Toast.makeText(this, "Open the home screen and try again", Toast.LENGTH_SHORT).show();
             return;
         }
-        currentPage = 1;
+        final int targetPage = Math.max(0, Math.min(1, requestedPage));
+        currentPage = targetPage;
         rebuildPages();
-        ensurePageExists(1);
+        ensurePageExists(targetPage);
         renderHomePages(false);
-        showPage(1, false);
-        final int targetPage = 1;
+        showPage(targetPage, false);
         // Wait for the page to be measured before sizing the host view. Immediately
         // after renderHomePages(), FrameLayout.getWidth()/getHeight() are often zero.
         pagesStrip.post(() -> {
@@ -1786,9 +1795,9 @@ public class MainActivity extends Activity {
         addSection(content, "Manage layout");
         addSettingRow(content, "▦", "Add widget", "Choose a clock, calendar, weather or other widget", () -> {
             dialog.dismiss();
-            beginWidgetPicker();
+            beginWidgetPicker(currentPage);
         });
-        addSettingRow(content, "＋", "Add apps to Home", "Choose shortcuts for the home screen", () -> { dialog.dismiss(); showAddApps(); });
+        addSettingRow(content, "＋", "Add apps to Home", "Choose shortcuts for the home screen", () -> { dialog.dismiss(); showAddApps(currentPage); });
         addSettingRow(content, "⌂", "Reset Home layout", "Restore default shortcuts and grid", () -> {
             homePackages.clear();
             prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS).remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE)
