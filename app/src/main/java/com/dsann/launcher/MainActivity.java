@@ -113,7 +113,7 @@ public class MainActivity extends Activity {
     private LinearLayout homeScreen;
     private TextView brandText;
     private LinearLayout pagesStrip;
-    private final FrameLayout[] workspaceGridOverlays = new FrameLayout[2];
+    private final View[] workspaceGridOverlays = new View[2];
     private int workspaceGridCellWidth = 1;
     private int workspaceGridCellHeight = 1;
     private int workspaceGridWidgetWidth = 1;
