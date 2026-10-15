@@ -1251,8 +1251,13 @@ public class MainActivity extends Activity {
                     float pageOffsetX = view.getTranslationX();
                     lp.leftMargin = Math.max(0, Math.min(maxX,
                             Math.round(event.getRawX() - pageLocation[0] - view.getWidth() / 2f - pageOffsetX)));
-                    lp.topMargin = Math.max(0, Math.min(maxY,
-                            Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f)));
+                    int slotHeight = LauncherUiUtils.dp(this,
+                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                    int gridRows = Math.max(1, page.getHeight() / slotHeight);
+                    int requestedTop = Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f);
+                    int snappedRow = Math.max(0, Math.min(gridRows - 1, requestedTop / slotHeight));
+                    lp.topMargin = Math.min(Math.max(0, page.getHeight() - view.getHeight()),
+                            snappedRow * slotHeight);
                     view.setLayoutParams(lp);
                 }
                 return true;
@@ -1302,7 +1307,14 @@ public class MainActivity extends Activity {
                     boolean movedAcrossPage = destinationPage != sourcePage;
                     FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
-                    int columns = getHomeColumns(), rows = HOME_ROWS;
+                    int columns = getHomeColumns();
+                    int slotHeight = LauncherUiUtils.dp(this,
+                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                    // Fixed-size slots are shared by both screens. The usable page
+                    // ends above the page indicator/dock, so a complete slot must fit.
+                    int rows = Math.max(1, Math.min(HOME_ROWS,
+                            Math.max(1, (pageViewport.getHeight() > 0
+                                    ? pageViewport.getHeight() : slotHeight) / slotHeight)));
                     // The dragged cell stays attached to its source page until ACTION_UP.
                     // Its layout margins therefore are not reliable destination coordinates.
                     // Map the release point to the visible viewport, where the destination
@@ -1314,13 +1326,14 @@ public class MainActivity extends Activity {
                     int[] viewportLocation = new int[2];
                     pageViewport.getLocationOnScreen(viewportLocation);
                     int cellWidth = Math.max(1, targetWidth / columns);
-                    int cellHeight = Math.max(1, targetHeight / rows);
+                    int cellHeight = slotHeight;
+                    rows = Math.max(1, Math.min(rows, targetHeight / cellHeight));
                     int targetCol = Math.max(0, Math.min(columns - 1,
                             (int) ((event.getRawX() - viewportLocation[0]) / cellWidth)));
                     int targetRow = Math.max(0, Math.min(rows - 1,
                             (int) ((event.getRawY() - viewportLocation[1]) / cellHeight)));
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
-                    int sourceCellHeight = Math.max(1, sourceView.getHeight() / rows);
+                    int sourceCellHeight = slotHeight;
                     int sourceCol = Math.max(0, Math.min(columns - 1, iconOriginalLeft / sourceCellWidth));
                     int sourceRow = Math.max(0, Math.min(rows - 1, iconOriginalTop / sourceCellHeight));
                     boolean[][] occupied = new boolean[rows][columns];
