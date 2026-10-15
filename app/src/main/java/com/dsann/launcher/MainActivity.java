@@ -406,31 +406,19 @@ public class MainActivity extends Activity {
     }
 
     private void buildDrawer() {
-        drawerScreen = new LinearLayout(this);
-        drawerScreen.setOrientation(LinearLayout.VERTICAL);
-        drawerScreen.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 8));
-        drawerScreen.setBackground(drawerBackground());
-        TextView title = LauncherUiUtils.text(this, "Apps", 28, Color.WHITE, true);
-        drawerScreen.addView(title, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 48)));
-        drawerGrid = new GridView(this);
-        drawerGrid.setNumColumns(getDrawerColumns());
-        drawerGrid.setVerticalSpacing(LauncherUiUtils.dp(this, prefs.getInt(KEY_DRAWER_SPACING, 8)));
-        drawerGrid.setHorizontalSpacing(LauncherUiUtils.dp(this, prefs.getInt(KEY_DRAWER_SPACING, 8) / 2));
-        drawerGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        drawerGrid.setSelector(android.R.color.transparent);
-        drawerAdapter = new LauncherAppAdapter(this, prefs, packageManager, allApps, drawerApps, null,
-                true, KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE, KEY_SHOW_DRAWER_LABELS,
-                new LauncherAppAdapter.Actions() {
-                    @Override public void onAppClick(ResolveInfo app) { launchApp(app); }
-                    @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { showAppOptions(app, onHome); }
+        LauncherDrawerController.BuiltDrawer built = LauncherDrawerController.build(
+                this, root, prefs, packageManager, allApps, drawerApps, drawerBackground(),
+                prefs.getInt(KEY_DRAWER_SPACING, 8), KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE,
+                KEY_SHOW_DRAWER_LABELS, new LauncherDrawerController.Actions() {
+                    @Override public void launchApp(ResolveInfo app) { MainActivity.this.launchApp(app); }
+                    @Override public void showAppOptions(ResolveInfo app, boolean onHome) {
+                        MainActivity.this.showAppOptions(app, onHome);
+                    }
+                    @Override public int getColumns() { return getDrawerColumns(); }
                 });
-        drawerGrid.setAdapter(drawerAdapter);
-        drawerScreen.addView(drawerGrid, new LinearLayout.LayoutParams(-1, 0, 1f));
-        drawerGrid.setOnItemLongClickListener((parent, view, position, id) -> {
-            showAppOptions(drawerApps.get(position), false);
-            return true;
-        });
-        root.addView(drawerScreen, new FrameLayout.LayoutParams(-1, -1));
+        drawerScreen = built.screen;
+        drawerGrid = built.grid;
+        drawerAdapter = built.adapter;
     }
 
     private void renderHomePages(boolean animate) {
