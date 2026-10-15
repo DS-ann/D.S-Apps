@@ -623,20 +623,19 @@ public class MainActivity extends Activity {
                             otherPackage = ((String) candidate.getTag()).substring("launcher_app:".length());
                         }
                     }
-                    if (movedAcrossPage || occupant != null) {
-                        int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
-                        for (int row = 0; row < rows; row++) for (int col = 0; col < columns; col++) {
-                            if (occupied[row][col]) continue;
-                            int distance = Math.abs(col - targetCol) + Math.abs(row - targetRow);
-                            if (distance < bestDistance) { bestDistance = distance; bestCol = col; bestRow = row; }
-                        }
-                        if (bestCol >= 0) { targetCol = bestCol; targetRow = bestRow; }
-                    } else if (occupant != null) {
-                        FrameLayout.LayoutParams otherLp = (FrameLayout.LayoutParams) occupant.getLayoutParams();
+                    // A drop onto an occupied cell swaps the two shortcuts instead of
+                    // searching for a free cell and leaving the original shortcut behind.
+                    // For a cross-page move, the displaced shortcut returns to the source page.
+                    if (occupant != null && otherPackage != null) {
+                        FrameLayout.LayoutParams otherLp =
+                                (FrameLayout.LayoutParams) occupant.getLayoutParams();
                         otherLp.leftMargin = sourceCol * sourceCellWidth;
                         otherLp.topMargin = sourceRow * sourceCellHeight;
                         occupant.setLayoutParams(otherLp);
                         saveIconSlot(otherPackage, sourceCol, sourceRow, columns);
+                        if (movedAcrossPage) {
+                            prefs.edit().putInt(KEY_ICON_PAGE + otherPackage, sourcePage).apply();
+                        }
                     }
                     // Persist the destination page before rebuilding the view hierarchy.
                     // The dragged view intentionally stays attached to its source page until UP;
@@ -1106,6 +1105,17 @@ public class MainActivity extends Activity {
      * their AppWidgetHostView instances. Android Launcher3 follows the same principle of
      * preserving workspace items while page membership changes.
      */
+    private void clearFocusRecursively(View view) {
+        if (view == null) return;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                clearFocusRecursively(group.getChildAt(i));
+            }
+        }
+        if (view.hasFocus()) view.clearFocus();
+    }
+
     private void syncWidgetViewsToPages() {
         if (pagesStrip == null || pagesStrip.getChildCount() == 0) return;
         String stored = prefs.getString(KEY_WIDGET_IDS, "");
@@ -1139,11 +1149,13 @@ public class MainActivity extends Activity {
                     }
                 }
                 if (targetPageIndex < 0) {
+                    clearFocusRecursively(child);
                     sourcePage.removeViewAt(childIndex);
                     continue;
                 }
                 targetPageIndex = Math.max(0, Math.min(pages.size() - 1, targetPageIndex));
                 if (targetPageIndex == pageIndex || targetPageIndex >= pagesStrip.getChildCount()) continue;
+                clearFocusRecursively(child);
                 FrameLayout targetPage = (FrameLayout) pagesStrip.getChildAt(targetPageIndex);
                 if (child.hasFocus()) child.clearFocus();
                 ViewGroup parent = (ViewGroup) child.getParent();
