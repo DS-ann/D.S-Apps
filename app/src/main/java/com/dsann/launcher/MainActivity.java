@@ -265,7 +265,33 @@ public class MainActivity extends Activity {
                         : Math.max(1, getResources().getDisplayMetrics().widthPixels
                                 - LauncherUiUtils.dp(this, 40));
                 float proposed = -currentPage * pageWidth + dx;
-                pagesStrip.setTranslationX(Math.max(-pageWidth, Math.min(0f, proposed)));
+                float clamped = Math.max(-pageWidth, Math.min(0f, proposed));
+                pagesStrip.setTranslationX(clamped);
+
+                // Add a restrained page-turn rotation while the strip follows the
+                // finger. The incoming page rotates toward flat as it enters view.
+                float progress = Math.max(-1f, Math.min(1f, dx / (float) pageWidth));
+                for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+                    View face = pagesStrip.getChildAt(i);
+                    face.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                    face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
+                    if (i == currentPage) {
+                        face.setPivotX(progress < 0f ? face.getWidth() : 0f);
+                        face.setRotationY(-progress * 14f);
+                        face.setAlpha(1f - Math.min(0.12f, Math.abs(progress) * 0.12f));
+                    } else if (i == currentPage + 1 && progress < 0f) {
+                        face.setPivotX(0f);
+                        face.setRotationY((1f + progress) * -14f);
+                        face.setAlpha(1f);
+                    } else if (i == currentPage - 1 && progress > 0f) {
+                        face.setPivotX(face.getWidth());
+                        face.setRotationY((1f - progress) * 14f);
+                        face.setAlpha(1f);
+                    } else {
+                        face.setRotationY(0f);
+                        face.setAlpha(1f);
+                    }
+                }
                 return true;
             }
             return pageSwipeActive || super.dispatchTouchEvent(event);
@@ -918,9 +944,18 @@ public class MainActivity extends Activity {
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View page = pagesStrip.getChildAt(i);
             page.animate().cancel();
-            page.setRotationY(0f);
             page.setAlpha(1f);
-            page.setLayerType(View.LAYER_TYPE_NONE, null);
+            if (animate) {
+                page.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                page.animate().rotationY(0f).alpha(1f)
+                        .setDuration(240L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .withEndAction(() -> page.setLayerType(View.LAYER_TYPE_NONE, null))
+                        .start();
+            } else {
+                page.setRotationY(0f);
+                page.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
         }
         if (animate) {
             pagesStrip.animate().translationX(targetX)
