@@ -459,7 +459,9 @@ public class MainActivity extends Activity {
         dockContainer.setGravity(Gravity.CENTER_VERTICAL);
         dockContainer.setPadding(0, LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 2));
         dockContainer.setBackgroundColor(Color.TRANSPARENT);
-        LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 48));
+        int initialDockIconSize = prefs.getInt(KEY_ICON_SIZE, 48);
+        LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, Math.max(56, initialDockIconSize + 8)));
         dockParams.topMargin = LauncherUiUtils.dp(this, 2);
         dockParams.bottomMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(dockContainer, dockParams);
@@ -516,23 +518,26 @@ public class MainActivity extends Activity {
     private void renderDock() {
         if (dockContainer == null) return;
         dockContainer.removeAllViews();
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        ViewGroup.LayoutParams dockLayoutParams = dockContainer.getLayoutParams();
+        int desiredHeight = LauncherUiUtils.dp(this, Math.max(56, iconSize + 8));
+        if (dockLayoutParams != null && dockLayoutParams.height != desiredHeight) {
+            dockLayoutParams.height = desiredHeight;
+            dockContainer.setLayoutParams(dockLayoutParams);
+        }
         for (int slot = 0; slot < DOCK_CAPACITY; slot++) {
             if (slot == 2) {
                 TextView drawerHint = LauncherUiUtils.text(this, "Swipe up for all apps", 11,
                         Color.rgb(180, 194, 224), false);
                 drawerHint.setGravity(Gravity.CENTER);
                 drawerHint.setSingleLine(true);
+                drawerHint.setIncludeFontPadding(false);
                 dockContainer.addView(drawerHint, new LinearLayout.LayoutParams(0, -1, 1f));
             }
 
             FrameLayout slotView = new FrameLayout(this);
             slotView.setBackgroundColor(Color.TRANSPARENT);
-            LinearLayout.LayoutParams slotParams = new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(this, 40), -1);
-            if (slot == 1 || slot == 2) {
-                slotParams.leftMargin = LauncherUiUtils.dp(this, 1);
-                slotParams.rightMargin = LauncherUiUtils.dp(this, 1);
-            }
+            LinearLayout.LayoutParams slotParams = new LinearLayout.LayoutParams(0, -1, 1f);
             if (slot < dockPackages.size()) {
                 final String packageName = dockPackages.get(slot);
                 ResolveInfo app = findApp(packageName);
@@ -540,9 +545,9 @@ public class MainActivity extends Activity {
                     ImageView icon = new ImageView(this);
                     icon.setImageDrawable(app.loadIcon(packageManager));
                     icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    icon.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3),
-                            LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3));
-                    slotView.addView(icon, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+                    FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
+                            LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
+                    slotView.addView(icon, iconParams);
                     slotView.setContentDescription(String.valueOf(app.loadLabel(packageManager)));
                     slotView.setOnClickListener(v -> launchApp(app));
                     slotView.setOnLongClickListener(v -> {
@@ -1402,10 +1407,10 @@ public class MainActivity extends Activity {
                 {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
         int[] tone = tones[phase];
-        int side = Color.argb(99, tone[0], tone[1], tone[2]); // 50% more opacity than the previous alpha 66.
+        int side = Color.argb(149, tone[0], tone[1], tone[2]); // 50% more opacity than the previous alpha 99.
         int centre = Color.argb(0, tone[0], tone[1], tone[2]);
         GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT,
-                new int[] {side, Color.argb(42, tone[0], tone[1], tone[2]), centre});
+                new int[] {side, Color.argb(63, tone[0], tone[1], tone[2]), centre});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         if (animate) {
             hero.setBackground(next);

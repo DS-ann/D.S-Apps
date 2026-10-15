@@ -25,6 +25,7 @@ public final class SquarePixelClockTextView extends TextView {
             "01110/11011/11011/01111/00011/00011/01110"
     };
     private SharedPreferences preferences;
+    private boolean squarePixelMode = false;
     private String styleKey = "clock_style";
 
     public SquarePixelClockTextView(Context context) {
@@ -47,6 +48,13 @@ public final class SquarePixelClockTextView extends TextView {
     public void setClockStylePreferences(SharedPreferences preferences, String styleKey) {
         this.preferences = preferences;
         if (styleKey != null) this.styleKey = styleKey;
+        setSquarePixelMode(preferences != null && preferences.getInt(this.styleKey, 0) == 5);
+    }
+
+    public void setSquarePixelMode(boolean enabled) {
+        squarePixelMode = enabled;
+        setIncludeFontPadding(false);
+        requestLayout();
         invalidate();
     }
 
@@ -56,7 +64,7 @@ public final class SquarePixelClockTextView extends TextView {
     }
 
     @Override protected void onDraw(Canvas canvas) {
-        if (preferences == null || preferences.getInt(styleKey, 0) != 5) {
+        if (!squarePixelMode) {
             super.onDraw(canvas);
             return;
         }
@@ -70,7 +78,7 @@ public final class SquarePixelClockTextView extends TextView {
         if (value.length() == 0) return;
         float availableWidth = Math.max(1f, getWidth() - getPaddingLeft() - getPaddingRight());
         float availableHeight = Math.max(1f, getHeight() - getPaddingTop() - getPaddingBottom());
-        float naturalCell = getTextSize() / 9.0f;
+        float naturalCell = getTextSize() / 7.4f;
         float widthLimitedCell = availableWidth / Math.max(1f, value.length() * 6.0f - 1.0f);
         float heightLimitedCell = availableHeight / 7.0f;
         // TextView measures using ordinary font metrics, which can be narrower or shorter
@@ -78,8 +86,8 @@ public final class SquarePixelClockTextView extends TextView {
         // every digit remains visible in all launcher clock styles and screen widths.
         float cell = Math.min(naturalCell, Math.min(widthLimitedCell, heightLimitedCell));
         float block = cell * 0.82f;
-        float advance = cell * 6.0f;
-        float total = value.length() * advance - cell;
+        float advance = cell * 5.8f;
+        float total = value.length() * advance - cell * 0.8f;
         float left = getPaddingLeft() + Math.max(0f, (availableWidth - total) / 2.0f);
         float top = getPaddingTop() + Math.max(0f, (availableHeight - cell * 7.0f) / 2.0f);
         pixelPaint.setColor(getCurrentTextColor());
