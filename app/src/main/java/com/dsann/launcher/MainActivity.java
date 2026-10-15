@@ -280,7 +280,9 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_MOVE) {
             // Claim vertical gestures from every surface (icons, widgets, and drawer
             // included) so child views cannot consume the swipe before the launcher.
-            if (!verticalSwipeClaimed && !gestureStartedOnDrawerGrid
+            // While the drawer is open, all vertical gestures belong to its scrolling
+            // surface. Never cancel them or route them to the system Quick Settings action.
+            if (!drawerOpen && !verticalSwipeClaimed
                     && Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dy) > Math.abs(dx) * 1.15f) {
                 verticalSwipeClaimed = true;
@@ -360,7 +362,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
-            if (!gestureStartedOnDrawerGrid && (verticalSwipeClaimed
+            if (!drawerOpen && (verticalSwipeClaimed
                     || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                         && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
                 if (dy < 0f) {
