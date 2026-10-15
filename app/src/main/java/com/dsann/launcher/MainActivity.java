@@ -7,6 +7,8 @@ import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -125,6 +127,18 @@ public class MainActivity extends Activity {
     };
     private boolean drawerOpen = false;
     private boolean drawerAtTopOnGestureDown = true;
+    private boolean packageReceiverRegistered = false;
+    private final BroadcastReceiver packageChangesReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            // Package broadcasts can arrive before PackageManager's launcher query is refreshed.
+            // Debounce briefly, then refresh the existing list objects used by the drawer adapter.
+            handler.removeCallbacks(refreshAppsAfterPackageChange);
+            handler.postDelayed(refreshAppsAfterPackageChange, 300L);
+        }
+    };
+    private final Runnable refreshAppsAfterPackageChange = new Runnable() {
+        @Override public void run() { loadApps(); }
+    };
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
             updateClock();
@@ -136,6 +150,14 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        IntentFilter packageFilter = new IntentFilter();
+        packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        packageFilter.addDataScheme("package");
+        registerReceiver(packageChangesReceiver, packageFilter);
+        packageReceiverRegistered = true;
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, HOST_ID);
         widgetInteractionController = new WidgetInteractionController(this, handler, widgetHost, prefs, KEY_WIDGET_IDS,
@@ -240,6 +262,10 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (packageReceiverRegistered) {
+            try { unregisterReceiver(packageChangesReceiver); } catch (IllegalArgumentException ignored) {}
+            packageReceiverRegistered = false;
+        }
         super.onDestroy();
     }
 
@@ -253,8 +279,11 @@ public class MainActivity extends Activity {
                 return prefs != null && prefs.getBoolean(KEY_DRAWER_DESCENDING, false) ? -order : order;
             }
         });
-        allApps = result;
-        drawerApps = new ArrayList<>();
+        // Keep the list objects stable: LauncherAppAdapter and the drawer's long-press
+        // listener retain references to these exact lists.
+        allApps.clear();
+        allApps.addAll(result);
+        drawerApps.clear();
         // The launcher is a system-facing app, not a user app shortcut: keep it
         // discoverable by PackageManager for internal lookups, but hide it from its own drawer.
         String launcherPackage = getPackageName();
