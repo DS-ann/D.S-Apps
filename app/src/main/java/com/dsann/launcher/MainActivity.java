@@ -11,6 +11,10 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
@@ -58,6 +62,10 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_X = "icon_x_";
     private static final String KEY_ICON_Y = "icon_y_";
     private static final int REQUEST_WALLPAPER = 7301;
+    private static final int REQUEST_WIDGET_PICK = 7302;
+    private static final int REQUEST_WIDGET_BIND = 7303;
+    private static final int REQUEST_WIDGET_CONFIGURE = 7304;
+    private int pendingWidgetId = -1;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
     private interface IntAction { void onSelect(int value); }
@@ -495,6 +503,10 @@ public class MainActivity extends Activity {
                     FrameLayout page = (FrameLayout) view.getParent();
                     int maxX = Math.max(0, page.getWidth() - view.getWidth());
                     int maxY = Math.max(0, page.getHeight() - view.getHeight());
+                    float rawCenterX = iconOriginalLeft + Math.round(dx) + view.getWidth() / 2f;
+                    if (rawCenterX > page.getWidth() - dp(12) && currentPage == pages.size() - 1) {
+                        ensurePageExists(currentPage + 1);
+                    }
                     lp.leftMargin = Math.max(0, Math.min(maxX, iconOriginalLeft + Math.round(dx)));
                     lp.topMargin = Math.max(0, Math.min(maxY, iconOriginalTop + Math.round(dy)));
                     view.setLayoutParams(lp);
@@ -566,6 +578,10 @@ public class MainActivity extends Activity {
             }
             return iconDragging;
         });
+    }
+
+    private void ensurePageExists(int pageIndex) {
+        while (pages.size() <= pageIndex) pages.add(new ArrayList<String>());
     }
 
     private void nextPage() {
@@ -1131,6 +1147,10 @@ public class MainActivity extends Activity {
         });
 
         addSection(content, "Manage layout");
+        addSettingRow(content, "▦", "Add widget", "Choose a clock, calendar, weather or other widget", () -> {
+            dialog.dismiss();
+            beginWidgetPicker();
+        });
         addSettingRow(content, "＋", "Add apps to Home", "Choose shortcuts for the home screen", () -> { dialog.dismiss(); showAddApps(); });
         addSettingRow(content, "⌂", "Reset Home layout", "Restore default shortcuts and grid", () -> {
             homePackages.clear();
