@@ -1,12 +1,28 @@
 package com.dsann.launcher;
 
+import android.appwidget.AppWidgetHostView;
+import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
+import android.os.Bundle;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
 /** Shared widget persistence operations, kept out of the activity's view code. */
 final class WidgetController {
     private WidgetController() {}
+
+    static void updateWidgetSize(AppWidgetManager manager, int widgetId, AppWidgetHostView hostView,
+                                 float density, int widthPx, int heightPx) {
+        int widthDp = Math.max(1, Math.round(widthPx / Math.max(0.1f, density)));
+        int heightDp = Math.max(1, Math.round(heightPx / Math.max(0.1f, density)));
+        Bundle options = new Bundle();
+        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, widthDp);
+        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, widthDp);
+        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, heightDp);
+        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
+        try { manager.updateAppWidgetOptions(widgetId, options); } catch (Exception ignored) {}
+        try { hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp); } catch (Exception ignored) {}
+    }
 
     static boolean containsWidgetId(String stored, int widgetId) {
         if (stored == null || stored.isEmpty()) return false;
