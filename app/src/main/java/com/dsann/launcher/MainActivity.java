@@ -678,21 +678,46 @@ public class MainActivity extends Activity {
         while (pages.size() <= pageIndex) pages.add(new ArrayList<String>());
     }
 
-    private void nextPage() {
-        if (currentPage + 1 < pages.size()) {
-            currentPage++;
-            renderHomePages(true);
-            return;
+    /**
+     * Page swipes only move the existing strip. Rebuilding the hierarchy for a swipe
+     * unnecessarily detached AppWidgetHostViews and caused focus-related framework
+     * crashes. Page membership is rebuilt only after a real content change.
+     */
+    private void showPage(int requestedPage, boolean animate) {
+        if (pages.isEmpty()) rebuildPages();
+        int lastPage = Math.max(0, pages.size() - 1);
+        currentPage = Math.max(0, Math.min(requestedPage, lastPage));
+        if (pagesStrip == null) return;
+        int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth()
+                : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(this, 40));
+        float targetX = -currentPage * pageWidth;
+        pagesStrip.animate().cancel();
+        if (animate) {
+            pagesStrip.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
+            pagesStrip.setRotationY(currentPage > 0 ? 3f : -3f);
+            pagesStrip.animate().translationX(targetX).rotationY(0f)
+                    .setDuration(220L).start();
+        } else {
+            pagesStrip.setTranslationX(targetX);
+            pagesStrip.setRotationY(0f);
         }
-        // A swipe creates a new page only when the current page is full.
-        if (pages.get(currentPage).size() >= pageCapacity()) {
-            currentPage++;
-            renderHomePages(true);
+        if (pageIndicator != null) {
+            pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)
+                    ? View.VISIBLE : View.GONE);
+            pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
         }
     }
 
+    private void nextPage() {
+        // Empty pages are never retained. A new page is created only by a successful
+        // icon/widget drop at the edge, which then persists actual page membership.
+        if (currentPage + 1 < pages.size()) showPage(currentPage + 1, true);
+    }
+
     private void previousPage() {
-        if (currentPage > 0) { currentPage--; renderHomePages(true); }
+        if (currentPage > 0) showPage(currentPage - 1, true);
     }
 
     private boolean isDrawerAtTop() {
