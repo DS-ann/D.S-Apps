@@ -592,7 +592,6 @@ public class MainActivity extends Activity {
         clockText.setText("--:--");
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(78);
-        int initialClockSize = getClockSize();
         clockText.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
                 Gravity.LEFT | Gravity.CENTER_VERTICAL));
