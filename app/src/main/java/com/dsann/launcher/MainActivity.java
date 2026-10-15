@@ -2767,7 +2767,13 @@ public class MainActivity extends Activity {
                 markerParams.leftMargin = Math.max(0, (int) Math.ceil(
                         clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale)
                         - markerParams.width);
-                markerParams.topMargin = Math.max(0, rowHeight - markerParams.height);
+                // Anchor AM/PM to the lower-right corner of the rendered digits,
+                // not the bottom edge of the entire row (which changes with breadth).
+                android.graphics.Paint.FontMetrics clockMetrics = clockText.getPaint().getFontMetrics();
+                float renderedGlyphHeight = (clockMetrics.descent - clockMetrics.ascent) * breadthScale;
+                markerParams.topMargin = Math.max(0, Math.round(
+                        (rowHeight - renderedGlyphHeight) * 0.5f + renderedGlyphHeight
+                                - markerParams.height));
                 amPmText.setLayoutParams(markerParams);
             }
         }
