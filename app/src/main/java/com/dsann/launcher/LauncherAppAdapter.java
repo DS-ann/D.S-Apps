@@ -77,8 +77,10 @@ public final class LauncherAppAdapter extends BaseAdapter {
         label.setTextSize(10);
         label.setTextColor(Color.rgb(236, 239, 249));
         label.setGravity(Gravity.CENTER);
-        label.setMaxLines(2);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setSingleLine(true);
+        label.setMaxLines(1);
+        label.setEllipsize(null);
+        label.setIncludeFontPadding(false);
         return label;
     }
 
@@ -119,9 +121,27 @@ public final class LauncherAppAdapter extends BaseAdapter {
             icon.setLayoutParams(iconParams);
         }
         icon.setImageDrawable(app.loadIcon(packageManager));
-        label.setText(app.loadLabel(packageManager));
+        final String fullLabel = String.valueOf(app.loadLabel(packageManager));
+        label.setTag(fullLabel);
+        label.setText(fullLabel);
         int fontChoice = preferences == null ? 1 : preferences.getInt(fontSizeKey, 1);
         label.setTextSize(new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))]);
+        // Fit labels after layout and use two literal dots rather than the single
+        // ellipsis glyph. This keeps every name on one line at every grid size.
+        label.post(() -> {
+            if (!fullLabel.equals(label.getTag())) return;
+            float available = label.getWidth() - label.getPaddingLeft() - label.getPaddingRight();
+            if (available <= 0f) return;
+            android.graphics.Paint paint = label.getPaint();
+            if (paint.measureText(fullLabel) <= available) {
+                label.setText(fullLabel);
+                return;
+            }
+            String suffix = "..";
+            int end = fullLabel.length();
+            while (end > 0 && paint.measureText(fullLabel.substring(0, end) + suffix) > available) end--;
+            label.setText(end == 0 ? suffix : fullLabel.substring(0, end) + suffix);
+        });
         label.setVisibility(preferences == null || preferences.getBoolean(showLabelsKey, true)
                 ? View.VISIBLE : View.GONE);
         cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
