@@ -2667,10 +2667,12 @@ public class MainActivity extends Activity {
         clockText.setScaleX(lengthScale);
         clockText.setScaleY(breadthScale);
         ViewGroup.LayoutParams clockParams = clockText.getLayoutParams();
-        if (clockParams != null) {
-            clockParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-            clockParams.height = LauncherUiUtils.dp(this, 114);
-            clockText.setLayoutParams(clockParams);
+        if (clockParams instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) clockParams;
+            textParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            textParams.height = LauncherUiUtils.dp(this, 114);
+            textParams.gravity = Gravity.LEFT | Gravity.TOP;
+            clockText.setLayoutParams(textParams);
         }
         if (dateText != null) {
             dateText.setGravity(alignment);
