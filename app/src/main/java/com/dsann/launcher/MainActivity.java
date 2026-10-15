@@ -339,97 +339,87 @@ public class MainActivity extends Activity {
     }
 
     private void rebuildPages() {
-        pages.clear();
-        int capacity = pageCapacity();
+        // Reconstruct pages from the saved home shortcuts and live widget IDs. Never
+        // trust a page index on its own: stale widget records can otherwise preserve
+        // invisible pages, and stale indexes can leave valid shortcuts off-screen.
+        List<List<String>> originalPages = new ArrayList<>();
+        int capacity = Math.max(1, pageCapacity());
         for (int i = 0; i < homePackages.size(); i++) {
             String packageName = homePackages.get(i);
-            int pageIndex = prefs.contains(KEY_ICON_PAGE + packageName)
-                    ? Math.max(0, Math.min(20, prefs.getInt(KEY_ICON_PAGE + packageName, i / capacity)))
-                    : i / capacity;
-            ensurePageExists(pageIndex);
-            pages.get(pageIndex).add(packageName);
+            int fallback = i / capacity;
+            int savedPage = prefs.contains(KEY_ICON_PAGE + packageName)
+                    ? prefs.getInt(KEY_ICON_PAGE + packageName, fallback) : fallback;
+            int pageIndex = Math.max(0, Math.min(20, savedPage));
+            while (originalPages.size() <= pageIndex) originalPages.add(new ArrayList<String>());
+            originalPages.get(pageIndex).add(packageName);
         }
-        boolean changed = false;
-        String widgetEntries = prefs.getString(KEY_WIDGET_IDS, "");
-        if (!widgetEntries.isEmpty()) {
-            for (String entry : widgetEntries.split("\\n")) {
-                String[] parts = entry.split(":");
-                if (parts.length != 2) continue;
-                try { ensurePageExists(Math.max(0, Math.min(20, Integer.parseInt(parts[1])))); }
-                catch (NumberFormatException ignored) {}
-            }
-        }
-        if (pages.isEmpty()) pages.add(new ArrayList<String>());
 
-        // Compact page indexes so no empty page survives between populated pages.
-        // Widgets count as content and keep their page alive.
-        boolean[] occupied = new boolean[pages.size()];
-        for (int i = 0; i < pages.size(); i++) occupied[i] = !pages.get(i).isEmpty();
-        if (!widgetEntries.isEmpty()) {
-            for (String entry : widgetEntries.split("\\n")) {
+        String storedWidgets = prefs.getString(KEY_WIDGET_IDS, "");
+        List<int[]> validWidgets = new ArrayList<>();
+        if (storedWidgets != null && !storedWidgets.isEmpty()) {
+            for (String entry : storedWidgets.split("\\n")) {
                 String[] parts = entry.split(":");
                 if (parts.length != 2) continue;
                 try {
                     int id = Integer.parseInt(parts[0]);
-                    int index = Integer.parseInt(parts[1]);
-                    // Stale widget IDs must not keep otherwise empty pages alive.
-                    boolean validWidget = widgetManager != null && widgetManager.getAppWidgetInfo(id) != null;
-                    if (validWidget && index >= 0 && index < occupied.length) {
-                        occupied[index] = true;
-                    } else if (!validWidget) {
+                    int rawPage = Integer.parseInt(parts[1]);
+                    if (widgetManager == null || widgetManager.getAppWidgetInfo(id) == null) {
                         WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
-                        changed = true;
+                        continue;
                     }
+                    int pageIndex = Math.max(0, Math.min(20, rawPage));
+                    while (originalPages.size() <= pageIndex) originalPages.add(new ArrayList<String>());
+                    validWidgets.add(new int[]{id, pageIndex});
                 } catch (NumberFormatException ignored) {}
             }
         }
+        if (originalPages.isEmpty()) originalPages.add(new ArrayList<String>());
+
+        boolean[] occupied = new boolean[originalPages.size()];
+        for (int i = 0; i < originalPages.size(); i++) {
+            occupied[i] = !originalPages.get(i).isEmpty();
+        }
+        for (int[] widget : validWidgets) {
+            if (widget[1] >= 0 && widget[1] < occupied.length) occupied[widget[1]] = true;
+        }
+
         int[] remap = new int[occupied.length];
-        int compactCount = 0;
+        int pageCount = 0;
         for (int i = 0; i < occupied.length; i++) {
-            remap[i] = occupied[i] ? compactCount++ : -1;
+            remap[i] = occupied[i] ? pageCount++ : -1;
         }
-        if (compactCount == 0) compactCount = 1;
-        changed |= compactCount != pages.size();
+        if (pageCount == 0) pageCount = 1;
+
         List<List<String>> compacted = new ArrayList<>();
-        for (int i = 0; i < compactCount; i++) compacted.add(new ArrayList<String>());
+        for (int i = 0; i < pageCount; i++) compacted.add(new ArrayList<String>());
         SharedPreferences.Editor edit = prefs.edit();
-        for (int oldIndex = 0; oldIndex < pages.size(); oldIndex++) {
-            if (remap[oldIndex] < 0) continue;
-            int newIndex = remap[oldIndex];
-            compacted.get(newIndex).addAll(pages.get(oldIndex));
-            for (String packageName : pages.get(oldIndex)) {
-                if (oldIndex != newIndex) changed = true;
-                edit.putInt(KEY_ICON_PAGE + packageName, newIndex);
+        for (int oldPage = 0; oldPage < originalPages.size(); oldPage++) {
+            if (remap[oldPage] < 0) continue;
+            int newPage = remap[oldPage];
+            compacted.get(newPage).addAll(originalPages.get(oldPage));
+            for (String packageName : originalPages.get(oldPage)) {
+                edit.putInt(KEY_ICON_PAGE + packageName, newPage);
             }
         }
-        StringBuilder compactWidgets = new StringBuilder();
-        if (!widgetEntries.isEmpty()) {
-            for (String entry : widgetEntries.split("\\n")) {
-                String[] parts = entry.split(":");
-                if (parts.length != 2) continue;
-                try {
-                    int id = Integer.parseInt(parts[0]);
-                    int oldIndex = Integer.parseInt(parts[1]);
-                    int newIndex = oldIndex >= 0 && oldIndex < remap.length && remap[oldIndex] >= 0
-                            ? remap[oldIndex] : 0;
-                    if (newIndex != oldIndex) changed = true;
-                    if (compactWidgets.length() > 0) compactWidgets.append('\n');
-                    compactWidgets.append(id).append(':').append(newIndex);
-                } catch (NumberFormatException ignored) {}
-            }
+
+        StringBuilder normalizedWidgets = new StringBuilder();
+        for (int[] widget : validWidgets) {
+            int oldPage = widget[1];
+            int newPage = oldPage < remap.length && remap[oldPage] >= 0 ? remap[oldPage] : 0;
+            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\\n');
+            normalizedWidgets.append(widget[0]).append(':').append(newPage);
         }
-        int oldCurrentPage = Math.max(0, Math.min(currentPage, remap.length - 1));
+        edit.putString(KEY_WIDGET_IDS, normalizedWidgets.toString());
+
+        int oldCurrentPage = Math.max(0, Math.min(currentPage, Math.max(0, originalPages.size() - 1)));
         int mappedCurrentPage = 0;
-        for (int i = 0; i < oldCurrentPage; i++) {
-            if (occupied[i]) mappedCurrentPage++;
-        }
+        for (int i = 0; i < oldCurrentPage; i++) if (occupied[i]) mappedCurrentPage++;
         if (occupied[oldCurrentPage]) mappedCurrentPage = remap[oldCurrentPage];
-        mappedCurrentPage = Math.max(0, Math.min(mappedCurrentPage, compactCount - 1));
+        currentPage = Math.max(0, Math.min(mappedCurrentPage, pageCount - 1));
 
         pages.clear();
         pages.addAll(compacted);
-        currentPage = mappedCurrentPage;
-        if (changed) edit.putString(KEY_WIDGET_IDS, compactWidgets.toString()).apply();
+        edit.apply();
     }
 
     private void buildInterface() {
