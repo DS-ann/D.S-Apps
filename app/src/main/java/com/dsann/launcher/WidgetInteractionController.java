@@ -197,12 +197,49 @@ final class WidgetInteractionController {
                     return true;
                 }
                 if (editMode[0] == 1) {
+                    if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
+                            || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
+                    cancelWidgetTouch.run();
+                    int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
+                    int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(activity, 28) ? 1
+                            : event.getRawX() <= LauncherUiUtils.dp(activity, 28) ? -1 : 0;
+                    if (edge == 0) edgeLatch[0] = 0;
+                    LinearLayout strip = listener.getPagesStrip();
+                    // 'page' is the child in the strip; page.getParent() is the strip itself,
+                    // so asking the strip for its parent's index always returns -1.
+                    ViewParent currentParent = container.getParent();
+                    int sourceIndex = strip == null || !(currentParent instanceof View)
+                            ? widgetPage[0] : strip.indexOfChild((View) currentParent);
+                    if (sourceIndex < 0) sourceIndex = widgetPage[0];
+                    // Widget movement stays on the only home page.
+                    FrameLayout activePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    int[] pageLocation = new int[2];
+                    activePage.getLocationOnScreen(pageLocation);
+                    int maxX = Math.max(0, activePage.getWidth() - container.getWidth());
+                    int maxY = Math.max(0, activePage.getHeight() - container.getHeight());
+                    // Store coordinates relative to the still-attached source page, not the viewport.
+                    // Remove the temporary cross-page translation before calculating layout margins.
+                    current.leftMargin = Math.max(0, Math.min(maxX,
+                            Math.round(event.getRawX() - pageLocation[0] - container.getTranslationX() - container.getWidth() / 2f)));
+                    current.topMargin = Math.max(0, Math.min(maxY,
+                            Math.round(event.getRawY() - pageLocation[1] - container.getHeight() / 2f)));
+                    container.setLayoutParams(current);
+                    return true;
+                }
+                if (!childCanceled[0]) widget.dispatchTouchEvent(event);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(movePress[0]);
+                handler.removeCallbacks(menuPress[0]);
+                if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
                     FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
                     container.setTranslationX(0f);
                     clearEditChrome[0].run();
-                    widgetPage[0] = 0;
                     listener.saveWidgetGeometry(widgetId, 0, container);
                     listener.resolveWidgetCollisions(sourcePage, container);
                 } else if (!childCanceled[0]) {
