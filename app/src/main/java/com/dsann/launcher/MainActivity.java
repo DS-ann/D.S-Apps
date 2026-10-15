@@ -113,6 +113,11 @@ public class MainActivity extends Activity {
     private LinearLayout homeScreen;
     private TextView brandText;
     private LinearLayout pagesStrip;
+    private final FrameLayout[] workspaceGridOverlays = new FrameLayout[2];
+    private int workspaceGridCellWidth = 1;
+    private int workspaceGridCellHeight = 1;
+    private int workspaceGridWidgetWidth = 1;
+    private int workspaceGridWidgetHeight = 1;
     private FrameLayout pageViewport;
     private LinearLayout dockContainer;
     private final List<String> dockPackages = new ArrayList<>();
@@ -618,6 +623,76 @@ public class MainActivity extends Activity {
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
         showHome();
+    }
+
+    private void setWorkspaceGridVisible(boolean visible, View movingView) {
+        if (pagesStrip == null) return;
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        workspaceGridCellWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth() / Math.max(1, getHomeColumns())
+                : LauncherUiUtils.dp(this, 90));
+        workspaceGridCellHeight = LauncherUiUtils.dp(this, Math.max(56, iconSize + 28));
+        workspaceGridWidgetWidth = movingView == null ? workspaceGridCellWidth
+                : Math.max(1, movingView.getWidth());
+        workspaceGridWidgetHeight = movingView == null ? workspaceGridCellHeight
+                : Math.max(1, movingView.getHeight());
+        for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
+            if (!(pagesStrip.getChildAt(i) instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(i);
+            if (workspaceGridOverlays[i] == null || workspaceGridOverlays[i].getParent() != page) {
+                WorkspaceGridOverlay overlay = new WorkspaceGridOverlay();
+                overlay.setClickable(false);
+                overlay.setFocusable(false);
+                overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                overlay.setVisibility(View.GONE);
+                page.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
+                workspaceGridOverlays[i] = overlay;
+            }
+            WorkspaceGridOverlay overlay = (WorkspaceGridOverlay) workspaceGridOverlays[i];
+            overlay.configure(workspaceGridCellWidth, workspaceGridCellHeight,
+                    workspaceGridWidgetWidth, workspaceGridWidgetHeight);
+            overlay.setVisibility(visible ? View.VISIBLE : View.GONE);
+            overlay.bringToFront();
+            if (movingView != null && movingView.getParent() == page) movingView.bringToFront();
+        }
+    }
+
+    private final class WorkspaceGridOverlay extends View {
+        private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint widgetGridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private int cellW = 1, cellH = 1, widgetW = 1, widgetH = 1;
+        WorkspaceGridOverlay() {
+            super(MainActivity.this);
+            gridPaint.setStyle(Paint.Style.STROKE);
+            gridPaint.setStrokeWidth(LauncherUiUtils.dp(MainActivity.this, 1));
+            gridPaint.setColor(Color.argb(105, 120, 165, 255));
+            widgetGridPaint.setStyle(Paint.Style.STROKE);
+            widgetGridPaint.setStrokeWidth(LauncherUiUtils.dp(MainActivity.this, 1));
+            widgetGridPaint.setColor(Color.argb(75, 100, 220, 190));
+        }
+        void configure(int cw, int ch, int ww, int wh) {
+            cellW = Math.max(1, cw); cellH = Math.max(1, ch);
+            widgetW = Math.max(1, ww); widgetH = Math.max(1, wh);
+            invalidate();
+        }
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int w = getWidth(), h = getHeight();
+            // App/shortcut slots use a fixed icon-and-label footprint.
+            for (int x = 0; x < w; x += cellW) {
+                for (int y = 0; y < h; y += cellH) {
+                    canvas.drawRect(x + 1, y + 1, Math.min(w - 1, x + cellW - 1),
+                            Math.min(h - 1, y + cellH - 1), gridPaint);
+                }
+            }
+            // Widget placement guides are tiled at the size of the widget being moved.
+            for (int x = 0; x < w; x += widgetW) {
+                for (int y = 0; y < h; y += widgetH) {
+                    canvas.drawRect(x + 2, y + 2, Math.min(w - 2, x + widgetW - 2),
+                            Math.min(h - 2, y + widgetH - 2), widgetGridPaint);
+                }
+            }
+        }
     }
 
     private void buildHomeChrome() {
@@ -2841,13 +2916,11 @@ public class MainActivity extends Activity {
 
         clockText.setTextSize(78f);
         clockText.setPivotX(0f);
-        // Scale around the row's vertical centre. This is purely a drawing
-        // transform: the clock keeps its fixed 114dp layout slot and cannot
-        // remeasure the home viewport or push app cells down.
-        clockText.setPivotY(rowHeight * 0.5f);
+        // Preserve the clock's original top-aligned scaling behaviour.
+        clockText.setPivotY(0f);
         clockText.setScaleX(lengthScale);
         clockText.setScaleY(breadthScale);
-        clockText.setTranslationY((rowHeight * 0.5f) * (1f - breadthScale));
+        clockText.setTranslationY(0f);
         // Scale around the left edge, then compensate so center/right aligned
         // clocks stay aligned by their visible edge rather than their unscaled box.
         float horizontalScaleOffset = naturalClockWidth - renderedClockWidth;
