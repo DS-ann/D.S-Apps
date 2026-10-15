@@ -459,7 +459,10 @@ public class MainActivity extends Activity {
             rebuildPages();
             if (root != null) renderHomePages(false);
         }
-        if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+        if (drawerAdapter != null) {
+            drawerAdapter.clearPackageCaches();
+            drawerAdapter.notifyDataSetChanged();
+        }
     }
 
     private void restoreHomeApps() {
