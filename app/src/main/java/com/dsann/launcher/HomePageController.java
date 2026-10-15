@@ -38,10 +38,12 @@ final class HomePageController {
     private final String iconXKey;
     private final String iconYKey;
     private final String showLabelsKey;
+    private final String iconSizeKey;
+    private final String fontSizeKey;
     private final int homeRows;
 
     HomePageController(Activity activity, SharedPreferences prefs, PackageManager packageManager,
-                       Host host, String iconXKey, String iconYKey, String showLabelsKey, int homeRows) {
+                       Host host, String iconXKey, String iconYKey, String showLabelsKey, String iconSizeKey, String fontSizeKey, int homeRows) {
         this.activity = activity;
         this.prefs = prefs;
         this.packageManager = packageManager;
@@ -49,6 +51,8 @@ final class HomePageController {
         this.iconXKey = iconXKey;
         this.iconYKey = iconYKey;
         this.showLabelsKey = showLabelsKey;
+        this.iconSizeKey = iconSizeKey;
+        this.fontSizeKey = fontSizeKey;
         this.homeRows = homeRows;
     }
 
@@ -67,7 +71,7 @@ final class HomePageController {
                 String packageName = pagePackages.get(itemIndex);
                 if (host.findApp(packageName) == null) continue;
                 View cell = new LauncherAppAdapter(activity, prefs, packageManager, host.getAllApps(), host.getDrawerApps(), pagePackages,
-                        false, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, showLabelsKey,
+                        false, iconSizeKey, fontSizeKey, showLabelsKey,
                         new LauncherAppAdapter.Actions() {
                             @Override public void onAppClick(ResolveInfo app) { host.launchApp(app); }
                             @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { host.showAppOptions(app, onHome); }
