@@ -721,8 +721,14 @@ public class MainActivity extends Activity {
 
         FrameLayout chosenPage = null;
         int chosenLeft = 0, chosenTop = 0;
-        int shortcutSpanX = Math.max(1, Math.min(columns, prefs.getInt(KEY_SHORTCUT_SPAN_X, 1)));
-        int shortcutSpanY = Math.max(1, Math.min(rows, prefs.getInt(KEY_SHORTCUT_SPAN_Y, 1)));
+        int savedWidthDp = prefs.getInt(KEY_SHORTCUT_WIDTH_DP, 0);
+        int savedHeightDp = prefs.getInt(KEY_SHORTCUT_HEIGHT_DP, 0);
+        // Old span-only values could have been written by the broken resize logic.
+        // Start compact unless a real pixel-size resize has been saved by this version.
+        int shortcutSpanX = savedWidthDp > 0
+                ? Math.max(1, Math.min(columns, prefs.getInt(KEY_SHORTCUT_SPAN_X, 1))) : 1;
+        int shortcutSpanY = savedHeightDp > 0
+                ? Math.max(1, Math.min(rows, prefs.getInt(KEY_SHORTCUT_SPAN_Y, 1))) : 1;
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
@@ -802,8 +808,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
         labelParams.topMargin = LauncherUiUtils.dp(this, 3);
         tileContent.addView(label, labelParams);
-        int savedWidthDp = prefs.getInt(KEY_SHORTCUT_WIDTH_DP, 0);
-        int savedHeightDp = prefs.getInt(KEY_SHORTCUT_HEIGHT_DP, 0);
         int tileWidth = savedWidthDp > 0
                 ? Math.min(pageViewport.getWidth() - chosenLeft, LauncherUiUtils.dp(this, savedWidthDp))
                 : Math.min(pageViewport.getWidth() - chosenLeft, cellW * shortcutSpanX);
