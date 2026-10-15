@@ -148,6 +148,9 @@ public class MainActivity extends Activity {
                     }
                     @Override public void setCurrentPage(int page) { currentPage = page; }
                     @Override public LinearLayout getPagesStrip() { return pagesStrip; }
+                    @Override public void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer) {
+                        MainActivity.this.resolveWidgetIconCollisions(page, widgetContainer);
+                    }
                 });
         // Let the wallpaper flow behind the status bar so it feels like launcher chrome,
         // while retaining the system icons and reserving their inset for launcher content.
@@ -432,9 +435,13 @@ public class MainActivity extends Activity {
         hero.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12));
         // A smoked-glass black panel: translucent enough to let the wallpaper subtly show through.
         hero.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(188, 17, 20, 27), Color.argb(168, 8, 10, 15)}, LauncherUiUtils.dp(this, 22)));
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
+                Math.max(LauncherUiUtils.dp(this, 180), (getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) / 2),
+                -2);
+        hp.gravity = Gravity.CENTER_HORIZONTAL;
         hp.topMargin = LauncherUiUtils.dp(this, 8);
         homeScreen.addView(hero, hp);
+        applyClockPanelColor(false);
         clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
         clockText.setText("--:--");
         clockText.setTextSize(40);
@@ -1045,6 +1052,8 @@ public class MainActivity extends Activity {
                 WidgetController.updateWidgetSize(widgetManager, widgetId, widget, getResources().getDisplayMetrics().density,
                         container.getLayoutParams().width, container.getLayoutParams().height);
                 saveWidgetGeometry(widgetId, targetPage, container);
+                final FrameLayout placedWidget = container;
+                page.post(() -> resolveWidgetIconCollisions(page, placedWidget));
             } else {
                 String stored = prefs.getString(KEY_WIDGET_IDS, "");
                 String entry = widgetId + ":" + targetPage;
@@ -1116,6 +1125,8 @@ public class MainActivity extends Activity {
                     widget.setAppWidget(id, info);
                     addWidgetContainer(page, widget, id, pageIndex, x, y, width, height);
                     WidgetController.updateWidgetSize(widgetManager, id, widget, getResources().getDisplayMetrics().density, width, height);
+                    final View candidate = page.findViewWithTag("launcher_widget:" + id);
+                    if (candidate instanceof FrameLayout) page.post(() -> resolveWidgetIconCollisions(page, (FrameLayout) candidate));
                 } catch (Exception ignored) {}
             }
         });
@@ -1175,7 +1186,87 @@ public class MainActivity extends Activity {
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
         applyClockStyle();
+        applyClockPanelColor(true);
         applyBrandVisibility();
+    }
+
+    private void applyClockPanelColor(boolean animate) {
+        if (homeScreen == null) return;
+        View hero = clockText == null ? null : (View) clockText.getParent();
+        if (!(hero instanceof LinearLayout)) return;
+        int minute = new Date().getMinutes();
+        int phase = (minute / 5) % 4;
+        int[][] palettes = new int[][] {
+                {Color.rgb(21, 30, 55), Color.rgb(8, 12, 22)},
+                {Color.rgb(26, 38, 62), Color.rgb(10, 13, 25)},
+                {Color.rgb(34, 27, 55), Color.rgb(9, 12, 24)},
+                {Color.rgb(20, 39, 47), Color.rgb(8, 13, 20)}
+        };
+        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.TL_BR, palettes[phase]);
+        next.setCornerRadius(LauncherUiUtils.dp(this, 22));
+        if (animate) {
+            hero.animate().alpha(0.88f).setDuration(100L).withEndAction(() -> {
+                hero.setBackground(next);
+                hero.animate().alpha(1f).setDuration(180L).start();
+            }).start();
+        } else {
+            hero.setBackground(next);
+        }
+    }
+
+    private void resolveWidgetIconCollisions(FrameLayout page, FrameLayout widgetContainer) {
+        if (page == null || widgetContainer == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        int columns = getHomeColumns();
+        int rows = HOME_ROWS;
+        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellHeight = Math.max(1, page.getHeight() / rows);
+        FrameLayout.LayoutParams widgetLp = (FrameLayout.LayoutParams) widgetContainer.getLayoutParams();
+        int wx1 = widgetLp.leftMargin, wy1 = widgetLp.topMargin;
+        int wx2 = wx1 + widgetContainer.getWidth(), wy2 = wy1 + widgetContainer.getHeight();
+        boolean[][] occupied = new boolean[rows][columns];
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (child == widgetContainer || !(child.getTag() instanceof String)
+                    || !((String) child.getTag()).startsWith("launcher_app:")) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
+            int col = Math.max(0, Math.min(columns - 1, Math.round((float) lp.leftMargin / cellWidth)));
+            int row = Math.max(0, Math.min(rows - 1, Math.round((float) lp.topMargin / cellHeight)));
+            occupied[row][col] = true;
+        }
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (child == widgetContainer || !(child.getTag() instanceof String)
+                    || !((String) child.getTag()).startsWith("launcher_app:")) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
+            int cx1 = lp.leftMargin, cy1 = lp.topMargin;
+            int cx2 = cx1 + cellWidth, cy2 = cy1 + cellHeight;
+            boolean overlaps = cx1 < wx2 && cx2 > wx1 && cy1 < wy2 && cy2 > wy1;
+            if (!overlaps) continue;
+            String pkg = ((String) child.getTag()).substring("launcher_app:".length());
+            int fromCol = Math.max(0, Math.min(columns - 1, Math.round((float) lp.leftMargin / cellWidth)));
+            int fromRow = Math.max(0, Math.min(rows - 1, Math.round((float) lp.topMargin / cellHeight)));
+            occupied[fromRow][fromCol] = false;
+            int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < columns; col++) {
+                    if (occupied[row][col]) continue;
+                    int x1 = col * cellWidth, y1 = row * cellHeight;
+                    if (x1 < wx2 && x1 + cellWidth > wx1 && y1 < wy2 && y1 + cellHeight > wy1) continue;
+                    int distance = Math.abs(col - fromCol) + Math.abs(row - fromRow);
+                    if (distance < bestDistance) { bestDistance = distance; bestCol = col; bestRow = row; }
+                }
+            }
+            if (bestCol >= 0) {
+                lp.leftMargin = bestCol * cellWidth;
+                lp.topMargin = bestRow * cellHeight;
+                child.setLayoutParams(lp);
+                child.setTranslationX(LauncherUiUtils.dp(this, 5));
+                child.setTranslationY(LauncherUiUtils.dp(this, 3));
+                child.animate().translationX(0f).translationY(0f).setDuration(150L).start();
+                occupied[bestRow][bestCol] = true;
+                saveIconSlot(pkg, bestCol, bestRow, columns);
+            }
+        }
     }
 
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
