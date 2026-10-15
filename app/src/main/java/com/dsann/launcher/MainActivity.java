@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
             int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
             int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
             int sample = 1;
-            while (bounds.outWidth / (sample * 2) >= screenW * 2 && bounds.outHeight / (sample * 2) >= screenH * 2) sample *= 2;
+            while (bounds.outWidth / (sample * 2) > screenW * 2 || bounds.outHeight / (sample * 2) > screenH * 2) sample *= 2;
             BitmapFactory.Options decoded = new BitmapFactory.Options();
             decoded.inSampleSize = sample;
             Bitmap preview = BitmapFactory.decodeFile(savedImage.getAbsolutePath(), decoded);
@@ -1044,7 +1044,7 @@ public class MainActivity extends Activity {
                 int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
                 int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
                 int sample = 1;
-                while (bounds.outWidth / (sample * 2) >= screenW && bounds.outHeight / (sample * 2) >= screenH) sample *= 2;
+                while (bounds.outWidth / (sample * 2) > screenW || bounds.outHeight / (sample * 2) > screenH) sample *= 2;
                 BitmapFactory.Options decode = new BitmapFactory.Options();
                 decode.inSampleSize = sample;
                 try (java.io.InputStream in = openWallpaperStream(uri)) {
