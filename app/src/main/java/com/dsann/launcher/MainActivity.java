@@ -83,6 +83,7 @@ public class MainActivity extends Activity {
     private AppWidgetManager widgetManager;
     private AppWidgetHost widgetHost;
     private WidgetInteractionController widgetInteractionController;
+    private HomePageController homePageController;
     private FrameLayout root;
     private LinearLayout homeScreen;
     private TextView brandText;
@@ -345,6 +346,23 @@ public class MainActivity extends Activity {
         buildDrawer();
         setContentView(root);
         root.requestApplyInsets();
+        homePageController = new HomePageController(this, prefs, packageManager,
+                new HomePageController.Host() {
+                    @Override public LinearLayout getPagesStrip() { return pagesStrip; }
+                    @Override public FrameLayout getPageViewport() { return pageViewport; }
+                    @Override public TextView getPageIndicator() { return pageIndicator; }
+                    @Override public List<List<String>> getPages() { return pages; }
+                    @Override public List<ResolveInfo> getAllApps() { return allApps; }
+                    @Override public List<ResolveInfo> getDrawerApps() { return drawerApps; }
+                    @Override public int getCurrentPage() { return currentPage; }
+                    @Override public void rebuildPages() { MainActivity.this.rebuildPages(); }
+                    @Override public int getHomeColumns() { return MainActivity.this.getHomeColumns(); }
+                    @Override public ResolveInfo findApp(String packageName) { return MainActivity.this.findApp(packageName); }
+                    @Override public void installHomeIconTouch(View cell, String packageName) { MainActivity.this.installHomeIconTouch(cell, packageName); }
+                    @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
+                    @Override public void launchApp(ResolveInfo app) { MainActivity.this.launchApp(app); }
+                    @Override public void showAppOptions(ResolveInfo app, boolean onHome) { MainActivity.this.showAppOptions(app, onHome); }
+                }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, HOME_ROWS);
         renderHomePages(false);
         showHome();
     }
@@ -422,81 +440,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderHomePages(boolean animate) {
-        if (pagesStrip == null) return;
-        pagesStrip.removeAllViews();
-        rebuildPages();
-        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
-        int columns = getHomeColumns();
-        int rows = HOME_ROWS;
-        for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
-            FrameLayout page = new FrameLayout(this);
-            page.setClipChildren(false);
-            List<String> pagePackages = pages.get(pageIndex);
-            for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
-                String packageName = pagePackages.get(itemIndex);
-                if (findApp(packageName) == null) continue;
-                View cell = new LauncherAppAdapter(this, prefs, packageManager, allApps, drawerApps, pagePackages,
-                        false, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_HOME_LABELS,
-                        new LauncherAppAdapter.Actions() {
-                            @Override public void onAppClick(ResolveInfo app) { launchApp(app); }
-                            @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { showAppOptions(app, onHome); }
-                        }).getView(itemIndex, null, page);
-                cell.setTag("launcher_app:" + packageName);
-                int fallbackHeight = Math.max(LauncherUiUtils.dp(this, 360), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
-                int pageHeight = pageViewport.getHeight() > LauncherUiUtils.dp(this, 100) ? pageViewport.getHeight() : fallbackHeight;
-                int cellWidth = Math.max(LauncherUiUtils.dp(this, 1), pageWidth / columns);
-                int cellHeight = Math.max(LauncherUiUtils.dp(this, 1), pageHeight / rows);
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
-                int defaultCol = itemIndex % columns;
-                int defaultRow = (itemIndex / columns) % rows;
-                float savedX = prefs.getFloat(KEY_ICON_X + packageName, defaultCol / (float) Math.max(1, columns - 1));
-                float savedY = prefs.getFloat(KEY_ICON_Y + packageName, defaultRow / (float) Math.max(1, rows - 1));
-                int col = Math.max(0, Math.min(columns - 1, Math.round(savedX * Math.max(1, columns - 1))));
-                int row = Math.max(0, Math.min(rows - 1, Math.round(savedY * Math.max(1, rows - 1))));
-                lp.leftMargin = col * cellWidth;
-                lp.topMargin = row * cellHeight;
-                page.addView(cell, lp);
-                installHomeIconTouch(cell, packageName);
-            }
-            pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
-            page.post(() -> {
-                if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
-                int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                int actualCellHeight = Math.max(1, page.getHeight() / rows);
-                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
-                    View child = page.getChildAt(childIndex);
-                    Object childTag = child.getTag();
-                    if (!(childTag instanceof String) || !((String) childTag).startsWith("launcher_app:")) continue;
-                    String childPackage = ((String) childTag).substring("launcher_app:".length());
-                    int orderIndex = pagePackages.indexOf(childPackage);
-                    if (orderIndex < 0) continue;
-                    int defaultCol = orderIndex % columns;
-                    int defaultRow = (orderIndex / columns) % rows;
-                    float savedX = prefs.getFloat(KEY_ICON_X + childPackage, defaultCol / (float) Math.max(1, columns - 1));
-                    float savedY = prefs.getFloat(KEY_ICON_Y + childPackage, defaultRow / (float) Math.max(1, rows - 1));
-                    int col = Math.max(0, Math.min(columns - 1, Math.round(savedX * Math.max(1, columns - 1))));
-                    int row = Math.max(0, Math.min(rows - 1, Math.round(savedY * Math.max(1, rows - 1))));
-                    FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
-                    actual.width = actualCellWidth;
-                    actual.height = actualCellHeight;
-                    actual.leftMargin = col * actualCellWidth;
-                    actual.topMargin = row * actualCellHeight;
-                    child.setLayoutParams(actual);
-                }
-            });
-        }
-        restoreWidgetsOnPages();
-        pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? View.VISIBLE : View.GONE);
-        pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
-        pagesStrip.setTranslationX(-currentPage * pageWidth);
-        if (animate) {
-            pagesStrip.setRotationY(-18f);
-            pagesStrip.setScaleX(0.94f);
-            pagesStrip.animate().rotationY(0f).scaleX(1f).setDuration(360).start();
-        } else {
-            pagesStrip.setRotationY(0f);
-            pagesStrip.setScaleX(1f);
-        }
+        if (homePageController != null) homePageController.renderHomePages(animate);
     }
 
     private void installHomeIconTouch(View cell, String packageName) {
