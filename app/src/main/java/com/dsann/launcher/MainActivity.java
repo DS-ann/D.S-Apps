@@ -263,6 +263,16 @@ public class MainActivity extends Activity {
                 if (!pageSwipeActive) {
                     pageSwipeActive = true;
                     pagesStrip.animate().cancel();
+                    // Prepare only the two faces involved in this turn once. Repeatedly
+                    // toggling hardware layers on every MOVE causes visible frame drops.
+                    float density = getResources().getDisplayMetrics().density;
+                    for (int i = Math.max(0, currentPage - 1);
+                            i <= Math.min(pagesStrip.getChildCount() - 1, currentPage + 1); i++) {
+                        View face = pagesStrip.getChildAt(i);
+                        face.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                        face.setCameraDistance(16000f * density);
+                        face.setPivotY(face.getHeight() / 2f);
+                    }
                 }
                 if (!pageSwipeChildCancelled) {
                     MotionEvent cancel = MotionEvent.obtain(event);
@@ -282,19 +292,16 @@ public class MainActivity extends Activity {
                 // Add a restrained page-turn rotation while the strip follows the
                 // finger. The incoming page rotates toward flat as it enters view.
                 float progress = Math.max(-1f, Math.min(1f, dx / (float) pageWidth));
-                for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+                for (int i = Math.max(0, currentPage - 1);
+                        i <= Math.min(pagesStrip.getChildCount() - 1, currentPage + 1); i++) {
                     View face = pagesStrip.getChildAt(i);
-                    face.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                    face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
-                    // Use the viewport's centre line as the shared vertical hinge.
-                    // The current face hinges at its centre; the incoming face hinges
-                    // at the edge that meets the viewport centre, not at its own centre.
                     float faceWidth = face.getWidth();
-                    face.setPivotY(face.getHeight() / 2f);
+                    // Both faces use the same shared edge as their hinge. This avoids
+                    // the two pages rotating around unrelated axes and looking warped.
                     if (i == currentPage) {
-                        face.setPivotX(faceWidth / 2f);
+                        face.setPivotX(dx < 0 ? faceWidth : 0f);
                         face.setRotationY(-progress * getPageRotationDegrees());
-                        face.setAlpha(1f - Math.min(0.18f, Math.abs(progress) * 0.18f));
+                        face.setAlpha(1f - Math.min(0.08f, Math.abs(progress) * 0.08f));
                     } else if (i == currentPage + 1 && progress < 0f) {
                         face.setPivotX(0f);
                         face.setRotationY((1f + progress) * -getPageRotationDegrees());
@@ -302,10 +309,6 @@ public class MainActivity extends Activity {
                     } else if (i == currentPage - 1 && progress > 0f) {
                         face.setPivotX(faceWidth);
                         face.setRotationY((1f - progress) * getPageRotationDegrees());
-                        face.setAlpha(1f);
-                    } else {
-                        face.setPivotX(faceWidth / 2f);
-                        face.setRotationY(0f);
                         face.setAlpha(1f);
                     }
                 }
@@ -990,10 +993,10 @@ public class MainActivity extends Activity {
             View page = pagesStrip.getChildAt(i);
             page.animate().cancel();
             page.setAlpha(1f);
-            if (animate) {
+            if (animate && Math.abs(page.getRotationY()) > 0.1f) {
                 page.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                 page.animate().rotationY(0f).alpha(1f)
-                        .setDuration(animationDuration(240L))
+                        .setDuration(animationDuration(180L))
                         .setInterpolator(new android.view.animation.DecelerateInterpolator())
                         .withEndAction(() -> page.setLayerType(View.LAYER_TYPE_NONE, null))
                         .start();
