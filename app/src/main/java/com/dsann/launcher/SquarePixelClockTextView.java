@@ -68,12 +68,20 @@ public final class SquarePixelClockTextView extends TextView {
         }
         String value = visible.toString();
         if (value.length() == 0) return;
-        float cell = getTextSize() / 9.0f;
+        float availableWidth = Math.max(1f, getWidth() - getPaddingLeft() - getPaddingRight());
+        float availableHeight = Math.max(1f, getHeight() - getPaddingTop() - getPaddingBottom());
+        float naturalCell = getTextSize() / 9.0f;
+        float widthLimitedCell = availableWidth / Math.max(1f, value.length() * 6.0f - 1.0f);
+        float heightLimitedCell = availableHeight / 7.0f;
+        // TextView measures using ordinary font metrics, which can be narrower or shorter
+        // than the custom pixel face. Scale the pixel grid to the actual view bounds so
+        // every digit remains visible in all launcher clock styles and screen widths.
+        float cell = Math.min(naturalCell, Math.min(widthLimitedCell, heightLimitedCell));
         float block = cell * 0.82f;
         float advance = cell * 6.0f;
         float total = value.length() * advance - cell;
-        float left = Math.max(getPaddingLeft(), (getWidth() - total) / 2.0f);
-        float top = (getHeight() - cell * 7.0f) / 2.0f;
+        float left = getPaddingLeft() + Math.max(0f, (availableWidth - total) / 2.0f);
+        float top = getPaddingTop() + Math.max(0f, (availableHeight - cell * 7.0f) / 2.0f);
         pixelPaint.setColor(getCurrentTextColor());
         pixelPaint.setStyle(Paint.Style.FILL);
         pixelPaint.setShadowLayer(dp(1), 0f, 0f, Color.argb(70, 60, 255, 100));

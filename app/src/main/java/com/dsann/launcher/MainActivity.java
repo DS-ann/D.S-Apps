@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
     private FrameLayout pageViewport;
     private LinearLayout dockContainer;
     private final List<String> dockPackages = new ArrayList<>();
-    private static final int DOCK_CAPACITY = 5;
+    private static final int DOCK_CAPACITY = 4;
     private LinearLayout drawerScreen;
     private GridView drawerGrid;
     private TextView clockText;
@@ -412,7 +412,7 @@ public class MainActivity extends Activity {
         hero.setGravity(Gravity.RIGHT);
         hero.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
-                Math.max(LauncherUiUtils.dp(this, 150), (getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) / 2),
+                Math.max(LauncherUiUtils.dp(this, 220), (int) ((getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) * 0.72f)),
                 -2);
         hp.gravity = Gravity.RIGHT;
         hp.topMargin = LauncherUiUtils.dp(this, 8);
@@ -444,22 +444,6 @@ public class MainActivity extends Activity {
         pp.topMargin = LauncherUiUtils.dp(this, 12);
         homeScreen.addView(pageViewport, pp);
 
-        dockContainer = new LinearLayout(this);
-        dockContainer.setOrientation(LinearLayout.HORIZONTAL);
-        dockContainer.setGravity(Gravity.CENTER);
-        dockContainer.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 3),
-                LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 3));
-        dockContainer.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{Color.argb(45, 105, 135, 205), Color.argb(24, 50, 65, 105)},
-                LauncherUiUtils.dp(this, 20)));
-        LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76));
-        dockParams.leftMargin = LauncherUiUtils.dp(this, 10);
-        dockParams.rightMargin = LauncherUiUtils.dp(this, 10);
-        dockParams.topMargin = LauncherUiUtils.dp(this, 4);
-        dockParams.bottomMargin = LauncherUiUtils.dp(this, 4);
-        homeScreen.addView(dockContainer, dockParams);
-        restoreDockApps();
-
         // The viewport stays fixed while the page strip moves inside it.
         pagesStrip = new LinearLayout(this);
         pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
@@ -470,9 +454,16 @@ public class MainActivity extends Activity {
         pageIndicator.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28));
         homeScreen.addView(pageIndicator, ip);
-        TextView drawerHint = LauncherUiUtils.text(this, "Swipe up for all apps", 11, Color.rgb(180, 194, 224), false);
-        drawerHint.setGravity(Gravity.CENTER);
-        homeScreen.addView(drawerHint, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28)));
+        dockContainer = new LinearLayout(this);
+        dockContainer.setOrientation(LinearLayout.HORIZONTAL);
+        dockContainer.setGravity(Gravity.CENTER_VERTICAL);
+        dockContainer.setPadding(0, LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 2));
+        dockContainer.setBackgroundColor(Color.TRANSPARENT);
+        LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 48));
+        dockParams.topMargin = LauncherUiUtils.dp(this, 2);
+        dockParams.bottomMargin = LauncherUiUtils.dp(this, 2);
+        homeScreen.addView(dockContainer, dockParams);
+        restoreDockApps();
     }
 
     private void buildDrawer() {
@@ -526,46 +517,53 @@ public class MainActivity extends Activity {
         if (dockContainer == null) return;
         dockContainer.removeAllViews();
         for (int slot = 0; slot < DOCK_CAPACITY; slot++) {
-            if (slot >= dockPackages.size()) {
-                FrameLayout emptySlot = new FrameLayout(this);
-                emptySlot.setBackground(LauncherUiUtils.roundRect(this,
-                        new int[]{Color.argb(26, 145, 170, 235), Color.argb(13, 100, 125, 190)},
-                        LauncherUiUtils.dp(this, 13)));
-                TextView plus = LauncherUiUtils.text(this, "+", 22, Color.argb(155, 195, 210, 250), false);
-                plus.setGravity(Gravity.CENTER);
-                emptySlot.addView(plus, new FrameLayout.LayoutParams(-1, -1));
-                dockContainer.addView(emptySlot, new LinearLayout.LayoutParams(0, -1, 1f));
-                continue;
+            if (slot == 2) {
+                TextView drawerHint = LauncherUiUtils.text(this, "Swipe up for all apps", 11,
+                        Color.rgb(180, 194, 224), false);
+                drawerHint.setGravity(Gravity.CENTER);
+                drawerHint.setSingleLine(true);
+                dockContainer.addView(drawerHint, new LinearLayout.LayoutParams(0, -1, 1f));
             }
-            final String packageName = dockPackages.get(slot);
-            ResolveInfo app = findApp(packageName);
-            if (app == null) continue;
-            LauncherAppAdapter adapter = new LauncherAppAdapter(this, prefs, packageManager,
-                    allApps, drawerApps, java.util.Collections.singletonList(packageName),
-                    false, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_HOME_LABELS,
-                    new LauncherAppAdapter.Actions() {
-                        @Override public void onAppClick(ResolveInfo selected) { launchApp(selected); }
-                        @Override public void onAppLongClick(ResolveInfo selected, boolean onHome) {
-                            showActionDialog("Dock app", new String[]{"−", "↗"},
-                                    new String[]{"Remove from dock", "Move to home screen"}, (dialog, which) -> {
-                                dockPackages.remove(packageName);
-                                if (which == 1 && !homePackages.contains(packageName)) {
-                                    if (homePackages.size() >= pageCapacity()) {
-                                        Toast.makeText(MainActivity.this, "Home screen is full.", Toast.LENGTH_SHORT).show();
-                                    } else {
-                                        homePackages.add(packageName);
-                                    }
-                                }
-                                persistDockApps();
-                                persistHomeApps();
-                                renderHomePages(false);
-                            });
-                        }
+
+            FrameLayout slotView = new FrameLayout(this);
+            slotView.setBackgroundColor(Color.TRANSPARENT);
+            LinearLayout.LayoutParams slotParams = new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 40), -1);
+            if (slot == 1 || slot == 2) {
+                slotParams.leftMargin = LauncherUiUtils.dp(this, 1);
+                slotParams.rightMargin = LauncherUiUtils.dp(this, 1);
+            }
+            if (slot < dockPackages.size()) {
+                final String packageName = dockPackages.get(slot);
+                ResolveInfo app = findApp(packageName);
+                if (app != null) {
+                    ImageView icon = new ImageView(this);
+                    icon.setImageDrawable(app.loadIcon(packageManager));
+                    icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    icon.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3),
+                            LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3));
+                    slotView.addView(icon, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+                    slotView.setContentDescription(String.valueOf(app.loadLabel(packageManager)));
+                    slotView.setOnClickListener(v -> launchApp(app));
+                    slotView.setOnLongClickListener(v -> {
+                        showActionDialog("Dock app", new String[]{"−", "↗"},
+                                new String[]{"Remove from dock", "Move to home screen"}, (dialog, which) -> {
+                            if (which == 1 && !homePackages.contains(packageName)
+                                    && homePackages.size() >= pageCapacity()) {
+                                Toast.makeText(MainActivity.this, "Home screen is full.", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            dockPackages.remove(packageName);
+                            if (which == 1 && !homePackages.contains(packageName)) homePackages.add(packageName);
+                            persistDockApps();
+                            persistHomeApps();
+                            renderHomePages(false);
+                        });
+                        return true;
                     });
-            View cell = adapter.getView(0, null, dockContainer);
-            cell.setTag("launcher_dock:" + packageName);
-            cell.setOnTouchListener((v, event) -> false);
-            dockContainer.addView(cell, new LinearLayout.LayoutParams(0, -1, 1f));
+                }
+            }
+            dockContainer.addView(slotView, slotParams);
         }
     }
 
@@ -1404,10 +1402,10 @@ public class MainActivity extends Activity {
                 {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
         int[] tone = tones[phase];
-        int side = Color.argb(66, tone[0], tone[1], tone[2]); // About 26% opacity, up from 20%.
+        int side = Color.argb(99, tone[0], tone[1], tone[2]); // 50% more opacity than the previous alpha 66.
         int centre = Color.argb(0, tone[0], tone[1], tone[2]);
         GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT,
-                new int[] {side, Color.argb(28, tone[0], tone[1], tone[2]), centre});
+                new int[] {side, Color.argb(42, tone[0], tone[1], tone[2]), centre});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         if (animate) {
             hero.setBackground(next);
