@@ -32,6 +32,16 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      # setup-gradle already caches Gradle distributions and dependency caches.
+      # Cache the Android platform and build-tools used by this project as well.
+      - name: Cache Android SDK components
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/platforms/android-35
+            /usr/local/lib/android/sdk/build-tools/35.0.0
+          key: ${{ runner.os }}-android-sdk-api35-build-tools-35.0.0-v1
+
       - name: Set up Android SDK build tools
         uses: android-actions/setup-android@v3
         with:
