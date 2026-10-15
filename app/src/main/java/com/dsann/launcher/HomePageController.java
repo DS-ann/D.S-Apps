@@ -90,6 +90,24 @@ final class HomePageController {
             newPage.setClipChildren(false);
             strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
         }
+        // Keep the strip and both page containers at the exact measured viewport width.
+        // A stale width makes the second screen translate to the wrong offset and appear blank.
+        for (int i = 0; i < requiredPages; i++) {
+            View child = strip.getChildAt(i);
+            if (child instanceof FrameLayout) {
+                ViewGroup.LayoutParams pageParams = child.getLayoutParams();
+                if (pageParams == null) pageParams = new LinearLayout.LayoutParams(pageWidth, -1);
+                pageParams.width = pageWidth;
+                pageParams.height = -1;
+                child.setLayoutParams(pageParams);
+            }
+        }
+        ViewGroup.LayoutParams stripParams = strip.getLayoutParams();
+        if (stripParams != null) {
+            stripParams.width = pageWidth * requiredPages;
+            stripParams.height = -1;
+            strip.setLayoutParams(stripParams);
+        }
 
         // Rebuild shortcut cells only. Existing widget containers remain attached to their
         // page objects and are synchronized to their persisted page indexes separately.
