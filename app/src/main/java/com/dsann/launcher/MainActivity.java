@@ -566,8 +566,10 @@ public class MainActivity extends Activity {
                     FrameLayout.LayoutParams dragged = (FrameLayout.LayoutParams) view.getLayoutParams();
                     // Detect the edge from both the finger and the icon bounds. Touch events
                     // can be clipped by the icon cell before the finger reaches the screen edge.
-                    boolean atRightEdge = event.getRawX() >= releaseLocation[0] + page.getWidth() - dp(48)
-                            || dragged.leftMargin + view.getWidth() >= page.getWidth() - dp(48);
+                    int[] viewportLocation = new int[2];
+                    pageViewport.getLocationOnScreen(viewportLocation);
+                    boolean atRightEdge = event.getRawX() >= viewportLocation[0] + pageViewport.getWidth() - dp(36)
+                            || dragged.leftMargin + view.getWidth() >= page.getWidth() - dp(36);
                     boolean moveToNextPage = atRightEdge;
                     int columns = getHomeColumns();
                     int rows = HOME_ROWS;
@@ -605,7 +607,10 @@ public class MainActivity extends Activity {
                     view.setLayoutParams(dragged);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     if (moveToNextPage) {
+                        // Edge-drag always opens the next page, even when this page
+                        // still has unused grid capacity.
                         int destinationPage = currentPage + 1;
+                        ensurePageExists(destinationPage);
                         prefs.edit().putInt(KEY_ICON_PAGE + packageName, destinationPage)
                                 .putFloat(KEY_ICON_X + packageName, 0f)
                                 .putFloat(KEY_ICON_Y + packageName, targetRow / (float) Math.max(1, rows - 1)).apply();
@@ -647,11 +652,11 @@ public class MainActivity extends Activity {
             renderHomePages(true);
             return;
         }
-        // A new page is created only when the current page has reached capacity.
-        if (pages.get(currentPage).size() >= pageCapacity()) {
-            currentPage++;
-            renderHomePages(true);
-        }
+        // Allow an empty trailing page to be created by a deliberate swipe;
+        // edge-dragging an icon also creates a page regardless of grid capacity.
+        currentPage++;
+        ensurePageExists(currentPage);
+        renderHomePages(true);
     }
 
     private void previousPage() {
@@ -1019,18 +1024,145 @@ public class MainActivity extends Activity {
         FrameLayout page = (FrameLayout) pagesStrip.getChildAt(currentPage);
         AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
         widget.setAppWidget(widgetId, info);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(180), page.getWidth() / 2),
-                Math.max(dp(100), page.getHeight() / 4), Gravity.TOP | Gravity.LEFT);
-        lp.leftMargin = dp(8); lp.topMargin = dp(8);
-        widget.setTag("launcher_widget:" + widgetId);
-        widget.setFocusable(true);
-        page.addView(widget, lp);
-        widget.bringToFront();
+        addWidgetContainer(page, widget, widgetId, currentPage, dp(8), dp(8),
+                Math.max(dp(180), page.getWidth() / 2), Math.max(dp(100), page.getHeight() / 4));
         String stored = prefs.getString(KEY_WIDGET_IDS, "");
         String entry = widgetId + ":" + currentPage;
-        if (!stored.contains(entry)) prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
-        Toast.makeText(this, "Widget added to this page", Toast.LENGTH_SHORT).show();
+        if (!containsWidgetId(stored, widgetId)) {
+            prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
+        }
+        Toast.makeText(this, "Widget added. Long-press to move; use the corner handle to resize.", Toast.LENGTH_LONG).show();
         widgetHost.startListening();
+    }
+
+    private boolean containsWidgetId(String stored, int widgetId) {
+        if (stored == null || stored.isEmpty()) return false;
+        for (String entry : stored.split("\\n")) {
+            String[] parts = entry.split(":");
+            if (parts.length >= 2) {
+                try { if (Integer.parseInt(parts[0]) == widgetId) return true; }
+                catch (NumberFormatException ignored) {}
+            }
+        }
+        return false;
+    }
+
+    private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
+            int x, int y, int width, int height) {
+        final FrameLayout container = new FrameLayout(this);
+        container.setTag("launcher_widget:" + widgetId);
+        widget.setTag("launcher_widget_content:" + widgetId);
+        widget.setFocusable(true);
+        container.addView(widget, new FrameLayout.LayoutParams(-1, -1));
+        final View resizeHandle = new View(this);
+        GradientDrawable handleBg = new GradientDrawable();
+        handleBg.setColor(Color.rgb(115, 159, 255));
+        handleBg.setCornerRadius(dp(5));
+        resizeHandle.setBackground(handleBg);
+        resizeHandle.setVisibility(View.GONE);
+        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.RIGHT | Gravity.BOTTOM);
+        container.addView(resizeHandle, handleLp);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(140), width), Math.max(dp(90), height), Gravity.TOP | Gravity.LEFT);
+        lp.leftMargin = x;
+        lp.topMargin = y;
+        page.addView(container, lp);
+        container.bringToFront();
+
+        final boolean[] editing = {false};
+        final float[] down = {0f, 0f};
+        final int[] origin = {x, y, lp.width, lp.height};
+        final Runnable[] longPress = new Runnable[1];
+        longPress[0] = () -> {
+            editing[0] = true;
+            resizeHandle.setVisibility(View.VISIBLE);
+            container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
+            Toast.makeText(this, "Drag widget to move; drag blue corner to resize", Toast.LENGTH_SHORT).show();
+        };
+        container.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                down[0] = event.getRawX();
+                down[1] = event.getRawY();
+                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                origin[0] = current.leftMargin; origin[1] = current.topMargin;
+                origin[2] = current.width; origin[3] = current.height;
+                handler.removeCallbacks(longPress[0]);
+                handler.postDelayed(longPress[0], 650L);
+                return editing[0];
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                if (!editing[0]) {
+                    if (Math.abs(event.getRawX() - down[0]) > dp(10) || Math.abs(event.getRawY() - down[1]) > dp(10)) {
+                        handler.removeCallbacks(longPress[0]);
+                    }
+                    return false;
+                }
+                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                current.leftMargin = Math.max(0, Math.min(page.getWidth() - container.getWidth(),
+                        origin[0] + Math.round(event.getRawX() - down[0])));
+                current.topMargin = Math.max(0, Math.min(page.getHeight() - container.getHeight(),
+                        origin[1] + Math.round(event.getRawY() - down[1])));
+                container.setLayoutParams(current);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(longPress[0]);
+                if (editing[0]) {
+                    saveWidgetGeometry(widgetId, pageIndex, container);
+                    return true;
+                }
+            }
+            return editing[0];
+        });
+        resizeHandle.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                down[0] = event.getRawX(); down[1] = event.getRawY();
+                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                origin[2] = current.width; origin[3] = current.height;
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                current.width = Math.max(dp(140), Math.min(page.getWidth() - current.leftMargin,
+                        origin[2] + Math.round(event.getRawX() - down[0])));
+                current.height = Math.max(dp(90), Math.min(page.getHeight() - current.topMargin,
+                        origin[3] + Math.round(event.getRawY() - down[1])));
+                container.setLayoutParams(current);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                saveWidgetGeometry(widgetId, pageIndex, container);
+                return true;
+            }
+            return true;
+        });
+    }
+
+    private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) container.getLayoutParams();
+        prefs.edit().putInt("widget_x_" + widgetId, lp.leftMargin)
+                .putInt("widget_y_" + widgetId, lp.topMargin)
+                .putInt("widget_w_" + widgetId, lp.width)
+                .putInt("widget_h_" + widgetId, lp.height).apply();
+        String stored = prefs.getString(KEY_WIDGET_IDS, "");
+        StringBuilder updated = new StringBuilder();
+        boolean found = false;
+        for (String entry : stored.split("\\n")) {
+            String[] parts = entry.split(":");
+            if (parts.length < 2) continue;
+            if (parts[0].equals(String.valueOf(widgetId))) {
+                entry = widgetId + ":" + pageIndex;
+                found = true;
+            }
+            if (updated.length() > 0) updated.append('\n');
+            updated.append(entry);
+        }
+        if (!found) {
+            if (updated.length() > 0) updated.append('\n');
+            updated.append(widgetId).append(':').append(pageIndex);
+        }
+        prefs.edit().putString(KEY_WIDGET_IDS, updated.toString()).apply();
     }
 
     private void restoreWidgetsOnPages() {
@@ -1038,7 +1170,7 @@ public class MainActivity extends Activity {
         if (stored.isEmpty()) return;
         for (String entry : stored.split("\\n")) {
             String[] parts = entry.split(":");
-            if (parts.length != 2) continue;
+            if (parts.length < 2) continue;
             try {
                 int id = Integer.parseInt(parts[0]);
                 int pageIndex = Integer.parseInt(parts[1]);
@@ -1052,14 +1184,13 @@ public class MainActivity extends Activity {
                 if (exists) continue;
                 AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
                 if (info == null) continue;
+                int width = prefs.getInt("widget_w_" + id, Math.max(dp(180), page.getWidth() / 2));
+                int height = prefs.getInt("widget_h_" + id, Math.max(dp(100), page.getHeight() / 4));
+                int x = prefs.getInt("widget_x_" + id, dp(8));
+                int y = prefs.getInt("widget_y_" + id, dp(8));
                 AppWidgetHostView widget = widgetHost.createView(this, id, info);
                 widget.setAppWidget(id, info);
-                widget.setTag("launcher_widget:" + id);
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(180), page.getWidth() / 2),
-                        Math.max(dp(100), page.getHeight() / 4), Gravity.TOP | Gravity.LEFT);
-                lp.leftMargin = dp(8); lp.topMargin = dp(8);
-                page.addView(widget, lp);
-                widget.bringToFront();
+                addWidgetContainer(page, widget, id, pageIndex, x, y, width, height);
             } catch (Exception ignored) {}
         }
     }
