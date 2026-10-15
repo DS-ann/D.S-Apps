@@ -339,87 +339,14 @@ public class MainActivity extends Activity {
     }
 
     private void rebuildPages() {
-        // Reconstruct pages from the saved home shortcuts and live widget IDs. Never
-        // trust a page index on its own: stale widget records can otherwise preserve
-        // invisible pages, and stale indexes can leave valid shortcuts off-screen.
-        List<List<String>> originalPages = new ArrayList<>();
-        int capacity = Math.max(1, pageCapacity());
-        for (int i = 0; i < homePackages.size(); i++) {
-            String packageName = homePackages.get(i);
-            int fallback = i / capacity;
-            int savedPage = prefs.contains(KEY_ICON_PAGE + packageName)
-                    ? prefs.getInt(KEY_ICON_PAGE + packageName, fallback) : fallback;
-            int pageIndex = Math.max(0, Math.min(20, savedPage));
-            while (originalPages.size() <= pageIndex) originalPages.add(new ArrayList<String>());
-            originalPages.get(pageIndex).add(packageName);
-        }
-
-        String storedWidgets = prefs.getString(KEY_WIDGET_IDS, "");
-        List<int[]> validWidgets = new ArrayList<>();
-        if (storedWidgets != null && !storedWidgets.isEmpty()) {
-            for (String entry : storedWidgets.split("\\n")) {
-                String[] parts = entry.split(":");
-                if (parts.length != 2) continue;
-                try {
-                    int id = Integer.parseInt(parts[0]);
-                    int rawPage = Integer.parseInt(parts[1]);
-                    if (widgetManager == null || widgetManager.getAppWidgetInfo(id) == null) {
-                        WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
-                        continue;
-                    }
-                    int pageIndex = Math.max(0, Math.min(20, rawPage));
-                    while (originalPages.size() <= pageIndex) originalPages.add(new ArrayList<String>());
-                    validWidgets.add(new int[]{id, pageIndex});
-                } catch (NumberFormatException ignored) {}
-            }
-        }
-        if (originalPages.isEmpty()) originalPages.add(new ArrayList<String>());
-
-        boolean[] occupied = new boolean[originalPages.size()];
-        for (int i = 0; i < originalPages.size(); i++) {
-            occupied[i] = !originalPages.get(i).isEmpty();
-        }
-        for (int[] widget : validWidgets) {
-            if (widget[1] >= 0 && widget[1] < occupied.length) occupied[widget[1]] = true;
-        }
-
-        int[] remap = new int[occupied.length];
-        int pageCount = 0;
-        for (int i = 0; i < occupied.length; i++) {
-            remap[i] = occupied[i] ? pageCount++ : -1;
-        }
-        if (pageCount == 0) pageCount = 1;
-
-        List<List<String>> compacted = new ArrayList<>();
-        for (int i = 0; i < pageCount; i++) compacted.add(new ArrayList<String>());
-        SharedPreferences.Editor edit = prefs.edit();
-        for (int oldPage = 0; oldPage < originalPages.size(); oldPage++) {
-            if (remap[oldPage] < 0) continue;
-            int newPage = remap[oldPage];
-            compacted.get(newPage).addAll(originalPages.get(oldPage));
-            for (String packageName : originalPages.get(oldPage)) {
-                edit.putInt(KEY_ICON_PAGE + packageName, newPage);
-            }
-        }
-
-        StringBuilder normalizedWidgets = new StringBuilder();
-        for (int[] widget : validWidgets) {
-            int oldPage = widget[1];
-            int newPage = oldPage < remap.length && remap[oldPage] >= 0 ? remap[oldPage] : 0;
-            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\n');
-            normalizedWidgets.append(widget[0]).append(':').append(newPage);
-        }
-        edit.putString(KEY_WIDGET_IDS, normalizedWidgets.toString());
-
-        int oldCurrentPage = Math.max(0, Math.min(currentPage, Math.max(0, originalPages.size() - 1)));
-        int mappedCurrentPage = 0;
-        for (int i = 0; i < oldCurrentPage; i++) if (occupied[i]) mappedCurrentPage++;
-        if (occupied[oldCurrentPage]) mappedCurrentPage = remap[oldCurrentPage];
-        currentPage = Math.max(0, Math.min(mappedCurrentPage, pageCount - 1));
-
+        // All membership validation and gap compaction now lives in HomePageModel.
+        // Rendering never infers page membership from the current view hierarchy.
+        HomePageModel.Result result = HomePageModel.rebuild(
+                prefs, homePackages, widgetManager, currentPage, pageCapacity(),
+                KEY_ICON_PAGE, KEY_WIDGET_IDS);
         pages.clear();
-        pages.addAll(compacted);
-        edit.apply();
+        pages.addAll(result.pages);
+        currentPage = result.currentPage;
     }
 
     private void buildInterface() {
