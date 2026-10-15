@@ -369,8 +369,16 @@ public class MainActivity extends Activity {
                 String[] parts = entry.split(":");
                 if (parts.length != 2) continue;
                 try {
+                    int id = Integer.parseInt(parts[0]);
                     int index = Integer.parseInt(parts[1]);
-                    if (index >= 0 && index < occupied.length) occupied[index] = true;
+                    // Stale widget IDs must not keep otherwise empty pages alive.
+                    boolean validWidget = widgetManager != null && widgetManager.getAppWidgetInfo(id) != null;
+                    if (validWidget && index >= 0 && index < occupied.length) {
+                        occupied[index] = true;
+                    } else if (!validWidget) {
+                        WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
+                        changed = true;
+                    }
                 } catch (NumberFormatException ignored) {}
             }
         }
