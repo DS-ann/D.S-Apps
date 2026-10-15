@@ -1318,6 +1318,9 @@ public class MainActivity extends Activity {
             page.setTranslationZ(0f);
             page.setLayerType(View.LAYER_TYPE_NONE, null);
         }
+        // Pre-create GPU layers for the two faces most likely to move next.
+        // Doing this while the page is idle avoids a hitch on the first swipe frame.
+        preparePageLayersForSwipe(currentPage);
         if (animate) {
             pagesStrip.animate().translationX(targetX)
                     .setDuration(animationDuration(240L))
@@ -1461,6 +1464,7 @@ public class MainActivity extends Activity {
                 currentPage = to;
                 pagesStrip.setTranslationX(-to * (float) width);
                 resetPageTransforms();
+                preparePageLayersForSwipe(currentPage);
                 wheelSwipeProgress = 0f;
                 wheelSwipeDirection = 0;
                 if (pageIndicator != null) {
@@ -1487,6 +1491,27 @@ public class MainActivity extends Activity {
             face.setTranslationY(0f);
             face.setTranslationZ(0f);
             face.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
+    }
+
+    /**
+     * Keep hardware display lists warm for only the visible page and its neighbour.
+     * The active gesture then changes transforms on cached surfaces instead of
+     * paying the layer-creation cost during the first frames of a swipe.
+     */
+    private void preparePageLayersForSwipe(int pageIndex) {
+        if (pagesStrip == null) return;
+        int count = pagesStrip.getChildCount();
+        int active = Math.max(0, Math.min(count - 1, pageIndex));
+        int neighbour = active + 1 < count ? active + 1 : active - 1;
+        for (int i = 0; i < count; i++) {
+            View page = pagesStrip.getChildAt(i);
+            if (i == active || i == neighbour) {
+                page.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                page.setCameraDistance(10000f * getResources().getDisplayMetrics().density);
+            } else {
+                page.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
         }
     }
 
