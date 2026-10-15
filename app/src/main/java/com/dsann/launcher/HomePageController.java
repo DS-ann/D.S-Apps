@@ -84,7 +84,7 @@ final class HomePageController {
                 ? host.getPageViewport().getWidth()
                 : Math.max(1, activity.getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(activity, 40));
-        int requiredPages = 1;
+        int requiredPages = Math.max(1, host.getPages().size());
         while (strip.getChildCount() < requiredPages) {
             FrameLayout newPage = new FrameLayout(activity);
             newPage.setClipChildren(false);
@@ -134,11 +134,11 @@ final class HomePageController {
         }
 
         int columns = host.getHomeColumns();
-        int rows = Math.max(homeRows, (host.getPages().get(0).size() + columns - 1) / columns);
         for (int pageIndex = 0; pageIndex < requiredPages; pageIndex++) {
             FrameLayout page = (FrameLayout) strip.getChildAt(pageIndex);
             page.setClipChildren(false);
             List<String> pagePackages = host.getPages().get(pageIndex);
+            int rows = Math.max(homeRows, (pagePackages.size() + columns - 1) / columns);
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
                 if (host.findApp(packageName) == null) continue;
