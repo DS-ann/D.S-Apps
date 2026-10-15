@@ -1312,9 +1312,9 @@ public class MainActivity extends Activity {
                             Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
                     // Fixed-size slots are shared by both screens. The usable page
                     // ends above the page indicator/dock, so a complete slot must fit.
-                    int rows = Math.max(1, Math.min(HOME_ROWS,
-                            Math.max(1, (pageViewport.getHeight() > 0
-                                    ? pageViewport.getHeight() : slotHeight) / slotHeight)));
+                    int rows = Math.max(1,
+                            (pageViewport.getHeight() > 0 ? pageViewport.getHeight() : slotHeight)
+                                    / slotHeight);
                     // The dragged cell stays attached to its source page until ACTION_UP.
                     // Its layout margins therefore are not reliable destination coordinates.
                     // Map the release point to the visible viewport, where the destination
@@ -2463,9 +2463,10 @@ public class MainActivity extends Activity {
     private void resolveWidgetIconCollisions(FrameLayout page, FrameLayout widgetContainer) {
         if (page == null || widgetContainer == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
         int columns = getHomeColumns();
-        int rows = HOME_ROWS;
         int cellWidth = Math.max(1, page.getWidth() / columns);
-        int cellHeight = Math.max(1, page.getHeight() / rows);
+        int cellHeight = LauncherUiUtils.dp(this,
+                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int rows = Math.max(1, page.getHeight() / cellHeight);
         FrameLayout.LayoutParams widgetLp = (FrameLayout.LayoutParams) widgetContainer.getLayoutParams();
         int wx1 = widgetLp.leftMargin, wy1 = widgetLp.topMargin;
         int wx2 = wx1 + widgetContainer.getWidth(), wy2 = wy1 + widgetContainer.getHeight();
