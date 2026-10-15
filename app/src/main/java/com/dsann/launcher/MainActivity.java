@@ -331,7 +331,10 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
         hp.topMargin = dp(8);
         homeScreen.addView(hero, hp);
-        clockText = text("--:--", 40, Color.WHITE, true);
+        clockText = new SquarePixelClockTextView(this);
+        clockText.setText("--:--");
+        clockText.setTextSize(40);
+        clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
         clockText.setLetterSpacing(0.055f);
@@ -1080,6 +1083,69 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Draws the selected clock in a chunky 5x7 square-pixel font. */
+    private class SquarePixelClockTextView extends TextView {
+        private final Paint pixelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final String[] digitRows = new String[]{
+                "01110/11011/11011/11011/11011/11011/01110",
+                "00100/01100/00100/00100/00100/00100/01110",
+                "01110/11011/00011/00110/01100/11000/11111",
+                "11110/00011/00011/01110/00011/00011/11110",
+                "00011/00111/01011/10011/11111/00011/00011",
+                "11111/11000/11000/11110/00011/00011/11110",
+                "01110/11000/11000/11110/11011/11011/01110",
+                "11111/00011/00110/00100/01100/01100/01100",
+                "01110/11011/11011/01110/11011/11011/01110",
+                "01110/11011/11011/01111/00011/00011/01110"
+        };
+
+        SquarePixelClockTextView(android.content.Context context) {
+            super(context);
+            setGravity(Gravity.CENTER_VERTICAL);
+            setSingleLine(true);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            if (prefs == null || prefs.getInt(KEY_CLOCK_STYLE, 0) != 5) {
+                super.onDraw(canvas);
+                return;
+            }
+            String value = getText() == null ? "" : getText().toString();
+            if (value.length() == 0) return;
+            float cell = getTextSize() / 9.0f;
+            float block = cell * 0.82f;
+            float advance = cell * 6.0f;
+            float total = value.length() * advance - cell;
+            float left = Math.max(getPaddingLeft(), (getWidth() - total) / 2.0f);
+            float top = (getHeight() - cell * 7.0f) / 2.0f;
+            pixelPaint.setColor(getCurrentTextColor());
+            pixelPaint.setStyle(Paint.Style.FILL);
+            pixelPaint.setShadowLayer(dp(1), 0f, 0f, Color.argb(70, 60, 255, 100));
+            for (int i = 0; i < value.length(); i++) {
+                char ch = value.charAt(i);
+                if (ch == ':') {
+                    drawPixel(canvas, left + i * advance + cell * 2.0f, top + cell * 2.0f, block);
+                    drawPixel(canvas, left + i * advance + cell * 2.0f, top + cell * 5.0f, block);
+                    continue;
+                }
+                if (ch < '0' || ch > '9') continue;
+                String[] rows = digitRows[ch - '0'].split("/");
+                for (int row = 0; row < 7; row++) {
+                    for (int col = 0; col < 5; col++) {
+                        if (rows[row].charAt(col) == '1') {
+                            drawPixel(canvas, left + i * advance + col * cell, top + row * cell, block);
+                        }
+                    }
+                }
+            }
+            pixelPaint.clearShadowLayer();
+        }
+
+        private void drawPixel(Canvas canvas, float x, float y, float size) {
+            canvas.drawRect(x, y, x + size, y + size, pixelPaint);
+        }
+    }
+
     private void applyClockStyle() {
         if (clockText == null) return;
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
@@ -1111,6 +1177,13 @@ public class MainActivity extends Activity {
                 clockText.setLetterSpacing(0.09f);
                 clockText.setTextColor(Color.rgb(125, 255, 150));
                 clockText.setShadowLayer(dp(3), 0f, 0f, Color.argb(95, 60, 255, 100));
+                break;
+            case 5: // Square Pixel: custom chunky square-pixel numerals, not a system font.
+                clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+                clockText.setTextSize(40);
+                clockText.setLetterSpacing(0f);
+                clockText.setTextColor(Color.rgb(145, 255, 170));
+                clockText.setShadowLayer(dp(2), 0f, 0f, Color.argb(70, 60, 255, 100));
                 break;
             default: // Digital: fixed-width digital readout with bold squared-off glyphs.
                 clockText.setTypeface(Typeface.create("sans-serif-monospace", Typeface.BOLD));
@@ -1389,7 +1462,7 @@ public class MainActivity extends Activity {
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital"}, value -> {
+        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "Square Pixel"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
             applyClockStyle();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
