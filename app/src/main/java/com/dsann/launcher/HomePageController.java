@@ -166,7 +166,7 @@ final class HomePageController {
             int cellHeight = LauncherUiUtils.dp(activity, Math.max(56, configuredIconSize + 28));
             // Each app owns one fixed-height grid slot. Compute the number of rows
             // from the usable workspace height so no slot extends into the dock.
-            int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
+            final int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
             boolean[][] occupiedSlots = new boolean[rows][columns];
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
