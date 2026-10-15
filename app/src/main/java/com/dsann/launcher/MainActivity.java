@@ -435,7 +435,9 @@ public class MainActivity extends Activity {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setGravity(Gravity.RIGHT);
-        hero.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
+        hero.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
+        hero.setClipChildren(false);
+        hero.setClipToPadding(false);
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
                 Math.max(LauncherUiUtils.dp(this, 220), (int) ((getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) * 0.82f)),
                 -2);
