@@ -579,7 +579,7 @@ public class MainActivity extends Activity {
         hero.setClipToPadding(false);
         // Give the clock the full usable width; a large LED clock must not be
         // measured inside the old 82%-width panel and clipped at its left edge.
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, -2);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
         hp.gravity = Gravity.TOP;
         hp.topMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(hero, hp);
