@@ -357,10 +357,15 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            boolean verticalSwipe = !gestureStartedOnWidget && !gestureStartedOnAppCell && !gestureStartedOnContactShortcut
-                    && Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+            // The drawer must always dismiss on a deliberate downward swipe,
+            // including when the gesture begins over an app icon or after scrolling.
+            // On the home screen, preserve widget/icon gestures and only open on an upward swipe.
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dy) > Math.abs(dx)
-                    && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
+                    && (drawerOpen
+                        ? dy > 0
+                        : dy < 0 && !gestureStartedOnWidget && !gestureStartedOnAppCell
+                                && !gestureStartedOnContactShortcut);
             if (verticalSwipe) {
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
@@ -417,6 +422,17 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(homeLongPress);
         // Stay on the home screen; the system Recents action belongs to the
         // navigation bar/gesture, not the Back button.
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        // Android sends the HOME intent back to this singleTask launcher. Always
+        // return to the first home page and dismiss the drawer on that action.
+        if (root != null) {
+            if (drawerOpen) showHome();
+            if (currentPage != 0) showPage(0, true);
+        }
     }
 
     @Override protected void onResume() {
