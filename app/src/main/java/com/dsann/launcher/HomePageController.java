@@ -167,7 +167,7 @@ final class HomePageController {
             // Each app owns one fixed-height grid slot. Compute the number of rows
             // from the usable workspace height so no slot extends into the dock.
             int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
-            rows = Math.max(rows, (pagePackages.size() + columns - 1) / columns);
+            boolean[][] occupiedSlots = new boolean[rows][columns];
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
                 if (host.findApp(packageName) == null) continue;
@@ -194,6 +194,25 @@ final class HomePageController {
                         Math.round(savedX * Math.max(1, columns - 1))));
                 int row = Math.max(0, Math.min(rows - 1,
                         Math.round(savedY * Math.max(1, rows - 1))));
+                if (occupiedSlots[row][col]) {
+                    int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
+                    for (int candidateRow = 0; candidateRow < rows; candidateRow++) {
+                        for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                            if (occupiedSlots[candidateRow][candidateCol]) continue;
+                            int distance = Math.abs(candidateCol - col) + Math.abs(candidateRow - row);
+                            if (distance < bestDistance) {
+                                bestDistance = distance; bestCol = candidateCol; bestRow = candidateRow;
+                            }
+                        }
+                    }
+                    if (bestCol < 0) continue; // Never overlap another app or extend below the dock.
+                    col = bestCol; row = bestRow;
+                    savedX = col / (float) Math.max(1, columns - 1);
+                    savedY = row / (float) Math.max(1, rows - 1);
+                    prefs.edit().putFloat(iconXKey + packageName, savedX)
+                            .putFloat(iconYKey + packageName, savedY).apply();
+                }
+                occupiedSlots[row][col] = true;
                 lp.leftMargin = col * cellWidth;
                 lp.topMargin = row * cellHeight;
                 page.addView(cell, lp);
@@ -205,7 +224,6 @@ final class HomePageController {
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         Math.max(56, configuredIconSize + 28));
                 int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
-                actualRows = Math.max(actualRows, (pagePackages.size() + columns - 1) / columns);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
