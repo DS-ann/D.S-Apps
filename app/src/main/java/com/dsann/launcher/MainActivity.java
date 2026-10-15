@@ -1839,7 +1839,6 @@ public class MainActivity extends Activity {
         addSection(content, "Clock and motion");
         addSliderRow(content, "Page rotation", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Launcher animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
             prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
@@ -1848,7 +1847,6 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Clock size", 50, 120, getClockSize(), " sp", value -> {
             prefs.edit().putInt(KEY_CLOCK_SIZE, value).apply();
             applyClockPositionAndSize();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_POSITION, value).apply();
