@@ -456,7 +456,7 @@ public class MainActivity extends Activity {
         clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(78);
         // Scale the clock's drawing area by 50%; the custom LED renderer fits digits to these bounds.
-        int clockDisplayWidth = Math.min(LauncherUiUtils.dp(this, 278),
+        int clockDisplayWidth = Math.min(LauncherUiUtils.dp(this, 340),
                 Math.max(LauncherUiUtils.dp(this, 185), (int) ((getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(this, 40)) * 0.82f) - LauncherUiUtils.dp(this, 38)));
         clockText.setLayoutParams(new LinearLayout.LayoutParams(clockDisplayWidth, LauncherUiUtils.dp(this, 114)));
