@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: launcher-app-build
+  group: launcher-app-build-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
