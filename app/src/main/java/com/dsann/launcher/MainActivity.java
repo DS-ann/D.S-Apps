@@ -950,26 +950,60 @@ public class MainActivity extends Activity {
     }
 
     private void addWidgetToCurrentPage(AppWidgetProviderInfo info, int widgetId) {
-        if (pagesStrip == null) {
+        if (pagesStrip == null || info == null) {
             Toast.makeText(this, "Open the home screen and try again", Toast.LENGTH_SHORT).show();
             return;
         }
         rebuildPages();
         ensurePageExists(Math.max(0, currentPage));
         renderHomePages(false);
-        if (currentPage < 0 || currentPage >= pagesStrip.getChildCount()) currentPage = Math.max(0, pagesStrip.getChildCount() - 1);
-        FrameLayout page = (FrameLayout) pagesStrip.getChildAt(currentPage);
-        AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
-        widget.setAppWidget(widgetId, info);
-        addWidgetContainer(page, widget, widgetId, currentPage, LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 8),
-                Math.max(LauncherUiUtils.dp(this, 180), page.getWidth() / 2), Math.max(LauncherUiUtils.dp(this, 100), page.getHeight() / 4));
-        String stored = prefs.getString(KEY_WIDGET_IDS, "");
-        String entry = widgetId + ":" + currentPage;
-        if (!containsWidgetId(stored, widgetId)) {
-            prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
-        }
-        Toast.makeText(this, "Widget added. Long-press to move; use the corner handle to resize.", Toast.LENGTH_LONG).show();
-        widgetHost.startListening();
+        final int targetPage = Math.max(0, currentPage);
+        // Wait for the page to be measured before sizing the host view. Immediately
+        // after renderHomePages(), FrameLayout.getWidth()/getHeight() are often zero.
+        pagesStrip.post(() -> {
+            if (isFinishing() || pagesStrip == null) return;
+            ensurePageExists(targetPage);
+            if (targetPage >= pagesStrip.getChildCount()) {
+                renderHomePages(false);
+                return;
+            }
+            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(targetPage);
+            if (page == null) return;
+            int availableWidth = page.getWidth() > 0 ? page.getWidth()
+                    : Math.max(LauncherUiUtils.dp(this, 180), getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
+            int availableHeight = page.getHeight() > 0 ? page.getHeight()
+                    : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
+            int minWidth = LauncherUiUtils.dp(this, Math.max(0, info.minWidth));
+            int minHeight = LauncherUiUtils.dp(this, Math.max(0, info.minHeight));
+            int width = Math.min(Math.max(LauncherUiUtils.dp(this, 180), minWidth),
+                    Math.max(LauncherUiUtils.dp(this, 140), availableWidth - LauncherUiUtils.dp(this, 16)));
+            int height = Math.min(Math.max(LauncherUiUtils.dp(this, 100), minHeight),
+                    Math.max(LauncherUiUtils.dp(this, 90), availableHeight - LauncherUiUtils.dp(this, 80)));
+            AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
+            widget.setAppWidget(widgetId, info);
+            addWidgetContainer(page, widget, widgetId, targetPage, LauncherUiUtils.dp(this, 8),
+                    LauncherUiUtils.dp(this, 8), width, height);
+            FrameLayout container = null;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                if (("launcher_widget:" + widgetId).equals(child.getTag()) && child instanceof FrameLayout) {
+                    container = (FrameLayout) child;
+                    break;
+                }
+            }
+            if (container != null) {
+                WidgetController.updateWidgetSize(widgetManager, widgetId, widget, getResources().getDisplayMetrics().density,
+                        container.getLayoutParams().width, container.getLayoutParams().height);
+                saveWidgetGeometry(widgetId, targetPage, container);
+            } else {
+                String stored = prefs.getString(KEY_WIDGET_IDS, "");
+                String entry = widgetId + ":" + targetPage;
+                if (!containsWidgetId(stored, widgetId)) {
+                    prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
+                }
+            }
+            widgetHost.startListening();
+        });
     }
 
     private boolean containsWidgetId(String stored, int widgetId) {
@@ -986,33 +1020,55 @@ public class MainActivity extends Activity {
     }
 
     private void restoreWidgetsOnPages() {
-        String stored = prefs.getString(KEY_WIDGET_IDS, "");
-        if (stored.isEmpty()) return;
-        for (String entry : stored.split("\\n")) {
-            String[] parts = entry.split(":");
-            if (parts.length < 2) continue;
-            try {
-                int id = Integer.parseInt(parts[0]);
-                int pageIndex = Integer.parseInt(parts[1]);
-                if (pageIndex < 0 || pageIndex >= pagesStrip.getChildCount()) continue;
-                FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
-                boolean exists = false;
-                for (int i = 0; i < page.getChildCount(); i++) {
-                    Object tag = page.getChildAt(i).getTag();
-                    if (("launcher_widget:" + id).equals(tag)) { exists = true; break; }
-                }
-                if (exists) continue;
-                AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
-                if (info == null) continue;
-                int width = prefs.getInt("widget_w_" + id, Math.max(LauncherUiUtils.dp(this, 180), page.getWidth() / 2));
-                int height = prefs.getInt("widget_h_" + id, Math.max(LauncherUiUtils.dp(this, 100), page.getHeight() / 4));
-                int x = prefs.getInt("widget_x_" + id, LauncherUiUtils.dp(this, 8));
-                int y = prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8));
-                AppWidgetHostView widget = widgetHost.createView(this, id, info);
-                widget.setAppWidget(id, info);
-                addWidgetContainer(page, widget, id, pageIndex, x, y, width, height);
-            } catch (Exception ignored) {}
-        }
+        if (pagesStrip == null) return;
+        // Restore only after layout: providers often need real dimensions to render
+        // correctly, and zero-sized host views can make widgets look broken.
+        pagesStrip.post(() -> {
+            if (pagesStrip == null || isFinishing()) return;
+            String stored = prefs.getString(KEY_WIDGET_IDS, "");
+            if (stored.isEmpty()) return;
+            for (String entry : stored.split("\\n")) {
+                String[] parts = entry.split(":");
+                if (parts.length < 2) continue;
+                try {
+                    int id = Integer.parseInt(parts[0]);
+                    int pageIndex = Integer.parseInt(parts[1]);
+                    if (pageIndex < 0 || pageIndex >= pagesStrip.getChildCount()) continue;
+                    FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+                    boolean exists = false;
+                    for (int i = 0; i < page.getChildCount(); i++) {
+                        Object tag = page.getChildAt(i).getTag();
+                        if (("launcher_widget:" + id).equals(tag)) { exists = true; break; }
+                    }
+                    if (exists) continue;
+                    AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
+                    if (info == null) {
+                        WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
+                        continue;
+                    }
+                    int availableWidth = page.getWidth() > 0 ? page.getWidth()
+                            : Math.max(LauncherUiUtils.dp(this, 180), getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
+                    int availableHeight = page.getHeight() > 0 ? page.getHeight()
+                            : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
+                    int defaultWidth = Math.min(Math.max(LauncherUiUtils.dp(this, 180), LauncherUiUtils.dp(this, Math.max(0, info.minWidth))),
+                            Math.max(LauncherUiUtils.dp(this, 140), availableWidth - LauncherUiUtils.dp(this, 16)));
+                    int defaultHeight = Math.min(Math.max(LauncherUiUtils.dp(this, 100), LauncherUiUtils.dp(this, Math.max(0, info.minHeight))),
+                            Math.max(LauncherUiUtils.dp(this, 90), availableHeight - LauncherUiUtils.dp(this, 80)));
+                    int width = Math.min(Math.max(LauncherUiUtils.dp(this, 140), prefs.getInt("widget_w_" + id, defaultWidth)),
+                            Math.max(LauncherUiUtils.dp(this, 140), availableWidth));
+                    int height = Math.min(Math.max(LauncherUiUtils.dp(this, 90), prefs.getInt("widget_h_" + id, defaultHeight)),
+                            Math.max(LauncherUiUtils.dp(this, 90), availableHeight));
+                    int x = Math.max(0, Math.min(prefs.getInt("widget_x_" + id, LauncherUiUtils.dp(this, 8)),
+                            Math.max(0, availableWidth - width)));
+                    int y = Math.max(0, Math.min(prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8)),
+                            Math.max(0, availableHeight - height)));
+                    AppWidgetHostView widget = widgetHost.createView(this, id, info);
+                    widget.setAppWidget(id, info);
+                    addWidgetContainer(page, widget, id, pageIndex, x, y, width, height);
+                    WidgetController.updateWidgetSize(widgetManager, id, widget, getResources().getDisplayMetrics().density, width, height);
+                } catch (Exception ignored) {}
+            }
+        });
     }
 
     private boolean touchStartedOnAppCell(float rawX, float rawY) {
