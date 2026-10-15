@@ -555,20 +555,18 @@ public class MainActivity extends Activity {
                     view.setLayoutParams(dragged);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     if (moveToNextPage) {
-                        // Insert a fresh page immediately after the page being dragged from.
-                        // Shift existing later pages (including widget-only pages) so the
-                        // dragged shortcut lands on the new page instead of a stale page list.
-                        int destinationPage = currentPage + 1;
+                        // Use the actual source view index; currentPage can lag during page animations.
+                        int sourcePage = pagesStrip.indexOfChild(page);
+                        if (sourcePage < 0) sourcePage = currentPage;
+                        int destinationPage = sourcePage + 1;
                         SharedPreferences.Editor edit = prefs.edit();
-                        int capacity = pageCapacity();
-                        for (int packageIndex = 0; packageIndex < homePackages.size(); packageIndex++) {
-                            String existingPackage = homePackages.get(packageIndex);
-                            if (existingPackage.equals(packageName)) continue;
-                            int existingPage = prefs.contains(KEY_ICON_PAGE + existingPackage)
-                                    ? prefs.getInt(KEY_ICON_PAGE + existingPackage, 0)
-                                    : packageIndex / capacity;
-                            if (existingPage >= destinationPage) {
-                                edit.putInt(KEY_ICON_PAGE + existingPackage, existingPage + 1);
+                        // Persist current page assignments first, then shift all later pages.
+                        for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+                            for (String existingPackage : pages.get(pageIndex)) {
+                                if (!existingPackage.equals(packageName)) {
+                                    int shiftedPage = pageIndex >= destinationPage ? pageIndex + 1 : pageIndex;
+                                    edit.putInt(KEY_ICON_PAGE + existingPackage, shiftedPage);
+                                }
                             }
                         }
                         String widgetEntries = prefs.getString(KEY_WIDGET_IDS, "");
@@ -593,7 +591,9 @@ public class MainActivity extends Activity {
                                 .apply();
                         currentPage = destinationPage;
                     } else {
-                        prefs.edit().putInt(KEY_ICON_PAGE + packageName, currentPage).apply();
+                        int sourcePage = pagesStrip.indexOfChild(page);
+                        prefs.edit().putInt(KEY_ICON_PAGE + packageName,
+                                sourcePage >= 0 ? sourcePage : currentPage).apply();
                     }
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
                     iconDragging = false;
