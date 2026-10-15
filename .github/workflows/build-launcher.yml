@@ -8,7 +8,6 @@ on:
 permissions:
   contents: read
 
-# Only build the latest launcher commit; older builds are superseded on rapid fixes.
 concurrency:
   group: launcher-app-build
   cancel-in-progress: true
@@ -27,20 +26,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Disable Gradle's persisted dependency/build caches for a clean diagnostic build.
       - name: Set up Gradle without cache
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
           cache-disabled: true
 
-      - name: Set up Android SDK build tools
+      # Install SDK packages explicitly as separate shell arguments. This avoids
+      # setup-android's packages input treating a combined value as one package.
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          # setup-android expects one SDK package per line, not comma-separated.
-          packages: |
-            platforms;android-35
-            build-tools;35.0.0
+
+      - name: Install Android platform and build tools
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager --list_installed | grep -E 'platforms;android-35|build-tools;35.0.0'
 
       - name: Prepare and validate BatteryPulse signing key
         env:
