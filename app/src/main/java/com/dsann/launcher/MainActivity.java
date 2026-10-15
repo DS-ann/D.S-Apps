@@ -670,7 +670,6 @@ public class MainActivity extends Activity {
                     view.bringToFront();
                 }
                 if (iconDragging) {
-                    int screenWidth = getResources().getDisplayMetrics().widthPixels;
                     // Fixed workspace: dragging never changes screens or creates pages.
                     iconEdgeLatch = 0;
                     FrameLayout page = (FrameLayout) view.getParent();
@@ -924,7 +923,10 @@ public class MainActivity extends Activity {
 
     private void showAddApps() {
         final List<ResolveInfo> available = new ArrayList<>();
-        for (ResolveInfo app : allApps) if (!homePackages.contains(app.activityInfo.packageName)) available.add(app);
+        for (ResolveInfo app : allApps) {
+            String packageName = app.activityInfo.packageName;
+            if (!packageName.equals(getPackageName()) && !homePackages.contains(packageName)) available.add(app);
+        }
         if (available.isEmpty()) {
             Toast.makeText(this, "All apps are already on Home", Toast.LENGTH_SHORT).show();
             return;
