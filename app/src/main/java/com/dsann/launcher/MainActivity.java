@@ -1110,7 +1110,7 @@ public class MainActivity extends Activity {
                 configureOrAddWidget(boundInfo);
                 return;
             }
-            addWidgetToCurrentPage(info, pendingWidgetId);
+            addWidgetToPage(info, pendingWidgetId, pendingWidgetTargetPage)
             pendingWidgetId = -1;
             pendingWidgetInfo = null;
             return;
