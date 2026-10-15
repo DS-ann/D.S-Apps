@@ -539,10 +539,10 @@ public class MainActivity extends Activity {
         clockText.setTextSize(78);
         // Scale the clock's drawing area by 50%; the custom LED renderer fits digits to these bounds.
         int initialClockSize = getClockSize();
-        int clockDisplayWidth = Math.min(LauncherUiUtils.dp(this, 340),
-                Math.max(LauncherUiUtils.dp(this, 185), Math.round(LauncherUiUtils.dp(this, 1)
-                        * initialClockSize * 4.28f)));
-        clockText.setLayoutParams(new LinearLayout.LayoutParams(clockDisplayWidth, LauncherUiUtils.dp(this, 114)));
+        // Wrap to the measured time glyphs; a fixed-width slot separates AM/PM
+        // from the digits whenever the clock is moved or resized.
+        clockText.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
@@ -2014,12 +2014,9 @@ public class MainActivity extends Activity {
         if (dateText != null) dateText.setGravity(alignment);
         int size = getClockSize();
         clockText.setTextSize(size);
-        int contentWidth = Math.min(LauncherUiUtils.dp(this, 340),
-                Math.max(LauncherUiUtils.dp(this, 150), Math.round(LauncherUiUtils.dp(this, 1)
-                        * size * 4.28f)));
         ViewGroup.LayoutParams clockWidthParams = clockText.getLayoutParams();
-        if (clockWidthParams != null) {
-            clockWidthParams.width = contentWidth;
+        if (clockWidthParams != null && clockWidthParams.width != ViewGroup.LayoutParams.WRAP_CONTENT) {
+            clockWidthParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
             clockText.setLayoutParams(clockWidthParams);
         }
         int height = LauncherUiUtils.dp(this, Math.round(size * 1.46f));
