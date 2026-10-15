@@ -1607,9 +1607,29 @@ public class MainActivity extends Activity {
     }
 
     private void applyClockPanelColor(boolean animate) {
-        // Diagnostic build: remove the clock panel's gradient/background entirely.
-        if (clockPanel != null) {
-            clockPanel.setBackgroundColor(Color.TRANSPARENT);
+        if (homeScreen == null) return;
+        View hero = clockPanel;
+        if (hero == null) return;
+        int minute = new Date().getMinutes();
+        int phase = (minute / 5) % 4;
+        int[][] tones = new int[][] {
+                {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
+        };
+        int[] tone = tones[phase];
+        int side = Color.argb(149, tone[0], tone[1], tone[2]);
+        int centre = Color.argb(0, tone[0], tone[1], tone[2]);
+        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT,
+                new int[] {side, Color.argb(63, tone[0], tone[1], tone[2]), centre});
+        next.setCornerRadius(LauncherUiUtils.dp(this, 18));
+        if (animate) {
+            hero.setBackground(next);
+            next.setAlpha(0);
+            android.animation.ValueAnimator fade = android.animation.ValueAnimator.ofInt(0, 255);
+            fade.setDuration(animationDuration(260L));
+            fade.addUpdateListener(a -> next.setAlpha((Integer) a.getAnimatedValue()));
+            fade.start();
+        } else {
+            hero.setBackground(next);
         }
     }
 
