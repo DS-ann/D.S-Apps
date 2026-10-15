@@ -211,8 +211,9 @@ final class HomePageController {
 
         host.restoreWidgetsOnPages();
         if (host.getPageIndicator() != null) {
-            host.getPageIndicator().setVisibility(
-                    View.GONE);
+            boolean showIndicator = requiredPages > 1
+                    && prefs.getBoolean(showPageIndicatorKey, true);
+            host.getPageIndicator().setVisibility(showIndicator ? View.VISIBLE : View.GONE);
             host.getPageIndicator().setText(
                     (host.getCurrentPage() + 1) + "  /  " + requiredPages);
         }
