@@ -869,6 +869,7 @@ public class MainActivity extends Activity {
         } else {
             pagesStrip.setTranslationX(targetX);
             pagesStrip.setRotationY(0f);
+            pagesStrip.setScaleX(1f);
         }
         if (pageIndicator != null) {
             boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
