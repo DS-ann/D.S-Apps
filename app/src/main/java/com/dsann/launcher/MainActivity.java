@@ -358,7 +358,9 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
-            if (verticalSwipeClaimed) {
+            if (verticalSwipeClaimed
+                    || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+                        && Math.abs(dy) > Math.abs(dx) * 1.15f)) {
                 if (dy < 0f) {
                     showDrawer();
                 } else {
@@ -2841,12 +2843,13 @@ public class MainActivity extends Activity {
                 markerParams.width = LauncherUiUtils.dp(this, 22);
                 markerParams.height = LauncherUiUtils.dp(this, 12);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
-                int clockLeft = alignment == Gravity.RIGHT
-                        ? naturalWidthPx - renderedClockWidth
+                int clockLayoutLeft = alignment == Gravity.RIGHT
+                        ? contentWidth - naturalWidthPx
                         : (alignment == Gravity.CENTER_HORIZONTAL
-                            ? (naturalWidthPx - renderedClockWidth) / 2 : 0);
+                            ? (contentWidth - naturalWidthPx) / 2 : 0);
                 markerParams.leftMargin = Math.max(0,
-                        clockLeft + renderedClockWidth - markerParams.width);
+                        clockLayoutLeft + Math.round(horizontalScaleOffset)
+                                + renderedClockWidth - markerParams.width);
                 // The marker follows the scaled clock's bottom edge, independent
                 // of row height or the selected horizontal position.
                 markerParams.topMargin = Math.max(0,
