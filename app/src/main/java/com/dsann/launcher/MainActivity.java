@@ -266,7 +266,7 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             // Widget gestures belong to the widget interaction handler, never the
             // launcher's global long-press/customization or drawer gesture.
-            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget)
+            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget && !gestureStartedOnContactShortcut)
                 handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
         }
@@ -593,7 +593,7 @@ public class MainActivity extends Activity {
         clockGroup.setClipToPadding(false);
         clockText = new SevenSegmentClockTextView(this);
         clockText.setText("--:--");
-        clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        clockText.setGravity(Gravity.LEFT | Gravity.TOP);
         clockText.setTextSize(78);
         clockText.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
@@ -798,7 +798,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = LauncherUiUtils.dp(this, 38);
+        int initialIconSize = LauncherUiUtils.dp(this, 28);
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 11, Color.WHITE, true);
@@ -828,8 +828,9 @@ public class MainActivity extends Activity {
         resizeGrip.setBackground(gripBackground);
         resizeGrip.setVisibility(View.GONE);
         FrameLayout.LayoutParams gripParams = new FrameLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 22), LauncherUiUtils.dp(this, 22), Gravity.RIGHT | Gravity.BOTTOM);
+                LauncherUiUtils.dp(this, 36), LauncherUiUtils.dp(this, 36), Gravity.RIGHT | Gravity.BOTTOM);
         tile.addView(resizeGrip, gripParams);
+        resizeGrip.bringToFront();
         final boolean[] resizingShortcut = {false};
         final float[] resizeStart = {0f, 0f};
         final int[] resizeBase = {shortcutSpanX, shortcutSpanY};
@@ -858,11 +859,11 @@ public class MainActivity extends Activity {
                         tile.setLayoutParams(p);
                         // Grow the actual contact/app icon as the tile grows; changing only
                         // the tile bounds leaves the icon visually stuck at its original size.
-                        int availableWidth = Math.max(LauncherUiUtils.dp(this, 38),
+                        int availableWidth = Math.max(LauncherUiUtils.dp(this, 28),
                                 p.width - LauncherUiUtils.dp(this, 16));
-                        int availableHeight = Math.max(LauncherUiUtils.dp(this, 38),
+                        int availableHeight = Math.max(LauncherUiUtils.dp(this, 28),
                                 p.height - LauncherUiUtils.dp(this, 42));
-                        int iconSize = Math.max(LauncherUiUtils.dp(this, 38),
+                        int iconSize = Math.max(LauncherUiUtils.dp(this, 28),
                                 Math.min(LauncherUiUtils.dp(this, 96),
                                         Math.min(availableWidth, availableHeight)));
                         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
@@ -1341,14 +1342,13 @@ public class MainActivity extends Activity {
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
 
-        pagesStrip.setTranslationX(-from * width);
         View incomingFace = to >= 0 && to < pagesStrip.getChildCount() ? pagesStrip.getChildAt(to) : null;
-        if (incomingFace != null) {
-            incomingFace.setTranslationX(-direction * width);
-            incomingFace.setAlpha(progress);
-        }
-        outgoing.setAlpha(1f - progress);
-        // Parallax uses restrained transforms; no extra strip movement competes with them.
+        // Keep the two page views in their real neighbouring positions. Translating the
+        // incoming face over the outgoing one caused the next page to pop into view.
+        // Only the parallax style moves the strip; 3D styles rotate the adjacent faces.
+        pagesStrip.setTranslationX(-from * width - (effect == 2 ? direction * width * progress : 0f));
+        outgoing.setAlpha(1f);
+        if (incomingFace != null) incomingFace.setAlpha(1f);
         if (effect == 2) {
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
@@ -1400,7 +1400,7 @@ public class MainActivity extends Activity {
         } else {
             // 3D Wheel: broad rotation around the page center, controlled by the rotation slider.
             float angle = Math.min(180f, getPageRotationDegrees());
-            outgoing.setPivotX(width * 0.5f);
+            outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
             outgoing.setRotationY(direction * angle * progress);
             outgoing.setScaleX(1f - 0.035f * progress);
@@ -1408,7 +1408,7 @@ public class MainActivity extends Activity {
             if (to >= 0 && to < pagesStrip.getChildCount()) {
                 View incoming = pagesStrip.getChildAt(to);
                 incoming.setCameraDistance(10000f * density);
-                incoming.setPivotX(incoming.getWidth() * 0.5f);
+                incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
                 incoming.setRotationY(-direction * angle * (1f - progress));
                 incoming.setScaleX(0.965f + 0.035f * progress);
