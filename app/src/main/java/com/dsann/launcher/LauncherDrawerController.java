@@ -45,8 +45,15 @@ final class LauncherDrawerController {
         int side = LauncherUiUtils.dp(activity, 18);
         screen.setPadding(side, side, side, LauncherUiUtils.dp(activity, 8));
         screen.setBackground(background);
-        TextView title = LauncherUiUtils.text(activity, "Apps", 28, android.graphics.Color.WHITE, true);
-        screen.addView(title, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 48)));
+        TextView title = LauncherUiUtils.text(activity, "My Apps", 28,
+                android.graphics.Color.WHITE, true);
+        title.setGravity(Gravity.CENTER);
+        title.setTypeface(android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL));
+        title.setLetterSpacing(0.015f);
+        LinearLayout.LayoutParams titleParams =
+                new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 48));
+        titleParams.bottomMargin = LauncherUiUtils.dp(activity, 4);
+        screen.addView(title, titleParams);
 
         GridView grid = new GridView(activity);
         grid.setNumColumns(actions.getColumns());
