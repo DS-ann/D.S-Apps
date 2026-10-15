@@ -612,9 +612,13 @@ public class MainActivity extends Activity {
                         // dragged shortcut lands on the new page instead of a stale page list.
                         int destinationPage = currentPage + 1;
                         SharedPreferences.Editor edit = prefs.edit();
-                        for (String existingPackage : homePackages) {
+                        int capacity = pageCapacity();
+                        for (int packageIndex = 0; packageIndex < homePackages.size(); packageIndex++) {
+                            String existingPackage = homePackages.get(packageIndex);
                             if (existingPackage.equals(packageName)) continue;
-                            int existingPage = prefs.getInt(KEY_ICON_PAGE + existingPackage, -1);
+                            int existingPage = prefs.contains(KEY_ICON_PAGE + existingPackage)
+                                    ? prefs.getInt(KEY_ICON_PAGE + existingPackage, 0)
+                                    : packageIndex / capacity;
                             if (existingPage >= destinationPage) {
                                 edit.putInt(KEY_ICON_PAGE + existingPackage, existingPage + 1);
                             }
