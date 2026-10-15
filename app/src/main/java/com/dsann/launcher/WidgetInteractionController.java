@@ -146,7 +146,7 @@ final class WidgetInteractionController {
                     resizeHandle.setVisibility(View.VISIBLE);
                     container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
- 
+                }
             });
         };
         gestureGrip.setOnTouchListener((view, event) -> {
