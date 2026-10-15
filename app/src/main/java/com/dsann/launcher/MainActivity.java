@@ -1229,6 +1229,7 @@ public class MainActivity extends Activity {
                 if (!iconDragging && iconDragArmed && moved) {
                     iconDragging = true;
                     if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
+                    setWorkspaceGridVisible(true, view);
                     view.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(animationDuration(100)).start();
                     view.bringToFront();
                 }
@@ -1279,7 +1280,9 @@ public class MainActivity extends Activity {
                             view.animate().cancel();
                             view.setTranslationX(0f);
                             view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(100)).start();
-                            iconDragging = false;
+                            setWorkspaceGridVisible(false, null);
+                            setWorkspaceGridVisible(false, null);
+                    iconDragging = false;
                             iconDragArmed = false;
                             activeDragView = null;
                             activeDragPackage = null;
@@ -1357,6 +1360,7 @@ public class MainActivity extends Activity {
                     currentPage = committedPage;
                     view.setTranslationX(0f);
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(140)).start();
+                    setWorkspaceGridVisible(false, null);
                     iconDragging = false;
                     iconDragArmed = false;
                     activeDragView = null;
