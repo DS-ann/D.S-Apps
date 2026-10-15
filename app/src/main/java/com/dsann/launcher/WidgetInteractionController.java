@@ -28,6 +28,7 @@ final class WidgetInteractionController {
         void showActionDialog(String title, String[] icons, String[] labels,
                               DialogInterface.OnClickListener listener);
         void setCurrentPage(int page);
+        int getCurrentPage();
         void showPage(int page, boolean animate);
         LinearLayout getPagesStrip();
         void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
@@ -204,14 +205,23 @@ final class WidgetInteractionController {
                     int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(activity, 28) ? 1
                             : event.getRawX() <= LauncherUiUtils.dp(activity, 28) ? -1 : 0;
                     if (edge == 0) edgeLatch[0] = 0;
+                    else if (edge != edgeLatch[0]) {
+                        edgeLatch[0] = edge;
+                        int current = listener.getCurrentPage();
+                        if (edge > 0) {
+                            listener.ensurePageExists(current + 1);
+                            listener.setCurrentPage(current + 1);
+                            listener.showPage(current + 1, true);
+                        } else if (current > 0) {
+                            listener.setCurrentPage(current - 1);
+                            listener.showPage(current - 1, true);
+                        }
+                    }
                     LinearLayout strip = listener.getPagesStrip();
-                    // 'page' is the child in the strip; page.getParent() is the strip itself,
-                    // so asking the strip for its parent's index always returns -1.
                     ViewParent currentParent = container.getParent();
                     int sourceIndex = strip == null || !(currentParent instanceof View)
                             ? widgetPage[0] : strip.indexOfChild((View) currentParent);
                     if (sourceIndex < 0) sourceIndex = widgetPage[0];
-                    // Widget movement stays on the only home page.
                     FrameLayout activePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
@@ -236,12 +246,43 @@ final class WidgetInteractionController {
                 handler.removeCallbacks(menuPress[0]);
                 if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
+                    LinearLayout strip = listener.getPagesStrip();
                     FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
+                    int destinationPage = action == MotionEvent.ACTION_CANCEL
+                            ? originalPageAtDown[0] : listener.getCurrentPage();
+                    listener.ensurePageExists(destinationPage);
+                    FrameLayout targetPage = strip != null && destinationPage < strip.getChildCount()
+                            && strip.getChildAt(destinationPage) instanceof FrameLayout
+                            ? (FrameLayout) strip.getChildAt(destinationPage) : sourcePage;
+                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    if (action == MotionEvent.ACTION_CANCEL) {
+                        current.leftMargin = origin[0];
+                        current.topMargin = origin[1];
+                    } else {
+                        int[] viewportLocation = new int[2];
+                        View viewport = strip == null ? null : (View) strip.getParent();
+                        if (viewport != null) viewport.getLocationOnScreen(viewportLocation);
+                        int maxX = Math.max(0, targetPage.getWidth() - container.getWidth());
+                        int maxY = Math.max(0, targetPage.getHeight() - container.getHeight());
+                        current.leftMargin = Math.max(0, Math.min(maxX,
+                                Math.round(event.getRawX() - viewportLocation[0] - container.getWidth() / 2f)));
+                        current.topMargin = Math.max(0, Math.min(maxY,
+                                Math.round(event.getRawY() - viewportLocation[1] - container.getHeight() / 2f)));
+                    }
                     container.setTranslationX(0f);
+                    container.setLayoutParams(current);
                     clearEditChrome[0].run();
-                    listener.saveWidgetGeometry(widgetId, 0, container);
-                    listener.resolveWidgetCollisions(sourcePage, container);
+                    if (sourcePage != targetPage) {
+                        reparenting[0] = true;
+                        sourcePage.removeView(container);
+                        targetPage.addView(container, current);
+                        reparenting[0] = false;
+                    }
+                    widgetPage[0] = destinationPage;
+                    listener.saveWidgetGeometry(widgetId, destinationPage, container);
+                    listener.resolveWidgetCollisions(targetPage, container);
+                    if (action == MotionEvent.ACTION_UP) listener.renderHomePages(false);
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
                 }
