@@ -1365,7 +1365,9 @@ public class MainActivity extends Activity {
         pagesStrip.setTranslationX(-from * width
                 - ((effect == 0 || effect == 2) ? direction * width * progress : 0f));
         outgoing.setAlpha(1f);
-        if (incomingFace != null) incomingFace.setAlpha(1f);
+        // Fade the incoming page in with swipe progress. Keep each transition's
+        // existing geometry and rotation untouched; only its visibility changes.
+        if (incomingFace != null) incomingFace.setAlpha(progress);
         if (effect == 2) {
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
