@@ -706,6 +706,8 @@ public class MainActivity extends Activity {
 
         FrameLayout chosenPage = null;
         int chosenLeft = 0, chosenTop = 0;
+        int shortcutSpanX = Math.max(1, Math.min(columns, prefs.getInt(KEY_SHORTCUT_SPAN_X, 1)));
+        int shortcutSpanY = Math.max(1, Math.min(rows, prefs.getInt(KEY_SHORTCUT_SPAN_Y, 1)));
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
@@ -782,11 +784,70 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
         labelParams.topMargin = LauncherUiUtils.dp(this, 3);
         tile.addView(label, labelParams);
-        FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(cellW, cellH, Gravity.TOP | Gravity.LEFT);
+        int tileWidth = Math.min(pageViewport.getWidth() - chosenLeft, cellW * shortcutSpanX);
+        int tileHeight = Math.min(pageViewport.getHeight() - chosenTop, cellH * shortcutSpanY);
+        FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
+                Math.max(cellW, tileWidth), Math.max(cellH, tileHeight), Gravity.TOP | Gravity.LEFT);
         tileParams.leftMargin = chosenLeft;
         tileParams.topMargin = chosenTop;
         chosenPage.addView(tile, tileParams);
+        // Resize handle mirrors widget editing: drag the blue lower-right grip to
+        // grow/shrink the contact tile in whole grid-cell increments.
+        View resizeGrip = new View(this);
+        GradientDrawable gripBackground = new GradientDrawable();
+        gripBackground.setColor(Color.rgb(115, 159, 255));
+        gripBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
+        resizeGrip.setBackground(gripBackground);
+        resizeGrip.setVisibility(View.GONE);
+        FrameLayout.LayoutParams gripParams = new FrameLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 22), LauncherUiUtils.dp(this, 22), Gravity.RIGHT | Gravity.BOTTOM);
+        tile.addView(resizeGrip, gripParams);
+        final boolean[] resizingShortcut = {false};
+        final float[] resizeStart = {0f, 0f};
+        final int[] resizeBase = {shortcutSpanX, shortcutSpanY};
+        resizeGrip.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    resizingShortcut[0] = true;
+                    resizeStart[0] = event.getRawX();
+                    resizeStart[1] = event.getRawY();
+                    resizeBase[0] = Math.max(1, Math.round((float) tile.getWidth() / cellW));
+                    resizeBase[1] = Math.max(1, Math.round((float) tile.getHeight() / cellH));
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (!resizingShortcut[0]) return true;
+                    int spanX = Math.max(1, Math.min(columns, resizeBase[0]
+                            + Math.round((event.getRawX() - resizeStart[0]) / cellW)));
+                    int spanY = Math.max(1, Math.min(rows, resizeBase[1]
+                            + Math.round((event.getRawY() - resizeStart[1]) / cellH)));
+                    ViewGroup.LayoutParams raw = tile.getLayoutParams();
+                    if (raw instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) raw;
+                        p.width = Math.min(pageViewport.getWidth() - p.leftMargin, spanX * cellW);
+                        p.height = Math.min(pageViewport.getHeight() - p.topMargin, spanY * cellH);
+                        tile.setLayoutParams(p);
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (resizingShortcut[0]) {
+                        resizingShortcut[0] = false;
+                        int finalX = Math.max(1, Math.min(columns, Math.round((float) tile.getWidth() / cellW)));
+                        int finalY = Math.max(1, Math.min(rows, Math.round((float) tile.getHeight() / cellH)));
+                        prefs.edit().putInt(KEY_SHORTCUT_SPAN_X, finalX)
+                                .putInt(KEY_SHORTCUT_SPAN_Y, finalY).apply();
+                        renderSavedContactShortcut();
+                    }
+                    return true;
+            }
+            return true;
+        });
         tile.setOnClickListener(v -> {
+            if (resizeGrip.getVisibility() == View.VISIBLE) {
+                resizeGrip.setVisibility(View.GONE);
+                tile.setBackgroundColor(Color.TRANSPARENT);
+                return;
+            }
             try {
                 Intent target = Intent.parseUri(prefs.getString(KEY_SHORTCUT_INTENT, ""),
                         Intent.URI_INTENT_SCHEME);
@@ -809,7 +870,7 @@ public class MainActivity extends Activity {
         tile.setOnLongClickListener(v -> {
             showActionDialog(prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"),
                     new String[]{"↔", "−", "↻"},
-                    new String[]{"Move to other page", "Remove shortcut", "Recreate contact shortcut"},
+                    new String[]{"Move to other page", "Resize shortcut", "Remove shortcut", "Recreate contact shortcut"},
                     (dialog, which) -> {
                 if (which == 0) {
                     int pageCount = pagesStrip == null ? 1 : Math.max(1, pagesStrip.getChildCount());
@@ -819,12 +880,20 @@ public class MainActivity extends Activity {
                     renderHomePages(false);
                     showPage(targetPage, true);
                 } else if (which == 1) {
-                    prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
-                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON).apply();
-                    renderHomePages(false);
+                    resizeGrip.setVisibility(View.VISIBLE);
+                    tile.setBackground(LauncherUiUtils.roundRect(this,
+                            new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
+                            LauncherUiUtils.dp(this, 8)));
+                    Toast.makeText(this, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
                     prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
-                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON).apply();
+                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
+                            .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y).apply();
+                    renderHomePages(false);
+                } else if (which == 3) {
+                    prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
+                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
+                            .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y).apply();
                     beginWidgetPicker(currentPage);
                 }
             });
