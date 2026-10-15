@@ -11,8 +11,8 @@ final class LauncherClockStyler {
 
     static void apply(Activity activity, TextView clock, int style) {
         if (clock == null) return;
-        if (clock instanceof SquarePixelClockTextView) {
-            ((SquarePixelClockTextView) clock).setSquarePixelMode(style == 5);
+        if (clock instanceof SevenSegmentClockTextView) {
+            ((SevenSegmentClockTextView) clock).setSevenSegmentMode(style == 5);
         }
         switch (style) {
             case 1:
