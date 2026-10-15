@@ -53,7 +53,8 @@ final class LauncherWallpaperController {
                 }
                 throw new IOException("Image could not be decoded");
             } catch (Exception ignored) {
-                if (prefs != null) prefs.edit().remove(wallpaperKey).apply();
+                // Keep the saved URI: provider access can fail temporarily, and deleting
+                // it here would make a transient read error permanently forget the wallpaper.
             }
         }
         int theme = prefs == null ? 0 : prefs.getInt(themeKey, 0);
