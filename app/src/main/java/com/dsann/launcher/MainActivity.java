@@ -362,7 +362,7 @@ public class MainActivity extends Activity {
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
                     @Override public void launchApp(ResolveInfo app) { MainActivity.this.launchApp(app); }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome) { MainActivity.this.showAppOptions(app, onHome); }
-                }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, HOME_ROWS);
+                }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
         showHome();
     }
