@@ -108,6 +108,8 @@ public class MainActivity extends Activity {
     private boolean iconMovedTooEarly = false;
     private float iconTouchRawX, iconTouchRawY;
     private int iconOriginalLeft, iconOriginalTop;
+    private int iconDragPageIndex = -1;
+    private int iconEdgeLatch = 0;
     private View activeDragView;
     private String activeDragPackage;
     private Runnable iconArmDrag;
@@ -516,6 +518,9 @@ public class MainActivity extends Activity {
                 iconMovedTooEarly = false;
                 activeDragView = view;
                 activeDragPackage = packageName;
+                iconDragPageIndex = view.getParent() instanceof View
+                        ? pagesStrip.indexOfChild((View) view.getParent()) : currentPage;
+                iconEdgeLatch = 0;
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                 iconOriginalLeft = lp.leftMargin;
                 iconOriginalTop = lp.topMargin;
@@ -551,6 +556,53 @@ public class MainActivity extends Activity {
                     view.bringToFront();
                 }
                 if (iconDragging) {
+                    int screenWidth = getResources().getDisplayMetrics().widthPixels;
+                    int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(this, 28) ? 1
+                            : event.getRawX() <= LauncherUiUtils.dp(this, 28) ? -1 : 0;
+                    if (edge == 0) iconEdgeLatch = 0;
+                    if (edge != 0 && edge != iconEdgeLatch) {
+                        iconEdgeLatch = edge;
+                        int sourceIndex = view.getParent() instanceof View
+                                ? pagesStrip.indexOfChild((View) view.getParent()) : iconDragPageIndex;
+                        int destination = sourceIndex + edge;
+                        if (destination >= 0 && destination <= 20) {
+                            ensurePageExists(destination);
+                            while (pagesStrip.getChildCount() <= destination) {
+                                FrameLayout newPage = new FrameLayout(this);
+                                newPage.setClipChildren(false);
+                                pagesStrip.addView(newPage, new LinearLayout.LayoutParams(
+                                        Math.max(1, pageViewport.getWidth()), -1));
+                            }
+                            if (destination != sourceIndex) {
+                                FrameLayout targetPage = (FrameLayout) pagesStrip.getChildAt(destination);
+                                ViewGroup oldParent = (ViewGroup) view.getParent();
+                                FrameLayout.LayoutParams movedLp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                                oldParent.removeView(view);
+                                targetPage.addView(view, movedLp);
+                                iconDragPageIndex = destination;
+                                currentPage = destination;
+                                int pageWidth = Math.max(1, pageViewport.getWidth());
+                                pagesStrip.setTranslationX(-destination * pageWidth);
+                                int[] viewportLocation = new int[2];
+                                pageViewport.getLocationOnScreen(viewportLocation);
+                                int[] targetLocation = new int[2];
+                                targetPage.getLocationOnScreen(targetLocation);
+                                movedLp.leftMargin = Math.max(0, Math.min(
+                                        Math.max(0, pageWidth - view.getWidth()),
+                                        Math.round(event.getRawX() - viewportLocation[0] - view.getWidth() / 2f)));
+                                movedLp.topMargin = Math.max(0, Math.min(
+                                        Math.max(0, targetPage.getHeight() - view.getHeight()),
+                                        Math.round(event.getRawY() - targetLocation[1] - view.getHeight() / 2f)));
+                                view.setLayoutParams(movedLp);
+                                iconOriginalLeft = movedLp.leftMargin;
+                                iconOriginalTop = movedLp.topMargin;
+                                iconTouchRawX = event.getRawX();
+                                iconTouchRawY = event.getRawY();
+                                if (pageIndicator != null) pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
+                                return true;
+                            }
+                        }
+                    }
                     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                     FrameLayout page = (FrameLayout) view.getParent();
                     int maxX = Math.max(0, page.getWidth() - view.getWidth());
@@ -571,11 +623,8 @@ public class MainActivity extends Activity {
                     FrameLayout.LayoutParams dragged = (FrameLayout.LayoutParams) view.getLayoutParams();
                     // Detect the edge from both the finger and the icon bounds. Touch events
                     // can be clipped by the icon cell before the finger reaches the screen edge.
-                    int[] viewportLocation = new int[2];
-                    pageViewport.getLocationOnScreen(viewportLocation);
-                    boolean atRightEdge = event.getRawX() >= viewportLocation[0] + pageViewport.getWidth() - LauncherUiUtils.dp(this, 36)
-                            || dragged.leftMargin + view.getWidth() >= page.getWidth() - LauncherUiUtils.dp(this, 36);
-                    boolean moveToNextPage = atRightEdge;
+                    int sourcePage = pagesStrip.indexOfChild(page);
+                    boolean moveToNextPage = iconDragPageIndex >= 0 && iconDragPageIndex != sourcePage;
                     int columns = getHomeColumns();
                     int rows = HOME_ROWS;
                     int cellWidth = Math.max(1, page.getWidth() / columns);
@@ -612,43 +661,13 @@ public class MainActivity extends Activity {
                     view.setLayoutParams(dragged);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     if (moveToNextPage) {
-                        // Use the actual source view index; currentPage can lag during page animations.
-                        int sourcePage = pagesStrip.indexOfChild(page);
-                        if (sourcePage < 0) sourcePage = currentPage;
-                        int destinationPage = sourcePage + 1;
-                        SharedPreferences.Editor edit = prefs.edit();
-                        // Persist current page assignments first, then shift all later pages.
-                        for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
-                            for (String existingPackage : pages.get(pageIndex)) {
-                                if (!existingPackage.equals(packageName)) {
-                                    int shiftedPage = pageIndex >= destinationPage ? pageIndex + 1 : pageIndex;
-                                    edit.putInt(KEY_ICON_PAGE + existingPackage, shiftedPage);
-                                }
-                            }
-                        }
-                        String widgetEntries = prefs.getString(KEY_WIDGET_IDS, "");
-                        StringBuilder shiftedWidgets = new StringBuilder();
-                        if (!widgetEntries.isEmpty()) {
-                            for (String entry : widgetEntries.split("\\n")) {
-                                String[] parts = entry.split(":");
-                                if (parts.length != 2) continue;
-                                try {
-                                    int id = Integer.parseInt(parts[0]);
-                                    int widgetPage = Integer.parseInt(parts[1]);
-                                    if (widgetPage >= destinationPage) widgetPage++;
-                                    if (shiftedWidgets.length() > 0) shiftedWidgets.append('\n');
-                                    shiftedWidgets.append(id).append(':').append(widgetPage);
-                                } catch (NumberFormatException ignored) {}
-                            }
-                        }
-                        edit.putString(KEY_WIDGET_IDS, shiftedWidgets.toString())
-                                .putInt(KEY_ICON_PAGE + packageName, destinationPage)
-                                .putFloat(KEY_ICON_X + packageName, 0f)
+                        int destinationPage = Math.max(0, iconDragPageIndex);
+                        prefs.edit().putInt(KEY_ICON_PAGE + packageName, destinationPage)
+                                .putFloat(KEY_ICON_X + packageName, targetCol / (float) Math.max(1, columns - 1))
                                 .putFloat(KEY_ICON_Y + packageName, targetRow / (float) Math.max(1, rows - 1))
                                 .apply();
                         currentPage = destinationPage;
                     } else {
-                        int sourcePage = pagesStrip.indexOfChild(page);
                         prefs.edit().putInt(KEY_ICON_PAGE + packageName,
                                 sourcePage >= 0 ? sourcePage : currentPage).apply();
                     }
@@ -657,6 +676,8 @@ public class MainActivity extends Activity {
                     iconDragArmed = false;
                     activeDragView = null;
                     activeDragPackage = null;
+                    iconDragPageIndex = -1;
+                    iconEdgeLatch = 0;
                     renderHomePages(false);
                     return true;
                 }
