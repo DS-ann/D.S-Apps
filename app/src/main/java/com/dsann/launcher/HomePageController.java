@@ -60,7 +60,16 @@ final class HomePageController {
 
     void renderHomePages(boolean animate) {
         if (host.getPagesStrip() == null) return;
-        host.getPagesStrip().removeAllViews();
+        // Android 6 / some OEM ViewGroup implementations can crash while removing
+        // a focused AppWidgetHostView during a page rebuild. Clear focus through the
+        // existing page tree before detaching any page children.
+        LinearLayout strip = host.getPagesStrip();
+        strip.clearFocus();
+        for (int i = 0; i < strip.getChildCount(); i++) {
+            View pageChild = strip.getChildAt(i);
+            if (pageChild != null) pageChild.clearFocus();
+        }
+        strip.removeAllViews();
         int pageWidth = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(activity, 40));
         int columns = host.getHomeColumns();
         int rows = homeRows;
