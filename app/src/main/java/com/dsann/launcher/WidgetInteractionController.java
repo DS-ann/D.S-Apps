@@ -14,6 +14,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -27,6 +28,7 @@ final class WidgetInteractionController {
         void showActionDialog(String title, String[] icons, String[] labels,
                               DialogInterface.OnClickListener listener);
         void setCurrentPage(int page);
+        void showPage(int page, boolean animate);
         LinearLayout getPagesStrip();
         void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
     }
@@ -46,6 +48,17 @@ final class WidgetInteractionController {
         this.prefs = prefs;
         this.widgetIdsKey = widgetIdsKey;
         this.listener = listener;
+    }
+
+    private void clearFocusRecursively(View view) {
+        if (view == null) return;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                clearFocusRecursively(group.getChildAt(i));
+            }
+        }
+        if (view.hasFocus()) view.clearFocus();
     }
 
     void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
@@ -81,6 +94,7 @@ final class WidgetInteractionController {
         final float[] down = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
         final int[] widgetPage = {pageIndex};
+        final int[] originalPageAtDown = {pageIndex};
         final int[] edgeLatch = {0};
         final Runnable[] movePress = new Runnable[1];
         final Runnable[] menuPress = new Runnable[1];
@@ -130,15 +144,33 @@ final class WidgetInteractionController {
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
                     int destination = widgetPage[0] + 1;
+                    listener.ensurePageExists(destination);
+                    LinearLayout strip = listener.getPagesStrip();
+                    int pageWidth = Math.max(1, page.getWidth());
+                    while (strip != null && strip.getChildCount() <= destination) {
+                        FrameLayout newPage = new FrameLayout(activity);
+                        newPage.setClipChildren(false);
+                        strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
+                    }
+                    if (strip == null || destination >= strip.getChildCount()) {
+                        Toast.makeText(activity, "Couldn't create the destination page", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    FrameLayout targetPage = (FrameLayout) strip.getChildAt(destination);
                     FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
                     moved.leftMargin = LauncherUiUtils.dp(activity, 8);
                     moved.topMargin = LauncherUiUtils.dp(activity, 40);
-                    container.setLayoutParams(moved);
+                    clearFocusRecursively(container);
+                    if (container.getParent() instanceof ViewGroup) {
+                        ((ViewGroup) container.getParent()).removeView(container);
+                    }
+                    container.setTranslationX(0f);
+                    targetPage.addView(container, moved);
+                    container.bringToFront();
                     widgetPage[0] = destination;
-                    listener.ensurePageExists(destination);
                     listener.saveWidgetGeometry(widgetId, destination, container);
                     listener.setCurrentPage(destination);
-                    listener.renderHomePages(true);
+                    listener.showPage(destination, true);
                     Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
                 }
             });
@@ -156,6 +188,11 @@ final class WidgetInteractionController {
                 origin[1] = current.topMargin;
                 origin[2] = current.width;
                 origin[3] = current.height;
+                LinearLayout currentStrip = listener.getPagesStrip();
+                ViewParent parent = container.getParent();
+                int actualPage = parent instanceof View ? (currentStrip == null ? -1 : currentStrip.indexOfChild((View) parent)) : -1;
+                originalPageAtDown[0] = actualPage >= 0 ? actualPage : widgetPage[0];
+                widgetPage[0] = originalPageAtDown[0];
                 editMode[0] = 0;
                 childCanceled[0] = false;
                 menuShown[0] = false;
@@ -193,7 +230,9 @@ final class WidgetInteractionController {
                     LinearLayout strip = listener.getPagesStrip();
                     // 'page' is the child in the strip; page.getParent() is the strip itself,
                     // so asking the strip for its parent's index always returns -1.
-                    int sourceIndex = strip == null ? widgetPage[0] : strip.indexOfChild(page);
+                    ViewParent currentParent = container.getParent();
+                    int sourceIndex = strip == null || !(currentParent instanceof View)
+                            ? widgetPage[0] : strip.indexOfChild((View) currentParent);
                     if (sourceIndex < 0) sourceIndex = widgetPage[0];
                     if (edge != 0 && edge != edgeLatch[0]) {
                         edgeLatch[0] = edge;
@@ -236,15 +275,40 @@ final class WidgetInteractionController {
                 handler.removeCallbacks(menuPress[0]);
                 if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
-                    FrameLayout activePage = container.getParent() instanceof FrameLayout
+                    FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
                     container.setTranslationX(0f);
-                    listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     clearEditChrome[0].run();
-                    if (widgetPage[0] != pageIndex) {
-                        listener.renderHomePages(false);
+                    if (widgetPage[0] != originalPageAtDown[0]) {
+                        LinearLayout strip = listener.getPagesStrip();
+                        int destination = widgetPage[0];
+                        listener.ensurePageExists(destination);
+                        int pageWidth = Math.max(1, sourcePage.getWidth());
+                        while (strip != null && strip.getChildCount() <= destination) {
+                            FrameLayout newPage = new FrameLayout(activity);
+                            newPage.setClipChildren(false);
+                            strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
+                        }
+                        if (strip != null && destination < strip.getChildCount()) {
+                            FrameLayout targetPage = (FrameLayout) strip.getChildAt(destination);
+                            FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
+                            clearFocusRecursively(container);
+                            if (container.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) container.getParent()).removeView(container);
+                            }
+                            targetPage.addView(container, moved);
+                            container.bringToFront();
+                            listener.saveWidgetGeometry(widgetId, destination, container);
+                            listener.setCurrentPage(destination);
+                            listener.showPage(destination, false);
+                        } else {
+                            listener.saveWidgetGeometry(widgetId, originalPageAtDown[0], container);
+                            listener.setCurrentPage(originalPageAtDown[0]);
+                            listener.showPage(originalPageAtDown[0], false);
+                        }
                     } else {
-                        listener.resolveWidgetCollisions(activePage, container);
+                        listener.saveWidgetGeometry(widgetId, originalPageAtDown[0], container);
+                        listener.resolveWidgetCollisions(sourcePage, container);
                     }
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
@@ -264,10 +328,12 @@ final class WidgetInteractionController {
                 return true;
             }
             if (action == MotionEvent.ACTION_MOVE) {
+                FrameLayout activePage = container.getParent() instanceof FrameLayout
+                        ? (FrameLayout) container.getParent() : page;
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                current.width = Math.max(LauncherUiUtils.dp(activity, 140), Math.min(page.getWidth() - current.leftMargin,
+                current.width = Math.max(LauncherUiUtils.dp(activity, 140), Math.min(Math.max(1, activePage.getWidth()) - current.leftMargin,
                         origin[2] + Math.round(event.getRawX() - down[0])));
-                current.height = Math.max(LauncherUiUtils.dp(activity, 90), Math.min(page.getHeight() - current.topMargin,
+                current.height = Math.max(LauncherUiUtils.dp(activity, 90), Math.min(Math.max(1, activePage.getHeight()) - current.topMargin,
                         origin[3] + Math.round(event.getRawY() - down[1])));
                 container.setLayoutParams(current);
                 return true;
