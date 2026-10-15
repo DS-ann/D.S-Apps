@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_X = "icon_x_";
     private static final String KEY_ICON_Y = "icon_y_";
     private static final String KEY_ICON_PAGE = "icon_page_";
+    private static final String KEY_DOCK_APPS = "dock_apps";
     private static final String KEY_WIDGET_IDS = "widget_ids";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
@@ -91,6 +92,9 @@ public class MainActivity extends Activity {
     private TextView brandText;
     private LinearLayout pagesStrip;
     private FrameLayout pageViewport;
+    private LinearLayout dockContainer;
+    private final List<String> dockPackages = new ArrayList<>();
+    private static final int DOCK_CAPACITY = 5;
     private LinearLayout drawerScreen;
     private GridView drawerGrid;
     private TextView clockText;
@@ -440,6 +444,22 @@ public class MainActivity extends Activity {
         pp.topMargin = LauncherUiUtils.dp(this, 12);
         homeScreen.addView(pageViewport, pp);
 
+        dockContainer = new LinearLayout(this);
+        dockContainer.setOrientation(LinearLayout.HORIZONTAL);
+        dockContainer.setGravity(Gravity.CENTER);
+        dockContainer.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 3),
+                LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 3));
+        dockContainer.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.argb(45, 105, 135, 205), Color.argb(24, 50, 65, 105)},
+                LauncherUiUtils.dp(this, 20)));
+        LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76));
+        dockParams.leftMargin = LauncherUiUtils.dp(this, 10);
+        dockParams.rightMargin = LauncherUiUtils.dp(this, 10);
+        dockParams.topMargin = LauncherUiUtils.dp(this, 4);
+        dockParams.bottomMargin = LauncherUiUtils.dp(this, 4);
+        homeScreen.addView(dockContainer, dockParams);
+        restoreDockApps();
+
         // The viewport stays fixed while the page strip moves inside it.
         pagesStrip = new LinearLayout(this);
         pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
@@ -477,6 +497,64 @@ public class MainActivity extends Activity {
         // This also cleans up pages left behind by widget removal or cross-page moves.
         rebuildPages();
         if (homePageController != null) homePageController.renderHomePages(animate);
+        renderDock();
+    }
+
+    private void restoreDockApps() {
+        dockPackages.clear();
+        String saved = prefs.getString(KEY_DOCK_APPS, "");
+        if (saved != null && !saved.isEmpty()) {
+            for (String packageName : saved.split("\n")) {
+                if (!packageName.isEmpty() && findApp(packageName) != null
+                        && !dockPackages.contains(packageName) && dockPackages.size() < DOCK_CAPACITY) {
+                    dockPackages.add(packageName);
+                }
+            }
+        }
+    }
+
+    private void persistDockApps() {
+        StringBuilder saved = new StringBuilder();
+        for (String packageName : dockPackages) {
+            if (saved.length() > 0) saved.append('\n');
+            saved.append(packageName);
+        }
+        prefs.edit().putString(KEY_DOCK_APPS, saved.toString()).apply();
+    }
+
+    private void renderDock() {
+        if (dockContainer == null) return;
+        dockContainer.removeAllViews();
+        for (String packageName : new ArrayList<>(dockPackages)) {
+            ResolveInfo app = findApp(packageName);
+            if (app == null) continue;
+            LauncherAppAdapter adapter = new LauncherAppAdapter(this, prefs, packageManager,
+                    allApps, drawerApps, java.util.Collections.singletonList(packageName),
+                    false, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_HOME_LABELS,
+                    new LauncherAppAdapter.Actions() {
+                        @Override public void onAppClick(ResolveInfo selected) { launchApp(selected); }
+                        @Override public void onAppLongClick(ResolveInfo selected, boolean onHome) {
+                            showActionDialog("Dock app", new String[]{"−", "↗"},
+                                    new String[]{"Remove from dock", "Move to home screen"}, (dialog, which) -> {
+                                dockPackages.remove(packageName);
+                                if (which == 1 && !homePackages.contains(packageName)) {
+                                    if (homePackages.size() >= pageCapacity()) {
+                                        Toast.makeText(MainActivity.this, "Home screen is full.", Toast.LENGTH_SHORT).show();
+                                    } else {
+                                        homePackages.add(packageName);
+                                    }
+                                }
+                                persistDockApps();
+                                persistHomeApps();
+                                renderHomePages(false);
+                            });
+                        }
+                    });
+            View cell = adapter.getView(0, null, dockContainer);
+            cell.setTag("launcher_dock:" + packageName);
+            cell.setOnTouchListener((v, event) -> false);
+            dockContainer.addView(cell, new LinearLayout.LayoutParams(0, -1, 1f));
+        }
     }
 
     private void installHomeIconTouch(View cell, String packageName) {
@@ -563,6 +641,39 @@ public class MainActivity extends Activity {
                 if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
                 if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 if (iconDragging) {
+                    int[] dockLocation = new int[2];
+                    if (dockContainer != null && dockContainer.getWidth() > 0) {
+                        dockContainer.getLocationOnScreen(dockLocation);
+                        boolean releasedOnDock = event.getRawY() >= dockLocation[1]
+                                && event.getRawY() <= dockLocation[1] + dockContainer.getHeight()
+                                && event.getRawX() >= dockLocation[0]
+                                && event.getRawX() <= dockLocation[0] + dockContainer.getWidth();
+                        if (releasedOnDock && !dockPackages.contains(packageName)) {
+                            if (dockPackages.size() < DOCK_CAPACITY) {
+                                dockPackages.add(packageName);
+                                homePackages.remove(packageName);
+                                persistDockApps();
+                                persistHomeApps();
+                                prefs.edit().remove(KEY_ICON_X + packageName)
+                                        .remove(KEY_ICON_Y + packageName)
+                                        .remove(KEY_ICON_PAGE + packageName).apply();
+                            } else {
+                                Toast.makeText(this, "Dock is full. Remove an app first.", Toast.LENGTH_SHORT).show();
+                            }
+                            view.animate().cancel();
+                            view.setTranslationX(0f);
+                            view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(100).start();
+                            iconDragging = false;
+                            iconDragArmed = false;
+                            activeDragView = null;
+                            activeDragPackage = null;
+                            iconDragPageIndex = -1;
+                            iconOriginalPageIndex = -1;
+                            iconEdgeLatch = 0;
+                            renderHomePages(false);
+                            return true;
+                        }
+                    }
                     FrameLayout sourceView = (FrameLayout) view.getParent();
                     int sourcePage = pagesStrip.indexOfChild(sourceView);
                     int destinationPage = 0;
@@ -1254,7 +1365,7 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
-        String clockValue = new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mm a", Locale.getDefault()).format(now);
+        String clockValue = new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mma", Locale.getDefault()).format(now);
         if (!prefs.getBoolean(KEY_24_HOUR, false) && clockValue.length() >= 2) {
             int suffixStart = clockValue.length() - 2;
             android.text.SpannableString styled = new android.text.SpannableString(clockValue);
@@ -1281,7 +1392,7 @@ public class MainActivity extends Activity {
                 {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
         int[] tone = tones[phase];
-        int side = Color.argb(51, tone[0], tone[1], tone[2]); // 20% opacity at the outside edge
+        int side = Color.argb(66, tone[0], tone[1], tone[2]); // About 26% opacity, up from 20%.
         int centre = Color.argb(0, tone[0], tone[1], tone[2]);
         GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT,
                 new int[] {side, Color.argb(28, tone[0], tone[1], tone[2]), centre});
