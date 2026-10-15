@@ -406,7 +406,7 @@ public class MainActivity extends Activity {
         for (int[] widget : validWidgets) {
             int oldPage = widget[1];
             int newPage = oldPage < remap.length && remap[oldPage] >= 0 ? remap[oldPage] : 0;
-            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\\n');
+            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\n');
             normalizedWidgets.append(widget[0]).append(':').append(newPage);
         }
         edit.putString(KEY_WIDGET_IDS, normalizedWidgets.toString());
