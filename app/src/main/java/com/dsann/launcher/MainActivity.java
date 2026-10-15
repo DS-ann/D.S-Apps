@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_X = "icon_x_";
     private static final String KEY_ICON_Y = "icon_y_";
     private static final String KEY_ICON_PAGE = "icon_page_";
+    private static final String KEY_WIDGET_IDS = "widget_ids";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
@@ -443,6 +444,7 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        restoreWidgetsOnPages();
         pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? View.VISIBLE : View.GONE);
         pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
         pagesStrip.setTranslationX(-currentPage * pageWidth);
@@ -952,9 +954,44 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(180), page.getWidth() / 2),
                 Math.max(dp(100), page.getHeight() / 4), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = dp(8); lp.topMargin = dp(8);
+        widget.setTag("launcher_widget:" + widgetId);
         page.addView(widget, lp);
         widget.bringToFront();
+        String stored = prefs.getString(KEY_WIDGET_IDS, "");
+        String entry = widgetId + ":" + currentPage;
+        if (!stored.contains(entry)) prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
         Toast.makeText(this, "Widget added to this page", Toast.LENGTH_SHORT).show();
+    }
+
+    private void restoreWidgetsOnPages() {
+        String stored = prefs.getString(KEY_WIDGET_IDS, "");
+        if (stored.isEmpty()) return;
+        for (String entry : stored.split("\\n")) {
+            String[] parts = entry.split(":");
+            if (parts.length != 2) continue;
+            try {
+                int id = Integer.parseInt(parts[0]);
+                int pageIndex = Integer.parseInt(parts[1]);
+                if (pageIndex < 0 || pageIndex >= pagesStrip.getChildCount()) continue;
+                FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+                boolean exists = false;
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    Object tag = page.getChildAt(i).getTag();
+                    if (("launcher_widget:" + id).equals(tag)) { exists = true; break; }
+                }
+                if (exists) continue;
+                AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
+                if (info == null) continue;
+                AppWidgetHostView widget = widgetHost.createView(this, id, info);
+                widget.setAppWidget(id, info);
+                widget.setTag("launcher_widget:" + id);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(180), page.getWidth() / 2),
+                        Math.max(dp(100), page.getHeight() / 4), Gravity.TOP | Gravity.LEFT);
+                lp.leftMargin = dp(8); lp.topMargin = dp(8);
+                page.addView(widget, lp);
+                widget.bringToFront();
+            } catch (Exception ignored) {}
+        }
     }
 
     private boolean touchStartedOnAppCell(float rawX, float rawY) {
