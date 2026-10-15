@@ -616,10 +616,13 @@ public class MainActivity extends Activity {
                 clockGravity() | Gravity.CENTER_VERTICAL);
         clockRow.addView(clockGroup, groupParams);
         hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 114)));
-        dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
-        dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
+        // Keep the existing 13sp date size; improve contrast instead of enlarging it.
+        dateText = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
+        dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.BOLD));
         dateText.setGravity(Gravity.RIGHT);
-        dateText.setLetterSpacing(0.075f);
+        dateText.setLetterSpacing(0.04f);
+        dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
+                Color.argb(220, 0, 0, 0));
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
         dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
