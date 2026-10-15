@@ -129,10 +129,17 @@ final class HomePageController {
         host.getPagesStrip().setLayerType(View.LAYER_TYPE_HARDWARE, null);
         float targetX = -host.getCurrentPage() * pageWidth;
         if (animate) {
-            host.getPagesStrip().setRotationY(0f);
+            // Lightweight 3D page-turn hint: small rotation, no scaling or heavy overshoot.
+            // Keep the strip on a hardware layer only for the short transition.
+            host.getPagesStrip().setCameraDistance(12000f * activity.getResources().getDisplayMetrics().density);
+            host.getPagesStrip().setRotationY(host.getCurrentPage() > 0 ? 3f : -3f);
             host.getPagesStrip().setScaleX(1f);
-            host.getPagesStrip().animate().translationX(targetX).setDuration(210L)
-                    .withEndAction(() -> host.getPagesStrip().setLayerType(View.LAYER_TYPE_NONE, null)).start();
+            host.getPagesStrip().animate()
+                    .translationX(targetX)
+                    .rotationY(0f)
+                    .setDuration(220L)
+                    .withEndAction(() -> host.getPagesStrip().setLayerType(View.LAYER_TYPE_NONE, null))
+                    .start();
         } else {
             host.getPagesStrip().setTranslationX(targetX);
             host.getPagesStrip().setRotationY(0f);
