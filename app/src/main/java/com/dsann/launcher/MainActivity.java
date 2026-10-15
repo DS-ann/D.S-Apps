@@ -349,6 +349,7 @@ public class MainActivity extends Activity {
             ensurePageExists(pageIndex);
             pages.get(pageIndex).add(packageName);
         }
+        boolean changed = false;
         String widgetEntries = prefs.getString(KEY_WIDGET_IDS, "");
         if (!widgetEntries.isEmpty()) {
             for (String entry : widgetEntries.split("\\n")) {
@@ -388,7 +389,7 @@ public class MainActivity extends Activity {
             remap[i] = occupied[i] ? compactCount++ : -1;
         }
         if (compactCount == 0) compactCount = 1;
-        boolean changed = compactCount != pages.size();
+        changed |= compactCount != pages.size();
         List<List<String>> compacted = new ArrayList<>();
         for (int i = 0; i < compactCount; i++) compacted.add(new ArrayList<String>());
         SharedPreferences.Editor edit = prefs.edit();
