@@ -48,12 +48,12 @@ final class WidgetInteractionController {
 
     void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
                             int x, int y, int width, int height) {
-        final FrameLayout container = new FrameLayout(this);
+        final FrameLayout container = new FrameLayout(activity);
         container.setTag("launcher_widget:" + widgetId);
         widget.setTag("launcher_widget_content:" + widgetId);
         widget.setFocusable(true);
         container.addView(widget, new FrameLayout.LayoutParams(-1, -1));
-        final View resizeHandle = new View(this);
+        final View resizeHandle = new View(activity);
         GradientDrawable handleBg = new GradientDrawable();
         handleBg.setColor(Color.rgb(115, 159, 255));
         handleBg.setCornerRadius(LauncherUiUtils.dp(activity, 5));
@@ -69,7 +69,7 @@ final class WidgetInteractionController {
 
         // A slim grip at the top of each widget owns launcher edit gestures,
         // leaving the widget's normal content fully interactive.
-        final View gestureGrip = new View(this);
+        final View gestureGrip = new View(activity);
         gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
         FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 28), Gravity.TOP);
         container.addView(gestureGrip, gripLp);
@@ -107,9 +107,9 @@ final class WidgetInteractionController {
                     container.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
-                    int destination = Math.max(pageIndex + 1, pagesStrip.getChildCount());
+                    int destination = Math.max(pageIndex + 1, listener.getPagesStrip().getChildCount());
                     listener.ensurePageExists(destination);
-                    FrameLayout destinationPage = (FrameLayout) pagesStrip.getChildAt(destination);
+                    FrameLayout destinationPage = (FrameLayout) listener.getPagesStrip().getChildAt(destination);
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
                     FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
                             Math.min(container.getLayoutParams().width, Math.max(LauncherUiUtils.dp(activity, 140), destinationPage.getWidth())),
