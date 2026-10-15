@@ -2766,9 +2766,6 @@ public class MainActivity extends Activity {
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
-        final int screenWidth = getResources().getDisplayMetrics().widthPixels;
-        final int horizontalSafety = LauncherUiUtils.dp(this, 24);
-        final int maxContentWidth = Math.max(1, screenWidth - horizontalSafety);
 
         // The 7-segment view draws its own glyphs; Paint.measureText() does not
         // describe those glyphs and made its container too narrow. Calculate the
@@ -2795,22 +2792,17 @@ public class MainActivity extends Activity {
         }
         final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-        // Clamp every clock style to the usable screen width. Scaling the TextView
-        // beyond its parent width clips the glyphs on large settings (not only in
-        // the custom LED renderer). Reserve a little room for the AM/PM marker too.
+        // Clock length is a visual scale, not a layout-width constraint.
+        // Keep the user's requested scale; vertical layout is reserved separately.
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
-        final int clockWidthBudget = Math.max(1,
-                maxContentWidth - markerWidth - LauncherUiUtils.dp(this, 4));
-        final float lengthScale = Math.min(requestedLengthScale,
-                clockWidthBudget / naturalClockWidth);
+        final float lengthScale = requestedLengthScale;
         final int renderedClockWidth = Math.max(1,
                 (int) Math.ceil(naturalClockWidth * lengthScale));
         final int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
         final int naturalWidthPx = Math.max(1, (int) Math.ceil(naturalClockWidth));
         final int clockWithMarkerWidth = renderedClockWidth + markerWidth + LauncherUiUtils.dp(this, 2);
-        final int contentWidth = Math.min(maxContentWidth,
-                Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4));
+        final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4);
         // Keep the clock's reserved layout footprint constant. Scaling the glyph
         // must not increase the hero's measured height and steal vertical space from
         // the home-page viewport (which made lower icons/widgets slide under the dock).
@@ -2848,9 +2840,13 @@ public class MainActivity extends Activity {
 
         clockText.setTextSize(78f);
         clockText.setPivotX(0f);
-        clockText.setPivotY(0f);
+        // Scale around the row's vertical centre. This is purely a drawing
+        // transform: the clock keeps its fixed 114dp layout slot and cannot
+        // remeasure the home viewport or push app cells down.
+        clockText.setPivotY(rowHeight * 0.5f);
         clockText.setScaleX(lengthScale);
         clockText.setScaleY(breadthScale);
+        clockText.setTranslationY((rowHeight * 0.5f) * (1f - breadthScale));
         // Scale around the left edge, then compensate so center/right aligned
         // clocks stay aligned by their visible edge rather than their unscaled box.
         float horizontalScaleOffset = naturalClockWidth - renderedClockWidth;
