@@ -707,8 +707,18 @@ public class MainActivity extends Activity {
                     for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                         View child = page.getChildAt(childIndex);
                         if ("launcher_contact_shortcut".equals(child.getTag())) continue;
-                        android.graphics.Rect bounds = new android.graphics.Rect(
-                                child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
+                        android.graphics.Rect bounds;
+                        ViewGroup.LayoutParams rawParams = child.getLayoutParams();
+                        if (rawParams instanceof FrameLayout.LayoutParams) {
+                            FrameLayout.LayoutParams childParams = (FrameLayout.LayoutParams) rawParams;
+                            int left = childParams.leftMargin;
+                            int top = childParams.topMargin;
+                            int width = childParams.width > 0 ? childParams.width : child.getWidth();
+                            int height = childParams.height > 0 ? childParams.height : child.getHeight();
+                            bounds = new android.graphics.Rect(left, top, left + Math.max(0, width), top + Math.max(0, height));
+                        } else {
+                            bounds = new android.graphics.Rect(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
+                        }
                         if (android.graphics.Rect.intersects(candidate, bounds)) { occupied = true; break; }
                     }
                     if (!occupied) {
