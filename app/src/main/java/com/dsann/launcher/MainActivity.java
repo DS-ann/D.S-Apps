@@ -1201,82 +1201,118 @@ public class MainActivity extends Activity {
         page.addView(container, lp);
         container.bringToFront();
 
-        // 0 = normal widget interaction, 1 = move mode after 1 second,
-        // 2 = resize mode after 2 seconds. Keep the widget's ordinary taps intact.
-        final int[] editMode = {0};
+        // A slim grip at the top of each widget owns launcher edit gestures,
+        // leaving the widget's normal content fully interactive.
+        final View gestureGrip = new View(this);
+        gestureGrip.setBackground(roundRect(new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, dp(8)));
+        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, dp(28), Gravity.TOP);
+        container.addView(gestureGrip, gripLp);
+
+        final int[] editMode = {0}; // 0 idle, 1 moving
         final float[] down = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
         final Runnable[] movePress = new Runnable[1];
-        final Runnable[] resizePress = new Runnable[1];
-        Runnable showEditChrome = () -> {
-            resizeHandle.setVisibility(View.VISIBLE);
-            container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
+        final Runnable[] menuPress = new Runnable[1];
+        Runnable clearEditChrome = () -> {
+            resizeHandle.setVisibility(View.GONE);
+            container.setBackground(null);
+            gestureGrip.setBackground(roundRect(new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, dp(8)));
         };
         movePress[0] = () -> {
             editMode[0] = 1;
-            showEditChrome.run();
+            resizeHandle.setVisibility(View.VISIBLE);
+            container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
+            gestureGrip.setBackground(roundRect(new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, dp(8)));
+            Toast.makeText(this, "Move widget", Toast.LENGTH_SHORT).show();
         };
-        resizePress[0] = () -> {
-            editMode[0] = 2;
-            showEditChrome.run();
-            Toast.makeText(this, "Drag to resize; release to save", Toast.LENGTH_SHORT).show();
+        menuPress[0] = () -> {
+            editMode[0] = 0;
+            handler.removeCallbacks(movePress[0]);
+            clearEditChrome.run();
+            String[] actions = {"Remove widget", "Resize widget", "Move to next page"};
+            String[] icons = {"×", "↘", "→"};
+            showActionDialog("Widget options", icons, actions, (dialog, which) -> {
+                if (which == 0) {
+                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
+                    String stored = prefs.getString(KEY_WIDGET_IDS, "");
+                    StringBuilder updated = new StringBuilder();
+                    for (String entry : stored.split("\\n")) {
+                        String[] parts = entry.split(":");
+                        if (parts.length > 0 && parts[0].equals(String.valueOf(widgetId))) continue;
+                        if (!entry.trim().isEmpty()) {
+                            if (updated.length() > 0) updated.append('\n');
+                            updated.append(entry);
+                        }
+                    }
+                    prefs.edit().putString(KEY_WIDGET_IDS, updated.toString()).remove("widget_x_" + widgetId)
+                            .remove("widget_y_" + widgetId).remove("widget_w_" + widgetId).remove("widget_h_" + widgetId).apply();
+                    try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
+                } else if (which == 1) {
+                    resizeHandle.setVisibility(View.VISIBLE);
+                    container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
+                    Toast.makeText(this, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
+                } else if (which == 2) {
+                    int destination = Math.max(pageIndex + 1, pagesStrip.getChildCount());
+                    ensurePageExists(destination);
+                    FrameLayout destinationPage = (FrameLayout) pagesStrip.getChildAt(destination);
+                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
+                    FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
+                            Math.min(container.getLayoutParams().width, Math.max(dp(140), destinationPage.getWidth())),
+                            Math.min(container.getLayoutParams().height, Math.max(dp(90), destinationPage.getHeight())),
+                            Gravity.TOP | Gravity.LEFT);
+                    moved.leftMargin = dp(8);
+                    moved.topMargin = dp(40);
+                    destinationPage.addView(container, moved);
+                    currentPage = destination;
+                    renderHomePages(true);
+                    saveWidgetGeometry(widgetId, destination, container);
+                    Toast.makeText(this, "Widget moved to next page", Toast.LENGTH_SHORT).show();
+                }
+            });
         };
-        // The AppWidgetHostView fills the container and consumes most touch
-        // events, so attach the move gesture there; the resize handle stays separate.
-        widget.setOnTouchListener((view, event) -> {
+        gestureGrip.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                origin[0] = current.leftMargin; origin[1] = current.topMargin;
-                origin[2] = current.width; origin[3] = current.height;
+                origin[0] = current.leftMargin;
+                origin[1] = current.topMargin;
                 editMode[0] = 0;
-                resizeHandle.setVisibility(View.GONE);
-                container.setBackground(null);
                 handler.removeCallbacks(movePress[0]);
-                handler.removeCallbacks(resizePress[0]);
+                handler.removeCallbacks(menuPress[0]);
                 handler.postDelayed(movePress[0], 1000L);
-                handler.postDelayed(resizePress[0], 2000L);
-                return false;
+                handler.postDelayed(menuPress[0], 2000L);
+                return true;
             }
             if (action == MotionEvent.ACTION_MOVE) {
-                float deltaX = event.getRawX() - down[0];
-                float deltaY = event.getRawY() - down[1];
-                if (editMode[0] == 0) {
-                    if (Math.abs(deltaX) > dp(10) || Math.abs(deltaY) > dp(10)) {
-                        handler.removeCallbacks(movePress[0]);
-                        handler.removeCallbacks(resizePress[0]);
-                    }
-                    return false;
+                float dx = event.getRawX() - down[0];
+                float dy = event.getRawY() - down[1];
+                if (editMode[0] == 0 && (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10))) {
+                    handler.removeCallbacks(movePress[0]);
+                    handler.removeCallbacks(menuPress[0]);
+                    return true;
                 }
-                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                 if (editMode[0] == 1) {
-                    current.leftMargin = Math.max(0, Math.min(page.getWidth() - container.getWidth(),
-                            origin[0] + Math.round(deltaX)));
-                    current.topMargin = Math.max(0, Math.min(page.getHeight() - container.getHeight(),
-                            origin[1] + Math.round(deltaY)));
-                } else {
-                    current.width = Math.max(dp(140), origin[2] + Math.round(deltaX));
-                    current.height = Math.max(dp(90), origin[3] + Math.round(deltaY));
-                    current.width = Math.min(current.width, Math.max(dp(140), page.getWidth() - current.leftMargin));
-                    current.height = Math.min(current.height, Math.max(dp(90), page.getHeight() - current.topMargin));
+                    handler.removeCallbacks(menuPress[0]);
+                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    current.leftMargin = Math.max(0, Math.min(page.getWidth() - container.getWidth(), origin[0] + Math.round(dx)));
+                    current.topMargin = Math.max(0, Math.min(page.getHeight() - container.getHeight(), origin[1] + Math.round(dy)));
+                    container.setLayoutParams(current);
                 }
-                container.setLayoutParams(current);
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(movePress[0]);
-                handler.removeCallbacks(resizePress[0]);
-                if (editMode[0] != 0) {
+                handler.removeCallbacks(menuPress[0]);
+                if (editMode[0] == 1) {
                     saveWidgetGeometry(widgetId, pageIndex, container);
-                    resizeHandle.setVisibility(View.GONE);
-                    container.setBackground(null);
-                    editMode[0] = 0;
-                    return true;
+                    clearEditChrome.run();
                 }
+                editMode[0] = 0;
+                return true;
             }
-            return editMode[0] != 0;
+            return true;
         });
         resizeHandle.setOnTouchListener((v, event) -> {
             int action = event.getActionMasked();
