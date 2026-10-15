@@ -81,6 +81,7 @@ final class WidgetInteractionController {
         final float[] down = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
         final int[] widgetPage = {pageIndex};
+        final int[] edgeLatch = {0};
         final Runnable[] movePress = new Runnable[1];
         final Runnable[] menuPress = new Runnable[1];
         final Runnable[] clearEditChrome = new Runnable[1];
@@ -183,16 +184,61 @@ final class WidgetInteractionController {
                     return true;
                 }
                 if (editMode[0] == 1) {
-                    // Do not cancel the options timer just because the user is still holding.
-                    // Cancel it only after a deliberate drag begins in move mode.
+                    // Keep the drag active while the page strip follows the finger at either edge.
                     if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
                             || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) {
                         handler.removeCallbacks(menuPress[0]);
                     }
                     cancelWidgetTouch.run();
+                    int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
+                    int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(activity, 28) ? 1
+                            : event.getRawX() <= LauncherUiUtils.dp(activity, 28) ? -1 : 0;
+                    if (edge == 0) edgeLatch[0] = 0;
+                    if (edge != 0 && edgeLatch[0] != edge) {
+                        edgeLatch[0] = edge;
+                        LinearLayout strip = listener.getPagesStrip();
+                        int sourceIndex = strip == null ? widgetPage[0] : strip.indexOfChild((View) container.getParent());
+                        int destination = sourceIndex + edge;
+                        if (strip != null && destination >= 0 && destination <= 20) {
+                            listener.ensurePageExists(destination);
+                            while (strip.getChildCount() <= destination) {
+                                FrameLayout newPage = new FrameLayout(activity);
+                                newPage.setClipChildren(false);
+                                strip.addView(newPage, new LinearLayout.LayoutParams(
+                                        Math.max(1, page.getWidth()), -1));
+                            }
+                            if (destination != sourceIndex) {
+                                FrameLayout targetPage = (FrameLayout) strip.getChildAt(destination);
+                                ViewGroup oldParent = (ViewGroup) container.getParent();
+                                FrameLayout.LayoutParams movedLp = (FrameLayout.LayoutParams) container.getLayoutParams();
+                                oldParent.removeView(container);
+                                targetPage.addView(container, movedLp);
+                                listener.setCurrentPage(destination);
+                                widgetPage[0] = destination;
+                                int pageWidth = Math.max(1, targetPage.getWidth());
+                                strip.setTranslationX(-destination * pageWidth);
+                                int[] pageLocation = new int[2];
+                                targetPage.getLocationOnScreen(pageLocation);
+                                movedLp.leftMargin = Math.max(0, Math.min(
+                                        Math.max(0, targetPage.getWidth() - container.getWidth()),
+                                        Math.round(event.getRawX() - pageLocation[0] - container.getWidth() / 2f)));
+                                movedLp.topMargin = Math.max(0, Math.min(
+                                        Math.max(0, targetPage.getHeight() - container.getHeight()),
+                                        Math.round(event.getRawY() - pageLocation[1] - container.getHeight() / 2f)));
+                                container.setLayoutParams(movedLp);
+                                origin[0] = movedLp.leftMargin;
+                                origin[1] = movedLp.topMargin;
+                                down[0] = event.getRawX();
+                                down[1] = event.getRawY();
+                                return true;
+                            }
+                        }
+                    }
+                    FrameLayout activePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    int maxX = Math.max(0, page.getWidth() - container.getWidth());
-                    int maxY = Math.max(0, page.getHeight() - container.getHeight());
+                    int maxX = Math.max(0, activePage.getWidth() - container.getWidth());
+                    int maxY = Math.max(0, activePage.getHeight() - container.getHeight());
                     current.leftMargin = Math.max(0, Math.min(maxX, origin[0] + Math.round(dx)));
                     current.topMargin = Math.max(0, Math.min(maxY, origin[1] + Math.round(dy)));
                     container.setLayoutParams(current);
@@ -206,8 +252,10 @@ final class WidgetInteractionController {
                 handler.removeCallbacks(menuPress[0]);
                 if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
+                    FrameLayout activePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
-                    listener.resolveWidgetCollisions(page, container);
+                    listener.resolveWidgetCollisions(activePage, container);
                     clearEditChrome[0].run();
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
