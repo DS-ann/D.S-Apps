@@ -982,6 +982,7 @@ public class MainActivity extends Activity {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     resizingShortcut[0] = true;
+                    setWorkspaceGridVisible(true, tile);
                     resizeStart[0] = event.getRawX();
                     resizeStart[1] = event.getRawY();
                     resizeBase[0] = Math.max(1, (int) Math.ceil((float) tile.getWidth() / cellW));
@@ -1032,6 +1033,7 @@ public class MainActivity extends Activity {
                                 .putInt(KEY_SHORTCUT_HEIGHT_DP, Math.max(1, Math.round(tile.getHeight() / density)))
                                 .apply();
                         if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
+                        setWorkspaceGridVisible(false, null);
                         // Keep the resized tile in place; rebuilding it here can move it
                         // to another free cell and makes the resize appear to snap back.
                     }
