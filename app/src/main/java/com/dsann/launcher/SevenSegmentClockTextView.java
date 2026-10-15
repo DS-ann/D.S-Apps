@@ -37,6 +37,17 @@ public final class SevenSegmentClockTextView extends TextView {
         segmentPaint.setStyle(Paint.Style.FILL);
     }
 
+    @Override public void setTextColor(int color) {
+        super.setTextColor(color);
+        if (Color.alpha(color) != 0) segmentColor = color;
+        invalidate();
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        invalidate();
+    }
+
     public void setSevenSegmentMode(boolean enabled) {
         if (enabled) {
             int current = getCurrentTextColor();
@@ -65,8 +76,12 @@ public final class SevenSegmentClockTextView extends TextView {
         for (int i = 0; i < raw.length(); i++) {
             char ch = raw.charAt(i);
             int digit = Character.digit(ch, 10);
-            if (digit >= 0) display.append((char) ('0' + digit));
-            else if (ch == ':' || ch == '\uFF1A') display.append(':');
+            if (digit >= 0) {
+                display.append((char) ('0' + digit));
+            } else if (ch == ':' || ch == '\uFF1A' || ch == '.' || ch == '\u2236') {
+                // Normalize common locale-specific time separators for LED rendering.
+                display.append(':');
+            }
         }
         String value = display.toString();
         // Never leave the clock invisible if an unexpected format reaches this view.
