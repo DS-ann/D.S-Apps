@@ -109,6 +109,7 @@ public class MainActivity extends Activity {
     private float iconTouchRawX, iconTouchRawY;
     private int iconOriginalLeft, iconOriginalTop;
     private int iconDragPageIndex = -1;
+    private int iconOriginalPageIndex = -1;
     private int iconEdgeLatch = 0;
     private View activeDragView;
     private String activeDragPackage;
@@ -459,6 +460,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
         dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
+        applyClockPanelColor(false);
 
         pageViewport = new FrameLayout(this);
         pageViewport.setClipChildren(true);
@@ -521,6 +523,7 @@ public class MainActivity extends Activity {
                 iconDragPageIndex = view.getParent() instanceof View
                         ? pagesStrip.indexOfChild((View) view.getParent()) : currentPage;
                 iconEdgeLatch = 0;
+                iconOriginalPageIndex = iconDragPageIndex;
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                 iconOriginalLeft = lp.leftMargin;
                 iconOriginalTop = lp.topMargin;
@@ -624,7 +627,7 @@ public class MainActivity extends Activity {
                     // Detect the edge from both the finger and the icon bounds. Touch events
                     // can be clipped by the icon cell before the finger reaches the screen edge.
                     int sourcePage = pagesStrip.indexOfChild(page);
-                    boolean moveToNextPage = iconDragPageIndex >= 0 && iconDragPageIndex != sourcePage;
+                    boolean moveToNextPage = iconDragPageIndex >= 0 && iconDragPageIndex != iconOriginalPageIndex;
                     int columns = getHomeColumns();
                     int rows = HOME_ROWS;
                     int cellWidth = Math.max(1, page.getWidth() / columns);
@@ -677,6 +680,7 @@ public class MainActivity extends Activity {
                     activeDragView = null;
                     activeDragPackage = null;
                     iconDragPageIndex = -1;
+                    iconOriginalPageIndex = -1;
                     iconEdgeLatch = 0;
                     renderHomePages(false);
                     return true;
@@ -1107,6 +1111,7 @@ public class MainActivity extends Activity {
             if (pagesStrip == null || isFinishing()) return;
             String stored = prefs.getString(KEY_WIDGET_IDS, "");
             if (stored.isEmpty()) return;
+            boolean removedStaleWidget = false;
             for (String entry : stored.split("\\n")) {
                 String[] parts = entry.split(":");
                 if (parts.length < 2) continue;
@@ -1124,6 +1129,7 @@ public class MainActivity extends Activity {
                     AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
                     if (info == null) {
                         WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
+                        removedStaleWidget = true;
                         continue;
                     }
                     int availableWidth = page.getWidth() > 0 ? page.getWidth()
@@ -1150,6 +1156,7 @@ public class MainActivity extends Activity {
                     if (candidate instanceof FrameLayout) page.post(() -> resolveWidgetIconCollisions(page, (FrameLayout) candidate));
                 } catch (Exception ignored) {}
             }
+            if (removedStaleWidget) renderHomePages(false);
         });
     }
 
