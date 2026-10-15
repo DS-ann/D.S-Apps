@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_STYLE = "clock_style";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
+    private static final String KEY_PAGE_TRANSITION = "page_transition";
     private static final String KEY_CLOCK_SIZE = "clock_size";
     private static final String KEY_CLOCK_POSITION = "clock_position";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
@@ -1267,27 +1268,66 @@ public class MainActivity extends Activity {
      * No horizontal strip translation happens until the turn has finished, avoiding
      * the double-motion that made the old page-flip animation look jittery.
      */
+    private int getPageTransition() {
+        return Math.max(0, Math.min(3, prefs == null ? 0 : prefs.getInt(KEY_PAGE_TRANSITION, 0)));
+    }
+
     private void applyWheelSwipe(int direction, float progress) {
         if (pagesStrip == null || pagesStrip.getChildCount() == 0) return;
         int from = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, currentPage));
         int to = from + direction;
         View outgoing = pagesStrip.getChildAt(from);
         float width = Math.max(1, outgoing.getWidth());
-        float angle = Math.min(90f, getPageRotationDegrees()) * progress;
+        float height = Math.max(1, outgoing.getHeight());
+        int effect = getPageTransition();
+        float density = getResources().getDisplayMetrics().density;
+
+        // Parallax uses a real strip translation with small opposing depth offsets.
+        // Keeping the same page instances attached avoids widget detach/rebind churn.
+        if (effect == 2) {
+            pagesStrip.setTranslationX(-from * width - direction * width * progress);
+            outgoing.setPivotX(width * 0.5f);
+            outgoing.setPivotY(height * 0.5f);
+            outgoing.setScaleX(1f - 0.045f * progress);
+            outgoing.setScaleY(1f - 0.025f * progress);
+            outgoing.setAlpha(1f - 0.12f * progress);
+            outgoing.setTranslationX(-direction * width * 0.10f * progress);
+            if (to >= 0 && to < pagesStrip.getChildCount()) {
+                View incoming = pagesStrip.getChildAt(to);
+                incoming.setPivotX(incoming.getWidth() * 0.5f);
+                incoming.setPivotY(incoming.getHeight() * 0.5f);
+                incoming.setScaleX(0.955f + 0.045f * progress);
+                incoming.setScaleY(0.975f + 0.025f * progress);
+                incoming.setAlpha(0.88f + 0.12f * progress);
+                incoming.setTranslationX(direction * width * 0.10f * (1f - progress));
+            }
+            return;
+        }
+
+        // Wheel keeps its adjustable rotation; Cube always turns exactly one 90-degree face.
+        float angle = effect == 1 ? 90f
+                : (effect == 3 ? 90f : Math.min(90f, getPageRotationDegrees()));
+        float signedAngle = direction > 0 ? angle * progress : -angle * progress;
         outgoing.setPivotX(direction > 0 ? width : 0f);
-        outgoing.setPivotY(outgoing.getHeight() * 0.5f);
-        outgoing.setRotationY(direction > 0 ? angle : -angle);
-        outgoing.setScaleX(1f);
-        outgoing.setAlpha(1f);
+        outgoing.setPivotY(height * 0.5f);
+        outgoing.setCameraDistance(10000f * density);
+        outgoing.setRotationY(signedAngle);
+        outgoing.setScaleX(effect == 3 ? 1f - 0.07f * progress : 1f);
+        outgoing.setScaleY(effect == 3 ? 1f - 0.025f * progress : 1f);
+        outgoing.setAlpha(effect == 3 ? 1f - 0.18f * progress : 1f);
+        outgoing.setTranslationZ(effect == 1 ? -density * 12f * progress : 0f);
 
         if (to >= 0 && to < pagesStrip.getChildCount()) {
             View incoming = pagesStrip.getChildAt(to);
             incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
             incoming.setPivotY(incoming.getHeight() * 0.5f);
-            incoming.setCameraDistance(10000f * getResources().getDisplayMetrics().density);
-            incoming.setRotationY(direction > 0 ? -(90f - angle) : (90f - angle));
-            incoming.setScaleX(1f);
-            incoming.setAlpha(1f);
+            incoming.setCameraDistance(10000f * density);
+            float incomingAngle = 90f * (1f - progress);
+            incoming.setRotationY(direction > 0 ? -incomingAngle : incomingAngle);
+            incoming.setScaleX(effect == 3 ? 0.93f + 0.07f * progress : 1f);
+            incoming.setScaleY(effect == 3 ? 0.975f + 0.025f * progress : 1f);
+            incoming.setAlpha(effect == 3 ? 0.82f + 0.18f * progress : 1f);
+            incoming.setTranslationZ(effect == 1 ? density * 12f * progress : 0f);
         }
     }
 
@@ -1344,6 +1384,7 @@ public class MainActivity extends Activity {
             face.setScaleY(1f);
             face.setAlpha(1f);
             face.setTranslationX(0f);
+            face.setTranslationY(0f);
             face.setTranslationZ(0f);
             face.setLayerType(View.LAYER_TYPE_NONE, null);
         }
@@ -2334,6 +2375,11 @@ public class MainActivity extends Activity {
         });
         addChoiceRow(content, "Launcher animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
             prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "Page transition effect", getPageTransition(),
+                new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
+            prefs.edit().putInt(KEY_PAGE_TRANSITION, value).apply();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSliderRow(content, "Clock size", 50, 120, getClockSize(), " sp", value -> {
