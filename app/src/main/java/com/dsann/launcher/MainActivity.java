@@ -633,7 +633,7 @@ public class MainActivity extends Activity {
                                     int id = Integer.parseInt(parts[0]);
                                     int widgetPage = Integer.parseInt(parts[1]);
                                     if (widgetPage >= destinationPage) widgetPage++;
-                                    if (shiftedWidgets.length() > 0) shiftedWidgets.append('\\n');
+                                    if (shiftedWidgets.length() > 0) shiftedWidgets.append('\n');
                                     shiftedWidgets.append(id).append(':').append(widgetPage);
                                 } catch (NumberFormatException ignored) {}
                             }
