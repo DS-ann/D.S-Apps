@@ -9,6 +9,7 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -71,8 +72,9 @@ final class WidgetInteractionController {
         // leaving the widget's normal content fully interactive.
         final View gestureGrip = new View(activity);
         gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 12), Gravity.TOP);
+        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, -1, Gravity.TOP | Gravity.LEFT);
         container.addView(gestureGrip, gripLp);
+        resizeHandle.bringToFront();
 
         final int[] editMode = {0}; // 0 idle, 1 moving
         final float[] down = {0f, 0f};
@@ -125,19 +127,92 @@ final class WidgetInteractionController {
                 }
             });
         };
+        final boolean[] childCanceled = {false};
+        final boolean[] menuShown = {false};
+        final float[] lastTouch = {0f, 0f};
+        final long[] downTime = {0L};
+        Runnable cancelWidgetTouch = () -> {
+            if (childCanceled[0]) return;
+            long now = SystemClock.uptimeMillis();
+            MotionEvent cancel = MotionEvent.obtain(downTime[0], now, MotionEvent.ACTION_CANCEL,
+                    lastTouch[0], lastTouch[1], 0);
+            try { widget.dispatchTouchEvent(cancel); } finally { cancel.recycle(); }
+            childCanceled[0] = true;
+        };
+        gestureGrip.setBackgroundColor(Color.TRANSPARENT);
+        clearEditChrome = () -> {
+            resizeHandle.setVisibility(View.GONE);
+            container.setBackground(null);
+            gestureGrip.setBackgroundColor(Color.TRANSPARENT);
+        };
+        movePress[0] = () -> {
+            editMode[0] = 1;
+            resizeHandle.setVisibility(View.VISIBLE);
+            container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
+            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(20, 80, 128, 245), Color.argb(10, 54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
+            Toast.makeText(activity, "Move widget", Toast.LENGTH_SHORT).show();
+        };
+        menuPress[0] = () -> {
+            menuShown[0] = true;
+            cancelWidgetTouch.run();
+            editMode[0] = 0;
+            handler.removeCallbacks(movePress[0]);
+            clearEditChrome.run();
+            String[] actions = {"Remove widget", "Resize widget", "Move to next page"};
+            String[] icons = {"×", "↘", "→"};
+            listener.showActionDialog("Widget options", icons, actions, (dialog, which) -> {
+                if (which == 0) {
+                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
+                    WidgetController.removeWidget(prefs, widgetIdsKey, widgetId);
+                    try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
+                    listener.renderHomePages(false);
+                } else if (which == 1) {
+                    resizeHandle.setVisibility(View.VISIBLE);
+                    container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
+                    Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
+                } else if (which == 2) {
+                    int destination = widgetPage[0] + 1;
+                    FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    moved.leftMargin = LauncherUiUtils.dp(activity, 8);
+                    moved.topMargin = LauncherUiUtils.dp(activity, 40);
+                    container.setLayoutParams(moved);
+                    widgetPage[0] = destination;
+                    listener.ensurePageExists(destination);
+                    listener.saveWidgetGeometry(widgetId, destination, container);
+                    listener.setCurrentPage(destination);
+                    listener.renderHomePages(true);
+                    Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
+                }
+            });
+        };
         gestureGrip.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
+            lastTouch[0] = event.getX();
+            lastTouch[1] = event.getY();
             if (action == MotionEvent.ACTION_DOWN) {
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
+                downTime[0] = event.getDownTime();
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                 origin[0] = current.leftMargin;
                 origin[1] = current.topMargin;
+                origin[2] = current.width;
+                origin[3] = current.height;
                 editMode[0] = 0;
+                childCanceled[0] = false;
+                menuShown[0] = false;
                 handler.removeCallbacks(movePress[0]);
                 handler.removeCallbacks(menuPress[0]);
+                widget.dispatchTouchEvent(event);
                 handler.postDelayed(movePress[0], 1000L);
                 handler.postDelayed(menuPress[0], 2000L);
+                return true;
+            }
+            if (menuShown[0]) {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    handler.removeCallbacks(movePress[0]);
+                    handler.removeCallbacks(menuPress[0]);
+                }
                 return true;
             }
             if (action == MotionEvent.ACTION_MOVE) {
@@ -146,27 +221,37 @@ final class WidgetInteractionController {
                 if (editMode[0] == 0 && (Math.abs(dx) > LauncherUiUtils.dp(activity, 10) || Math.abs(dy) > LauncherUiUtils.dp(activity, 10))) {
                     handler.removeCallbacks(movePress[0]);
                     handler.removeCallbacks(menuPress[0]);
+                    if (!childCanceled[0]) widget.dispatchTouchEvent(event);
                     return true;
                 }
                 if (editMode[0] == 1) {
                     handler.removeCallbacks(menuPress[0]);
+                    cancelWidgetTouch.run();
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    current.leftMargin = Math.max(0, Math.min(page.getWidth() - container.getWidth(), origin[0] + Math.round(dx)));
-                    current.topMargin = Math.max(0, Math.min(page.getHeight() - container.getHeight(), origin[1] + Math.round(dy)));
+                    int maxX = Math.max(0, page.getWidth() - container.getWidth());
+                    int maxY = Math.max(0, page.getHeight() - container.getHeight());
+                    current.leftMargin = Math.max(0, Math.min(maxX, origin[0] + Math.round(dx)));
+                    current.topMargin = Math.max(0, Math.min(maxY, origin[1] + Math.round(dy)));
                     container.setLayoutParams(current);
+                    return true;
                 }
+                if (!childCanceled[0]) widget.dispatchTouchEvent(event);
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(movePress[0]);
                 handler.removeCallbacks(menuPress[0]);
                 if (editMode[0] == 1) {
+                    cancelWidgetTouch.run();
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     clearEditChrome.run();
+                } else if (!childCanceled[0]) {
+                    widget.dispatchTouchEvent(event);
                 }
                 editMode[0] = 0;
                 return true;
             }
+            if (!childCanceled[0]) widget.dispatchTouchEvent(event);
             return true;
         });
         resizeHandle.setOnTouchListener((v, event) -> {
