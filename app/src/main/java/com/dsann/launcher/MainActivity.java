@@ -81,6 +81,8 @@ public class MainActivity extends Activity {
     private static final String KEY_SHORTCUT_LABEL = "contact_shortcut_label";
     private static final String KEY_SHORTCUT_PAGE = "contact_shortcut_page";
     private static final String KEY_SHORTCUT_ICON = "contact_shortcut_icon";
+    private static final String KEY_SHORTCUT_SPAN_X = "contact_shortcut_span_x";
+    private static final String KEY_SHORTCUT_SPAN_Y = "contact_shortcut_span_y";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
