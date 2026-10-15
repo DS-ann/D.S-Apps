@@ -235,6 +235,7 @@ final class WidgetInteractionController {
                 if (editMode[0] == 1) {
                     if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
                             || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
+                    listener.setWorkspaceGridVisible(true, container);
                     cancelWidgetTouch.run();
                     // Fixed two-screen workspace: widget dragging never changes screens.
                     edgeLatch[0] = 0;
@@ -361,6 +362,7 @@ final class WidgetInteractionController {
         resizeHandle.setOnTouchListener((v, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
+                listener.setWorkspaceGridVisible(true, container);
                 down[0] = event.getRawX(); down[1] = event.getRawY();
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                 origin[2] = current.width; origin[3] = current.height;
@@ -375,9 +377,11 @@ final class WidgetInteractionController {
                 current.height = Math.max(LauncherUiUtils.dp(activity, 90), Math.min(Math.max(1, activePage.getHeight()) - current.topMargin,
                         origin[3] + Math.round(event.getRawY() - down[1])));
                 container.setLayoutParams(current);
+                listener.setWorkspaceGridVisible(true, container);
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                listener.setWorkspaceGridVisible(false, null);
                 if (container.getChildAt(0) instanceof AppWidgetHostView) {
                     WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
                             widgetId, (AppWidgetHostView) container.getChildAt(0),
