@@ -672,9 +672,15 @@ public class MainActivity extends Activity {
                     int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(this, 28) ? 1
                             : event.getRawX() <= LauncherUiUtils.dp(this, 28) ? -1 : 0;
                     if (edge == 0) iconEdgeLatch = 0;
-                    int sourceIndex = iconOriginalPageIndex;
-                    // Edge dragging never creates or navigates to another page.
-                    if (edge != 0) iconEdgeLatch = edge;
+                    else if (edge != iconEdgeLatch) {
+                        iconEdgeLatch = edge;
+                        if (edge > 0) {
+                            ensurePageExists(currentPage + 1);
+                            showPage(currentPage + 1, true);
+                        } else if (currentPage > 0) {
+                            showPage(currentPage - 1, true);
+                        }
+                    }
                     FrameLayout page = (FrameLayout) view.getParent();
                     int pageWidth = Math.max(1, page.getWidth());
                     int[] pageLocation = new int[2];
@@ -732,8 +738,8 @@ public class MainActivity extends Activity {
                     }
                     FrameLayout sourceView = (FrameLayout) view.getParent();
                     int sourcePage = pagesStrip.indexOfChild(sourceView);
-                    int destinationPage = 0;
-                    boolean movedAcrossPage = destinationPage != iconOriginalPageIndex;
+                    int destinationPage = Math.max(0, Math.min(pages.size() - 1, currentPage));
+                    boolean movedAcrossPage = destinationPage != sourcePage;
                     FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
                     int columns = getHomeColumns(), rows = HOME_ROWS;
@@ -791,7 +797,7 @@ public class MainActivity extends Activity {
                     // The dragged view intentionally stays attached to its source page until UP;
                     // reparenting during MOVE cancels Android's active touch target.
                     saveIconSlot(packageName, targetCol, targetRow, columns);
-                    int committedPage = 0;
+                    int committedPage = destinationPage;
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
                     ensurePageExists(committedPage);
                     currentPage = committedPage;
@@ -827,6 +833,18 @@ public class MainActivity extends Activity {
 
     private void ensurePageExists(int pageIndex) {
         if (pages.isEmpty()) pages.add(new ArrayList<String>());
+        int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth()
+                : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(this, 40));
+        while (pages.size() <= pageIndex) {
+            pages.add(new ArrayList<String>());
+            if (pagesStrip != null) {
+                FrameLayout page = new FrameLayout(this);
+                page.setClipChildren(false);
+                pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
+            }
+        }
     }
 
     /**
@@ -837,7 +855,7 @@ public class MainActivity extends Activity {
     private void showPage(int requestedPage, boolean animate) {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
-        currentPage = 0;
+        currentPage = Math.max(0, Math.min(lastPage, requestedPage));
         if (pagesStrip == null) return;
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth()
@@ -855,14 +873,19 @@ public class MainActivity extends Activity {
             pagesStrip.setRotationY(0f);
         }
         if (pageIndicator != null) {
-            pageIndicator.setVisibility(View.GONE);
+            boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
+            pageIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
             pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
         }
     }
 
-    private void nextPage() { showPage(0, false); }
+    private void nextPage() {
+        if (currentPage < pages.size() - 1) showPage(currentPage + 1, true);
+    }
 
-    private void previousPage() { showPage(0, false); }
+    private void previousPage() {
+        if (currentPage > 0) showPage(currentPage - 1, true);
+    }
 
     private boolean isDrawerAtTop() {
         if (drawerGrid == null || drawerGrid.getChildCount() == 0) return true;
@@ -883,17 +906,22 @@ public class MainActivity extends Activity {
     }
 
     private void addToHome(String packageName) {
-        if (!homePackages.contains(packageName)) {
-            if (homePackages.size() >= pageCapacity()) {
-                Toast.makeText(this, "Home screen is full. Remove a shortcut first.", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            homePackages.add(packageName);
-            persistHomeApps();
-            rebuildPages();
-            currentPage = 0;
-            renderHomePages(false);
+        if (homePackages.contains(packageName)) return;
+        int capacity = pageCapacity();
+        int targetPage = 0;
+        java.util.Map<Integer, Integer> counts = new java.util.HashMap<>();
+        for (String existing : homePackages) {
+            int p = Math.max(0, prefs.getInt(KEY_ICON_PAGE + existing, 0));
+            counts.put(p, counts.containsKey(p) ? counts.get(p) + 1 : 1);
         }
+        while (counts.containsKey(targetPage) && counts.get(targetPage) >= capacity) targetPage++;
+        homePackages.add(packageName);
+        prefs.edit().putInt(KEY_ICON_PAGE + packageName, targetPage).apply();
+        persistHomeApps();
+        rebuildPages();
+        currentPage = targetPage;
+        renderHomePages(false);
+        showPage(currentPage, false);
     }
 
     private void showAddApps() {
