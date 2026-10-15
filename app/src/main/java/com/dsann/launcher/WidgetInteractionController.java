@@ -191,7 +191,10 @@ final class WidgetInteractionController {
                             : event.getRawX() <= LauncherUiUtils.dp(activity, 28) ? -1 : 0;
                     if (edge == 0) edgeLatch[0] = 0;
                     LinearLayout strip = listener.getPagesStrip();
-                    int sourceIndex = strip == null ? widgetPage[0] : strip.indexOfChild((View) page.getParent());
+                    // 'page' is the child in the strip; page.getParent() is the strip itself,
+                    // so asking the strip for its parent's index always returns -1.
+                    int sourceIndex = strip == null ? widgetPage[0] : strip.indexOfChild(page);
+                    if (sourceIndex < 0) sourceIndex = widgetPage[0];
                     if (edge != 0 && edge != edgeLatch[0]) {
                         edgeLatch[0] = edge;
                         int destination = widgetPage[0] + edge;
