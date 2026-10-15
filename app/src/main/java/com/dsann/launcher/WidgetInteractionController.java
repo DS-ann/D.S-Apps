@@ -287,10 +287,54 @@ final class WidgetInteractionController {
                         if (viewport != null) viewport.getLocationOnScreen(viewportLocation);
                         int maxX = Math.max(0, targetPage.getWidth() - container.getWidth());
                         int maxY = Math.max(0, targetPage.getHeight() - container.getHeight());
-                        current.leftMargin = Math.max(0, Math.min(maxX,
+                        int requestedX = Math.max(0, Math.min(maxX,
                                 Math.round(event.getRawX() - viewportLocation[0] - container.getWidth() / 2f)));
-                        current.topMargin = Math.max(0, Math.min(maxY,
+                        int requestedY = Math.max(0, Math.min(maxY,
                                 Math.round(event.getRawY() - viewportLocation[1] - container.getHeight() / 2f)));
+                        // Snap the widget to a grid whose pitch equals this widget's
+                        // own size. Clamp the full widget inside the workspace above the dock.
+                        int pitchX = Math.max(1, container.getWidth());
+                        int pitchY = Math.max(1, container.getHeight());
+                        current.leftMargin = Math.min(maxX,
+                                Math.max(0, Math.round(requestedX / (float) pitchX) * pitchX));
+                        current.topMargin = Math.min(maxY,
+                                Math.max(0, Math.round(requestedY / (float) pitchY) * pitchY));
+                        // Do not allow widget-sized cells to overlap another widget.
+                        boolean collision;
+                        do {
+                            collision = false;
+                            int bestX = current.leftMargin, bestY = current.topMargin;
+                            int bestDistance = Integer.MAX_VALUE;
+                            for (int gy = 0; gy <= maxY; gy += pitchY) {
+                                for (int gx = 0; gx <= maxX; gx += pitchX) {
+                                    boolean blocked = false;
+                                    for (int ci = 0; ci < targetPage.getChildCount(); ci++) {
+                                        View other = targetPage.getChildAt(ci);
+                                        if (other == container || !(other.getTag() instanceof String)
+                                                || !((String) other.getTag()).startsWith("launcher_widget:")) continue;
+                                        FrameLayout.LayoutParams op = (FrameLayout.LayoutParams) other.getLayoutParams();
+                                        int ox = op.leftMargin, oy = op.topMargin;
+                                        if (gx < ox + other.getWidth() && gx + container.getWidth() > ox
+                                                && gy < oy + other.getHeight() && gy + container.getHeight() > oy) {
+                                            blocked = true; break;
+                                        }
+                                    }
+                                    if (blocked) continue;
+                                    int distance = Math.abs(gx - requestedX) + Math.abs(gy - requestedY);
+                                    if (distance < bestDistance) {
+                                        bestDistance = distance; bestX = gx; bestY = gy;
+                                    }
+                                }
+                            }
+                            if (bestDistance != Integer.MAX_VALUE) {
+                                current.leftMargin = bestX;
+                                current.topMargin = bestY;
+                            } else {
+                                current.leftMargin = Math.min(maxX, origin[0]);
+                                current.topMargin = Math.min(maxY, origin[1]);
+                            }
+                            collision = false;
+                        } while (collision);
                     }
                     container.setTranslationX(0f);
                     container.setLayoutParams(current);
