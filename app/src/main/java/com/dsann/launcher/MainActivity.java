@@ -655,6 +655,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void refreshWorkspaceGrid() {
+        for (View overlay : workspaceGridOverlays) {
+            if (overlay != null && overlay.getVisibility() == View.VISIBLE) overlay.invalidate();
+        }
+    }
+
     private final class WorkspaceGridOverlay extends View {
         private final FrameLayout page;
         private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1013,6 +1019,7 @@ public class MainActivity extends Activity {
                         p.height = Math.max(cellH, Math.min(pageViewport.getHeight() - p.topMargin,
                                 resizeBasePx[1] + Math.round(event.getRawY() - resizeStart[1])));
                         tile.setLayoutParams(p);
+                        refreshWorkspaceGrid();
                         // Grow the actual contact/app icon as the tile grows; changing only
                         // the tile bounds leaves the icon visually stuck at its original size.
                         // Keep the initial one-cell shortcut compact. Scale from the original
@@ -1273,6 +1280,7 @@ public class MainActivity extends Activity {
                     lp.topMargin = Math.min(Math.max(0, page.getHeight() - view.getHeight()),
                             snappedRow * slotHeight);
                     view.setLayoutParams(lp);
+                    refreshWorkspaceGrid();
                 }
                 return true;
             }
