@@ -63,11 +63,6 @@ final class LauncherDrawerController {
                 });
         grid.setAdapter(adapter);
         screen.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
-        grid.setOnItemLongClickListener((parent, view, position, id) -> {
-            if (position < 0 || position >= drawerApps.size()) return true;
-            actions.showAppOptions(drawerApps.get(position), false);
-            return true;
-        });
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
         return new BuiltDrawer(screen, grid, adapter);
     }
