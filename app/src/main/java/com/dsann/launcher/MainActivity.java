@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
     private static final int REQUEST_WIDGET_CONFIGURE = 7304;
+    private static final int REQUEST_CALL_PERMISSION = 7305;
     private int pendingWidgetId = -1;
     private AppWidgetProviderInfo pendingWidgetInfo;
     private int pendingWidgetTargetPage = 0;
@@ -1186,6 +1187,16 @@ public class MainActivity extends Activity {
     }
 
     private void beginBindingWidget(AppWidgetProviderInfo info) {
+        if (info == null) return;
+        // Direct Dial widgets can initiate an immediate phone call. Request the
+        // runtime permission before binding one, rather than waiting for its first tap.
+        if (android.os.Build.VERSION.SDK_INT >= 23
+                && requiresDirectDialPermission(info)
+                && checkSelfPermission(android.Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+            pendingWidgetInfo = info;
+            requestPermissions(new String[]{android.Manifest.permission.CALL_PHONE}, REQUEST_CALL_PERMISSION);
+            return;
+        }
         try {
             pendingWidgetId = widgetHost.allocateAppWidgetId();
             pendingWidgetInfo = info;
@@ -1202,6 +1213,27 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             discardPendingWidget();
             Toast.makeText(this, "Couldn't start widget setup", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean requiresDirectDialPermission(AppWidgetProviderInfo info) {
+        try {
+            String label = String.valueOf(info.loadLabel(packageManager)).toLowerCase(Locale.ROOT);
+            return label.contains("direct dial") || label.contains("direct call");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_CALL_PERMISSION) return;
+        AppWidgetProviderInfo info = pendingWidgetInfo;
+        pendingWidgetInfo = null;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED && info != null) {
+            beginBindingWidget(info);
+        } else {
+            Toast.makeText(this, "Phone permission is needed for a Direct Dial widget", Toast.LENGTH_LONG).show();
         }
     }
 
