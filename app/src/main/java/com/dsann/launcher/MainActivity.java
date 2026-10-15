@@ -756,8 +756,48 @@ public class MainActivity extends Activity {
         panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
     }
 
+    private void beginWidgetPicker() {
+        try {
+            pendingWidgetId = widgetHost.allocateAppWidgetId();
+            Intent pick = new Intent(AppWidgetManager.ACTION_APPWIDGET_PICK);
+            pick.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+            startActivityForResult(pick, REQUEST_WIDGET_PICK);
+        } catch (Exception e) {
+            if (pendingWidgetId >= 0) widgetHost.deleteAppWidgetId(pendingWidgetId);
+            pendingWidgetId = -1;
+            Toast.makeText(this, "No widget picker is available", Toast.LENGTH_LONG).show();
+        }
+    }
+
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_WIDGET_PICK || requestCode == REQUEST_WIDGET_BIND || requestCode == REQUEST_WIDGET_CONFIGURE) {
+            if (resultCode != RESULT_OK || pendingWidgetId < 0) {
+                if (pendingWidgetId >= 0) widgetHost.deleteAppWidgetId(pendingWidgetId);
+                pendingWidgetId = -1;
+                return;
+            }
+            if (data != null) pendingWidgetId = data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+            AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(pendingWidgetId);
+            if (info == null) { widgetHost.deleteAppWidgetId(pendingWidgetId); pendingWidgetId = -1; return; }
+            if (requestCode == REQUEST_WIDGET_PICK) {
+                Intent bind = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
+                bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+                bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider);
+                startActivityForResult(bind, REQUEST_WIDGET_BIND);
+                return;
+            }
+            if (info.configure != null && requestCode != REQUEST_WIDGET_CONFIGURE) {
+                Intent configure = new Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
+                configure.setComponent(info.configure);
+                configure.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+                startActivityForResult(configure, REQUEST_WIDGET_CONFIGURE);
+                return;
+            }
+            addWidgetToCurrentPage(info, pendingWidgetId);
+            pendingWidgetId = -1;
+            return;
+        }
         if (requestCode != REQUEST_WALLPAPER || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         java.io.File savedImage = new java.io.File(getFilesDir(), "launcher_wallpaper_image");
@@ -793,6 +833,22 @@ public class MainActivity extends Activity {
             tempImage.delete();
             Toast.makeText(this, "Couldn't read that image. Try selecting a locally saved copy.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void addWidgetToCurrentPage(AppWidgetProviderInfo info, int widgetId) {
+        if (pagesStrip == null || currentPage < 0 || currentPage >= pagesStrip.getChildCount()) {
+            Toast.makeText(this, "Open the home screen and try again", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        FrameLayout page = (FrameLayout) pagesStrip.getChildAt(currentPage);
+        AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
+        widget.setAppWidget(widgetId, info);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(180), page.getWidth() / 2),
+                Math.max(dp(100), page.getHeight() / 4), Gravity.TOP | Gravity.LEFT);
+        lp.leftMargin = dp(8); lp.topMargin = dp(8);
+        page.addView(widget, lp);
+        widget.bringToFront();
+        Toast.makeText(this, "Widget added to this page", Toast.LENGTH_SHORT).show();
     }
 
     private boolean touchStartedOnAppCell(float rawX, float rawY) {
