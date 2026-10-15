@@ -673,6 +673,11 @@ public class MainActivity extends Activity {
 
     private void renderSavedContactShortcut() {
         if (pagesStrip == null || prefs == null) return;
+        if (pageViewport == null) return;
+        if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
+            pageViewport.post(() -> renderSavedContactShortcut());
+            return;
+        }
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View pageView = pagesStrip.getChildAt(i);
             if (!(pageView instanceof ViewGroup)) continue;
