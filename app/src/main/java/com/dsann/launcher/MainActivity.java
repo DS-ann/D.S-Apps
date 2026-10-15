@@ -110,6 +110,7 @@ public class MainActivity extends Activity {
     private final List<List<String>> pages = new ArrayList<>();
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
+    private boolean gestureStartedOnAppCell = false;
     private float longPressDownX, longPressDownY;
     private boolean longPressTriggered = false;
     private boolean iconDragArmed = false;
@@ -128,7 +129,8 @@ public class MainActivity extends Activity {
         @Override public void run() {
             if (!drawerOpen && root != null) {
                 longPressTriggered = true;
-                showCustomizationMenu();
+                if (currentPage == 1) showSecondPageMenu();
+                else showCustomizationMenu();
             }
         }
     };
@@ -222,8 +224,9 @@ public class MainActivity extends Activity {
             longPressDownY = event.getY();
             longPressTriggered = false;
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
+            gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             handler.removeCallbacks(homeLongPress);
-            if (!drawerOpen && !touchStartedOnAppCell(event.getRawX(), event.getRawY())) handler.postDelayed(homeLongPress, 2000L);
+            if (!drawerOpen && !gestureStartedOnAppCell) handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
         }
         if (event.getAction() == MotionEvent.ACTION_MOVE) {
@@ -236,11 +239,11 @@ public class MainActivity extends Activity {
             float dy = event.getY() - gestureDownY;
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65) && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
-            // A horizontal drag that began on an icon belongs to the icon's drag
-            // controller. Treating its ACTION_UP as a page swipe sends ACTION_CANCEL
-            // to the icon first, commits a partial move, then changes pages separately.
-            // That race is what leaves a blank page while the dragged icon disappears.
-            boolean horizontalSwipe = false; // Exactly one home screen; horizontal swipes do not navigate pages.
+            // Page swipes are recognized only when the gesture began on empty workspace,
+            // never on an app or widget touch target.
+            boolean horizontalSwipe = !gestureStartedOnAppCell
+                    && Math.abs(dx) > LauncherUiUtils.dp(this, 65)
+                    && Math.abs(dx) > Math.abs(dy);
             if (verticalSwipe || horizontalSwipe) {
                 // Cancel the child click before handling a swipe, otherwise a swipe
                 // beginning on an icon can accidentally launch that app on ACTION_UP.
@@ -333,8 +336,7 @@ public class MainActivity extends Activity {
         }
         if (removedMissingApps) {
             persistHomeApps();
-            int requiredPages = Math.max(1, (homePackages.size() + pageCapacity() - 1) / pageCapacity());
-            if (currentPage >= requiredPages) currentPage = requiredPages - 1;
+            currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
             if (root != null) renderHomePages(false);
         }
@@ -347,8 +349,8 @@ public class MainActivity extends Activity {
         if (saved != null && !saved.isEmpty()) {
             for (String p : saved.split("\\n")) if (!p.isEmpty() && findApp(p) != null && !homePackages.contains(p)) homePackages.add(p);
         }
-        int maxHomeShortcuts = Math.max(1, pageCapacity());
-        while (homePackages.size() > maxHomeShortcuts) homePackages.remove(homePackages.size() - 1);
+        // Keep every saved shortcut. The two screens can grow vertically rather than
+        // silently dropping shortcuts when a screen exceeds the preferred grid capacity.
         if (homePackages.isEmpty()) {
             // A few familiar shortcuts make the first page useful; all apps remain in the drawer.
             for (ResolveInfo app : allApps) {
@@ -372,8 +374,7 @@ public class MainActivity extends Activity {
     }
 
     private void rebuildPages() {
-        // All membership validation and gap compaction now lives in HomePageModel.
-        // Rendering never infers page membership from the current view hierarchy.
+        // The model always returns exactly two stable screens; it never compacts empty pages.
         HomePageModel.Result result = HomePageModel.rebuild(
                 prefs, homePackages, widgetManager, currentPage, pageCapacity(),
                 KEY_ICON_PAGE, KEY_WIDGET_IDS, KEY_ICON_X, KEY_ICON_Y, getHomeColumns(), HOME_ROWS);
@@ -670,18 +671,8 @@ public class MainActivity extends Activity {
                 }
                 if (iconDragging) {
                     int screenWidth = getResources().getDisplayMetrics().widthPixels;
-                    int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(this, 28) ? 1
-                            : event.getRawX() <= LauncherUiUtils.dp(this, 28) ? -1 : 0;
-                    if (edge == 0) iconEdgeLatch = 0;
-                    else if (edge != iconEdgeLatch) {
-                        iconEdgeLatch = edge;
-                        if (edge > 0) {
-                            ensurePageExists(currentPage + 1);
-                            showPage(currentPage + 1, true);
-                        } else if (currentPage > 0) {
-                            showPage(currentPage - 1, true);
-                        }
-                    }
+                    // Fixed workspace: dragging never changes screens or creates pages.
+                    iconEdgeLatch = 0;
                     FrameLayout page = (FrameLayout) view.getParent();
                     int pageWidth = Math.max(1, page.getWidth());
                     int[] pageLocation = new int[2];
@@ -739,7 +730,7 @@ public class MainActivity extends Activity {
                     }
                     FrameLayout sourceView = (FrameLayout) view.getParent();
                     int sourcePage = pagesStrip.indexOfChild(sourceView);
-                    int destinationPage = Math.max(0, Math.min(pages.size() - 1, currentPage));
+                    int destinationPage = Math.max(0, Math.min(1, sourcePage));
                     boolean movedAcrossPage = destinationPage != sourcePage;
                     FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
@@ -833,14 +824,16 @@ public class MainActivity extends Activity {
     }
 
     private void ensurePageExists(int pageIndex) {
-        if (pages.isEmpty()) pages.add(new ArrayList<String>());
+        // There are exactly two permanent home screens. This method only repairs missing
+        // containers after recreation; it can never append a third screen.
+        while (pages.size() < HomePageModel.PAGE_COUNT) pages.add(new ArrayList<String>());
+        while (pages.size() > HomePageModel.PAGE_COUNT) pages.remove(pages.size() - 1);
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth()
                 : Math.max(1, getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(this, 40));
-        while (pages.size() <= pageIndex) {
-            pages.add(new ArrayList<String>());
-            if (pagesStrip != null) {
+        if (pagesStrip != null) {
+            while (pagesStrip.getChildCount() < HomePageModel.PAGE_COUNT) {
                 FrameLayout page = new FrameLayout(this);
                 page.setClipChildren(false);
                 pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
@@ -907,22 +900,26 @@ public class MainActivity extends Activity {
     }
 
     private void addToHome(String packageName) {
-        if (homePackages.contains(packageName)) return;
-        int capacity = pageCapacity();
-        int targetPage = 0;
-        java.util.Map<Integer, Integer> counts = new java.util.HashMap<>();
-        for (String existing : homePackages) {
-            int p = Math.max(0, prefs.getInt(KEY_ICON_PAGE + existing, 0));
-            counts.put(p, counts.containsKey(p) ? counts.get(p) + 1 : 1);
-        }
-        while (counts.containsKey(targetPage) && counts.get(targetPage) >= capacity) targetPage++;
+        if (packageName == null || packageName.equals(getPackageName()) || homePackages.contains(packageName)) return;
+        // New shortcuts are added only to screen 2. Existing shortcuts never migrate.
         homePackages.add(packageName);
-        prefs.edit().putInt(KEY_ICON_PAGE + packageName, targetPage).apply();
+        prefs.edit().putInt(KEY_ICON_PAGE + packageName, 1).apply();
         persistHomeApps();
         rebuildPages();
-        currentPage = targetPage;
+        currentPage = 1;
+        ensurePageExists(1);
         renderHomePages(false);
-        showPage(currentPage, false);
+        showPage(1, false);
+    }
+
+    private void showSecondPageMenu() {
+        showActionDialog("Second home screen", new String[]{"▦", "+"},
+                new String[]{"Add widget", "Add apps"}, (dialog, which) -> {
+            currentPage = 1;
+            showPage(1, false);
+            if (which == 0) beginWidgetPicker();
+            else if (which == 1) showAddApps();
+        });
     }
 
     private void showAddApps() {
@@ -972,8 +969,7 @@ public class MainActivity extends Activity {
             } else if (action.equals("Remove from Home")) {
                 homePackages.remove(app.activityInfo.packageName);
                 prefs.edit().remove(KEY_ICON_X + app.activityInfo.packageName).remove(KEY_ICON_Y + app.activityInfo.packageName).apply();
-                int requiredPages = Math.max(1, (homePackages.size() + pageCapacity() - 1) / pageCapacity());
-                if (currentPage >= requiredPages) currentPage = requiredPages - 1;
+                currentPage = Math.max(0, Math.min(1, currentPage));
                 persistHomeApps(); rebuildPages(); renderHomePages(false);
             } else {
                 addToHome(app.activityInfo.packageName);
@@ -1209,10 +1205,12 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Open the home screen and try again", Toast.LENGTH_SHORT).show();
             return;
         }
+        currentPage = 1;
         rebuildPages();
-        ensurePageExists(Math.max(0, currentPage));
+        ensurePageExists(1);
         renderHomePages(false);
-        final int targetPage = Math.max(0, currentPage);
+        showPage(1, false);
+        final int targetPage = 1;
         // Wait for the page to be measured before sizing the host view. Immediately
         // after renderHomePages(), FrameLayout.getWidth()/getHeight() are often zero.
         pagesStrip.post(() -> {
