@@ -86,6 +86,8 @@ public class MainActivity extends Activity {
     private static final String KEY_SHORTCUT_ICON = "contact_shortcut_icon";
     private static final String KEY_SHORTCUT_SPAN_X = "contact_shortcut_span_x";
     private static final String KEY_SHORTCUT_SPAN_Y = "contact_shortcut_span_y";
+    private static final String KEY_SHORTCUT_WIDTH_DP = "contact_shortcut_width_dp";
+    private static final String KEY_SHORTCUT_HEIGHT_DP = "contact_shortcut_height_dp";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
@@ -790,9 +792,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = Math.max(LauncherUiUtils.dp(this, 38), Math.min(LauncherUiUtils.dp(this, 96),
-                Math.min(cellW * shortcutSpanX - LauncherUiUtils.dp(this, 16),
-                        cellH * shortcutSpanY - LauncherUiUtils.dp(this, 42))));
+        int initialIconSize = LauncherUiUtils.dp(this, 38);
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 11, Color.WHITE, true);
@@ -802,8 +802,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
         labelParams.topMargin = LauncherUiUtils.dp(this, 3);
         tileContent.addView(label, labelParams);
-        int tileWidth = Math.min(pageViewport.getWidth() - chosenLeft, cellW * shortcutSpanX);
-        int tileHeight = Math.min(pageViewport.getHeight() - chosenTop, cellH * shortcutSpanY);
+        int savedWidthDp = prefs.getInt(KEY_SHORTCUT_WIDTH_DP, 0);
+        int savedHeightDp = prefs.getInt(KEY_SHORTCUT_HEIGHT_DP, 0);
+        int tileWidth = savedWidthDp > 0
+                ? Math.min(pageViewport.getWidth() - chosenLeft, LauncherUiUtils.dp(this, savedWidthDp))
+                : Math.min(pageViewport.getWidth() - chosenLeft, cellW * shortcutSpanX);
+        int tileHeight = savedHeightDp > 0
+                ? Math.min(pageViewport.getHeight() - chosenTop, LauncherUiUtils.dp(this, savedHeightDp))
+                : Math.min(pageViewport.getHeight() - chosenTop, cellH * shortcutSpanY);
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
                 Math.max(cellW, tileWidth), Math.max(cellH, tileHeight), Gravity.TOP | Gravity.LEFT);
         tileParams.leftMargin = chosenLeft;
@@ -823,26 +829,28 @@ public class MainActivity extends Activity {
         final boolean[] resizingShortcut = {false};
         final float[] resizeStart = {0f, 0f};
         final int[] resizeBase = {shortcutSpanX, shortcutSpanY};
+        final int[] resizeBasePx = {tileWidth, tileHeight};
         resizeGrip.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     resizingShortcut[0] = true;
                     resizeStart[0] = event.getRawX();
                     resizeStart[1] = event.getRawY();
-                    resizeBase[0] = Math.max(1, Math.round((float) tile.getWidth() / cellW));
-                    resizeBase[1] = Math.max(1, Math.round((float) tile.getHeight() / cellH));
+                    resizeBase[0] = Math.max(1, (int) Math.ceil((float) tile.getWidth() / cellW));
+                    resizeBase[1] = Math.max(1, (int) Math.ceil((float) tile.getHeight() / cellH));
+                    resizeBasePx[0] = tile.getWidth();
+                    resizeBasePx[1] = tile.getHeight();
+                    tile.getParent().requestDisallowInterceptTouchEvent(true);
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     if (!resizingShortcut[0]) return true;
-                    int spanX = Math.max(1, Math.min(columns, resizeBase[0]
-                            + Math.round((event.getRawX() - resizeStart[0]) / cellW)));
-                    int spanY = Math.max(1, Math.min(rows, resizeBase[1]
-                            + Math.round((event.getRawY() - resizeStart[1]) / cellH)));
                     ViewGroup.LayoutParams raw = tile.getLayoutParams();
                     if (raw instanceof FrameLayout.LayoutParams) {
                         FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) raw;
-                        p.width = Math.min(pageViewport.getWidth() - p.leftMargin, spanX * cellW);
-                        p.height = Math.min(pageViewport.getHeight() - p.topMargin, spanY * cellH);
+                        p.width = Math.max(cellW, Math.min(pageViewport.getWidth() - p.leftMargin,
+                                resizeBasePx[0] + Math.round(event.getRawX() - resizeStart[0])));
+                        p.height = Math.max(cellH, Math.min(pageViewport.getHeight() - p.topMargin,
+                                resizeBasePx[1] + Math.round(event.getRawY() - resizeStart[1])));
                         tile.setLayoutParams(p);
                         // Grow the actual contact/app icon as the tile grows; changing only
                         // the tile bounds leaves the icon visually stuck at its original size.
@@ -865,10 +873,15 @@ public class MainActivity extends Activity {
                 case MotionEvent.ACTION_CANCEL:
                     if (resizingShortcut[0]) {
                         resizingShortcut[0] = false;
-                        int finalX = Math.max(1, Math.min(columns, Math.round((float) tile.getWidth() / cellW)));
-                        int finalY = Math.max(1, Math.min(rows, Math.round((float) tile.getHeight() / cellH)));
+                        int finalX = Math.max(1, Math.min(columns, (int) Math.ceil((float) tile.getWidth() / cellW)));
+                        int finalY = Math.max(1, Math.min(rows, (int) Math.ceil((float) tile.getHeight() / cellH)));
+                        float density = getResources().getDisplayMetrics().density;
                         prefs.edit().putInt(KEY_SHORTCUT_SPAN_X, finalX)
-                                .putInt(KEY_SHORTCUT_SPAN_Y, finalY).apply();
+                                .putInt(KEY_SHORTCUT_SPAN_Y, finalY)
+                                .putInt(KEY_SHORTCUT_WIDTH_DP, Math.max(1, Math.round(tile.getWidth() / density)))
+                                .putInt(KEY_SHORTCUT_HEIGHT_DP, Math.max(1, Math.round(tile.getHeight() / density)))
+                                .apply();
+                        if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                         // Keep the resized tile in place; rebuilding it here can move it
                         // to another free cell and makes the resize appear to snap back.
                     }
@@ -922,7 +935,8 @@ public class MainActivity extends Activity {
                 } else if (which == 2) {
                     prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
                             .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
-                            .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y).apply();
+                            .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y)
+                            .remove(KEY_SHORTCUT_WIDTH_DP).remove(KEY_SHORTCUT_HEIGHT_DP).apply();
                     renderHomePages(false);
                 } else if (which == 3) {
                     prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
@@ -1323,23 +1337,25 @@ public class MainActivity extends Activity {
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
 
-        // Parallax uses one strip translation plus subtle depth cues. Avoid moving
-        // the strip and both child pages independently, which doubled the work and
-        // made the effect feel laggy on lower-powered devices with live widgets.
+        pagesStrip.setTranslationX(-from * width);
+        View incomingFace = to >= 0 && to < pagesStrip.getChildCount() ? pagesStrip.getChildAt(to) : null;
+        if (incomingFace != null) {
+            incomingFace.setTranslationX(-direction * width);
+            incomingFace.setAlpha(progress);
+        }
+        outgoing.setAlpha(1f - progress);
+        // Parallax uses restrained transforms; no extra strip movement competes with them.
         if (effect == 2) {
-            pagesStrip.setTranslationX(-from * width - direction * width * progress);
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
             outgoing.setScaleX(1f - 0.045f * progress);
             outgoing.setScaleY(1f - 0.025f * progress);
-            outgoing.setAlpha(1f - 0.12f * progress);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
                 View incoming = pagesStrip.getChildAt(to);
                 incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
                 incoming.setScaleX(0.955f + 0.045f * progress);
                 incoming.setScaleY(0.975f + 0.025f * progress);
-                incoming.setAlpha(0.88f + 0.12f * progress);
             }
             return;
         }
@@ -1359,7 +1375,7 @@ public class MainActivity extends Activity {
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
                 incoming.setRotationY(-direction * 78f * (1f - progress));
                 incoming.setTranslationZ(density * 28f * progress);
-                incoming.setTranslationX(direction * width * 0.04f * (1f - progress));
+                incoming.setTranslationX(-direction * width + direction * width * 0.04f * (1f - progress));
             }
         } else if (effect == 3) {
             // Page Flip: hinge from the top edge on the X axis, like a turning sheet.
@@ -1368,7 +1384,6 @@ public class MainActivity extends Activity {
             outgoing.setRotationX(direction * 68f * progress);
             outgoing.setRotationY(direction * 5f * progress);
             outgoing.setScaleX(1f - 0.04f * progress);
-            outgoing.setAlpha(1f - 0.22f * progress);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
                 View incoming = pagesStrip.getChildAt(to);
                 incoming.setCameraDistance(10000f * density);
@@ -1377,7 +1392,6 @@ public class MainActivity extends Activity {
                 incoming.setRotationX(-direction * 68f * (1f - progress));
                 incoming.setRotationY(-direction * 5f * (1f - progress));
                 incoming.setScaleX(0.96f + 0.04f * progress);
-                incoming.setAlpha(0.78f + 0.22f * progress);
             }
         } else {
             // 3D Wheel: broad rotation around the page center, controlled by the rotation slider.
@@ -2615,65 +2629,51 @@ public class MainActivity extends Activity {
         int alignment = clockGravity();
         final float lengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
+        clockPanel.setGravity(alignment);
         LinearLayout.LayoutParams panelParams = (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
         panelParams.gravity = alignment;
+        panelParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
         clockPanel.setLayoutParams(panelParams);
-        clockPanel.setGravity(alignment);
-        int scaledClockWidth = Math.max(LauncherUiUtils.dp(this, 38),
-                (int) Math.ceil(clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale)
-                        + LauncherUiUtils.dp(this, 20));
+
+        int clockWidth = (int) Math.ceil(clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale);
         int dateWidth = dateText == null ? 0
-                : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()))
-                        + LauncherUiUtils.dp(this, 20);
-        // The gradient card follows the larger of the scaled clock and date, instead
-        // of staying screen-wide while only the digits change size.
-        int contentWidth = Math.max(scaledClockWidth, dateWidth);
+                : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
+        int contentWidth = Math.max(clockWidth, dateWidth) + LauncherUiUtils.dp(this, 20);
+        int rowHeight = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
+        if (clockRow != null) {
+            ViewGroup.LayoutParams rowParams = clockRow.getLayoutParams();
+            if (rowParams != null) { rowParams.width = contentWidth; rowParams.height = rowHeight; clockRow.setLayoutParams(rowParams); }
+            clockRow.setClipChildren(false);
+            clockRow.setClipToPadding(false);
+        }
         if (clockGroup != null) {
             FrameLayout.LayoutParams groupParams = (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.CENTER_VERTICAL;
-            groupParams.height = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
             groupParams.width = contentWidth;
+            groupParams.height = rowHeight;
             clockGroup.setLayoutParams(groupParams);
+            clockGroup.setClipChildren(false);
+            clockGroup.setClipToPadding(false);
         }
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        if (dateText != null) {
-            dateText.setGravity(alignment);
-            ViewGroup.LayoutParams dateParams = dateText.getLayoutParams();
-            if (dateParams != null) {
-                dateParams.width = contentWidth;
-                dateText.setLayoutParams(dateParams);
-            }
-        }
-        // Keep the typography base fixed; the two controls independently stretch the
-        // visible clock horizontally (length) and vertically (breadth).
         clockText.setTextSize(78f);
         clockText.setPivotX(0f);
         clockText.setPivotY(0f);
         clockText.setScaleX(lengthScale);
         clockText.setScaleY(breadthScale);
-        if (clockRow != null) {
-            clockRow.setClipChildren(false);
-            clockRow.setClipToPadding(false);
-        }
-        int height = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
         ViewGroup.LayoutParams clockParams = clockText.getLayoutParams();
         if (clockParams != null) {
             clockParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
             clockParams.height = LauncherUiUtils.dp(this, 114);
             clockText.setLayoutParams(clockParams);
         }
-        if (clockRow != null) {
-            ViewGroup.LayoutParams rowParams = clockRow.getLayoutParams();
-            if (rowParams != null) {
-                rowParams.height = height;
-                clockRow.setLayoutParams(rowParams);
-            }
+        if (dateText != null) {
+            dateText.setGravity(alignment);
+            ViewGroup.LayoutParams dateParams = dateText.getLayoutParams();
+            if (dateParams != null) { dateParams.width = contentWidth; dateText.setLayoutParams(dateParams); }
         }
         if (amPmText != null) {
-            // The AM/PM marker overlays the lower-right corner; it never consumes
-            // horizontal layout width or pushes the clock away from centre.
-            float markerSp = Math.max(6f, Math.min(9f, 78f * Math.min(lengthScale, breadthScale) * 0.10f));
-            amPmText.setTextSize(markerSp);
+            amPmText.setTextSize(Math.max(6f, Math.min(9f, 78f * Math.min(lengthScale, breadthScale) * 0.10f)));
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
@@ -2688,9 +2688,7 @@ public class MainActivity extends Activity {
         clockText.invalidate();
     }
 
-    private interface IntSliderAction { void onChange(int value); }
-
-    private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
+private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
