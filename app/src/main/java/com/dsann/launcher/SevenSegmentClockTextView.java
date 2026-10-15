@@ -65,6 +65,31 @@ public final class SevenSegmentClockTextView extends TextView {
         requestLayout();
     }
 
+    @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        if (!sevenSegmentMode) return;
+
+        String raw = getText() == null ? "" : getText().toString();
+        int digits = 0;
+        int colons = 0;
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (Character.digit(ch, 10) >= 0) digits++;
+            else if (ch == ':' || ch == '\\uFF1A' || ch == '.' || ch == '\\u2236') colons++;
+        }
+        if (digits == 0) return;
+
+        // Match the exact width formula used by onDraw, so the view ends where
+        // the last LED glyph ends and the AM/PM label can sit directly beside it.
+        int contentHeight = Math.max(1, getMeasuredHeight() - getPaddingTop() - getPaddingBottom());
+        float unit = contentHeight * 0.91f;
+        float widthUnits = digits * 0.72f + colons * 0.34f;
+        int desiredWidth = (int) Math.ceil(widthUnits * unit
+                + getPaddingLeft() + getPaddingRight());
+        int measuredWidth = resolveSize(desiredWidth, widthMeasureSpec);
+        setMeasuredDimension(measuredWidth, getMeasuredHeight());
+    }
+
     @Override protected void onDraw(Canvas canvas) {
         if (!sevenSegmentMode) {
             super.onDraw(canvas);
