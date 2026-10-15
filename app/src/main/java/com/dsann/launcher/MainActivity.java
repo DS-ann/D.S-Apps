@@ -585,11 +585,22 @@ public class MainActivity extends Activity {
                     FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
                     int columns = getHomeColumns(), rows = HOME_ROWS;
-                    int cellWidth = Math.max(1, targetPage.getWidth() / columns);
-                    int cellHeight = Math.max(1, targetPage.getHeight() / rows);
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
-                    int targetCol = Math.max(0, Math.min(columns - 1, lp.leftMargin / cellWidth));
-                    int targetRow = Math.max(0, Math.min(rows - 1, lp.topMargin / cellHeight));
+                    // The dragged cell stays attached to its source page until ACTION_UP.
+                    // Its layout margins therefore are not reliable destination coordinates.
+                    // Map the release point to the visible viewport, where the destination
+                    // page is aligned after the edge-page preview.
+                    int targetWidth = Math.max(1, targetPage.getWidth() > 0
+                            ? targetPage.getWidth() : pageViewport.getWidth());
+                    int targetHeight = Math.max(1, targetPage.getHeight() > 0
+                            ? targetPage.getHeight() : pageViewport.getHeight());
+                    int[] viewportLocation = new int[2];
+                    pageViewport.getLocationOnScreen(viewportLocation);
+                    int cellWidth = Math.max(1, targetWidth / columns);
+                    int cellHeight = Math.max(1, targetHeight / rows);
+                    int targetCol = Math.max(0, Math.min(columns - 1,
+                            (int) ((event.getRawX() - viewportLocation[0]) / cellWidth)));
+                    int targetRow = Math.max(0, Math.min(rows - 1,
+                            (int) ((event.getRawY() - viewportLocation[1]) / cellHeight)));
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = Math.max(1, sourceView.getHeight() / rows);
                     int sourceCol = Math.max(0, Math.min(columns - 1, iconOriginalLeft / sourceCellWidth));
