@@ -215,8 +215,7 @@ public class MainActivity extends Activity {
             // controller. Treating its ACTION_UP as a page swipe sends ACTION_CANCEL
             // to the icon first, commits a partial move, then changes pages separately.
             // That race is what leaves a blank page while the dragged icon disappears.
-            boolean horizontalSwipe = !drawerOpen && activeDragView == null && !iconDragging
-                    && Math.abs(dx) > LauncherUiUtils.dp(this, 65) && Math.abs(dx) > Math.abs(dy);
+            boolean horizontalSwipe = false; // Exactly one home screen; horizontal swipes do not navigate pages.
             if (verticalSwipe || horizontalSwipe) {
                 // Cancel the child click before handling a swipe, otherwise a swipe
                 // beginning on an icon can accidentally launch that app on ACTION_UP.
@@ -322,6 +321,8 @@ public class MainActivity extends Activity {
         if (saved != null && !saved.isEmpty()) {
             for (String p : saved.split("\\n")) if (!p.isEmpty() && findApp(p) != null && !homePackages.contains(p)) homePackages.add(p);
         }
+        int maxHomeShortcuts = Math.max(1, pageCapacity());
+        while (homePackages.size() > maxHomeShortcuts) homePackages.remove(homePackages.size() - 1);
         if (homePackages.isEmpty()) {
             // A few familiar shortcuts make the first page useful; all apps remain in the drawer.
             for (ResolveInfo app : allApps) {
@@ -538,26 +539,8 @@ public class MainActivity extends Activity {
                             : event.getRawX() <= LauncherUiUtils.dp(this, 28) ? -1 : 0;
                     if (edge == 0) iconEdgeLatch = 0;
                     int sourceIndex = iconOriginalPageIndex;
-                    if (edge != 0 && edge != iconEdgeLatch) {
-                        iconEdgeLatch = edge;
-                        int destination = iconDragPageIndex + edge;
-                        if (destination >= 0 && destination <= 20) {
-                            ensurePageExists(destination);
-                            while (pagesStrip.getChildCount() <= destination) {
-                                FrameLayout newPage = new FrameLayout(this);
-                                newPage.setClipChildren(false);
-                                pagesStrip.addView(newPage, new LinearLayout.LayoutParams(
-                                        Math.max(1, pageViewport.getWidth()), -1));
-                            }
-                            iconDragPageIndex = destination;
-                            currentPage = destination;
-                            int pageWidth = Math.max(1, pageViewport.getWidth());
-                            pagesStrip.setTranslationX(-destination * pageWidth);
-                            // Do not detach the touched view mid-gesture: Android cancels its touch target.
-                            view.setTranslationX((destination - sourceIndex) * pageWidth);
-                            if (pageIndicator != null) pageIndicator.setText((currentPage + 1) + "  /  " + Math.max(pages.size(), destination + 1));
-                        }
-                    }
+                    // Edge dragging never creates or navigates to another page.
+                    if (edge != 0) iconEdgeLatch = edge;
                     FrameLayout page = (FrameLayout) view.getParent();
                     int pageWidth = Math.max(1, page.getWidth());
                     int[] pageLocation = new int[2];
@@ -582,7 +565,7 @@ public class MainActivity extends Activity {
                 if (iconDragging) {
                     FrameLayout sourceView = (FrameLayout) view.getParent();
                     int sourcePage = pagesStrip.indexOfChild(sourceView);
-                    int destinationPage = Math.max(0, iconDragPageIndex);
+                    int destinationPage = 0;
                     boolean movedAcrossPage = destinationPage != iconOriginalPageIndex;
                     FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
@@ -641,7 +624,7 @@ public class MainActivity extends Activity {
                     // The dragged view intentionally stays attached to its source page until UP;
                     // reparenting during MOVE cancels Android's active touch target.
                     saveIconSlot(packageName, targetCol, targetRow, columns);
-                    int committedPage = movedAcrossPage ? destinationPage : sourcePage;
+                    int committedPage = 0;
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
                     ensurePageExists(committedPage);
                     currentPage = committedPage;
@@ -676,7 +659,7 @@ public class MainActivity extends Activity {
     }
 
     private void ensurePageExists(int pageIndex) {
-        while (pages.size() <= pageIndex) pages.add(new ArrayList<String>());
+        if (pages.isEmpty()) pages.add(new ArrayList<String>());
     }
 
     /**
@@ -687,7 +670,7 @@ public class MainActivity extends Activity {
     private void showPage(int requestedPage, boolean animate) {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
-        currentPage = Math.max(0, Math.min(requestedPage, lastPage));
+        currentPage = 0;
         if (pagesStrip == null) return;
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth()
@@ -705,21 +688,14 @@ public class MainActivity extends Activity {
             pagesStrip.setRotationY(0f);
         }
         if (pageIndicator != null) {
-            pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)
-                    ? View.VISIBLE : View.GONE);
+            pageIndicator.setVisibility(View.GONE);
             pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
         }
     }
 
-    private void nextPage() {
-        // Empty pages are never retained. A new page is created only by a successful
-        // icon/widget drop at the edge, which then persists actual page membership.
-        if (currentPage + 1 < pages.size()) showPage(currentPage + 1, true);
-    }
+    private void nextPage() { showPage(0, false); }
 
-    private void previousPage() {
-        if (currentPage > 0) showPage(currentPage - 1, true);
-    }
+    private void previousPage() { showPage(0, false); }
 
     private boolean isDrawerAtTop() {
         if (drawerGrid == null || drawerGrid.getChildCount() == 0) return true;
@@ -741,10 +717,14 @@ public class MainActivity extends Activity {
 
     private void addToHome(String packageName) {
         if (!homePackages.contains(packageName)) {
+            if (homePackages.size() >= pageCapacity()) {
+                Toast.makeText(this, "Home screen is full. Remove a shortcut first.", Toast.LENGTH_SHORT).show();
+                return;
+            }
             homePackages.add(packageName);
             persistHomeApps();
             rebuildPages();
-            currentPage = pages.size() - 1;
+            currentPage = 0;
             renderHomePages(false);
         }
     }
@@ -790,7 +770,7 @@ public class MainActivity extends Activity {
                     Collections.swap(homePackages, from, to);
                     persistHomeApps();
                     rebuildPages();
-                    currentPage = to / pageCapacity();
+                    currentPage = 0;
                     renderHomePages(false);
                 }
             } else if (action.equals("Remove from Home")) {
