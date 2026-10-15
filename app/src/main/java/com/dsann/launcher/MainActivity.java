@@ -1305,51 +1305,8 @@ public class MainActivity extends Activity {
         return view;
     }
 
-    private java.io.InputStream openWallpaperStream(Uri uri) throws java.io.IOException {
-        if ("file".equalsIgnoreCase(uri.getScheme())) {
-            return new java.io.FileInputStream(new java.io.File(uri.getPath()));
-        }
-        return getContentResolver().openInputStream(uri);
-    }
-
     private boolean applyHomeWallpaper() {
-        if (root == null) return false;
-        String saved = prefs == null ? null : prefs.getString(KEY_WALLPAPER_URI, null);
-        if (saved != null && !saved.isEmpty()) {
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            try {
-                Uri uri = Uri.parse(saved);
-                try (java.io.InputStream in = openWallpaperStream(uri)) {
-                    if (in != null) BitmapFactory.decodeStream(in, null, bounds);
-                }
-                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new java.io.IOException("Image could not be decoded");
-                int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-                int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
-                int sample = 1;
-                while (bounds.outWidth / (sample * 2) > screenW || bounds.outHeight / (sample * 2) > screenH) sample *= 2;
-                BitmapFactory.Options decode = new BitmapFactory.Options();
-                decode.inSampleSize = sample;
-                try (java.io.InputStream in = openWallpaperStream(uri)) {
-                    android.graphics.Bitmap bitmap = in == null ? null : BitmapFactory.decodeStream(in, null, decode);
-                    if (bitmap != null) {
-                        BitmapDrawable wallpaper = new BitmapDrawable(getResources(), bitmap);
-                        wallpaper.setGravity(Gravity.FILL);
-                        root.setBackground(wallpaper);
-                        return true;
-                    }
-                }
-                throw new java.io.IOException("Image could not be decoded");
-            } catch (Exception ignored) {
-                prefs.edit().remove(KEY_WALLPAPER_URI).apply();
-            }
-        }
-        int theme = prefs == null ? 0 : prefs.getInt(KEY_COLOR_THEME, 0);
-        if (theme == 1) root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(5, 35, 52), Color.rgb(7, 65, 84), BG}));
-        else if (theme == 2) root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(43, 19, 69), Color.rgb(65, 39, 104), BG}));
-        else if (theme == 3) root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(42, 46, 58), Color.rgb(25, 29, 39), BG}));
-        else root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(11, 22, 51), Color.rgb(20, 42, 88), BG}));
-        return false;
+        return LauncherWallpaperController.apply(this, root, prefs, KEY_WALLPAPER_URI, KEY_COLOR_THEME, BG);
     }
 
     private void launchApp(ResolveInfo app) {
