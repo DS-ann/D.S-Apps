@@ -826,12 +826,104 @@ public class MainActivity extends Activity {
                 }
                 tempImage.delete();
             }
-            prefs.edit().putString(KEY_WALLPAPER_URI, Uri.fromFile(savedImage).toString()).apply();
-            if (applyHomeWallpaper()) Toast.makeText(this, "Home wallpaper updated", Toast.LENGTH_SHORT).show();
-            else Toast.makeText(this, "Couldn't apply this image. Try a smaller image.", Toast.LENGTH_LONG).show();
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(savedImage.getAbsolutePath(), bounds);
+            int screenW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+            int screenH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+            int sample = 1;
+            while (bounds.outWidth / (sample * 2) >= screenW * 2 && bounds.outHeight / (sample * 2) >= screenH * 2) sample *= 2;
+            BitmapFactory.Options decoded = new BitmapFactory.Options();
+            decoded.inSampleSize = sample;
+            Bitmap preview = BitmapFactory.decodeFile(savedImage.getAbsolutePath(), decoded);
+            if (preview == null) throw new java.io.IOException("Unreadable image");
+            showWallpaperCropper(preview, savedImage);
         } catch (Exception e) {
             tempImage.delete();
             Toast.makeText(this, "Couldn't read that image. Try selecting a locally saved copy.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showWallpaperCropper(Bitmap bitmap, java.io.File savedImage) {
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int screenH = getResources().getDisplayMetrics().heightPixels;
+        int cropH = Math.max(dp(220), Math.min((int)(screenH * 0.56f), screenH - dp(190)));
+        int cropW = Math.max(dp(120), Math.round(cropH * screenW / (float)Math.max(1, screenH)));
+        CropView preview = new CropView(bitmap);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(14), dp(14), dp(14), dp(12));
+        panel.setBackground(roundRect(new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, dp(22)));
+        panel.addView(text("Crop wallpaper", 20, Color.WHITE, true));
+        TextView hint = text("Drag the image to adjust framing", 12, Color.rgb(185, 198, 225), false);
+        hint.setPadding(0, dp(4), 0, dp(10));
+        panel.addView(hint);
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(Color.BLACK);
+        frame.addView(preview, new FrameLayout.LayoutParams(cropW, cropH, Gravity.CENTER));
+        panel.addView(frame, new LinearLayout.LayoutParams(-1, cropH));
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        TextView cancel = text("Cancel", 14, Color.LTGRAY, true);
+        cancel.setPadding(dp(14), dp(12), dp(14), dp(12));
+        TextView use = text("Use wallpaper", 14, Color.WHITE, true);
+        use.setPadding(dp(14), dp(12), dp(14), dp(12));
+        actions.addView(cancel); actions.addView(use); panel.addView(actions);
+        Dialog dialog = new Dialog(this);
+        dialog.setContentView(panel);
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().setLayout(Math.min(screenW - dp(24), cropW + dp(36)), -2);
+        }
+        cancel.setOnClickListener(v -> { dialog.dismiss(); if (!bitmap.isRecycled()) bitmap.recycle(); });
+        use.setOnClickListener(v -> {
+            try {
+                Bitmap cropped = preview.crop();
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(savedImage)) {
+                    cropped.compress(Bitmap.CompressFormat.JPEG, 88, out);
+                }
+                cropped.recycle();
+                if (!bitmap.isRecycled()) bitmap.recycle();
+                prefs.edit().putString(KEY_WALLPAPER_URI, Uri.fromFile(savedImage).toString()).apply();
+                dialog.dismiss();
+                if (applyHomeWallpaper()) Toast.makeText(this, "Wallpaper updated", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Couldn't crop this image", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private final class CropView extends View {
+        private final Bitmap bitmap;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private float scale, x, y, lastX, lastY;
+        CropView(Bitmap bitmap) { super(MainActivity.this); this.bitmap = bitmap; }
+        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            scale = Math.max(w / (float)bitmap.getWidth(), h / (float)bitmap.getHeight());
+            x = (w - bitmap.getWidth() * scale) / 2f;
+            y = (h - bitmap.getHeight() * scale) / 2f;
+        }
+        @Override protected void onDraw(Canvas canvas) {
+            canvas.drawBitmap(bitmap, null, new RectF(x, y, x + bitmap.getWidth() * scale, y + bitmap.getHeight() * scale), paint);
+        }
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) { lastX = event.getX(); lastY = event.getY(); return true; }
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                x += event.getX() - lastX; y += event.getY() - lastY;
+                lastX = event.getX(); lastY = event.getY();
+                x = Math.min(0, Math.max(getWidth() - bitmap.getWidth() * scale, x));
+                y = Math.min(0, Math.max(getHeight() - bitmap.getHeight() * scale, y));
+                invalidate(); return true;
+            }
+            return true;
+        }
+        Bitmap crop() {
+            int left = Math.max(0, (int)Math.floor(-x / scale));
+            int top = Math.max(0, (int)Math.floor(-y / scale));
+            int width = Math.min(bitmap.getWidth() - left, Math.round(getWidth() / scale));
+            int height = Math.min(bitmap.getHeight() - top, Math.round(getHeight() / scale));
+            return Bitmap.createBitmap(bitmap, left, top, width, height);
         }
     }
 
