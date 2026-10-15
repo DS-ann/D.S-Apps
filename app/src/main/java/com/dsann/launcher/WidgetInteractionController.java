@@ -82,51 +82,7 @@ final class WidgetInteractionController {
         final int[] widgetPage = {pageIndex};
         final Runnable[] movePress = new Runnable[1];
         final Runnable[] menuPress = new Runnable[1];
-        Runnable clearEditChrome = () -> {
-            resizeHandle.setVisibility(View.GONE);
-            container.setBackground(null);
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-        };
-        movePress[0] = () -> {
-            editMode[0] = 1;
-            resizeHandle.setVisibility(View.VISIBLE);
-            container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
-            Toast.makeText(activity, "Move widget", Toast.LENGTH_SHORT).show();
-        };
-        menuPress[0] = () -> {
-            editMode[0] = 0;
-            handler.removeCallbacks(movePress[0]);
-            clearEditChrome.run();
-            String[] actions = {"Remove widget", "Resize widget", "Move to next page"};
-            String[] icons = {"×", "↘", "→"};
-            listener.showActionDialog("Widget options", icons, actions, (dialog, which) -> {
-                if (which == 0) {
-                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
-                    WidgetController.removeWidget(prefs, widgetIdsKey, widgetId);
-                    try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
-                    listener.renderHomePages(false);
-                } else if (which == 1) {
-                    resizeHandle.setVisibility(View.VISIBLE);
-                    container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-                    Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
-                } else if (which == 2) {
-                    int destination = widgetPage[0] + 1;
-                    // Persist the destination first, then rebuild the page strip. The
-                    // destination view may not exist yet when the widget is on the last page.
-                    FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    moved.leftMargin = LauncherUiUtils.dp(activity, 8);
-                    moved.topMargin = LauncherUiUtils.dp(activity, 40);
-                    container.setLayoutParams(moved);
-                    widgetPage[0] = destination;
-                    listener.ensurePageExists(destination);
-                    listener.saveWidgetGeometry(widgetId, destination, container);
-                    listener.setCurrentPage(destination);
-                    listener.renderHomePages(true);
-                    Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
-                }
-            });
-        };
+        final Runnable[] clearEditChrome = new Runnable[1];
         final boolean[] childCanceled = {false};
         final boolean[] menuShown = {false};
         final float[] lastTouch = {0f, 0f};
@@ -140,7 +96,7 @@ final class WidgetInteractionController {
             childCanceled[0] = true;
         };
         gestureGrip.setBackgroundColor(Color.TRANSPARENT);
-        clearEditChrome = () -> {
+        clearEditChrome[0] = () -> {
             resizeHandle.setVisibility(View.GONE);
             container.setBackground(null);
             gestureGrip.setBackgroundColor(Color.TRANSPARENT);
@@ -157,7 +113,7 @@ final class WidgetInteractionController {
             cancelWidgetTouch.run();
             editMode[0] = 0;
             handler.removeCallbacks(movePress[0]);
-            clearEditChrome.run();
+            clearEditChrome[0].run();
             String[] actions = {"Remove widget", "Resize widget", "Move to next page"};
             String[] icons = {"×", "↘", "→"};
             listener.showActionDialog("Widget options", icons, actions, (dialog, which) -> {
