@@ -1348,7 +1348,11 @@ public class MainActivity extends Activity {
         // Keep the two page views in their real neighbouring positions. Translating the
         // incoming face over the outgoing one caused the next page to pop into view.
         // Only the parallax style moves the strip; 3D styles rotate the adjacent faces.
-        pagesStrip.setTranslationX(-from * width - (effect == 2 ? direction * width * progress : 0f));
+        // The wheel must combine face rotation with continuous horizontal travel.
+        // Rotating two stationary neighbouring faces alone looks like a panel flip,
+        // not a wheel carrying the next page into the viewport.
+        pagesStrip.setTranslationX(-from * width
+                - ((effect == 0 || effect == 2) ? direction * width * progress : 0f));
         outgoing.setAlpha(1f);
         if (incomingFace != null) incomingFace.setAlpha(1f);
         if (effect == 2) {
