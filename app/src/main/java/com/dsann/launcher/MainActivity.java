@@ -117,6 +117,8 @@ public class MainActivity extends Activity {
     private TextView clockText;
     private TextView amPmText;
     private TextView dateText;
+    private FrameLayout clockRow;
+    private FrameLayout clockGroup;
     private LinearLayout clockPanel;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
@@ -302,27 +304,25 @@ public class MainActivity extends Activity {
                 float clamped = Math.max(-pageWidth, Math.min(0f, proposed));
                 pagesStrip.setTranslationX(clamped);
 
-                // Add a restrained page-turn rotation while the strip follows the
-                // finger. The incoming page rotates toward flat as it enters view.
+                // Keep both page faces centred on the viewport's vertical axis.
+                // The transition is a 3D page flip, not a horizontal strip slide.
                 float progress = Math.max(-1f, Math.min(1f, dx / (float) pageWidth));
+                pagesStrip.setTranslationX(-currentPage * pageWidth);
                 for (int i = Math.max(0, currentPage - 1);
                         i <= Math.min(pagesStrip.getChildCount() - 1, currentPage + 1); i++) {
                     View face = pagesStrip.getChildAt(i);
-                    float faceWidth = face.getWidth();
-                    // Both faces use the same shared edge as their hinge. This avoids
-                    // the two pages rotating around unrelated axes and looking warped.
+                    face.setPivotX(face.getWidth() / 2f);
+                    face.setPivotY(face.getHeight() / 2f);
+                    face.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
+                    face.setTranslationX((currentPage - i) * (float) pageWidth);
+                    face.setTranslationZ(i == currentPage ? 1f : 2f);
                     if (i == currentPage) {
-                        // Treat each page as a plane turning around the shared
-                        // vertical centre axis (Y), rather than hinging at its edge.
-                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY(-progress * getPageRotationDegrees());
-                        face.setAlpha(1f - Math.min(0.08f, Math.abs(progress) * 0.08f));
+                        face.setAlpha(1f - Math.min(0.06f, Math.abs(progress) * 0.06f));
                     } else if (i == currentPage + 1 && progress < 0f) {
-                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY((1f + progress) * -getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
-                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY((1f - progress) * getPageRotationDegrees());
                         face.setAlpha(1f);
                     }
@@ -336,7 +336,9 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (pageSwipeActive) {
                 pageSwipeActive = false;
-                showPage(currentPage, true);
+                int width = pageViewport != null && pageViewport.getWidth() > 0
+                        ? pageViewport.getWidth() : Math.max(1, getResources().getDisplayMetrics().widthPixels);
+                finishPageSwipe(currentPage, width);
                 return true;
             }
             return super.dispatchTouchEvent(event);
@@ -356,7 +358,7 @@ public class MainActivity extends Activity {
                     if (dx < 0 && currentPage < pages.size() - 1) destination = currentPage + 1;
                     else if (dx > 0 && currentPage > 0) destination = currentPage - 1;
                 }
-                showPage(destination, true);
+                finishPageSwipe(destination, pageWidth);
                 return true;
             }
 
@@ -578,38 +580,41 @@ public class MainActivity extends Activity {
         homeScreen.addView(hero, hp);
         clockPanel = hero;
         applyClockPanelColor(false);
-        LinearLayout clockRow = new LinearLayout(this);
-        clockRow.setOrientation(LinearLayout.HORIZONTAL);
-        clockRow.setGravity(clockGravity() | Gravity.CENTER_VERTICAL);
+        clockRow = new FrameLayout(this);
         clockRow.setClipChildren(false);
         clockRow.setClipToPadding(false);
+        clockGroup = new FrameLayout(this);
+        clockGroup.setClipChildren(false);
+        clockGroup.setClipToPadding(false);
         clockText = new SevenSegmentClockTextView(this);
         clockText.setText("--:--");
-        // The row controls the position of the complete clock + AM/PM group.
-        // Keep the digits left-aligned inside their measured-width view so the marker
-        // remains immediately beside the digits at every clock position.
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(78);
-        // Scale the clock's drawing area by 50%; the custom LED renderer fits digits to these bounds.
         int initialClockSize = getClockSize();
-        // Wrap to the measured time glyphs; a fixed-width slot separates AM/PM
-        // from the digits whenever the clock is moved or resized.
-        clockText.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
+        clockText.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
+                Gravity.LEFT | Gravity.CENTER_VERTICAL));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
         clockText.setLetterSpacing(0f);
         applyClockStyle();
-        clockRow.addView(clockText);
+        clockGroup.addView(clockText);
         amPmText = new TextView(this);
         amPmText.setTextColor(Color.WHITE);
-        amPmText.setTextSize(10);
+        amPmText.setTextSize(8);
         amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        amPmText.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
         amPmText.setIncludeFontPadding(false);
-        amPmText.setPadding(LauncherUiUtils.dp(this, 4), 0, 0, 0);
-        clockRow.addView(amPmText, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 30), LauncherUiUtils.dp(this, 114)));
+        amPmText.setPadding(0, 0, 0, 0);
+        FrameLayout.LayoutParams markerParams = new FrameLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12),
+                Gravity.RIGHT | Gravity.BOTTOM);
+        clockGroup.addView(amPmText, markerParams);
+        FrameLayout.LayoutParams groupParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
+                clockGravity() | Gravity.CENTER_VERTICAL);
+        clockRow.addView(clockGroup, groupParams);
         hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 114)));
         dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
@@ -1251,6 +1256,97 @@ public class MainActivity extends Activity {
                     .start();
         } else {
             pagesStrip.setTranslationX(targetX);
+        }
+        if (pageIndicator != null) {
+            boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
+            pageIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
+            pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
+        }
+    }
+
+    private void finishPageSwipe(int requestedPage, int pageWidth) {
+        if (pagesStrip == null || pagesStrip.getChildCount() == 0) return;
+        final int from = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, currentPage));
+        final int to = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, requestedPage));
+        final int direction = to > from ? 1 : (to < from ? -1 : 0);
+        final int degrees = getPageRotationDegrees();
+        final View outgoing = pagesStrip.getChildAt(from);
+        final View incoming = direction == 0 ? null : pagesStrip.getChildAt(to);
+        pagesStrip.animate().cancel();
+        pagesStrip.setTranslationX(-from * (float) pageWidth);
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            View face = pagesStrip.getChildAt(i);
+            face.animate().cancel();
+            if (i != from && i != to) {
+                face.setTranslationX(0f);
+                face.setRotationY(0f);
+                face.setTranslationZ(0f);
+                face.setAlpha(1f);
+                face.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
+        }
+        outgoing.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        outgoing.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
+        outgoing.setPivotX(outgoing.getWidth() / 2f);
+        outgoing.setPivotY(outgoing.getHeight() / 2f);
+        outgoing.setTranslationX(0f);
+        outgoing.setTranslationZ(1f);
+        if (direction == 0) {
+            View previous = from + 1 < pagesStrip.getChildCount()
+                    ? pagesStrip.getChildAt(from + 1)
+                    : (from > 0 ? pagesStrip.getChildAt(from - 1) : null);
+            if (previous != null) {
+                previous.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                previous.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
+                previous.setPivotX(previous.getWidth() / 2f);
+                previous.setPivotY(previous.getHeight() / 2f);
+                previous.setTranslationX((from - pagesStrip.indexOfChild(previous)) * (float) pageWidth);
+                previous.setRotationY((pagesStrip.indexOfChild(previous) > from ? -1f : 1f) * degrees);
+                previous.setTranslationZ(2f);
+                previous.animate().rotationY((pagesStrip.indexOfChild(previous) > from ? -1f : 1f) * degrees)
+                        .setDuration(animationDuration(220L)).start();
+            }
+            outgoing.animate().rotationY(0f).alpha(1f)
+                    .setDuration(animationDuration(220L))
+                    .withEndAction(() -> resetPageFaces(from, pageWidth))
+                    .start();
+            return;
+        }
+        incoming.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        incoming.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
+        incoming.setPivotX(incoming.getWidth() / 2f);
+        incoming.setPivotY(incoming.getHeight() / 2f);
+        incoming.setTranslationX((from - to) * (float) pageWidth);
+        incoming.setTranslationZ(2f);
+        // When a swipe has already started, preserve the finger-driven rotation.
+        // For menu/programmatic transitions, start the incoming face edge-on.
+        if (Math.abs(outgoing.getRotationY()) < 0.1f
+                && Math.abs(incoming.getRotationY()) < 0.1f) {
+            incoming.setRotationY(-direction * degrees);
+        }
+        outgoing.animate().rotationY(direction * degrees).alpha(1f)
+                .setDuration(animationDuration(260L))
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
+        incoming.animate().rotationY(0f).alpha(1f)
+                .setDuration(animationDuration(260L))
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> resetPageFaces(to, pageWidth))
+                .start();
+    }
+
+    private void resetPageFaces(int selectedPage, int pageWidth) {
+        currentPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, selectedPage));
+        pagesStrip.animate().cancel();
+        pagesStrip.setTranslationX(-currentPage * (float) pageWidth);
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            View face = pagesStrip.getChildAt(i);
+            face.animate().cancel();
+            face.setTranslationX(0f);
+            face.setTranslationZ(0f);
+            face.setRotationY(0f);
+            face.setAlpha(1f);
+            face.setLayerType(View.LAYER_TYPE_NONE, null);
         }
         if (pageIndicator != null) {
             boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
@@ -2403,47 +2499,46 @@ public class MainActivity extends Activity {
         panelParams.gravity = alignment;
         clockPanel.setLayoutParams(panelParams);
         clockPanel.setGravity(alignment);
-        View parent = (View) clockText.getParent();
-        if (parent instanceof LinearLayout) {
-            // Align the whole digits + AM/PM group together, rather than aligning
-            // the digits inside a full-width slot and leaving AM/PM behind.
-            ((LinearLayout) parent).setGravity(alignment | Gravity.CENTER_VERTICAL);
+        if (clockGroup != null) {
+            FrameLayout.LayoutParams groupParams = (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
+            groupParams.gravity = alignment | Gravity.CENTER_VERTICAL;
+            groupParams.height = LauncherUiUtils.dp(this, Math.round(getClockSize() * 1.46f));
+            groupParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            clockGroup.setLayoutParams(groupParams);
         }
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         if (dateText != null) dateText.setGravity(alignment);
         int size = getClockSize();
         clockText.setTextSize(size);
-        ViewGroup.LayoutParams clockWidthParams = clockText.getLayoutParams();
-        if (clockWidthParams != null && clockWidthParams.width != ViewGroup.LayoutParams.WRAP_CONTENT) {
-            clockWidthParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-            clockText.setLayoutParams(clockWidthParams);
-        }
         int height = LauncherUiUtils.dp(this, Math.round(size * 1.46f));
         ViewGroup.LayoutParams clockParams = clockText.getLayoutParams();
         if (clockParams != null) {
+            clockParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
             clockParams.height = height;
             clockText.setLayoutParams(clockParams);
         }
-        if (parent instanceof View) {
-            ViewGroup.LayoutParams rowParams = ((View) parent).getLayoutParams();
+        if (clockRow != null) {
+            ViewGroup.LayoutParams rowParams = clockRow.getLayoutParams();
             if (rowParams != null) {
                 rowParams.height = height;
-                ((View) parent).setLayoutParams(rowParams);
+                clockRow.setLayoutParams(rowParams);
             }
         }
         if (amPmText != null) {
-            // Scale the marker proportionally with the clock. The minimum clock
-            // size (50) maps to a compact 7sp label; the maximum remains readable.
-            float markerSp = 7f + (size - 50) * (5f / 70f);
+            // The AM/PM marker overlays the lower-right corner; it never consumes
+            // horizontal layout width or pushes the clock away from centre.
+            float markerSp = Math.max(6f, Math.min(9f, size * 0.10f));
             amPmText.setTextSize(markerSp);
-            ViewGroup.LayoutParams amPmParams = amPmText.getLayoutParams();
-            if (amPmParams != null) {
-                amPmParams.height = height;
-                amPmParams.width = LauncherUiUtils.dp(this, Math.max(18, Math.round(size * 0.34f)));
-                amPmText.setLayoutParams(amPmParams);
+            ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
+            if (markerRaw instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
+                markerParams.width = LauncherUiUtils.dp(this, 18);
+                markerParams.height = LauncherUiUtils.dp(this, 12);
+                markerParams.gravity = Gravity.RIGHT | Gravity.BOTTOM;
+                markerParams.rightMargin = 0;
+                markerParams.bottomMargin = 0;
+                amPmText.setLayoutParams(markerParams);
             }
-            amPmText.setPadding(LauncherUiUtils.dp(this, Math.max(2, Math.round(size * 0.045f))),
-                    0, 0, 0);
         }
         clockText.invalidate();
     }
