@@ -278,7 +278,8 @@ public class MainActivity extends Activity {
             }
             // A true wheel/cylinder turn: the two page surfaces pivot on their shared
             // vertical edge. Keep the strip stationary while the finger controls the angle.
-            if (!drawerOpen && pagesStrip != null && pagesStrip.getChildCount() > 1
+            if (!drawerOpen && !gestureStartedOnWidget && !gestureStartedOnContactShortcut
+                    && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dx) > Math.abs(dy) * 1.15f) {
                 int direction = dx < 0f ? 1 : -1;
@@ -841,6 +842,21 @@ public class MainActivity extends Activity {
                         p.width = Math.min(pageViewport.getWidth() - p.leftMargin, spanX * cellW);
                         p.height = Math.min(pageViewport.getHeight() - p.topMargin, spanY * cellH);
                         tile.setLayoutParams(p);
+                        // Grow the actual contact/app icon as the tile grows; changing only
+                        // the tile bounds leaves the icon visually stuck at its original size.
+                        int availableWidth = Math.max(LauncherUiUtils.dp(this, 38),
+                                p.width - LauncherUiUtils.dp(this, 16));
+                        int availableHeight = Math.max(LauncherUiUtils.dp(this, 38),
+                                p.height - LauncherUiUtils.dp(this, 42));
+                        int iconSize = Math.max(LauncherUiUtils.dp(this, 38),
+                                Math.min(LauncherUiUtils.dp(this, 96),
+                                        Math.min(availableWidth, availableHeight)));
+                        ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
+                        if (iconParams != null && (iconParams.width != iconSize || iconParams.height != iconSize)) {
+                            iconParams.width = iconSize;
+                            iconParams.height = iconSize;
+                            icon.setLayoutParams(iconParams);
+                        }
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
