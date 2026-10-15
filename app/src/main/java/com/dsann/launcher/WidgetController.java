@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -21,7 +22,15 @@ final class WidgetController {
         options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, heightDp);
         options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
         try { manager.updateAppWidgetOptions(widgetId, options); } catch (Exception ignored) {}
-        try { hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp); } catch (Exception ignored) {}
+        try {
+            // The four-dimension overload was added after Android 6 (API 23).
+            // Calling it unconditionally can throw NoSuchMethodError on older devices.
+            if (Build.VERSION.SDK_INT >= 31) {
+                hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp);
+            } else {
+                hostView.updateAppWidgetSize(options, widthDp, heightDp);
+            }
+        } catch (Exception ignored) {}
     }
 
     static boolean containsWidgetId(String stored, int widgetId) {
