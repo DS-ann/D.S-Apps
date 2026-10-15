@@ -1048,15 +1048,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean containsWidgetId(String stored, int widgetId) {
-        if (stored == null || stored.isEmpty()) return false;
-        for (String entry : stored.split("\\n")) {
-            String[] parts = entry.split(":");
-            if (parts.length >= 2) {
-                try { if (Integer.parseInt(parts[0]) == widgetId) return true; }
-                catch (NumberFormatException ignored) {}
-            }
-        }
-        return false;
+        return WidgetController.containsWidgetId(stored, widgetId);
     }
 
     private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
@@ -1113,18 +1105,7 @@ public class MainActivity extends Activity {
             showActionDialog("Widget options", icons, actions, (dialog, which) -> {
                 if (which == 0) {
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
-                    String stored = prefs.getString(KEY_WIDGET_IDS, "");
-                    StringBuilder updated = new StringBuilder();
-                    for (String entry : stored.split("\\n")) {
-                        String[] parts = entry.split(":");
-                        if (parts.length > 0 && parts[0].equals(String.valueOf(widgetId))) continue;
-                        if (!entry.trim().isEmpty()) {
-                            if (updated.length() > 0) updated.append('\n');
-                            updated.append(entry);
-                        }
-                    }
-                    prefs.edit().putString(KEY_WIDGET_IDS, updated.toString()).remove("widget_x_" + widgetId)
-                            .remove("widget_y_" + widgetId).remove("widget_w_" + widgetId).remove("widget_h_" + widgetId).apply();
+                    WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, widgetId);
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                 } else if (which == 1) {
                     resizeHandle.setVisibility(View.VISIBLE);
@@ -1219,29 +1200,7 @@ public class MainActivity extends Activity {
     }
 
     private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) container.getLayoutParams();
-        prefs.edit().putInt("widget_x_" + widgetId, lp.leftMargin)
-                .putInt("widget_y_" + widgetId, lp.topMargin)
-                .putInt("widget_w_" + widgetId, lp.width)
-                .putInt("widget_h_" + widgetId, lp.height).apply();
-        String stored = prefs.getString(KEY_WIDGET_IDS, "");
-        StringBuilder updated = new StringBuilder();
-        boolean found = false;
-        for (String entry : stored.split("\\n")) {
-            String[] parts = entry.split(":");
-            if (parts.length < 2) continue;
-            if (parts[0].equals(String.valueOf(widgetId))) {
-                entry = widgetId + ":" + pageIndex;
-                found = true;
-            }
-            if (updated.length() > 0) updated.append('\n');
-            updated.append(entry);
-        }
-        if (!found) {
-            if (updated.length() > 0) updated.append('\n');
-            updated.append(widgetId).append(':').append(pageIndex);
-        }
-        prefs.edit().putString(KEY_WIDGET_IDS, updated.toString()).apply();
+        WidgetController.saveGeometry(prefs, KEY_WIDGET_IDS, widgetId, pageIndex, container);
     }
 
     private void restoreWidgetsOnPages() {
