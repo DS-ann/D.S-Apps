@@ -2766,6 +2766,7 @@ public class MainActivity extends Activity {
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
+        final int screenWidth = getResources().getDisplayMetrics().widthPixels;
 
         // The 7-segment view draws its own glyphs; Paint.measureText() does not
         // describe those glyphs and made its container too narrow. Calculate the
