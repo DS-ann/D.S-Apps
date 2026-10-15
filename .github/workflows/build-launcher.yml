@@ -26,22 +26,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Restore the original workflow setup, with all Gradle and SDK caches disabled.
       - name: Set up Gradle without cache
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
           cache-disabled: true
 
-      # Install SDK packages explicitly as separate shell arguments. This avoids
-      # setup-android's packages input treating a combined value as one package.
-      - name: Set up Android SDK
+      - name: Set up Android SDK build tools
         uses: android-actions/setup-android@v3
-
-      - name: Install Android platform and build tools
-        run: |
-          set -euo pipefail
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
-          sdkmanager --list_installed | grep -E 'platforms;android-35|build-tools;35.0.0'
+        with:
+          packages: 'build-tools;35.0.0'
 
       - name: Prepare and validate BatteryPulse signing key
         env:
