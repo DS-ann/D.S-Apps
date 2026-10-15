@@ -100,6 +100,7 @@ public class MainActivity extends Activity {
     private LinearLayout drawerScreen;
     private GridView drawerGrid;
     private TextView clockText;
+    private TextView amPmText;
     private TextView dateText;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
@@ -438,19 +439,33 @@ public class MainActivity extends Activity {
         hp.topMargin = LauncherUiUtils.dp(this, 8);
         homeScreen.addView(hero, hp);
         applyClockPanelColor(false);
+        LinearLayout clockRow = new LinearLayout(this);
+        clockRow.setOrientation(LinearLayout.HORIZONTAL);
+        clockRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        clockRow.setClipChildren(false);
+        clockRow.setClipToPadding(false);
         clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
         clockText.setText("--:--");
         clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        clockText.setTextSize(52); // 30% larger than the previous 40sp clock
-        // Give the custom pixel renderer a stable drawing canvas. WRAP_CONTENT can
-        // measure against the regular font metrics and clip custom glyphs on some devices.
-        clockText.setLayoutParams(new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76)));
+        clockText.setTextSize(52);
+        // Keep the pixel clock at its natural time width; a full-width TextView
+        // made the custom glyphs scale unpredictably and could leave them clipped.
+        clockText.setLayoutParams(new LinearLayout.LayoutParams(-2, LauncherUiUtils.dp(this, 76)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
-        clockText.setLetterSpacing(0.008f); // Keep the time and AM/PM tightly spaced
+        clockText.setLetterSpacing(0f);
         applyClockStyle();
-        hero.addView(clockText);
+        clockRow.addView(clockText);
+        amPmText = new TextView(this);
+        amPmText.setTextColor(Color.WHITE);
+        amPmText.setTextSize(10);
+        amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
+        amPmText.setIncludeFontPadding(false);
+        amPmText.setPadding(LauncherUiUtils.dp(this, 3), 0, 0, LauncherUiUtils.dp(this, 18));
+        clockRow.addView(amPmText, new LinearLayout.LayoutParams(-2, LauncherUiUtils.dp(this, 76)));
+        hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76)));
         dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
         dateText.setGravity(Gravity.RIGHT);
@@ -1406,10 +1421,27 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
-        // Follow Android's system 12/24-hour preference and locale conventions,
-        // matching the format used by the status bar.
+        // Follow Android's system time format, but keep the AM/PM marker in a
+        // separate small bold label so it never inherits the large digital font.
         String clockValue = DateFormat.getTimeFormat(this).format(now);
-        clockText.setText(clockValue);
+        boolean use24Hour = DateFormat.is24HourFormat(this);
+        if (amPmText != null) {
+            if (use24Hour) {
+                amPmText.setText("");
+                amPmText.setVisibility(View.GONE);
+            } else {
+                String marker = new SimpleDateFormat("a", Locale.getDefault()).format(now);
+                int markerAt = clockValue.toUpperCase(Locale.getDefault())
+                        .lastIndexOf(marker.toUpperCase(Locale.getDefault()));
+                if (markerAt >= 0) {
+                    clockValue = (clockValue.substring(0, markerAt)
+                            + clockValue.substring(markerAt + marker.length())).trim();
+                }
+                amPmText.setText(marker);
+                amPmText.setVisibility(View.VISIBLE);
+            }
+        }
+        clockText.setText(clockValue.trim());
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
         applyClockStyle();
