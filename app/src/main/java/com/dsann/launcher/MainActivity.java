@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     private static final String KEY_WALLPAPER_URI = "wallpaper_uri";
     private static final String KEY_ICON_X = "icon_x_";
     private static final String KEY_ICON_Y = "icon_y_";
+    private static final String KEY_ICON_PAGE = "icon_page_";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
@@ -279,8 +280,14 @@ public class MainActivity extends Activity {
     private void rebuildPages() {
         pages.clear();
         int capacity = pageCapacity();
-        for (int i = 0; i < homePackages.size(); i += capacity)
-            pages.add(new ArrayList<>(homePackages.subList(i, Math.min(i + capacity, homePackages.size()))));
+        for (int i = 0; i < homePackages.size(); i++) {
+            String packageName = homePackages.get(i);
+            int pageIndex = prefs.contains(KEY_ICON_PAGE + packageName)
+                    ? Math.max(0, Math.min(20, prefs.getInt(KEY_ICON_PAGE + packageName, 0)))
+                    : i / capacity;
+            ensurePageExists(pageIndex);
+            pages.get(pageIndex).add(packageName);
+        }
         if (pages.isEmpty()) pages.add(new ArrayList<String>());
         // Keep the current empty page when the user has just swiped past a full page,
         // but discard stale page indexes after shortcuts are removed.
@@ -519,6 +526,10 @@ public class MainActivity extends Activity {
                 if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 if (iconDragging) {
                     FrameLayout page = (FrameLayout) view.getParent();
+                    int[] releaseLocation = new int[2];
+                    page.getLocationOnScreen(releaseLocation);
+                    boolean moveToNextPage = event.getRawX() > releaseLocation[0] + page.getWidth() - dp(18)
+                            && currentPage == pages.size() - 1;
                     int columns = getHomeColumns();
                     int rows = HOME_ROWS;
                     int cellWidth = Math.max(1, page.getWidth() / columns);
@@ -555,6 +566,12 @@ public class MainActivity extends Activity {
                     dragged.topMargin = targetRow * cellHeight;
                     view.setLayoutParams(dragged);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
+                    if (moveToNextPage) {
+                        prefs.edit().putInt(KEY_ICON_PAGE + packageName, currentPage + 1)
+                                .putFloat(KEY_ICON_X + packageName, 0f)
+                                .putFloat(KEY_ICON_Y + packageName, 0f).apply();
+                        currentPage++;
+                    }
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
                     iconDragging = false;
                     iconDragArmed = false;
