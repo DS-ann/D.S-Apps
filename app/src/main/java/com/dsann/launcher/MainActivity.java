@@ -1490,15 +1490,15 @@ public class MainActivity extends Activity {
         });
         addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
-            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home app font size", prefs.getInt(KEY_HOME_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
-            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
-            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◷", "Date under the clock", prefs.getBoolean(KEY_SHOW_DATE, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
