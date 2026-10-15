@@ -1264,8 +1264,8 @@ public class MainActivity extends Activity {
                     moved.topMargin = dp(40);
                     destinationPage.addView(container, moved);
                     currentPage = destination;
-                    renderHomePages(true);
                     saveWidgetGeometry(widgetId, destination, container);
+                    renderHomePages(true);
                     Toast.makeText(this, "Widget moved to next page", Toast.LENGTH_SHORT).show();
                 }
             });
