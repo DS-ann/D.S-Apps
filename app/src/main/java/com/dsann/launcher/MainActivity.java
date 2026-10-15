@@ -594,14 +594,15 @@ public class MainActivity extends Activity {
         clockText.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
                 Gravity.LEFT | Gravity.CENTER_VERTICAL));
-        clockText.setTextColor(Color.WHITE);
+        // Satin-silver digits: softer than pure white, while retaining strong contrast.
+        clockText.setTextColor(Color.rgb(196, 200, 209));
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
         clockText.setLetterSpacing(0f);
         applyClockStyle();
         clockGroup.addView(clockText);
         amPmText = new TextView(this);
-        amPmText.setTextColor(Color.WHITE);
+        amPmText.setTextColor(Color.rgb(176, 182, 193));
         amPmText.setTextSize(8);
         amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
@@ -2087,6 +2088,8 @@ public class MainActivity extends Activity {
     private void applyClockStyle() {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         LauncherClockStyler.apply(this, clockText, style);
+        // Apply the same restrained silver tone to every clock preset, including 7-segment.
+        clockText.setTextColor(Color.rgb(196, 200, 209));
         if (clockText instanceof SevenSegmentClockTextView) {
             SevenSegmentClockTextView ledClock = (SevenSegmentClockTextView) clockText;
             // Reassert the selected mode after every style refresh (including the
@@ -2095,8 +2098,9 @@ public class MainActivity extends Activity {
             if (ledMode) {
                 clockText.setVisibility(View.VISIBLE);
                 clockText.setAlpha(1f);
-                clockText.setTextColor(Color.WHITE);
-                clockText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+                // A very soft graphite halo adds depth without turning the digits white.
+                clockText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, 0f,
+                        Color.argb(100, 196, 200, 209));
             }
             ledClock.setSevenSegmentMode(ledMode);
             ledClock.invalidate();
