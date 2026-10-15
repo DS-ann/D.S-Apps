@@ -84,7 +84,7 @@ final class HomePageController {
                 ? host.getPageViewport().getWidth()
                 : Math.max(1, activity.getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(activity, 40));
-        int requiredPages = Math.max(1, host.getPages().size());
+        int requiredPages = HomePageModel.PAGE_COUNT;
         while (strip.getChildCount() < requiredPages) {
             FrameLayout newPage = new FrameLayout(activity);
             newPage.setClipChildren(false);
