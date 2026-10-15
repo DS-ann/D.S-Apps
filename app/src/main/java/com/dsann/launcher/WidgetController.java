@@ -4,7 +4,6 @@ import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.os.Build;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -23,13 +22,9 @@ final class WidgetController {
         options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
         try { manager.updateAppWidgetOptions(widgetId, options); } catch (Exception ignored) {}
         try {
-            // Use the AppWidgetHostView API available to the project's compile SDK.
-            // Widget size options are already applied through AppWidgetManager above.
-            if (Build.VERSION.SDK_INT >= 31) {
-                hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp);
-            } else if (Build.VERSION.SDK_INT >= 16) {
-                hostView.updateAppWidgetSize(options, widthDp, heightDp);
-            }
+            // AppWidgetHostView exposes the five-parameter overload; the three-parameter
+            // overload does not exist in the Android SDK. This overload is available on API 16+.
+            hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp);
         } catch (Exception ignored) {}
     }
 
