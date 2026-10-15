@@ -485,8 +485,10 @@ public class MainActivity extends Activity {
         applyClockPanelColor(false);
 
         pageViewport = new FrameLayout(this);
-        pageViewport.setClipChildren(true);
-        pageViewport.setClipToPadding(true);
+        // Permit the rotating faces to extend slightly beyond the viewport while turning.
+        pageViewport.setClipChildren(false);
+        pageViewport.setClipToPadding(false);
+        pageViewport.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, 0, 1f);
         pp.topMargin = LauncherUiUtils.dp(this, 12);
         homeScreen.addView(pageViewport, pp);
@@ -876,29 +878,42 @@ public class MainActivity extends Activity {
         }
         if (animate && previousPage != currentPage && previousPage >= 0 && previousPage < pageCount
                 && currentPage >= 0 && currentPage < pageCount) {
-            float direction = currentPage > previousPage ? 1f : -1f;
-            float cameraDistance = 12000f * getResources().getDisplayMetrics().density;
-            View outgoingPage = pagesStrip.getChildAt(previousPage);
-            View incomingPage = pagesStrip.getChildAt(currentPage);
+            final float direction = currentPage > previousPage ? 1f : -1f;
+            final float cameraDistance = 12000f * getResources().getDisplayMetrics().density;
+            final View outgoingPage = pagesStrip.getChildAt(previousPage);
+            final View incomingPage = pagesStrip.getChildAt(currentPage);
+            // Hardware layers are important here: older Android versions may otherwise
+            // flatten/skip simultaneous 3D rotation and translation on complex widget pages.
+            outgoingPage.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            incomingPage.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             outgoingPage.setCameraDistance(cameraDistance);
             incomingPage.setCameraDistance(cameraDistance);
-            // A true cube-like page turn: outgoing page rotates 90 degrees away
-            // around its vertical centre axis while the next page rotates into view.
+            outgoingPage.setPivotX(outgoingPage.getWidth() / 2f);
+            incomingPage.setPivotX(incomingPage.getWidth() / 2f);
+            outgoingPage.setPivotY(outgoingPage.getHeight() / 2f);
+            incomingPage.setPivotY(incomingPage.getHeight() / 2f);
             incomingPage.setRotationY(direction * 90f);
-            incomingPage.setAlpha(0.92f);
+            incomingPage.setAlpha(1f);
+            outgoingPage.setAlpha(1f);
             pagesStrip.setScaleX(1f);
-            pagesStrip.animate().translationX(targetX)
-                    .setDuration(420L)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .start();
-            outgoingPage.animate().rotationY(-direction * 90f).alpha(0.82f)
-                    .setDuration(420L)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .start();
+            android.view.animation.Interpolator turn = new android.view.animation.AccelerateDecelerateInterpolator();
+            pagesStrip.animate().translationX(targetX).setDuration(520L).setInterpolator(turn).start();
+            outgoingPage.animate().rotationY(-direction * 90f).alpha(0.75f)
+                    .setDuration(520L).setInterpolator(turn).withEndAction(new Runnable() {
+                        @Override public void run() {
+                            outgoingPage.setRotationY(0f);
+                            outgoingPage.setAlpha(1f);
+                            outgoingPage.setLayerType(View.LAYER_TYPE_NONE, null);
+                        }
+                    }).start();
             incomingPage.animate().rotationY(0f).alpha(1f)
-                    .setDuration(420L)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .start();
+                    .setDuration(520L).setInterpolator(turn).withEndAction(new Runnable() {
+                        @Override public void run() {
+                            incomingPage.setRotationY(0f);
+                            incomingPage.setAlpha(1f);
+                            incomingPage.setLayerType(View.LAYER_TYPE_NONE, null);
+                        }
+                    }).start();
         } else {
             pagesStrip.setTranslationX(targetX);
             pagesStrip.setRotationY(0f);
