@@ -101,6 +101,9 @@ final class WidgetInteractionController {
         final Runnable[] clearEditChrome = new Runnable[1];
         final boolean[] childCanceled = {false};
         final boolean[] menuShown = {false};
+        // Removing a touched widget synchronously dispatches ACTION_CANCEL on some Android
+        // versions. Guard reparenting so that cancellation cannot recursively remove it.
+        final boolean[] reparenting = {false};
         final float[] lastTouch = {0f, 0f};
         final long[] downTime = {0L};
         Runnable cancelWidgetTouch = () -> {
@@ -134,6 +137,7 @@ final class WidgetInteractionController {
             String[] icons = {"×", "↘", "→"};
             listener.showActionDialog("Widget options", icons, actions, (dialog, which) -> {
                 if (which == 0) {
+                    reparenting[0] = true;
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
                     WidgetController.removeWidget(prefs, widgetIdsKey, widgetId);
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
@@ -161,11 +165,13 @@ final class WidgetInteractionController {
                     moved.leftMargin = LauncherUiUtils.dp(activity, 8);
                     moved.topMargin = LauncherUiUtils.dp(activity, 40);
                     clearFocusRecursively(container);
+                    reparenting[0] = true;
                     if (container.getParent() instanceof ViewGroup) {
                         ((ViewGroup) container.getParent()).removeView(container);
                     }
                     container.setTranslationX(0f);
                     targetPage.addView(container, moved);
+                    reparenting[0] = false;
                     container.bringToFront();
                     widgetPage[0] = destination;
                     listener.saveWidgetGeometry(widgetId, destination, container);
@@ -176,6 +182,9 @@ final class WidgetInteractionController {
             });
         };
         gestureGrip.setOnTouchListener((view, event) -> {
+            // removeView() can dispatch a nested ACTION_CANCEL while the old parent is
+            // detaching this view. Never run the gesture completion path recursively.
+            if (reparenting[0]) return true;
             int action = event.getActionMasked();
             lastTouch[0] = event.getX();
             lastTouch[1] = event.getY();
@@ -293,10 +302,12 @@ final class WidgetInteractionController {
                             FrameLayout targetPage = (FrameLayout) strip.getChildAt(destination);
                             FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
                             clearFocusRecursively(container);
+                            reparenting[0] = true;
                             if (container.getParent() instanceof ViewGroup) {
                                 ((ViewGroup) container.getParent()).removeView(container);
                             }
                             targetPage.addView(container, moved);
+                            reparenting[0] = false;
                             container.bringToFront();
                             listener.saveWidgetGeometry(widgetId, destination, container);
                             listener.setCurrentPage(destination);
