@@ -82,6 +82,7 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private AppWidgetManager widgetManager;
     private AppWidgetHost widgetHost;
+    private WidgetInteractionController widgetInteractionController;
     private FrameLayout root;
     private LinearLayout homeScreen;
     private TextView brandText;
@@ -133,6 +134,20 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, HOST_ID);
+        widgetInteractionController = new WidgetInteractionController(this, handler, widgetHost, prefs, KEY_WIDGET_IDS,
+                new WidgetInteractionController.Listener() {
+                    @Override public void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
+                        MainActivity.this.saveWidgetGeometry(widgetId, pageIndex, container);
+                    }
+                    @Override public void ensurePageExists(int pageIndex) { MainActivity.this.ensurePageExists(pageIndex); }
+                    @Override public void renderHomePages(boolean animate) { MainActivity.this.renderHomePages(animate); }
+                    @Override public void showActionDialog(String title, String[] icons, String[] labels,
+                            android.content.DialogInterface.OnClickListener callback) {
+                        MainActivity.this.showActionDialog(title, icons, labels, callback);
+                    }
+                    @Override public void setCurrentPage(int page) { currentPage = page; }
+                    @Override public LinearLayout getPagesStrip() { return pagesStrip; }
+                });
         // Let the wallpaper flow behind the status bar so it feels like launcher chrome,
         // while retaining the system icons and reserving their inset for launcher content.
         getWindow().setStatusBarColor(Color.TRANSPARENT);
@@ -1053,150 +1068,7 @@ public class MainActivity extends Activity {
 
     private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
             int x, int y, int width, int height) {
-        final FrameLayout container = new FrameLayout(this);
-        container.setTag("launcher_widget:" + widgetId);
-        widget.setTag("launcher_widget_content:" + widgetId);
-        widget.setFocusable(true);
-        container.addView(widget, new FrameLayout.LayoutParams(-1, -1));
-        final View resizeHandle = new View(this);
-        GradientDrawable handleBg = new GradientDrawable();
-        handleBg.setColor(Color.rgb(115, 159, 255));
-        handleBg.setCornerRadius(LauncherUiUtils.dp(this, 5));
-        resizeHandle.setBackground(handleBg);
-        resizeHandle.setVisibility(View.GONE);
-        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(LauncherUiUtils.dp(this, 26), LauncherUiUtils.dp(this, 26), Gravity.RIGHT | Gravity.BOTTOM);
-        container.addView(resizeHandle, handleLp);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(LauncherUiUtils.dp(this, 140), width), Math.max(LauncherUiUtils.dp(this, 90), height), Gravity.TOP | Gravity.LEFT);
-        lp.leftMargin = x;
-        lp.topMargin = y;
-        page.addView(container, lp);
-        container.bringToFront();
-
-        // A slim grip at the top of each widget owns launcher edit gestures,
-        // leaving the widget's normal content fully interactive.
-        final View gestureGrip = new View(this);
-        gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
-        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28), Gravity.TOP);
-        container.addView(gestureGrip, gripLp);
-
-        final int[] editMode = {0}; // 0 idle, 1 moving
-        final float[] down = {0f, 0f};
-        final int[] origin = {x, y, lp.width, lp.height};
-        final Runnable[] movePress = new Runnable[1];
-        final Runnable[] menuPress = new Runnable[1];
-        Runnable clearEditChrome = () -> {
-            resizeHandle.setVisibility(View.GONE);
-            container.setBackground(null);
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
-        };
-        movePress[0] = () -> {
-            editMode[0] = 1;
-            resizeHandle.setVisibility(View.VISIBLE);
-            container.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, LauncherUiUtils.dp(this, 8)));
-            Toast.makeText(this, "Move widget", Toast.LENGTH_SHORT).show();
-        };
-        menuPress[0] = () -> {
-            editMode[0] = 0;
-            handler.removeCallbacks(movePress[0]);
-            clearEditChrome.run();
-            String[] actions = {"Remove widget", "Resize widget", "Move to next page"};
-            String[] icons = {"×", "↘", "→"};
-            showActionDialog("Widget options", icons, actions, (dialog, which) -> {
-                if (which == 0) {
-                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
-                    WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, widgetId);
-                    try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
-                } else if (which == 1) {
-                    resizeHandle.setVisibility(View.VISIBLE);
-                    container.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
-                    Toast.makeText(this, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
-                } else if (which == 2) {
-                    int destination = Math.max(pageIndex + 1, pagesStrip.getChildCount());
-                    ensurePageExists(destination);
-                    FrameLayout destinationPage = (FrameLayout) pagesStrip.getChildAt(destination);
-                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
-                    FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
-                            Math.min(container.getLayoutParams().width, Math.max(LauncherUiUtils.dp(this, 140), destinationPage.getWidth())),
-                            Math.min(container.getLayoutParams().height, Math.max(LauncherUiUtils.dp(this, 90), destinationPage.getHeight())),
-                            Gravity.TOP | Gravity.LEFT);
-                    moved.leftMargin = LauncherUiUtils.dp(this, 8);
-                    moved.topMargin = LauncherUiUtils.dp(this, 40);
-                    destinationPage.addView(container, moved);
-                    currentPage = destination;
-                    saveWidgetGeometry(widgetId, destination, container);
-                    renderHomePages(true);
-                    Toast.makeText(this, "Widget moved to next page", Toast.LENGTH_SHORT).show();
-                }
-            });
-        };
-        gestureGrip.setOnTouchListener((view, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                down[0] = event.getRawX();
-                down[1] = event.getRawY();
-                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                origin[0] = current.leftMargin;
-                origin[1] = current.topMargin;
-                editMode[0] = 0;
-                handler.removeCallbacks(movePress[0]);
-                handler.removeCallbacks(menuPress[0]);
-                handler.postDelayed(movePress[0], 1000L);
-                handler.postDelayed(menuPress[0], 2000L);
-                return true;
-            }
-            if (action == MotionEvent.ACTION_MOVE) {
-                float dx = event.getRawX() - down[0];
-                float dy = event.getRawY() - down[1];
-                if (editMode[0] == 0 && (Math.abs(dx) > LauncherUiUtils.dp(this, 10) || Math.abs(dy) > LauncherUiUtils.dp(this, 10))) {
-                    handler.removeCallbacks(movePress[0]);
-                    handler.removeCallbacks(menuPress[0]);
-                    return true;
-                }
-                if (editMode[0] == 1) {
-                    handler.removeCallbacks(menuPress[0]);
-                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    current.leftMargin = Math.max(0, Math.min(page.getWidth() - container.getWidth(), origin[0] + Math.round(dx)));
-                    current.topMargin = Math.max(0, Math.min(page.getHeight() - container.getHeight(), origin[1] + Math.round(dy)));
-                    container.setLayoutParams(current);
-                }
-                return true;
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                handler.removeCallbacks(movePress[0]);
-                handler.removeCallbacks(menuPress[0]);
-                if (editMode[0] == 1) {
-                    saveWidgetGeometry(widgetId, pageIndex, container);
-                    clearEditChrome.run();
-                }
-                editMode[0] = 0;
-                return true;
-            }
-            return true;
-        });
-        resizeHandle.setOnTouchListener((v, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                down[0] = event.getRawX(); down[1] = event.getRawY();
-                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                origin[2] = current.width; origin[3] = current.height;
-                return true;
-            }
-            if (action == MotionEvent.ACTION_MOVE) {
-                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                current.width = Math.max(LauncherUiUtils.dp(this, 140), Math.min(page.getWidth() - current.leftMargin,
-                        origin[2] + Math.round(event.getRawX() - down[0])));
-                current.height = Math.max(LauncherUiUtils.dp(this, 90), Math.min(page.getHeight() - current.topMargin,
-                        origin[3] + Math.round(event.getRawY() - down[1])));
-                container.setLayoutParams(current);
-                return true;
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                saveWidgetGeometry(widgetId, pageIndex, container);
-                return true;
-            }
-            return true;
-        });
+        widgetInteractionController.addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height);
     }
 
     private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
