@@ -694,7 +694,7 @@ public class MainActivity extends Activity {
             persistHomeApps();
             rebuildPages();
             currentPage = pages.size() - 1;
-            renderHomePages(true);
+            renderHomePages(false);
         }
     }
 
@@ -740,7 +740,7 @@ public class MainActivity extends Activity {
                     persistHomeApps();
                     rebuildPages();
                     currentPage = to / pageCapacity();
-                    renderHomePages(true);
+                    renderHomePages(false);
                 }
             } else if (action.equals("Remove from Home")) {
                 homePackages.remove(app.activityInfo.packageName);
@@ -1486,7 +1486,7 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_COLUMNS, value + 3).apply();
             clearIconPositions();
             currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
-            renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
@@ -1598,7 +1598,7 @@ public class MainActivity extends Activity {
             prefs.edit().remove(KEY_HOME_APPS).remove(KEY_COLUMNS).remove(KEY_SHOW_DATE).remove(KEY_ICON_SIZE)
                     .remove(KEY_SHOW_HOME_LABELS).remove(KEY_SHOW_PAGE_INDICATOR).apply();
             clearIconPositions();
-            currentPage = 0; restoreHomeApps(); renderHomePages(true);
+            currentPage = 0; restoreHomeApps(); renderHomePages(false);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "⟲", "Reset all customizations", "Restore launcher defaults", () -> {
@@ -1606,7 +1606,7 @@ public class MainActivity extends Activity {
             homePackages.clear(); currentPage = 0; restoreHomeApps();
             applyHomeWallpaper(); drawerScreen.setBackground(drawerBackground());
             drawerGrid.setNumColumns(getDrawerColumns()); drawerGrid.setVerticalSpacing(dp(8)); drawerGrid.setHorizontalSpacing(dp(4));
-            applyBrandVisibility(); loadApps(); renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            applyBrandVisibility(); loadApps(); renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
         if (!reuseContent) {
