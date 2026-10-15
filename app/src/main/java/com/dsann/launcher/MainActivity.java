@@ -140,6 +140,7 @@ public class MainActivity extends Activity {
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
     private boolean gestureStartedOnDrawerGrid = false;
+    private boolean drawerCloseSwipeClaimed = false;
     private float wheelSwipeProgress = 0f;
     private int wheelSwipeDirection = 0;
     private float longPressDownX, longPressDownY;
@@ -262,6 +263,7 @@ public class MainActivity extends Activity {
             pageSwipeActive = false;
             pageSwipeChildCancelled = false;
             verticalSwipeClaimed = false;
+            drawerCloseSwipeClaimed = false;
             gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
@@ -278,13 +280,25 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
         if (action == MotionEvent.ACTION_MOVE) {
-            // Claim vertical gestures from every surface (icons, widgets, and drawer
-            // included) so child views cannot consume the swipe before the launcher.
-            // While the drawer is open, all vertical gestures belong to its scrolling
-            // surface. Never cancel them or route them to the system Quick Settings action.
-            if (!drawerOpen && !verticalSwipeClaimed
-                    && Math.abs(dy) > LauncherUiUtils.dp(this, 65)
-                    && Math.abs(dy) > Math.abs(dx) * 1.15f) {
+            // In the drawer, only a downward pull starting at the very top closes it.
+            // All other vertical gestures are left to the app grid for normal scrolling.
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+                    && Math.abs(dy) > Math.abs(dx) * 1.15f;
+            if (drawerOpen && gestureStartedOnDrawerGrid && drawerAtTopOnGestureDown
+                    && dy > 0 && verticalSwipe && !drawerCloseSwipeClaimed) {
+                drawerCloseSwipeClaimed = true;
+                handler.removeCallbacks(homeLongPress);
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                super.dispatchTouchEvent(cancel);
+                cancel.recycle();
+                return true;
+            }
+            // Home gestures must not steal vertical movement from icons, widgets, or
+            // contact shortcuts: those surfaces may be scrolling or being dragged.
+            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
+                    && !gestureStartedOnContactShortcut && !verticalSwipeClaimed
+                    && verticalSwipe) {
                 verticalSwipeClaimed = true;
                 handler.removeCallbacks(homeLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
@@ -293,7 +307,7 @@ public class MainActivity extends Activity {
                 cancel.recycle();
                 return true;
             }
-            if (verticalSwipeClaimed) return true;
+            if (drawerCloseSwipeClaimed || verticalSwipeClaimed) return true;
             if (Math.abs(event.getX() - longPressDownX) > LauncherUiUtils.dp(this, 12)
                     || Math.abs(event.getY() - longPressDownY) > LauncherUiUtils.dp(this, 12)) {
                 handler.removeCallbacks(homeLongPress);
@@ -362,14 +376,16 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
-            if (!drawerOpen && (verticalSwipeClaimed
+            if (drawerCloseSwipeClaimed) {
+                showHome();
+                return true;
+            }
+            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
+                    && !gestureStartedOnContactShortcut && (verticalSwipeClaimed
                     || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                         && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
-                if (dy < 0f) {
-                    showDrawer();
-                } else {
-                    openControlCenter();
-                }
+                if (dy < 0f) showDrawer();
+                else openControlCenter();
                 return true;
             }
             if (pageSwipeActive) {
