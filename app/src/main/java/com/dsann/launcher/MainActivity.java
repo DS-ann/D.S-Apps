@@ -1078,7 +1078,9 @@ public class MainActivity extends Activity {
             container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
             Toast.makeText(this, "Drag widget to move; drag blue corner to resize", Toast.LENGTH_SHORT).show();
         };
-        container.setOnTouchListener((view, event) -> {
+        // The AppWidgetHostView fills the container and consumes most touch
+        // events, so attach the move gesture there; the resize handle stays separate.
+        widget.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 down[0] = event.getRawX();
