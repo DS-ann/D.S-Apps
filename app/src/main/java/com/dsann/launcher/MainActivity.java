@@ -1289,8 +1289,7 @@ public class MainActivity extends Activity {
                             view.setTranslationX(0f);
                             view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(100)).start();
                             setWorkspaceGridVisible(false, null);
-                            setWorkspaceGridVisible(false, null);
-                    iconDragging = false;
+                            iconDragging = false;
                             iconDragArmed = false;
                             activeDragView = null;
                             activeDragPackage = null;
