@@ -525,7 +525,19 @@ public class MainActivity extends Activity {
     private void renderDock() {
         if (dockContainer == null) return;
         dockContainer.removeAllViews();
-        for (String packageName : new ArrayList<>(dockPackages)) {
+        for (int slot = 0; slot < DOCK_CAPACITY; slot++) {
+            if (slot >= dockPackages.size()) {
+                FrameLayout emptySlot = new FrameLayout(this);
+                emptySlot.setBackground(LauncherUiUtils.roundRect(this,
+                        new int[]{Color.argb(26, 145, 170, 235), Color.argb(13, 100, 125, 190)},
+                        LauncherUiUtils.dp(this, 13)));
+                TextView plus = LauncherUiUtils.text(this, "+", 22, Color.argb(155, 195, 210, 250), false);
+                plus.setGravity(Gravity.CENTER);
+                emptySlot.addView(plus, new FrameLayout.LayoutParams(-1, -1));
+                dockContainer.addView(emptySlot, new LinearLayout.LayoutParams(0, -1, 1f));
+                continue;
+            }
+            final String packageName = dockPackages.get(slot);
             ResolveInfo app = findApp(packageName);
             if (app == null) continue;
             LauncherAppAdapter adapter = new LauncherAppAdapter(this, prefs, packageManager,
