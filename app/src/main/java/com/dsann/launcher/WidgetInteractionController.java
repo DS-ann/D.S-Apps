@@ -32,6 +32,7 @@ final class WidgetInteractionController {
         void showPage(int page, boolean animate);
         LinearLayout getPagesStrip();
         void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
+        void setWorkspaceGridVisible(boolean visible, View movingView);
     }
 
     private final Activity activity;
@@ -145,6 +146,7 @@ final class WidgetInteractionController {
         };
         gestureGrip.setBackgroundColor(Color.TRANSPARENT);
         clearEditChrome[0] = () -> {
+            listener.setWorkspaceGridVisible(false, null);
             resizeHandle.setVisibility(View.GONE);
             container.setBackground(null);
             gestureGrip.setBackgroundColor(Color.TRANSPARENT);
@@ -155,6 +157,7 @@ final class WidgetInteractionController {
         }));
         movePress[0] = () -> {
             editMode[0] = 1;
+            listener.setWorkspaceGridVisible(true, container);
             resizeHandle.setVisibility(View.VISIBLE);
             container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
             gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(20, 80, 128, 245), Color.argb(10, 54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
