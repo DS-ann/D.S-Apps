@@ -77,13 +77,19 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_PAGE = "icon_page_";
     private static final String KEY_DOCK_APPS = "dock_apps";
     private static final String KEY_WIDGET_IDS = "widget_ids";
+    private static final String KEY_SHORTCUT_INTENT = "contact_shortcut_intent";
+    private static final String KEY_SHORTCUT_LABEL = "contact_shortcut_label";
+    private static final String KEY_SHORTCUT_PAGE = "contact_shortcut_page";
+    private static final String KEY_SHORTCUT_ICON = "contact_shortcut_icon";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
     private static final int REQUEST_WIDGET_CONFIGURE = 7304;
     private static final int REQUEST_CALL_PERMISSION = 7305;
+    private static final int REQUEST_CREATE_SHORTCUT = 7306;
     private int pendingWidgetId = -1;
     private AppWidgetProviderInfo pendingWidgetInfo;
+    private Intent pendingShortcutCallIntent;
     private int pendingWidgetTargetPage = 0;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
@@ -661,7 +667,121 @@ public class MainActivity extends Activity {
         // This also cleans up pages left behind by widget removal or cross-page moves.
         rebuildPages();
         if (homePageController != null) homePageController.renderHomePages(animate);
+        renderSavedContactShortcut();
         renderDock();
+    }
+
+    private void renderSavedContactShortcut() {
+        if (pagesStrip == null || prefs == null) return;
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            View pageView = pagesStrip.getChildAt(i);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            for (int j = page.getChildCount() - 1; j >= 0; j--) {
+                View child = page.getChildAt(j);
+                if ("launcher_contact_shortcut".equals(child.getTag())) page.removeViewAt(j);
+            }
+        }
+        String savedUri = prefs.getString(KEY_SHORTCUT_INTENT, null);
+        if (savedUri == null || savedUri.isEmpty() || pagesStrip.getChildCount() == 0) return;
+        int desiredPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1,
+                prefs.getInt(KEY_SHORTCUT_PAGE, 0)));
+        int columns = Math.max(1, getHomeColumns());
+        int rows = HOME_ROWS;
+        int cellW = Math.max(1, pageViewport.getWidth() / columns);
+        int cellH = Math.max(1, pageViewport.getHeight() / rows);
+        if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) return;
+
+        FrameLayout chosenPage = null;
+        int chosenLeft = 0, chosenTop = 0;
+        for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
+            int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            for (int row = 0; row < rows && chosenPage == null; row++) {
+                for (int col = 0; col < columns && chosenPage == null; col++) {
+                    android.graphics.Rect candidate = new android.graphics.Rect(
+                            col * cellW, row * cellH, (col + 1) * cellW, (row + 1) * cellH);
+                    boolean occupied = false;
+                    for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                        View child = page.getChildAt(childIndex);
+                        if ("launcher_contact_shortcut".equals(child.getTag())) continue;
+                        android.graphics.Rect bounds = new android.graphics.Rect(
+                                child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
+                        if (android.graphics.Rect.intersects(candidate, bounds)) { occupied = true; break; }
+                    }
+                    if (!occupied) {
+                        chosenPage = page;
+                        chosenLeft = col * cellW;
+                        chosenTop = row * cellH;
+                    }
+                }
+            }
+        }
+        if (chosenPage == null) return;
+
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER);
+        tile.setTag("launcher_contact_shortcut");
+        tile.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3),
+                LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3));
+        ImageView icon = new ImageView(this);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        boolean iconLoaded = false;
+        String iconFile = prefs.getString(KEY_SHORTCUT_ICON, null);
+        if (iconFile != null) {
+            try {
+                java.io.File file = new java.io.File(getFilesDir(), iconFile);
+                if (file.isFile()) {
+                    Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+                    if (bitmap != null) { icon.setImageBitmap(bitmap); iconLoaded = true; }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (!iconLoaded) {
+            try {
+                Intent saved = Intent.parseUri(savedUri, Intent.URI_INTENT_SCHEME);
+                if (saved.getComponent() != null) {
+                    icon.setImageDrawable(packageManager.getActivityIcon(saved.getComponent()));
+                    iconLoaded = true;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
+        tile.addView(icon, new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38)));
+        TextView label = LauncherUiUtils.text(this,
+                prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 11, Color.WHITE, true);
+        label.setGravity(Gravity.CENTER);
+        label.setMaxLines(2);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
+        labelParams.topMargin = LauncherUiUtils.dp(this, 3);
+        tile.addView(label, labelParams);
+        FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(cellW, cellH, Gravity.TOP | Gravity.LEFT);
+        tileParams.leftMargin = chosenLeft;
+        tileParams.topMargin = chosenTop;
+        chosenPage.addView(tile, tileParams);
+        tile.setOnClickListener(v -> {
+            try {
+                Intent target = Intent.parseUri(prefs.getString(KEY_SHORTCUT_INTENT, ""),
+                        Intent.URI_INTENT_SCHEME);
+                if (Intent.ACTION_CALL.equals(target.getAction())
+                        && android.os.Build.VERSION.SDK_INT >= 23
+                        && checkSelfPermission(android.Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+                    pendingShortcutCallIntent = target;
+                    requestPermissions(new String[]{android.Manifest.permission.CALL_PHONE}, REQUEST_CALL_PERMISSION);
+                    return;
+                }
+                startActivity(target);
+            } catch (SecurityException e) {
+                Toast.makeText(this, "Permission is needed to use this shortcut", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Unable to open this contact shortcut", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private void restoreDockApps() {
@@ -1185,8 +1305,26 @@ public class MainActivity extends Activity {
 
     private void beginWidgetPicker(int requestedPage) {
         pendingWidgetTargetPage = Math.max(0, Math.min(1, requestedPage));
-        new WidgetPickerDialog(this, widgetManager, packageManager,
-                info -> beginBindingWidget(info)).show();
+        new WidgetPickerDialog(this, widgetManager, packageManager, new WidgetPickerDialog.Listener() {
+            @Override public void onWidgetSelected(AppWidgetProviderInfo info) {
+                beginBindingWidget(info);
+            }
+            @Override public void onShortcutSelected(ResolveInfo shortcutActivity) {
+                beginCreateShortcut(shortcutActivity);
+            }
+        }).show();
+    }
+
+    private void beginCreateShortcut(ResolveInfo shortcutActivity) {
+        if (shortcutActivity == null || shortcutActivity.activityInfo == null) return;
+        try {
+            Intent create = new Intent(Intent.ACTION_CREATE_SHORTCUT);
+            create.setComponent(new android.content.ComponentName(
+                    shortcutActivity.activityInfo.packageName, shortcutActivity.activityInfo.name));
+            startActivityForResult(create, REQUEST_CREATE_SHORTCUT);
+        } catch (Exception e) {
+            Toast.makeText(this, "Couldn't open this shortcut", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void beginBindingWidget(AppWidgetProviderInfo info) {
@@ -1231,9 +1369,22 @@ public class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != REQUEST_CALL_PERMISSION) return;
+        boolean granted = grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (pendingShortcutCallIntent != null) {
+            Intent callIntent = pendingShortcutCallIntent;
+            pendingShortcutCallIntent = null;
+            if (granted) {
+                try { startActivity(callIntent); }
+                catch (Exception e) { Toast.makeText(this, "Unable to start this call", Toast.LENGTH_LONG).show(); }
+            } else {
+                Toast.makeText(this, "Phone permission is needed to place this call", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         AppWidgetProviderInfo info = pendingWidgetInfo;
         pendingWidgetInfo = null;
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED && info != null) {
+        if (granted && info != null) {
             beginBindingWidget(info);
         } else {
             Toast.makeText(this, "Phone permission is needed for a Direct Dial widget", Toast.LENGTH_LONG).show();
@@ -1266,6 +1417,58 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_CREATE_SHORTCUT) {
+            if (resultCode != RESULT_OK || data == null) return;
+            try {
+                Intent shortcutIntent = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
+                if (shortcutIntent == null) {
+                    Toast.makeText(this, "The selected shortcut returned no launch action", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String shortcutLabel = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME);
+                if (shortcutLabel == null || shortcutLabel.trim().isEmpty()) shortcutLabel = "Contact shortcut";
+                prefs.edit()
+                        .putString(KEY_SHORTCUT_INTENT, shortcutIntent.toUri(Intent.URI_INTENT_SCHEME))
+                        .putString(KEY_SHORTCUT_LABEL, shortcutLabel)
+                        .putInt(KEY_SHORTCUT_PAGE, pendingWidgetTargetPage)
+                        .apply();
+                Bitmap shortcutBitmap = null;
+                Object iconExtra = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON);
+                if (iconExtra instanceof Bitmap) shortcutBitmap = (Bitmap) iconExtra;
+                if (shortcutBitmap == null) {
+                    try {
+                        Intent.ShortcutIconResource iconResource =
+                                data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON_RESOURCE);
+                        if (iconResource != null) {
+                            android.content.res.Resources res = packageManager.getResourcesForApplication(iconResource.packageName);
+                            int id = res.getIdentifier(iconResource.resourceName, null, null);
+                            if (id != 0) {
+                                android.graphics.drawable.Drawable drawable = res.getDrawable(id);
+                                shortcutBitmap = Bitmap.createBitmap(
+                                        Math.max(1, drawable.getIntrinsicWidth()), Math.max(1, drawable.getIntrinsicHeight()),
+                                        Bitmap.Config.ARGB_8888);
+                                Canvas canvas = new Canvas(shortcutBitmap);
+                                drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+                                drawable.draw(canvas);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+                if (shortcutBitmap != null) {
+                    try (java.io.FileOutputStream output = openFileOutput("contact_shortcut_icon.png", MODE_PRIVATE)) {
+                        shortcutBitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
+                        prefs.edit().putString(KEY_SHORTCUT_ICON, "contact_shortcut_icon.png").apply();
+                    } catch (Exception ignored) {}
+                } else {
+                    prefs.edit().remove(KEY_SHORTCUT_ICON).apply();
+                }
+                renderSavedContactShortcut();
+                Toast.makeText(this, "Contact shortcut added", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Couldn't add this shortcut", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode == REQUEST_WIDGET_BIND || requestCode == REQUEST_WIDGET_CONFIGURE) {
             if (resultCode != RESULT_OK || pendingWidgetId < 0) {
                 discardPendingWidget();
