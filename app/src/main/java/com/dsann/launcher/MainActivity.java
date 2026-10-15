@@ -369,7 +369,7 @@ public class MainActivity extends Activity {
                     int newIndex = oldIndex >= 0 && oldIndex < remap.length && remap[oldIndex] >= 0
                             ? remap[oldIndex] : 0;
                     if (newIndex != oldIndex) changed = true;
-                    if (compactWidgets.length() > 0) compactWidgets.append('\\n');
+                    if (compactWidgets.length() > 0) compactWidgets.append('\n');
                     compactWidgets.append(id).append(':').append(newIndex);
                 } catch (NumberFormatException ignored) {}
             }
