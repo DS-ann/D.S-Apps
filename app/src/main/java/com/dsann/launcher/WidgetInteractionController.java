@@ -28,6 +28,7 @@ final class WidgetInteractionController {
                               DialogInterface.OnClickListener listener);
         void setCurrentPage(int page);
         LinearLayout getPagesStrip();
+        void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
     }
 
     private final Activity activity;
@@ -136,6 +137,7 @@ final class WidgetInteractionController {
                     listener.ensurePageExists(destination);
                     listener.saveWidgetGeometry(widgetId, destination, container);
                     listener.setCurrentPage(destination);
+                    listener.resolveWidgetCollisions((FrameLayout) listener.getPagesStrip().getChildAt(destination), container);
                     listener.renderHomePages(true);
                     Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
                 }
@@ -205,6 +207,7 @@ final class WidgetInteractionController {
                 if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
+                    listener.resolveWidgetCollisions(page, container);
                     clearEditChrome[0].run();
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
