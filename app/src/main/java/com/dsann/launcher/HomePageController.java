@@ -242,7 +242,7 @@ final class HomePageController {
             strip.setCameraDistance(12000f * activity.getResources().getDisplayMetrics().density);
             strip.setRotationY(host.getCurrentPage() > 0 ? 3f : -3f);
             strip.setScaleX(1f);
-            strip.animate().translationX(targetX).rotationY(0f).setDuration(220L)
+            strip.animate().translationX(targetX).rotationY(0f).setDuration(LauncherMotion.duration(activity, 220L))
                     .withEndAction(() -> strip.setLayerType(View.LAYER_TYPE_NONE, null)).start();
         } else {
             strip.setTranslationX(targetX);
