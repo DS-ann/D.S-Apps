@@ -30,22 +30,18 @@ public final class SevenSegmentClockTextView extends TextView {
         setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         setSingleLine(true);
         setIncludeFontPadding(false);
+        // Software rendering avoids API 23/older-GPU failures with custom stroked segments.
+        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
         segmentPaint.setStrokeCap(Paint.Cap.ROUND);
         segmentPaint.setStrokeJoin(Paint.Join.ROUND);
         segmentPaint.setStyle(Paint.Style.STROKE);
     }
 
     public void setSevenSegmentMode(boolean enabled) {
-        if (sevenSegmentMode == enabled) return;
         sevenSegmentMode = enabled;
-        setLayerType(ViewLayerType(), null);
+        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
         invalidate();
         requestLayout();
-    }
-
-    // Kept separate so this class stays compatible with Android 6 (API 23).
-    private int ViewLayerType() {
-        return android.view.View.LAYER_TYPE_SOFTWARE;
     }
 
     @Override protected void onDraw(Canvas canvas) {
@@ -63,7 +59,11 @@ public final class SevenSegmentClockTextView extends TextView {
             else if (ch == ':' || ch == '\uFF1A') display.append(':');
         }
         String value = display.toString();
-        if (value.length() == 0) return;
+        // Never leave the clock invisible if an unexpected format reaches this view.
+        if (value.length() == 0) {
+            super.onDraw(canvas);
+            return;
+        }
 
         float leftBound = getPaddingLeft();
         float rightBound = getWidth() - getPaddingRight();
@@ -78,7 +78,10 @@ public final class SevenSegmentClockTextView extends TextView {
             if (value.charAt(i) == ':') colons++;
             else digits++;
         }
-        if (digits == 0) return;
+        if (digits == 0) {
+            super.onDraw(canvas);
+            return;
+        }
 
         // The whole string is sized as one unit, so 12-hour and 24-hour formats fit.
         float widthUnits = digits * 0.72f + colons * 0.34f;
