@@ -804,7 +804,7 @@ public class MainActivity extends Activity {
                             }
                             view.animate().cancel();
                             view.setTranslationX(0f);
-                            view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(100).start();
+                            view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(100)).start();
                             iconDragging = false;
                             iconDragArmed = false;
                             activeDragView = null;
@@ -965,7 +965,7 @@ public class MainActivity extends Activity {
         }
         if (animate) {
             pagesStrip.animate().translationX(targetX)
-                    .setDuration(240L)
+                    .setDuration(animationDuration(240L))
                     .setInterpolator(new android.view.animation.DecelerateInterpolator())
                     .start();
         } else {
