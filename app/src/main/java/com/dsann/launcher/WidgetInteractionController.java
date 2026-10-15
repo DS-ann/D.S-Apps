@@ -169,8 +169,8 @@ final class WidgetInteractionController {
                 LinearLayout currentStrip = listener.getPagesStrip();
                 ViewParent parent = container.getParent();
                 int actualPage = parent instanceof View ? (currentStrip == null ? -1 : currentStrip.indexOfChild((View) parent)) : -1;
-                originalPageAtDown[0] = 0;
-                widgetPage[0] = 0;
+                originalPageAtDown[0] = actualPage >= 0 ? actualPage : 0;
+                widgetPage[0] = originalPageAtDown[0];
                 editMode[0] = 0;
                 childCanceled[0] = false;
                 menuShown[0] = false;
