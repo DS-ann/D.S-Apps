@@ -40,10 +40,11 @@ final class HomePageController {
     private final String showLabelsKey;
     private final String iconSizeKey;
     private final String fontSizeKey;
+    private final String showPageIndicatorKey;
     private final int homeRows;
 
     HomePageController(Activity activity, SharedPreferences prefs, PackageManager packageManager,
-                       Host host, String iconXKey, String iconYKey, String showLabelsKey, String iconSizeKey, String fontSizeKey, int homeRows) {
+                       Host host, String iconXKey, String iconYKey, String showLabelsKey, String iconSizeKey, String fontSizeKey, String showPageIndicatorKey, int homeRows) {
         this.activity = activity;
         this.prefs = prefs;
         this.packageManager = packageManager;
@@ -53,6 +54,7 @@ final class HomePageController {
         this.showLabelsKey = showLabelsKey;
         this.iconSizeKey = iconSizeKey;
         this.fontSizeKey = fontSizeKey;
+        this.showPageIndicatorKey = showPageIndicatorKey;
         this.homeRows = homeRows;
     }
 
@@ -121,7 +123,7 @@ final class HomePageController {
             });
         }
         host.restoreWidgetsOnPages();
-        host.getPageIndicator().setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true) ? View.VISIBLE : View.GONE);
+        host.getPageIndicator().setVisibility(prefs.getBoolean(showPageIndicatorKey, true) ? View.VISIBLE : View.GONE);
         host.getPageIndicator().setText((host.getCurrentPage() + 1) + "  /  " + host.getPages().size());
         host.getPagesStrip().setTranslationX(-host.getCurrentPage() * pageWidth);
         if (animate) {
