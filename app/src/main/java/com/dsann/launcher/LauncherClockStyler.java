@@ -34,7 +34,7 @@ final class LauncherClockStyler {
                 break;
             case 5:
                 clock.setTypeface(Typeface.create("monospace", Typeface.BOLD));
-                clock.setLetterSpacing(0.09f);
+                clock.setLetterSpacing(0f);
                 clock.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
                 break;
             default:
