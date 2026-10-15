@@ -2659,7 +2659,7 @@ public class MainActivity extends Activity {
         if (amPmText != null) {
             // The AM/PM marker overlays the lower-right corner; it never consumes
             // horizontal layout width or pushes the clock away from centre.
-            float markerSp = Math.max(6f, Math.min(9f, size * 0.10f));
+            float markerSp = Math.max(6f, Math.min(9f, 78f * Math.min(lengthScale, breadthScale) * 0.10f));
             amPmText.setTextSize(markerSp);
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
