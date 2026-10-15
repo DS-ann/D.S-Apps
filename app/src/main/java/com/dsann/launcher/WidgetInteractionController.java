@@ -71,12 +71,13 @@ final class WidgetInteractionController {
         // leaving the widget's normal content fully interactive.
         final View gestureGrip = new View(activity);
         gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 28), Gravity.TOP);
+        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 12), Gravity.TOP);
         container.addView(gestureGrip, gripLp);
 
         final int[] editMode = {0}; // 0 idle, 1 moving
         final float[] down = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
+        final int[] widgetPage = {pageIndex};
         final Runnable[] movePress = new Runnable[1];
         final Runnable[] menuPress = new Runnable[1];
         Runnable clearEditChrome = () -> {
@@ -102,12 +103,13 @@ final class WidgetInteractionController {
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
                     WidgetController.removeWidget(prefs, widgetIdsKey, widgetId);
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
+                    listener.renderHomePages(false);
                 } else if (which == 1) {
                     resizeHandle.setVisibility(View.VISIBLE);
                     container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
-                    int destination = Math.max(pageIndex + 1, listener.getPagesStrip().getChildCount());
+                    int destination = widgetPage[0] + 1;
                     listener.ensurePageExists(destination);
                     FrameLayout destinationPage = (FrameLayout) listener.getPagesStrip().getChildAt(destination);
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
@@ -118,6 +120,7 @@ final class WidgetInteractionController {
                     moved.leftMargin = LauncherUiUtils.dp(activity, 8);
                     moved.topMargin = LauncherUiUtils.dp(activity, 40);
                     destinationPage.addView(container, moved);
+                    widgetPage[0] = destination;
                     listener.setCurrentPage(destination);
                     listener.saveWidgetGeometry(widgetId, destination, container);
                     listener.renderHomePages(true);
@@ -161,7 +164,7 @@ final class WidgetInteractionController {
                 handler.removeCallbacks(movePress[0]);
                 handler.removeCallbacks(menuPress[0]);
                 if (editMode[0] == 1) {
-                    listener.saveWidgetGeometry(widgetId, pageIndex, container);
+                    listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     clearEditChrome.run();
                 }
                 editMode[0] = 0;
