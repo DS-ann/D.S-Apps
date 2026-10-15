@@ -37,9 +37,7 @@ final class HomePageModel {
         for (int i = 0; i < homePackages.size(); i++) {
             String packageName = homePackages.get(i);
             int fallbackPage = i / capacity;
-            int savedPage = prefs.contains(iconPagePrefix + packageName)
-                    ? prefs.getInt(iconPagePrefix + packageName, fallbackPage) : fallbackPage;
-            int page = clampPage(savedPage);
+            int page = 0;
             entries.add(new PageEntry(packageName, page));
             maxPage = Math.max(maxPage, page);
         }
@@ -53,7 +51,8 @@ final class HomePageModel {
                 if (parts.length != 2) continue;
                 try {
                     int id = Integer.parseInt(parts[0].trim());
-                    int page = clampPage(Integer.parseInt(parts[1].trim()));
+                    Integer.parseInt(parts[1].trim());
+                    int page = 0;
                     if (widgetManager == null || widgetManager.getAppWidgetInfo(id) == null) {
                         WidgetController.removeWidget(prefs, widgetIdsKey, id);
                         continue;
@@ -93,8 +92,7 @@ final class HomePageModel {
         for (PageEntry entry : entries) {
             int desired = remap[entry.page];
             if (desired < 0) desired = 0;
-            int page = desired;
-            while (page < 20 && iconCounts[page] >= capacity) page++;
+            int page = 0;
             while (resultPages.size() <= page) resultPages.add(new ArrayList<String>());
             resultPages.get(page).add(entry.packageName);
             iconCounts[page]++;
