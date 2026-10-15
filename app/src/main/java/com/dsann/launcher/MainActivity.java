@@ -1237,20 +1237,41 @@ public class MainActivity extends Activity {
 
     private void showCustomizationMenu(Dialog existingDialog, int restoreScrollY, boolean animateOpening) {
         Dialog dialog = existingDialog == null ? new Dialog(this) : existingDialog;
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(16), dp(12), dp(16), dp(14));
-        panel.setBackground(roundRect(new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, dp(24)));
-        TextView title = text("Home Studio", 23, Color.WHITE, true);
-        title.setPadding(dp(4), dp(5), dp(4), dp(3));
-        panel.addView(title);
-        TextView subtitle = text("Personalize your home and app drawer", 12, Color.rgb(179, 191, 221), false);
-        subtitle.setPadding(dp(4), 0, dp(4), dp(7));
-        panel.addView(subtitle);
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(content, new android.widget.ScrollView.LayoutParams(-1, -2));
+        // Keep the same dialog/window/scroll container while a setting changes.
+        // Replacing the whole dialog content on every tap caused the visible flicker.
+        boolean reuseContent = existingDialog != null && existingDialog.isShowing()
+                && existingDialog.getWindow() != null
+                && existingDialog.getWindow().getDecorView().findViewWithTag("home_studio_panel") instanceof LinearLayout
+                && existingDialog.getWindow().getDecorView().findViewWithTag("home_studio_scroll") instanceof android.widget.ScrollView
+                && existingDialog.getWindow().getDecorView().findViewWithTag("home_studio_content") instanceof LinearLayout;
+        LinearLayout panel;
+        android.widget.ScrollView scroll;
+        LinearLayout content;
+        if (reuseContent) {
+            android.view.View decor = dialog.getWindow().getDecorView();
+            panel = (LinearLayout) decor.findViewWithTag("home_studio_panel");
+            scroll = (android.widget.ScrollView) decor.findViewWithTag("home_studio_scroll");
+            content = (LinearLayout) decor.findViewWithTag("home_studio_content");
+            content.removeAllViews();
+        } else {
+            panel = new LinearLayout(this);
+            panel.setTag("home_studio_panel");
+            panel.setOrientation(LinearLayout.VERTICAL);
+            panel.setPadding(dp(16), dp(12), dp(16), dp(14));
+            panel.setBackground(roundRect(new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, dp(24)));
+            TextView title = text("Home Studio", 23, Color.WHITE, true);
+            title.setPadding(dp(4), dp(5), dp(4), dp(3));
+            panel.addView(title);
+            TextView subtitle = text("Personalize your home and app drawer", 12, Color.rgb(179, 191, 221), false);
+            subtitle.setPadding(dp(4), 0, dp(4), dp(7));
+            panel.addView(subtitle);
+            scroll = new android.widget.ScrollView(this);
+            scroll.setTag("home_studio_scroll");
+            content = new LinearLayout(this);
+            content.setTag("home_studio_content");
+            content.setOrientation(LinearLayout.VERTICAL);
+            scroll.addView(content, new android.widget.ScrollView.LayoutParams(-1, -2));
+        }
 
         addSection(content, "Home screen");
         addChoiceRow(content, "Home columns", getHomeColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
@@ -1367,8 +1388,10 @@ public class MainActivity extends Activity {
             applyBrandVisibility(); loadApps(); renderHomePages(true); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
-        panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-        dialog.setContentView(panel);
+        if (!reuseContent) {
+            panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+            dialog.setContentView(panel);
+        }
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
