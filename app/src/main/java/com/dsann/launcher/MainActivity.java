@@ -577,7 +577,7 @@ public class MainActivity extends Activity {
         hero.setClipToPadding(false);
         // Give the clock the full usable width; a large LED clock must not be
         // measured inside the old 82%-width panel and clipped at its left edge.
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, -2);
         hp.gravity = Gravity.TOP;
         hp.topMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(hero, hp);
@@ -618,7 +618,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
                 clockGravity() | Gravity.CENTER_VERTICAL);
         clockRow.addView(clockGroup, groupParams);
-        hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 114)));
+        hero.addView(clockRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
         // Keep the existing 13sp date size; improve contrast instead of enlarging it.
         dateText = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.BOLD));
@@ -626,7 +626,7 @@ public class MainActivity extends Activity {
         dateText.setLetterSpacing(0.04f);
         dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(220, 0, 0, 0));
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, -2);
         dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
         applyClockPositionAndSize();
@@ -790,8 +790,10 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        tileContent.addView(icon, new LinearLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38)));
+        int initialIconSize = Math.max(LauncherUiUtils.dp(this, 38), Math.min(LauncherUiUtils.dp(this, 96),
+                Math.min(cellW * shortcutSpanX - LauncherUiUtils.dp(this, 16),
+                        cellH * shortcutSpanY - LauncherUiUtils.dp(this, 42))));
+        tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 11, Color.WHITE, true);
         label.setGravity(Gravity.CENTER);
@@ -867,7 +869,8 @@ public class MainActivity extends Activity {
                         int finalY = Math.max(1, Math.min(rows, Math.round((float) tile.getHeight() / cellH)));
                         prefs.edit().putInt(KEY_SHORTCUT_SPAN_X, finalX)
                                 .putInt(KEY_SHORTCUT_SPAN_Y, finalY).apply();
-                        renderSavedContactShortcut();
+                        // Keep the resized tile in place; rebuilding it here can move it
+                        // to another free cell and makes the resize appear to snap back.
                     }
                     return true;
             }
@@ -2456,11 +2459,11 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_PAGE_TRANSITION, value).apply();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSliderRow(content, "Clock length", 60, 150, getClockLength(), "%", value -> {
+        addSliderRow(content, "Clock length", 80, 250, getClockLength(), "%", value -> {
             prefs.edit().putInt(KEY_CLOCK_LENGTH, value).apply();
             applyClockPositionAndSize();
         });
-        addSliderRow(content, "Clock breadth", 60, 150, getClockBreadth(), "%", value -> {
+        addSliderRow(content, "Clock breadth", 80, 250, getClockBreadth(), "%", value -> {
             prefs.edit().putInt(KEY_CLOCK_BREADTH, value).apply();
             applyClockPositionAndSize();
         });
@@ -2593,11 +2596,11 @@ public class MainActivity extends Activity {
     }
 
     private int getClockLength() {
-        return Math.max(60, Math.min(150, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_LENGTH, 100)));
+        return Math.max(80, Math.min(250, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_LENGTH, 100)));
     }
 
     private int getClockBreadth() {
-        return Math.max(60, Math.min(150, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_BREADTH, 100)));
+        return Math.max(80, Math.min(250, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_BREADTH, 100)));
     }
 
     private int getClockPosition() {
@@ -2624,7 +2627,9 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams groupParams = (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.CENTER_VERTICAL;
             groupParams.height = LauncherUiUtils.dp(this, Math.round(114f * getClockBreadth() / 100f));
-            groupParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            float measuredClockWidth = clockText.getPaint().measureText(clockText.getText().toString());
+            groupParams.width = Math.max(LauncherUiUtils.dp(this, 38),
+                    (int) Math.ceil(measuredClockWidth * lengthScale) + LauncherUiUtils.dp(this, 20));
             clockGroup.setLayoutParams(groupParams);
         }
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
