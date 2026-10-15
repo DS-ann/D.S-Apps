@@ -70,7 +70,7 @@ final class WidgetInteractionController {
         // A slim grip at the top of each widget owns launcher edit gestures,
         // leaving the widget's normal content fully interactive.
         final View gestureGrip = new View(activity);
-        gestureGrip.setBackground(LauncherUiUtils.roundRect(activity), new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
+        gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
         FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 28), Gravity.TOP);
         container.addView(gestureGrip, gripLp);
 
@@ -82,13 +82,13 @@ final class WidgetInteractionController {
         Runnable clearEditChrome = () -> {
             resizeHandle.setVisibility(View.GONE);
             container.setBackground(null);
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity), new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
+            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
         };
         movePress[0] = () -> {
             editMode[0] = 1;
             resizeHandle.setVisibility(View.VISIBLE);
-            container.setBackground(LauncherUiUtils.roundRect(activity), new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity), new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
+            container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
+            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
             Toast.makeText(activity, "Move widget", Toast.LENGTH_SHORT).show();
         };
         menuPress[0] = () -> {
@@ -104,7 +104,7 @@ final class WidgetInteractionController {
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                 } else if (which == 1) {
                     resizeHandle.setVisibility(View.VISIBLE);
-                    container.setBackground(LauncherUiUtils.roundRect(activity), new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
+                    container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
                     int destination = Math.max(pageIndex + 1, listener.getPagesStrip().getChildCount());
