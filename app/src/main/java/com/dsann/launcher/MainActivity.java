@@ -2211,6 +2211,7 @@ public class MainActivity extends Activity {
         clockText.setText(clockValue.trim());
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
+        applyClockPositionAndSize();
         applyClockStyle();
         applyClockPanelColor(true);
         applyBrandVisibility();
