@@ -181,7 +181,12 @@ final class WidgetInteractionController {
                     return true;
                 }
                 if (editMode[0] == 1) {
-                    handler.removeCallbacks(menuPress[0]);
+                    // Do not cancel the options timer just because the user is still holding.
+                    // Cancel it only after a deliberate drag begins in move mode.
+                    if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
+                            || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) {
+                        handler.removeCallbacks(menuPress[0]);
+                    }
                     cancelWidgetTouch.run();
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                     int maxX = Math.max(0, page.getWidth() - container.getWidth());
