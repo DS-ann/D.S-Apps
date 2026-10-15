@@ -27,27 +27,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
+      # Disable Gradle's persisted dependency/build caches for a clean diagnostic build.
+      - name: Set up Gradle without cache
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-          # launcher-app is a feature branch, so explicitly allow it to save cache entries.
-          cache-read-only: false
-
-      # setup-gradle already caches Gradle distributions and dependency caches.
-      # Cache the Android platform and build-tools used by this project as well.
-      - name: Cache Android SDK components
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/lib/android/sdk/platforms/android-35
-            /usr/local/lib/android/sdk/build-tools/35.0.0
-          key: ${{ runner.os }}-android-sdk-api35-build-tools-35.0.0-v1
+          cache-disabled: true
 
       - name: Set up Android SDK build tools
         uses: android-actions/setup-android@v3
         with:
-          packages: 'build-tools;35.0.0'
+          packages: 'platforms;android-35,build-tools;35.0.0'
 
       - name: Prepare and validate BatteryPulse signing key
         env:
@@ -65,13 +55,13 @@ jobs:
           chmod 600 "$RUNNER_TEMP/batterypulse-release.p12"
           echo "BatteryPulse PKCS12 keystore validated."
 
-      - name: Build signed release APK
+      - name: Clean and build signed release APK without caches
         env:
           BATTERYPULSE_KEYSTORE_PATH: ${{ runner.temp }}/batterypulse-release.p12
           BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
           BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
           BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
-        run: gradle --no-daemon --stacktrace assembleRelease
+        run: gradle --no-daemon --no-build-cache --no-configuration-cache --stacktrace clean assembleRelease
 
       - name: Verify release APK signature
         run: |
