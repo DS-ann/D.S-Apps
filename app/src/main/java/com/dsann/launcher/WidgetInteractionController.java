@@ -40,6 +40,34 @@ final class WidgetInteractionController {
     private final SharedPreferences prefs;
     private final String widgetIdsKey;
     private final Listener listener;
+    private static final class EditChrome {
+        final View container;
+        final View resizeHandle;
+        final Runnable clear;
+        EditChrome(View container, View resizeHandle, Runnable clear) {
+            this.container = container;
+            this.resizeHandle = resizeHandle;
+            this.clear = clear;
+        }
+    }
+    private final java.util.ArrayList<EditChrome> editChrome = new java.util.ArrayList<>();
+
+    /** Hide resize outlines when the user taps anywhere except the active resize handle. */
+    void clearEditChromeOutsideTouch(float rawX, float rawY) {
+        for (int i = editChrome.size() - 1; i >= 0; i--) {
+            EditChrome chrome = editChrome.get(i);
+            if (chrome.container.getParent() == null) {
+                editChrome.remove(i);
+                continue;
+            }
+            if (chrome.resizeHandle.getVisibility() != View.VISIBLE) continue;
+            int[] location = new int[2];
+            chrome.resizeHandle.getLocationOnScreen(location);
+            boolean onHandle = rawX >= location[0] && rawX < location[0] + chrome.resizeHandle.getWidth()
+                    && rawY >= location[1] && rawY < location[1] + chrome.resizeHandle.getHeight();
+            if (!onHandle) chrome.clear.run();
+        }
+    }
 
     WidgetInteractionController(Activity activity, Handler handler, AppWidgetHost widgetHost,
                                 SharedPreferences prefs, String widgetIdsKey, Listener listener) {
@@ -121,6 +149,10 @@ final class WidgetInteractionController {
             container.setBackground(null);
             gestureGrip.setBackgroundColor(Color.TRANSPARENT);
         };
+        editChrome.add(new EditChrome(container, resizeHandle, () -> {
+            clearEditChrome[0].run();
+            editMode[0] = 0;
+        }));
         movePress[0] = () -> {
             editMode[0] = 1;
             resizeHandle.setVisibility(View.VISIBLE);
