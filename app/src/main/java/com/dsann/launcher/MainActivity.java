@@ -652,11 +652,11 @@ public class MainActivity extends Activity {
             renderHomePages(true);
             return;
         }
-        // Allow an empty trailing page to be created by a deliberate swipe;
-        // edge-dragging an icon also creates a page regardless of grid capacity.
-        currentPage++;
-        ensurePageExists(currentPage);
-        renderHomePages(true);
+        // A swipe creates a new page only when the current page is full.
+        if (pages.get(currentPage).size() >= pageCapacity()) {
+            currentPage++;
+            renderHomePages(true);
+        }
     }
 
     private void previousPage() {
