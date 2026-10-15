@@ -84,7 +84,7 @@ final class HomePageController {
                 ? host.getPageViewport().getWidth()
                 : Math.max(1, activity.getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(activity, 40));
-        int requiredPages = Math.max(1, host.getPages().size());
+        int requiredPages = 1;
         while (strip.getChildCount() < requiredPages) {
             FrameLayout newPage = new FrameLayout(activity);
             newPage.setClipChildren(false);
@@ -212,7 +212,7 @@ final class HomePageController {
         host.restoreWidgetsOnPages();
         if (host.getPageIndicator() != null) {
             host.getPageIndicator().setVisibility(
-                    prefs.getBoolean(showPageIndicatorKey, true) ? View.VISIBLE : View.GONE);
+                    View.GONE);
             host.getPageIndicator().setText(
                     (host.getCurrentPage() + 1) + "  /  " + requiredPages);
         }
