@@ -859,13 +859,15 @@ public class MainActivity extends Activity {
                         tile.setLayoutParams(p);
                         // Grow the actual contact/app icon as the tile grows; changing only
                         // the tile bounds leaves the icon visually stuck at its original size.
-                        int availableWidth = Math.max(LauncherUiUtils.dp(this, 28),
-                                p.width - LauncherUiUtils.dp(this, 16));
-                        int availableHeight = Math.max(LauncherUiUtils.dp(this, 28),
-                                p.height - LauncherUiUtils.dp(this, 42));
+                        // Keep the initial one-cell shortcut compact. Scale from the original
+                        // 28dp icon by the tile's grid-cell dimensions, so dragging smaller
+                        // restores the original icon instead of leaving it enlarged.
+                        float widthScale = (float) p.width / (float) cellW;
+                        float heightScale = (float) p.height / (float) cellH;
+                        float tileScale = Math.min(widthScale, heightScale);
                         int iconSize = Math.max(LauncherUiUtils.dp(this, 28),
                                 Math.min(LauncherUiUtils.dp(this, 96),
-                                        Math.min(availableWidth, availableHeight)));
+                                        Math.round(LauncherUiUtils.dp(this, 28) * tileScale)));
                         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
                         if (iconParams != null && (iconParams.width != iconSize || iconParams.height != iconSize)) {
                             iconParams.width = iconSize;
@@ -2636,8 +2638,10 @@ public class MainActivity extends Activity {
         final float breadthScale = getClockBreadth() / 100f;
         clockPanel.setGravity(alignment);
         LinearLayout.LayoutParams panelParams = (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
-        panelParams.gravity = alignment;
-        panelParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        panelParams.gravity = Gravity.TOP;
+        // The colored clock panel must span the entire home-screen width.
+        // Only the clock row's height follows the independent breadth slider.
+        panelParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
         clockPanel.setLayoutParams(panelParams);
 
         int clockWidth = (int) Math.ceil(clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale);
