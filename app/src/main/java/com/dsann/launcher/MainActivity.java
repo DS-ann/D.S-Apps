@@ -2809,8 +2809,11 @@ public class MainActivity extends Activity {
         final int clockWithMarkerWidth = renderedClockWidth + markerWidth + LauncherUiUtils.dp(this, 2);
         final int contentWidth = Math.min(maxContentWidth,
                 Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4));
-        final int rowHeight = Math.max(1,
-                LauncherUiUtils.dp(this, Math.round(114f * breadthScale)));
+        // Keep the clock's reserved layout footprint constant. Scaling the glyph
+        // must not increase the hero's measured height and steal vertical space from
+        // the home-page viewport (which made lower icons/widgets slide under the dock).
+        // The glyph itself scales visually; the surrounding home layout does not reflow.
+        final int rowHeight = Math.max(1, LauncherUiUtils.dp(this, 114));
 
         clockPanel.setGravity(alignment);
         LinearLayout.LayoutParams panelParams =
