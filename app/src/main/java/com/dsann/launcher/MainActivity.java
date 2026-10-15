@@ -103,6 +103,7 @@ public class MainActivity extends Activity {
     private TextView clockText;
     private TextView amPmText;
     private TextView dateText;
+    private LinearLayout clockPanel;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
@@ -436,11 +437,12 @@ public class MainActivity extends Activity {
         hero.setGravity(Gravity.RIGHT);
         hero.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
-                Math.max(LauncherUiUtils.dp(this, 220), (int) ((getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) * 0.72f)),
+                Math.max(LauncherUiUtils.dp(this, 220), (int) ((getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) * 0.82f)),
                 -2);
         hp.gravity = Gravity.RIGHT;
         hp.topMargin = LauncherUiUtils.dp(this, 8);
         homeScreen.addView(hero, hp);
+        clockPanel = hero;
         applyClockPanelColor(false);
         LinearLayout clockRow = new LinearLayout(this);
         clockRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -450,9 +452,12 @@ public class MainActivity extends Activity {
         clockText = new SevenSegmentClockTextView(this);
         clockText.setText("--:--");
         clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        clockText.setTextSize(52);
-        // A fixed digital display area keeps the seven-segment glyphs stable.
-        clockText.setLayoutParams(new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 185), LauncherUiUtils.dp(this, 76)));
+        clockText.setTextSize(78);
+        // Scale the clock's drawing area by 50%; the custom LED renderer fits digits to these bounds.
+        int clockDisplayWidth = Math.min(LauncherUiUtils.dp(this, 278),
+                Math.max(LauncherUiUtils.dp(this, 185), (int) ((getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(this, 40)) * 0.82f) - LauncherUiUtils.dp(this, 38)));
+        clockText.setLayoutParams(new LinearLayout.LayoutParams(clockDisplayWidth, LauncherUiUtils.dp(this, 114)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
@@ -466,8 +471,8 @@ public class MainActivity extends Activity {
         amPmText.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         amPmText.setIncludeFontPadding(false);
         amPmText.setPadding(LauncherUiUtils.dp(this, 4), 0, 0, 0);
-        clockRow.addView(amPmText, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 25), LauncherUiUtils.dp(this, 76)));
-        hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 76)));
+        clockRow.addView(amPmText, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 30), LauncherUiUtils.dp(this, 114)));
+        hero.addView(clockRow, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 114)));
         dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
         dateText.setGravity(Gravity.RIGHT);
@@ -857,15 +862,41 @@ public class MainActivity extends Activity {
                         - LauncherUiUtils.dp(this, 40));
         float targetX = -currentPage * pageWidth;
         pagesStrip.animate().cancel();
-        if (animate) {
-            pagesStrip.setCameraDistance(10000f * getResources().getDisplayMetrics().density);
-            // Rotate slightly away from the incoming direction, then settle flat as
-            // the strip slides into place. Keep the angle restrained to avoid clipping.
-            float rotationStart = currentPage > previousPage ? -7f : 7f;
-            pagesStrip.setRotationY(rotationStart);
-            pagesStrip.setScaleX(0.985f);
-            pagesStrip.animate().translationX(targetX).rotationY(0f).scaleX(1f)
-                    .setDuration(300L).start();
+        int pageCount = pagesStrip.getChildCount();
+        for (int i = 0; i < pageCount; i++) {
+            View page = pagesStrip.getChildAt(i);
+            page.animate().cancel();
+            page.setRotationY(0f);
+            page.setScaleX(1f);
+            page.setAlpha(1f);
+            page.setPivotX(page.getWidth() > 0 ? page.getWidth() / 2f : pageWidth / 2f);
+            page.setPivotY(page.getHeight() > 0 ? page.getHeight() / 2f : pageViewport.getHeight() / 2f);
+        }
+        if (animate && previousPage != currentPage && previousPage >= 0 && previousPage < pageCount
+                && currentPage >= 0 && currentPage < pageCount) {
+            float direction = currentPage > previousPage ? 1f : -1f;
+            float cameraDistance = 12000f * getResources().getDisplayMetrics().density;
+            View outgoingPage = pagesStrip.getChildAt(previousPage);
+            View incomingPage = pagesStrip.getChildAt(currentPage);
+            outgoingPage.setCameraDistance(cameraDistance);
+            incomingPage.setCameraDistance(cameraDistance);
+            // A true cube-like page turn: outgoing page rotates 90 degrees away
+            // around its vertical centre axis while the next page rotates into view.
+            incomingPage.setRotationY(direction * 90f);
+            incomingPage.setAlpha(0.92f);
+            pagesStrip.setScaleX(1f);
+            pagesStrip.animate().translationX(targetX)
+                    .setDuration(420L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+            outgoingPage.animate().rotationY(-direction * 90f).alpha(0.82f)
+                    .setDuration(420L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+            incomingPage.animate().rotationY(0f).alpha(1f)
+                    .setDuration(420L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
         } else {
             pagesStrip.setTranslationX(targetX);
             pagesStrip.setRotationY(0f);
@@ -1494,8 +1525,8 @@ public class MainActivity extends Activity {
 
     private void applyClockPanelColor(boolean animate) {
         if (homeScreen == null) return;
-        View hero = clockText == null ? null : (View) clockText.getParent();
-        if (!(hero instanceof LinearLayout)) return;
+        View hero = clockPanel;
+        if (hero == null) return;
         int minute = new Date().getMinutes();
         int phase = (minute / 5) % 4;
         int[][] tones = new int[][] {
