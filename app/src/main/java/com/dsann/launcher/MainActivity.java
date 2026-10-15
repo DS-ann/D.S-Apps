@@ -210,7 +210,12 @@ public class MainActivity extends Activity {
             float dy = event.getY() - gestureDownY;
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65) && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
-            boolean horizontalSwipe = !drawerOpen && Math.abs(dx) > LauncherUiUtils.dp(this, 65) && Math.abs(dx) > Math.abs(dy);
+            // A horizontal drag that began on an icon belongs to the icon's drag
+            // controller. Treating its ACTION_UP as a page swipe sends ACTION_CANCEL
+            // to the icon first, commits a partial move, then changes pages separately.
+            // That race is what leaves a blank page while the dragged icon disappears.
+            boolean horizontalSwipe = !drawerOpen && activeDragView == null && !iconDragging
+                    && Math.abs(dx) > LauncherUiUtils.dp(this, 65) && Math.abs(dx) > Math.abs(dy);
             if (verticalSwipe || horizontalSwipe) {
                 // Cancel the child click before handling a swipe, otherwise a swipe
                 // beginning on an icon can accidentally launch that app on ACTION_UP.
