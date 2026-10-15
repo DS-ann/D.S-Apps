@@ -304,26 +304,35 @@ public class MainActivity extends Activity {
                 float clamped = Math.max(-pageWidth, Math.min(0f, proposed));
                 pagesStrip.setTranslationX(clamped);
 
-                // Keep both page faces centred on the viewport's vertical axis.
-                // The transition is a 3D page flip, not a horizontal strip slide.
+                // Low-overhead cylinder-like page turn: the strip follows the finger,
+                // while the current and incoming faces rotate around their centre Y axes.
+                // No per-icon animators or forced hardware layers are created.
                 float progress = Math.max(-1f, Math.min(1f, dx / (float) pageWidth));
-                pagesStrip.setTranslationX(-currentPage * pageWidth);
-                for (int i = Math.max(0, currentPage - 1);
-                        i <= Math.min(pagesStrip.getChildCount() - 1, currentPage + 1); i++) {
+                float angle = getPageRotationDegrees();
+                pagesStrip.setTranslationX(-currentPage * (float) pageWidth + dx);
+                int first = Math.max(0, currentPage - 1);
+                int last = Math.min(pagesStrip.getChildCount() - 1, currentPage + 1);
+                for (int i = first; i <= last; i++) {
                     View face = pagesStrip.getChildAt(i);
+                    face.animate().cancel();
                     face.setPivotX(face.getWidth() / 2f);
                     face.setPivotY(face.getHeight() / 2f);
-                    face.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
-                    face.setTranslationX((currentPage - i) * (float) pageWidth);
-                    face.setTranslationZ(i == currentPage ? 1f : 2f);
+                    face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
                     if (i == currentPage) {
-                        face.setRotationY(-progress * getPageRotationDegrees());
-                        face.setAlpha(1f - Math.min(0.06f, Math.abs(progress) * 0.06f));
+                        face.setRotationY(-progress * angle);
+                        face.setScaleX(1f - Math.min(0.035f, Math.abs(progress) * 0.035f));
+                        face.setAlpha(1f - Math.min(0.04f, Math.abs(progress) * 0.04f));
                     } else if (i == currentPage + 1 && progress < 0f) {
-                        face.setRotationY((1f + progress) * -getPageRotationDegrees());
+                        face.setRotationY((1f + progress) * -angle);
+                        face.setScaleX(1f - Math.min(0.035f, Math.abs(1f + progress) * 0.035f));
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
-                        face.setRotationY((1f - progress) * getPageRotationDegrees());
+                        face.setRotationY((1f - progress) * angle);
+                        face.setScaleX(1f - Math.min(0.035f, Math.abs(1f - progress) * 0.035f));
+                        face.setAlpha(1f);
+                    } else {
+                        face.setRotationY(0f);
+                        face.setScaleX(1f);
                         face.setAlpha(1f);
                     }
                 }
@@ -1231,23 +1240,20 @@ public class MainActivity extends Activity {
                         - LauncherUiUtils.dp(this, 40));
         float targetX = -currentPage * pageWidth;
         pagesStrip.animate().cancel();
-        // Keep the page faces flat and let the complete strip follow the finger.
-        // This avoids the blank/clipped faces seen with 3D rotation on some devices.
+        // Always return to a clean transform state after page changes.
+        // Hardware layers are intentionally avoided to keep memory/graphics cost low.
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View page = pagesStrip.getChildAt(i);
             page.animate().cancel();
+            page.setPivotX(page.getWidth() / 2f);
+            page.setPivotY(page.getHeight() / 2f);
+            page.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
+            page.setRotationY(0f);
+            page.setScaleX(1f);
             page.setAlpha(1f);
-            if (animate && Math.abs(page.getRotationY()) > 0.1f) {
-                page.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                page.animate().rotationY(0f).alpha(1f)
-                        .setDuration(animationDuration(180L))
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                        .withEndAction(() -> page.setLayerType(View.LAYER_TYPE_NONE, null))
-                        .start();
-            } else {
-                page.setRotationY(0f);
-                page.setLayerType(View.LAYER_TYPE_NONE, null);
-            }
+            page.setTranslationX(0f);
+            page.setTranslationZ(0f);
+            page.setLayerType(View.LAYER_TYPE_NONE, null);
         }
         if (animate) {
             pagesStrip.animate().translationX(targetX)
@@ -1269,89 +1275,76 @@ public class MainActivity extends Activity {
         final int from = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, currentPage));
         final int to = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, requestedPage));
         final int direction = to > from ? 1 : (to < from ? -1 : 0);
-        final int degrees = getPageRotationDegrees();
+        final int width = Math.max(1, pageWidth);
         final View outgoing = pagesStrip.getChildAt(from);
         final View incoming = direction == 0 ? null : pagesStrip.getChildAt(to);
+        final float targetX = -to * (float) width;
+        final long duration = animationDuration(230L);
         pagesStrip.animate().cancel();
-        pagesStrip.setTranslationX(-from * (float) pageWidth);
+
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View face = pagesStrip.getChildAt(i);
             face.animate().cancel();
+            face.setPivotX(face.getWidth() / 2f);
+            face.setPivotY(face.getHeight() / 2f);
+            face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
             if (i != from && i != to) {
-                face.setTranslationX(0f);
                 face.setRotationY(0f);
-                face.setTranslationZ(0f);
+                face.setScaleX(1f);
                 face.setAlpha(1f);
-                face.setLayerType(View.LAYER_TYPE_NONE, null);
             }
         }
-        outgoing.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        outgoing.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
-        outgoing.setPivotX(outgoing.getWidth() / 2f);
-        outgoing.setPivotY(outgoing.getHeight() / 2f);
-        outgoing.setTranslationX(0f);
-        outgoing.setTranslationZ(1f);
+
         if (direction == 0) {
-            View previous = from + 1 < pagesStrip.getChildCount()
-                    ? pagesStrip.getChildAt(from + 1)
-                    : (from > 0 ? pagesStrip.getChildAt(from - 1) : null);
-            if (previous != null) {
-                previous.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                previous.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
-                previous.setPivotX(previous.getWidth() / 2f);
-                previous.setPivotY(previous.getHeight() / 2f);
-                previous.setTranslationX((from - pagesStrip.indexOfChild(previous)) * (float) pageWidth);
-                previous.setRotationY((pagesStrip.indexOfChild(previous) > from ? -1f : 1f) * degrees);
-                previous.setTranslationZ(2f);
-                previous.animate().rotationY((pagesStrip.indexOfChild(previous) > from ? -1f : 1f) * degrees)
-                        .setDuration(animationDuration(220L)).start();
-            }
-            outgoing.animate().rotationY(0f).alpha(1f)
-                    .setDuration(animationDuration(220L))
-                    .withEndAction(() -> resetPageFaces(from, pageWidth))
-                    .start();
+            outgoing.animate().rotationY(0f).scaleX(1f).alpha(1f)
+                    .setDuration(duration)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(() -> {
+                        pagesStrip.setTranslationX(-from * (float) width);
+                        resetPageTransforms();
+                    }).start();
             return;
         }
-        incoming.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        incoming.setCameraDistance(16000f * getResources().getDisplayMetrics().density);
-        incoming.setPivotX(incoming.getWidth() / 2f);
-        incoming.setPivotY(incoming.getHeight() / 2f);
-        incoming.setTranslationX((from - to) * (float) pageWidth);
-        incoming.setTranslationZ(2f);
-        // When a swipe has already started, preserve the finger-driven rotation.
-        // For menu/programmatic transitions, start the incoming face edge-on.
-        if (Math.abs(outgoing.getRotationY()) < 0.1f
-                && Math.abs(incoming.getRotationY()) < 0.1f) {
-            incoming.setRotationY(-direction * degrees);
+
+        // Incoming/outgoing pages rotate as a single low-cost 3D turn. The
+        // standard ViewPropertyAnimator easing supplies the release "snap".
+        if (Math.abs(incoming.getRotationY()) < 0.1f) {
+            incoming.setRotationY(-direction * getPageRotationDegrees());
         }
-        outgoing.animate().rotationY(direction * degrees).alpha(1f)
-                .setDuration(animationDuration(260L))
+        outgoing.animate().rotationY(direction * getPageRotationDegrees())
+                .scaleX(0.965f).alpha(0.98f)
+                .setDuration(duration)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator())
                 .start();
-        incoming.animate().rotationY(0f).alpha(1f)
-                .setDuration(animationDuration(260L))
+        incoming.animate().rotationY(0f).scaleX(1f).alpha(1f)
+                .setDuration(duration)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                .withEndAction(() -> resetPageFaces(to, pageWidth))
                 .start();
+        pagesStrip.animate().translationX(targetX)
+                .setDuration(duration)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> {
+                    currentPage = to;
+                    resetPageTransforms();
+                    if (pageIndicator != null) {
+                        boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
+                        pageIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
+                        pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
+                    }
+                }).start();
     }
 
-    private void resetPageFaces(int selectedPage, int pageWidth) {
-        currentPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, selectedPage));
-        pagesStrip.animate().cancel();
-        pagesStrip.setTranslationX(-currentPage * (float) pageWidth);
+    private void resetPageTransforms() {
+        if (pagesStrip == null) return;
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View face = pagesStrip.getChildAt(i);
             face.animate().cancel();
+            face.setRotationY(0f);
+            face.setScaleX(1f);
+            face.setAlpha(1f);
             face.setTranslationX(0f);
             face.setTranslationZ(0f);
-            face.setRotationY(0f);
-            face.setAlpha(1f);
             face.setLayerType(View.LAYER_TYPE_NONE, null);
-        }
-        if (pageIndicator != null) {
-            boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
-            pageIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
-            pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
         }
     }
 
