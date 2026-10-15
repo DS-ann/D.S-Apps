@@ -380,10 +380,17 @@ public class MainActivity extends Activity {
                 } catch (NumberFormatException ignored) {}
             }
         }
+        int oldCurrentPage = Math.max(0, Math.min(currentPage, remap.length - 1));
+        int mappedCurrentPage = 0;
+        for (int i = 0; i < oldCurrentPage; i++) {
+            if (occupied[i]) mappedCurrentPage++;
+        }
+        if (occupied[oldCurrentPage]) mappedCurrentPage = remap[oldCurrentPage];
+        mappedCurrentPage = Math.max(0, Math.min(mappedCurrentPage, compactCount - 1));
+
         pages.clear();
         pages.addAll(compacted);
-        if (currentPage >= pages.size()) currentPage = pages.size() - 1;
-        if (currentPage < 0) currentPage = 0;
+        currentPage = mappedCurrentPage;
         if (changed) edit.putString(KEY_WIDGET_IDS, compactWidgets.toString()).apply();
     }
 
@@ -502,6 +509,10 @@ public class MainActivity extends Activity {
     }
 
     private void renderHomePages(boolean animate) {
+        // Every completed UI refresh rebuilds the page model from saved icons/widgets,
+        // compacts away all empty pages, and remaps persisted page indexes before drawing.
+        // This also cleans up pages left behind by widget removal or cross-page moves.
+        rebuildPages();
         if (homePageController != null) homePageController.renderHomePages(animate);
     }
 
