@@ -277,15 +277,15 @@ public class MainActivity extends Activity {
                     face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
                     if (i == currentPage) {
                         face.setPivotX(progress < 0f ? face.getWidth() : 0f);
-                        face.setRotationY(-progress * 14f);
-                        face.setAlpha(1f - Math.min(0.12f, Math.abs(progress) * 0.12f));
+                        face.setRotationY(-progress * 38f);
+                        face.setAlpha(1f - Math.min(0.18f, Math.abs(progress) * 0.18f));
                     } else if (i == currentPage + 1 && progress < 0f) {
                         face.setPivotX(0f);
-                        face.setRotationY((1f + progress) * -14f);
+                        face.setRotationY((1f + progress) * -38f);
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
                         face.setPivotX(face.getWidth());
-                        face.setRotationY((1f - progress) * 14f);
+                        face.setRotationY((1f - progress) * 38f);
                         face.setAlpha(1f);
                     } else {
                         face.setRotationY(0f);
