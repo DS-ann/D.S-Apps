@@ -42,9 +42,9 @@ public final class SevenSegmentClockTextView extends TextView {
             int current = getCurrentTextColor();
             if (Color.alpha(current) != 0) segmentColor = current;
             sevenSegmentMode = true;
-            // Keep TextView's layout/accessibility value, but prevent its ordinary
-            // glyphs from competing with the custom LED segments.
-            super.setTextColor(Color.TRANSPARENT);
+            // Keep the normal text color as a visible fallback for unsupported
+            // locale/time formats. In LED mode onDraw skips TextView glyphs and
+            // paints the segments itself, so transparent text is unnecessary.
         } else {
             sevenSegmentMode = false;
             super.setTextColor(segmentColor);
@@ -100,7 +100,11 @@ public final class SevenSegmentClockTextView extends TextView {
         float digitHeight = unit * 0.92f;
         float advance = unit * 0.72f;
         float totalWidth = digits * advance + colons * unit * 0.34f;
-        float x = rightBound - totalWidth;
+        int horizontalGravity = getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
+        float x = horizontalGravity == Gravity.LEFT ? leftBound
+                : (horizontalGravity == Gravity.CENTER_HORIZONTAL
+                        ? leftBound + (availableWidth - totalWidth) / 2f
+                        : rightBound - totalWidth);
         float y = topBound + (availableHeight - digitHeight) / 2f;
         float thickness = Math.max(3f, digitWidth * 0.17f);
         float half = thickness / 2f;
