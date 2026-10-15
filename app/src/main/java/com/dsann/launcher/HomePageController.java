@@ -177,7 +177,13 @@ final class HomePageController {
                         && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
                         ? host.getPageViewport().getHeight() : fallbackHeight;
                 int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1), pageWidth / columns);
-                int cellHeight = Math.max(LauncherUiUtils.dp(activity, 1), pageHeight / rows);
+                // Keep app rows packed at a consistent height. Dividing the whole
+                // viewport by row count stretches every row to fill empty space,
+                // which makes icons drift down whenever the viewport gets taller.
+                // Use the configured icon size plus room for its label instead.
+                int configuredIconSize = prefs.getInt(iconSizeKey, 48);
+                int cellHeight = LauncherUiUtils.dp(activity,
+                        Math.max(56, configuredIconSize + 28));
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
@@ -198,7 +204,9 @@ final class HomePageController {
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
                 int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                int actualCellHeight = Math.max(1, page.getHeight() / rows);
+                int configuredIconSize = prefs.getInt(iconSizeKey, 48);
+                int actualCellHeight = LauncherUiUtils.dp(activity,
+                        Math.max(56, configuredIconSize + 28));
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
