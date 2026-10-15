@@ -1085,30 +1085,32 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         clockText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
         switch (style) {
-            case 1: // Terminal: classic monospace, compact tracking.
+            case 1: // Cyber HUD: compact technical lettering with cyan edge glow.
+                clockText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+                clockText.setTextSize(39);
+                clockText.setLetterSpacing(0.075f);
+                clockText.setTextColor(Color.rgb(87, 229, 255));
+                clockText.setShadowLayer(dp(4), 0f, 0f, Color.argb(125, 0, 190, 255));
+                break;
+            case 2: // Neon Circuit: vivid green terminal-inspired digital readout.
                 clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
                 clockText.setTextSize(38);
-                clockText.setLetterSpacing(0.015f);
-                clockText.setTextColor(Color.rgb(139, 255, 184));
+                clockText.setLetterSpacing(0.025f);
+                clockText.setTextColor(Color.rgb(112, 255, 190));
+                clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(105, 0, 255, 135));
                 break;
-            case 2: // Clean: simple modern system sans.
-                clockText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+            case 3: // Tech Minimal: restrained futuristic typography, no glow.
+                clockText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 clockText.setTextSize(42);
-                clockText.setLetterSpacing(0.005f);
-                clockText.setTextColor(Color.WHITE);
+                clockText.setLetterSpacing(0.035f);
+                clockText.setTextColor(Color.rgb(225, 237, 255));
                 break;
-            case 3: // Wide: futuristic spaced digits.
-                clockText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
-                clockText.setTextSize(40);
-                clockText.setLetterSpacing(0.11f);
-                clockText.setTextColor(Color.rgb(120, 218, 255));
-                break;
-            default: // Tech: bold digital-style face with subtle cool glow.
+            default: // Digital: crisp monospaced digits with a cool blue display glow.
                 clockText.setTypeface(Typeface.create("sans-serif-monospace", Typeface.BOLD));
                 clockText.setTextSize(40);
-                clockText.setLetterSpacing(0.045f);
-                clockText.setTextColor(Color.rgb(218, 235, 255));
-                clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(110, 57, 157, 255));
+                clockText.setLetterSpacing(0.055f);
+                clockText.setTextColor(Color.rgb(118, 204, 255));
+                clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(135, 40, 132, 255));
                 break;
         }
     }
@@ -1380,7 +1382,7 @@ public class MainActivity extends Activity {
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Tech", "Terminal", "Clean", "Wide"}, value -> {
+        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
             applyClockStyle();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
