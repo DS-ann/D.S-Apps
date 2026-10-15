@@ -240,6 +240,9 @@ public class MainActivity extends Activity {
                     @Override public void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer) {
                         MainActivity.this.resolveWidgetIconCollisions(page, widgetContainer);
                     }
+                    @Override public void setWorkspaceGridVisible(boolean visible, View movingView) {
+                        MainActivity.this.setWorkspaceGridVisible(visible, movingView);
+                    }
                 });
         // Let the wallpaper flow behind the status bar so it feels like launcher chrome,
         // while retaining the system icons and reserving their inset for launcher content.
