@@ -133,8 +133,8 @@ final class WidgetInteractionController {
             editMode[0] = 0;
             handler.removeCallbacks(movePress[0]);
             clearEditChrome[0].run();
-            String[] actions = {"Remove widget", "Resize widget", "Move to next page"};
-            String[] icons = {"×", "↘", "→"};
+            String[] actions = {"Remove widget", "Resize widget"};
+            String[] icons = {"×", "↘"};
             listener.showActionDialog("Widget options", icons, actions, (dialog, which) -> {
                 if (which == 0) {
                     reparenting[0] = true;
@@ -146,39 +146,7 @@ final class WidgetInteractionController {
                     resizeHandle.setVisibility(View.VISIBLE);
                     container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
-                } else if (which == 2) {
-                    int destination = widgetPage[0] + 1;
-                    listener.ensurePageExists(destination);
-                    LinearLayout strip = listener.getPagesStrip();
-                    int pageWidth = Math.max(1, page.getWidth());
-                    while (strip != null && strip.getChildCount() <= destination) {
-                        FrameLayout newPage = new FrameLayout(activity);
-                        newPage.setClipChildren(false);
-                        strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
-                    }
-                    if (strip == null || destination >= strip.getChildCount()) {
-                        Toast.makeText(activity, "Couldn't create the destination page", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    FrameLayout targetPage = (FrameLayout) strip.getChildAt(destination);
-                    FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    moved.leftMargin = LauncherUiUtils.dp(activity, 8);
-                    moved.topMargin = LauncherUiUtils.dp(activity, 40);
-                    clearFocusRecursively(container);
-                    reparenting[0] = true;
-                    if (container.getParent() instanceof ViewGroup) {
-                        ((ViewGroup) container.getParent()).removeView(container);
-                    }
-                    container.setTranslationX(0f);
-                    targetPage.addView(container, moved);
-                    reparenting[0] = false;
-                    container.bringToFront();
-                    widgetPage[0] = destination;
-                    listener.saveWidgetGeometry(widgetId, destination, container);
-                    listener.setCurrentPage(destination);
-                    listener.showPage(destination, true);
-                    Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
-                }
+ 
             });
         };
         gestureGrip.setOnTouchListener((view, event) -> {
@@ -200,8 +168,8 @@ final class WidgetInteractionController {
                 LinearLayout currentStrip = listener.getPagesStrip();
                 ViewParent parent = container.getParent();
                 int actualPage = parent instanceof View ? (currentStrip == null ? -1 : currentStrip.indexOfChild((View) parent)) : -1;
-                originalPageAtDown[0] = actualPage >= 0 ? actualPage : widgetPage[0];
-                widgetPage[0] = originalPageAtDown[0];
+                originalPageAtDown[0] = 0;
+                widgetPage[0] = 0;
                 editMode[0] = 0;
                 childCanceled[0] = false;
                 menuShown[0] = false;
@@ -229,98 +197,14 @@ final class WidgetInteractionController {
                     return true;
                 }
                 if (editMode[0] == 1) {
-                    if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
-                            || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
-                    cancelWidgetTouch.run();
-                    int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
-                    int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(activity, 28) ? 1
-                            : event.getRawX() <= LauncherUiUtils.dp(activity, 28) ? -1 : 0;
-                    if (edge == 0) edgeLatch[0] = 0;
-                    LinearLayout strip = listener.getPagesStrip();
-                    // 'page' is the child in the strip; page.getParent() is the strip itself,
-                    // so asking the strip for its parent's index always returns -1.
-                    ViewParent currentParent = container.getParent();
-                    int sourceIndex = strip == null || !(currentParent instanceof View)
-                            ? widgetPage[0] : strip.indexOfChild((View) currentParent);
-                    if (sourceIndex < 0) sourceIndex = widgetPage[0];
-                    if (edge != 0 && edge != edgeLatch[0]) {
-                        edgeLatch[0] = edge;
-                        int destination = widgetPage[0] + edge;
-                        if (strip != null && destination >= 0 && destination <= 20) {
-                            listener.ensurePageExists(destination);
-                            while (strip.getChildCount() <= destination) {
-                                FrameLayout newPage = new FrameLayout(activity);
-                                newPage.setClipChildren(false);
-                                strip.addView(newPage, new LinearLayout.LayoutParams(Math.max(1, page.getWidth()), -1));
-                            }
-                            widgetPage[0] = destination;
-                            listener.setCurrentPage(destination);
-                            int pageWidth = Math.max(1, page.getWidth());
-                            strip.setTranslationX(-destination * pageWidth);
-                            container.setTranslationX((destination - sourceIndex) * pageWidth);
-                        }
-                    }
-                    FrameLayout activePage = container.getParent() instanceof FrameLayout
-                            ? (FrameLayout) container.getParent() : page;
-                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    int[] pageLocation = new int[2];
-                    activePage.getLocationOnScreen(pageLocation);
-                    int maxX = Math.max(0, activePage.getWidth() - container.getWidth());
-                    int maxY = Math.max(0, activePage.getHeight() - container.getHeight());
-                    // Store coordinates relative to the still-attached source page, not the viewport.
-                    // Remove the temporary cross-page translation before calculating layout margins.
-                    current.leftMargin = Math.max(0, Math.min(maxX,
-                            Math.round(event.getRawX() - pageLocation[0] - container.getTranslationX() - container.getWidth() / 2f)));
-                    current.topMargin = Math.max(0, Math.min(maxY,
-                            Math.round(event.getRawY() - pageLocation[1] - container.getHeight() / 2f)));
-                    container.setLayoutParams(current);
-                    return true;
-                }
-                if (!childCanceled[0]) widget.dispatchTouchEvent(event);
-                return true;
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                handler.removeCallbacks(movePress[0]);
-                handler.removeCallbacks(menuPress[0]);
-                if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
                     FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
                     container.setTranslationX(0f);
                     clearEditChrome[0].run();
-                    if (widgetPage[0] != originalPageAtDown[0]) {
-                        LinearLayout strip = listener.getPagesStrip();
-                        int destination = widgetPage[0];
-                        listener.ensurePageExists(destination);
-                        int pageWidth = Math.max(1, sourcePage.getWidth());
-                        while (strip != null && strip.getChildCount() <= destination) {
-                            FrameLayout newPage = new FrameLayout(activity);
-                            newPage.setClipChildren(false);
-                            strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
-                        }
-                        if (strip != null && destination < strip.getChildCount()) {
-                            FrameLayout targetPage = (FrameLayout) strip.getChildAt(destination);
-                            FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
-                            clearFocusRecursively(container);
-                            reparenting[0] = true;
-                            if (container.getParent() instanceof ViewGroup) {
-                                ((ViewGroup) container.getParent()).removeView(container);
-                            }
-                            targetPage.addView(container, moved);
-                            reparenting[0] = false;
-                            container.bringToFront();
-                            listener.saveWidgetGeometry(widgetId, destination, container);
-                            listener.setCurrentPage(destination);
-                            listener.showPage(destination, false);
-                        } else {
-                            listener.saveWidgetGeometry(widgetId, originalPageAtDown[0], container);
-                            listener.setCurrentPage(originalPageAtDown[0]);
-                            listener.showPage(originalPageAtDown[0], false);
-                        }
-                    } else {
-                        listener.saveWidgetGeometry(widgetId, originalPageAtDown[0], container);
-                        listener.resolveWidgetCollisions(sourcePage, container);
-                    }
+                    widgetPage[0] = 0;
+                    listener.saveWidgetGeometry(widgetId, 0, container);
+                    listener.resolveWidgetCollisions(sourcePage, container);
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
                 }
