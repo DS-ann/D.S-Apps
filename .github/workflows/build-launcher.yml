@@ -31,6 +31,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+          # launcher-app is a feature branch, so explicitly allow it to save cache entries.
+          cache-read-only: false
 
       # setup-gradle already caches Gradle distributions and dependency caches.
       # Cache the Android platform and build-tools used by this project as well.
