@@ -28,6 +28,8 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.provider.Settings;
+import android.text.format.DateFormat;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
 import android.widget.GridView;
@@ -146,7 +148,18 @@ public class MainActivity extends Activity {
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
             updateClock();
-            handler.postDelayed(this, 60000L);
+            // Align refreshes to the system minute boundary instead of drifting
+            // from the time at which the launcher was opened.
+            long remainder = System.currentTimeMillis() % 60000L;
+            handler.postDelayed(this, remainder == 0L ? 60000L : 60000L - remainder);
+        }
+    };
+    private final BroadcastReceiver timeChangesReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            handler.removeCallbacks(clockUpdater);
+            updateClock();
+            long remainder = System.currentTimeMillis() % 60000L;
+            handler.postDelayed(clockUpdater, remainder == 0L ? 60000L : 60000L - remainder);
         }
     };
 
@@ -162,6 +175,12 @@ public class MainActivity extends Activity {
         packageFilter.addDataScheme("package");
         registerReceiver(packageChangesReceiver, packageFilter);
         packageReceiverRegistered = true;
+        IntentFilter timeFilter = new IntentFilter();
+        timeFilter.addAction(Intent.ACTION_TIME_TICK);
+        timeFilter.addAction(Intent.ACTION_TIME_CHANGED);
+        timeFilter.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+        timeFilter.addAction(Intent.ACTION_DATE_CHANGED);
+        registerReceiver(timeChangesReceiver, timeFilter);
         widgetManager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, HOST_ID);
         widgetInteractionController = new WidgetInteractionController(this, handler, widgetHost, prefs, KEY_WIDGET_IDS,
@@ -275,6 +294,7 @@ public class MainActivity extends Activity {
             try { unregisterReceiver(packageChangesReceiver); } catch (IllegalArgumentException ignored) {}
             packageReceiverRegistered = false;
         }
+        try { unregisterReceiver(timeChangesReceiver); } catch (IllegalArgumentException ignored) {}
         super.onDestroy();
     }
 
@@ -1386,16 +1406,10 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
-        String clockValue = new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mma", Locale.getDefault()).format(now);
-        if (!prefs.getBoolean(KEY_24_HOUR, false) && clockValue.length() >= 2) {
-            int suffixStart = clockValue.length() - 2;
-            android.text.SpannableString styled = new android.text.SpannableString(clockValue);
-            styled.setSpan(new android.text.style.RelativeSizeSpan(0.42f), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            styled.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            clockText.setText(styled);
-        } else {
-            clockText.setText(clockValue);
-        }
+        // Follow Android's system 12/24-hour preference and locale conventions,
+        // matching the format used by the status bar.
+        String clockValue = DateFormat.getTimeFormat(this).format(now);
+        clockText.setText(clockValue);
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
         applyClockStyle();
@@ -1673,9 +1687,10 @@ public class MainActivity extends Activity {
             applyClockStyle();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSettingRow(content, "12/24", "Clock format", prefs.getBoolean(KEY_24_HOUR, false) ? "24-hour" : "12-hour", () -> {
-            prefs.edit().putBoolean(KEY_24_HOUR, !prefs.getBoolean(KEY_24_HOUR, false)).apply();
-            updateClock(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        addSettingRow(content, "12/24", "System clock format", DateFormat.is24HourFormat(this) ? "24-hour" : "12-hour", () -> {
+            dialog.dismiss();
+            try { startActivity(new Intent(Settings.ACTION_DATE_SETTINGS)); }
+            catch (Exception e) { Toast.makeText(this, "Open system Date & time settings to change the clock format", Toast.LENGTH_LONG).show(); }
         });
         addSettingRow(content, "▧", "Choose photo wallpaper", "Select an image from this device", () -> {
             dialog.dismiss();
