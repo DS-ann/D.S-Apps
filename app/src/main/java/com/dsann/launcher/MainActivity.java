@@ -527,17 +527,21 @@ public class MainActivity extends Activity {
         applyClockPanelColor(false);
         LinearLayout clockRow = new LinearLayout(this);
         clockRow.setOrientation(LinearLayout.HORIZONTAL);
-        clockRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        clockRow.setGravity(clockGravity() | Gravity.CENTER_VERTICAL);
         clockRow.setClipChildren(false);
         clockRow.setClipToPadding(false);
         clockText = new SevenSegmentClockTextView(this);
         clockText.setText("--:--");
-        clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        // The row controls the position of the complete clock + AM/PM group.
+        // Keep the digits left-aligned inside their measured-width view so the marker
+        // remains immediately beside the digits at every clock position.
+        clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(78);
         // Scale the clock's drawing area by 50%; the custom LED renderer fits digits to these bounds.
+        int initialClockSize = getClockSize();
         int clockDisplayWidth = Math.min(LauncherUiUtils.dp(this, 340),
-                Math.max(LauncherUiUtils.dp(this, 185), (int) ((getResources().getDisplayMetrics().widthPixels
-                        - LauncherUiUtils.dp(this, 40)) * 0.82f) - LauncherUiUtils.dp(this, 38)));
+                Math.max(LauncherUiUtils.dp(this, 185), Math.round(LauncherUiUtils.dp(this, 1)
+                        * initialClockSize * 4.28f)));
         clockText.setLayoutParams(new LinearLayout.LayoutParams(clockDisplayWidth, LauncherUiUtils.dp(this, 114)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
@@ -2001,11 +2005,23 @@ public class MainActivity extends Activity {
         clockPanel.setLayoutParams(panelParams);
         clockPanel.setGravity(alignment);
         View parent = (View) clockText.getParent();
-        if (parent instanceof LinearLayout) ((LinearLayout) parent).setGravity(alignment | Gravity.CENTER_VERTICAL);
-        clockText.setGravity(alignment | Gravity.CENTER_VERTICAL);
+        if (parent instanceof LinearLayout) {
+            // Align the whole digits + AM/PM group together, rather than aligning
+            // the digits inside a full-width slot and leaving AM/PM behind.
+            ((LinearLayout) parent).setGravity(alignment | Gravity.CENTER_VERTICAL);
+        }
+        clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         if (dateText != null) dateText.setGravity(alignment);
         int size = getClockSize();
         clockText.setTextSize(size);
+        int contentWidth = Math.min(LauncherUiUtils.dp(this, 340),
+                Math.max(LauncherUiUtils.dp(this, 150), Math.round(LauncherUiUtils.dp(this, 1)
+                        * size * 4.28f)));
+        ViewGroup.LayoutParams clockWidthParams = clockText.getLayoutParams();
+        if (clockWidthParams != null) {
+            clockWidthParams.width = contentWidth;
+            clockText.setLayoutParams(clockWidthParams);
+        }
         int height = LauncherUiUtils.dp(this, Math.round(size * 1.46f));
         ViewGroup.LayoutParams clockParams = clockText.getLayoutParams();
         if (clockParams != null) {
