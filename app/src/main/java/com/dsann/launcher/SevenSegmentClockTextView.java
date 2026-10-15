@@ -30,11 +30,10 @@ public final class SevenSegmentClockTextView extends TextView {
         setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         setSingleLine(true);
         setIncludeFontPadding(false);
-        // Software rendering avoids API 23/older-GPU failures with custom stroked segments.
+        setWillNotDraw(false);
+        // The renderer uses filled rounded segments (not hardware-sensitive line effects).
         setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
-        segmentPaint.setStrokeCap(Paint.Cap.ROUND);
-        segmentPaint.setStrokeJoin(Paint.Join.ROUND);
-        segmentPaint.setStyle(Paint.Style.STROKE);
+        segmentPaint.setStyle(Paint.Style.FILL);
     }
 
     public void setSevenSegmentMode(boolean enabled) {
@@ -92,56 +91,46 @@ public final class SevenSegmentClockTextView extends TextView {
         float totalWidth = digits * advance + colons * unit * 0.34f;
         float x = rightBound - totalWidth;
         float y = topBound + (availableHeight - digitHeight) / 2f;
-        float stroke = Math.max(2f, unit * 0.075f);
-        float inset = stroke * 0.72f;
-        float halfStroke = stroke / 2f;
+        float thickness = Math.max(3f, digitWidth * 0.17f);
+        float half = thickness / 2f;
         float mid = y + digitHeight / 2f;
         int color = getCurrentTextColor();
+        int unlitColor = Color.argb(34, Color.red(color), Color.green(color), Color.blue(color));
 
         canvas.save();
         canvas.clipRect(leftBound, topBound, rightBound, bottomBound);
-        segmentPaint.setStrokeWidth(stroke);
-        segmentPaint.setStyle(Paint.Style.STROKE);
-
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
             if (ch == ':') {
-                segmentPaint.setStyle(Paint.Style.FILL);
-                segmentPaint.setColor(Color.argb(235, Color.red(color), Color.green(color), Color.blue(color)));
-                float radius = Math.max(2f, stroke * 0.62f);
+                segmentPaint.setColor(color);
+                float radius = Math.max(2.5f, thickness * 0.38f);
                 float dotX = x + unit * 0.15f;
                 canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
                 canvas.drawCircle(dotX, y + digitHeight * 0.68f, radius, segmentPaint);
-                segmentPaint.setStyle(Paint.Style.STROKE);
                 x += unit * 0.34f;
                 continue;
             }
 
-            float l = x + halfStroke;
-            float r = x + digitWidth - halfStroke;
-            float t = y + halfStroke;
-            float b = y + digitHeight - halfStroke;
+            float l = x;
+            float r = x + digitWidth;
+            float t = y;
+            float b = y + digitHeight;
             float m = mid;
-            float[][] lines = new float[][] {
-                    {l + inset, t, r - inset, t},             // A: top
-                    {r, t + inset, r, m - inset},             // B: upper right
-                    {r, m + inset, r, b - inset},             // C: lower right
-                    {l + inset, b, r - inset, b},             // D: bottom
-                    {l, m + inset, l, b - inset},             // E: lower left
-                    {l, t + inset, l, m - inset},             // F: upper left
-                    {l + inset, m, r - inset, m}              // G: middle
+            float[][] segments = new float[][] {
+                    {l + half, t, r - half, t + thickness},                    // A top
+                    {r - thickness, t + half, r, m - half},                   // B upper right
+                    {r - thickness, m + half, r, b - half},                   // C lower right
+                    {l + half, b - thickness, r - half, b},                   // D bottom
+                    {l, m + half, l + thickness, b - half},                   // E lower left
+                    {l, t + half, l + thickness, m - half},                   // F upper left
+                    {l + half, m - half, r - half, m + half}                  // G middle
             };
-
-            // Draw dim, unlit segments first, then the lit segments above them.
-            segmentPaint.setColor(Color.argb(28, Color.red(color), Color.green(color), Color.blue(color)));
-            for (float[] line : lines) canvas.drawLine(line[0], line[1], line[2], line[3], segmentPaint);
             boolean[] lit = segments(ch);
-            segmentPaint.setColor(color);
-            for (int j = 0; j < lines.length; j++) {
-                if (lit[j]) {
-                    float[] line = lines[j];
-                    canvas.drawLine(line[0], line[1], line[2], line[3], segmentPaint);
-                }
+            for (int j = 0; j < segments.length; j++) {
+                float[] seg = segments[j];
+                segmentPaint.setColor(lit[j] ? color : unlitColor);
+                canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
+                        thickness * 0.45f, thickness * 0.45f, segmentPaint);
             }
             x += advance;
         }
