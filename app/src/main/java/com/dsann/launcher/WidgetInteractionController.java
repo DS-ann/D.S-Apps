@@ -68,8 +68,8 @@ final class WidgetInteractionController {
         page.addView(container, lp);
         container.bringToFront();
 
-        // A slim grip at the top of each widget owns launcher edit gestures,
-        // leaving the widget's normal content fully interactive.
+        // A transparent interaction layer observes long presses across the full widget.
+        // Ordinary touch events are forwarded to the AppWidgetHostView so its controls still work.
         final View gestureGrip = new View(activity);
         gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
         FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, -1, Gravity.TOP | Gravity.LEFT);
@@ -200,7 +200,7 @@ final class WidgetInteractionController {
                 if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
-                    clearEditChrome.run();
+                    clearEditChrome[0].run();
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
                 }
