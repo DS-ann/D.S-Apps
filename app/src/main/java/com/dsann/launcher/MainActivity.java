@@ -450,7 +450,7 @@ public class MainActivity extends Activity {
         clockText.setTextSize(52);
         // Keep the pixel clock at its natural time width; a full-width TextView
         // made the custom glyphs scale unpredictably and could leave them clipped.
-        clockText.setLayoutParams(new LinearLayout.LayoutParams(-2, LauncherUiUtils.dp(this, 76)));
+        clockText.setLayoutParams(new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 185), LauncherUiUtils.dp(this, 76)));
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
