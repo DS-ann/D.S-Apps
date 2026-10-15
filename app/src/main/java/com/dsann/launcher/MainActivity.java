@@ -157,16 +157,16 @@ public class MainActivity extends Activity {
             return super.dispatchTouchEvent(event);
         }
         if (event.getAction() == MotionEvent.ACTION_MOVE) {
-            if (Math.abs(event.getX() - longPressDownX) > dp(12) || Math.abs(event.getY() - longPressDownY) > dp(12)) handler.removeCallbacks(homeLongPress);
+            if (Math.abs(event.getX() - longPressDownX) > LauncherUiUtils.dp(this, 12) || Math.abs(event.getY() - longPressDownY) > LauncherUiUtils.dp(this, 12)) handler.removeCallbacks(homeLongPress);
         }
         if (event.getAction() == MotionEvent.ACTION_CANCEL || event.getAction() == MotionEvent.ACTION_UP) handler.removeCallbacks(homeLongPress);
         if (event.getAction() == MotionEvent.ACTION_UP) {
             if (longPressTriggered) return true;
             float dx = event.getX() - gestureDownX;
             float dy = event.getY() - gestureDownY;
-            boolean verticalSwipe = Math.abs(dy) > dp(65) && Math.abs(dy) > Math.abs(dx)
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65) && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
-            boolean horizontalSwipe = !drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy);
+            boolean horizontalSwipe = !drawerOpen && Math.abs(dx) > LauncherUiUtils.dp(this, 65) && Math.abs(dx) > Math.abs(dy);
             if (verticalSwipe || horizontalSwipe) {
                 // Cancel the child click before handling a swipe, otherwise a swipe
                 // beginning on an icon can accidentally launch that app on ACTION_UP.
@@ -320,10 +320,10 @@ public class MainActivity extends Activity {
         applyHomeWallpaper();
         homeScreen = new LinearLayout(this);
         homeScreen.setOrientation(LinearLayout.VERTICAL);
-        homeScreen.setPadding(dp(20), dp(14), dp(20), dp(8));
+        homeScreen.setPadding(LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 8));
         root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            homeScreen.setPadding(dp(20), dp(14) + insets.getSystemWindowInsetTop(), dp(20), dp(8));
+            homeScreen.setPadding(LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 14) + insets.getSystemWindowInsetTop(), LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 8));
             return insets;
         });
         buildHomeChrome();
@@ -337,20 +337,20 @@ public class MainActivity extends Activity {
     private void buildHomeChrome() {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand = text("D.Sannigrahi", 12, Color.rgb(210, 220, 255), true);
+        TextView brand = LauncherUiUtils.text(this, "D.Sannigrahi", 12, Color.rgb(210, 220, 255), true);
         brandText = brand;
         brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.ITALIC));
         brand.setLetterSpacing(0.035f);
-        header.addView(brand, new LinearLayout.LayoutParams(0, dp(32), 1f));
+        header.addView(brand, new LinearLayout.LayoutParams(0, LauncherUiUtils.dp(this, 32), 1f));
         homeScreen.addView(header);
 
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(dp(18), dp(12), dp(18), dp(12));
+        hero.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12));
         // A smoked-glass black panel: translucent enough to let the wallpaper subtly show through.
-        hero.setBackground(roundRect(new int[]{Color.argb(188, 17, 20, 27), Color.argb(168, 8, 10, 15)}, dp(22)));
+        hero.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(188, 17, 20, 27), Color.argb(168, 8, 10, 15)}, LauncherUiUtils.dp(this, 22)));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
-        hp.topMargin = dp(8);
+        hp.topMargin = LauncherUiUtils.dp(this, 8);
         homeScreen.addView(hero, hp);
         clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
         clockText.setText("--:--");
@@ -361,18 +361,18 @@ public class MainActivity extends Activity {
         clockText.setLetterSpacing(0.055f);
         applyClockStyle();
         hero.addView(clockText);
-        dateText = text("", 13, Color.rgb(190, 201, 218), false);
+        dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
         dateText.setLetterSpacing(0.075f);
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
-        dp.topMargin = dp(3);
+        dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
 
         pageViewport = new FrameLayout(this);
         pageViewport.setClipChildren(true);
         pageViewport.setClipToPadding(true);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        pp.topMargin = dp(12);
+        pp.topMargin = LauncherUiUtils.dp(this, 12);
         homeScreen.addView(pageViewport, pp);
 
         // The viewport stays fixed while the page strip moves inside it.
@@ -381,26 +381,26 @@ public class MainActivity extends Activity {
         pagesStrip.setClipChildren(false);
         pageViewport.addView(pagesStrip, new FrameLayout.LayoutParams(-2, -1, Gravity.TOP | Gravity.LEFT));
 
-        pageIndicator = text("", 11, Color.rgb(210, 220, 255), false);
+        pageIndicator = LauncherUiUtils.text(this, "", 11, Color.rgb(210, 220, 255), false);
         pageIndicator.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, dp(28));
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28));
         homeScreen.addView(pageIndicator, ip);
-        TextView drawerHint = text("Swipe up for all apps", 11, Color.rgb(180, 194, 224), false);
+        TextView drawerHint = LauncherUiUtils.text(this, "Swipe up for all apps", 11, Color.rgb(180, 194, 224), false);
         drawerHint.setGravity(Gravity.CENTER);
-        homeScreen.addView(drawerHint, new LinearLayout.LayoutParams(-1, dp(28)));
+        homeScreen.addView(drawerHint, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28)));
     }
 
     private void buildDrawer() {
         drawerScreen = new LinearLayout(this);
         drawerScreen.setOrientation(LinearLayout.VERTICAL);
-        drawerScreen.setPadding(dp(18), dp(18), dp(18), dp(8));
+        drawerScreen.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 8));
         drawerScreen.setBackground(drawerBackground());
-        TextView title = text("Apps", 28, Color.WHITE, true);
-        drawerScreen.addView(title, new LinearLayout.LayoutParams(-1, dp(48)));
+        TextView title = LauncherUiUtils.text(this, "Apps", 28, Color.WHITE, true);
+        drawerScreen.addView(title, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 48)));
         drawerGrid = new GridView(this);
         drawerGrid.setNumColumns(getDrawerColumns());
-        drawerGrid.setVerticalSpacing(dp(prefs.getInt(KEY_DRAWER_SPACING, 8)));
-        drawerGrid.setHorizontalSpacing(dp(prefs.getInt(KEY_DRAWER_SPACING, 8) / 2));
+        drawerGrid.setVerticalSpacing(LauncherUiUtils.dp(this, prefs.getInt(KEY_DRAWER_SPACING, 8)));
+        drawerGrid.setHorizontalSpacing(LauncherUiUtils.dp(this, prefs.getInt(KEY_DRAWER_SPACING, 8) / 2));
         drawerGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         drawerGrid.setSelector(android.R.color.transparent);
         drawerAdapter = new LauncherAppAdapter(this, prefs, packageManager, allApps, drawerApps, null,
@@ -422,7 +422,7 @@ public class MainActivity extends Activity {
         if (pagesStrip == null) return;
         pagesStrip.removeAllViews();
         rebuildPages();
-        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(40));
+        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
         int columns = getHomeColumns();
         int rows = HOME_ROWS;
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
@@ -439,10 +439,10 @@ public class MainActivity extends Activity {
                             @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { showAppOptions(app, onHome); }
                         }).getView(itemIndex, null, page);
                 cell.setTag("launcher_app:" + packageName);
-                int fallbackHeight = Math.max(dp(360), getResources().getDisplayMetrics().heightPixels - dp(260));
-                int pageHeight = pageViewport.getHeight() > dp(100) ? pageViewport.getHeight() : fallbackHeight;
-                int cellWidth = Math.max(dp(1), pageWidth / columns);
-                int cellHeight = Math.max(dp(1), pageHeight / rows);
+                int fallbackHeight = Math.max(LauncherUiUtils.dp(this, 360), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
+                int pageHeight = pageViewport.getHeight() > LauncherUiUtils.dp(this, 100) ? pageViewport.getHeight() : fallbackHeight;
+                int cellWidth = Math.max(LauncherUiUtils.dp(this, 1), pageWidth / columns);
+                int cellHeight = Math.max(LauncherUiUtils.dp(this, 1), pageHeight / rows);
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
                 int defaultRow = (itemIndex / columns) % rows;
@@ -534,7 +534,7 @@ public class MainActivity extends Activity {
             if (action == MotionEvent.ACTION_MOVE) {
                 float dx = event.getRawX() - iconTouchRawX;
                 float dy = event.getRawY() - iconTouchRawY;
-                boolean moved = Math.abs(dx) > dp(8) || Math.abs(dy) > dp(8);
+                boolean moved = Math.abs(dx) > LauncherUiUtils.dp(this, 8) || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
                 if (!iconDragArmed && moved) {
                     iconMovedTooEarly = true;
                     if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
@@ -569,8 +569,8 @@ public class MainActivity extends Activity {
                     // can be clipped by the icon cell before the finger reaches the screen edge.
                     int[] viewportLocation = new int[2];
                     pageViewport.getLocationOnScreen(viewportLocation);
-                    boolean atRightEdge = event.getRawX() >= viewportLocation[0] + pageViewport.getWidth() - dp(36)
-                            || dragged.leftMargin + view.getWidth() >= page.getWidth() - dp(36);
+                    boolean atRightEdge = event.getRawX() >= viewportLocation[0] + pageViewport.getWidth() - LauncherUiUtils.dp(this, 36)
+                            || dragged.leftMargin + view.getWidth() >= page.getWidth() - LauncherUiUtils.dp(this, 36);
                     boolean moveToNextPage = atRightEdge;
                     int columns = getHomeColumns();
                     int rows = HOME_ROWS;
@@ -710,8 +710,8 @@ public class MainActivity extends Activity {
         homeScreen.setAlpha(0.82f);
         homeScreen.setScaleX(0.96f);
         homeScreen.setScaleY(0.96f);
-        homeScreen.setTranslationY(dp(24));
-        drawerScreen.animate().alpha(0f).translationY(dp(40)).scaleX(0.96f).scaleY(0.96f)
+        homeScreen.setTranslationY(LauncherUiUtils.dp(this, 24));
+        drawerScreen.animate().alpha(0f).translationY(LauncherUiUtils.dp(this, 40)).scaleX(0.96f).scaleY(0.96f)
                 .rotationX(-7f).setDuration(260).withEndAction(() -> drawerScreen.setVisibility(View.GONE)).start();
         homeScreen.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
                 .setDuration(340).start();
@@ -729,7 +729,7 @@ public class MainActivity extends Activity {
         drawerScreen.setTranslationY(getResources().getDisplayMetrics().heightPixels * 0.16f);
         drawerScreen.setRotationX(10f);
         drawerScreen.setPivotY(0f);
-        homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).translationY(-dp(22))
+        homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).translationY(-LauncherUiUtils.dp(this, 22))
                 .setDuration(250).withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
         drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).rotationX(0f)
                 .setDuration(420).start();
@@ -806,27 +806,27 @@ public class MainActivity extends Activity {
         Dialog dialog = new Dialog(this);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(16), dp(18), dp(16));
-        panel.setBackground(roundRect(new int[]{Color.rgb(28, 35, 59), Color.rgb(15, 19, 34)}, dp(24)));
-        TextView heading = text(title, 20, Color.WHITE, true);
-        heading.setPadding(dp(4), dp(4), dp(4), dp(12));
+        panel.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 16));
+        panel.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(28, 35, 59), Color.rgb(15, 19, 34)}, LauncherUiUtils.dp(this, 24)));
+        TextView heading = LauncherUiUtils.text(this, title, 20, Color.WHITE, true);
+        heading.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 12));
         panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
         for (int i = 0; i < labels.length; i++) {
             final int index = i;
             LinearLayout row = new LinearLayout(this);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(10), dp(7), dp(12), dp(7));
-            row.setBackground(roundRect(new int[]{Color.rgb(42, 51, 79), Color.rgb(31, 38, 61)}, dp(15)));
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(54));
-            rowParams.topMargin = dp(5);
-            TextView glyph = text(icons[i], 21, Color.rgb(178, 198, 255), true);
+            row.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 7));
+            row.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(42, 51, 79), Color.rgb(31, 38, 61)}, LauncherUiUtils.dp(this, 15)));
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 54));
+            rowParams.topMargin = LauncherUiUtils.dp(this, 5);
+            TextView glyph = LauncherUiUtils.text(this, icons[i], 21, Color.rgb(178, 198, 255), true);
             glyph.setGravity(Gravity.CENTER);
-            glyph.setBackground(roundRect(new int[]{Color.rgb(65, 83, 139), Color.rgb(51, 57, 112)}, dp(12)));
-            row.addView(glyph, new LinearLayout.LayoutParams(dp(38), dp(38)));
-            TextView label = text(labels[i], 15, Color.rgb(245, 247, 255), false);
+            glyph.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(65, 83, 139), Color.rgb(51, 57, 112)}, LauncherUiUtils.dp(this, 12)));
+            row.addView(glyph, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38)));
+            TextView label = LauncherUiUtils.text(this, labels[i], 15, Color.rgb(245, 247, 255), false);
             label.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -1, 1f);
-            labelParams.leftMargin = dp(12);
+            labelParams.leftMargin = LauncherUiUtils.dp(this, 12);
             row.addView(label, labelParams);
             row.setOnClickListener(v -> {
                 dialog.dismiss();
@@ -843,7 +843,7 @@ public class MainActivity extends Activity {
             dialog.getWindow().setAttributes(params);
         }
         dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - dp(36), -2);
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 36), -2);
         panel.setAlpha(0f);
         panel.setScaleX(0.94f);
         panel.setScaleY(0.94f);
@@ -871,23 +871,23 @@ public class MainActivity extends Activity {
         Dialog dialog = new Dialog(this);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(16), dp(14), dp(16), dp(12));
-        panel.setBackground(roundRect(new int[]{Color.rgb(19, 24, 42), Color.rgb(12, 16, 30)}, dp(20)));
+        panel.setPadding(LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 12));
+        panel.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(19, 24, 42), Color.rgb(12, 16, 30)}, LauncherUiUtils.dp(this, 20)));
 
-        TextView title = text("Choose a widget", 20, Color.WHITE, true);
+        TextView title = LauncherUiUtils.text(this, "Choose a widget", 20, Color.WHITE, true);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        panel.addView(title, new LinearLayout.LayoutParams(-1, dp(42)));
+        panel.addView(title, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 42)));
 
-        TextView subtitle = text("Preview each widget before adding it", 12, Color.rgb(165, 177, 207), false);
+        TextView subtitle = LauncherUiUtils.text(this, "Preview each widget before adding it", 12, Color.rgb(165, 177, 207), false);
         subtitle.setGravity(Gravity.CENTER_VERTICAL);
-        panel.addView(subtitle, new LinearLayout.LayoutParams(-1, dp(28)));
+        panel.addView(subtitle, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28)));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
         scroll.setVerticalScrollBarEnabled(true);
         scroll.setClipToPadding(false);
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, dp(440));
-        scrollParams.topMargin = dp(8);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 440));
+        scrollParams.topMargin = LauncherUiUtils.dp(this, 8);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
 
@@ -897,13 +897,13 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(10), dp(10), dp(10), dp(10));
-            row.setBackground(roundRect(new int[]{Color.rgb(34, 42, 67), Color.rgb(27, 33, 54)}, dp(14)));
+            row.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10));
+            row.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(34, 42, 67), Color.rgb(27, 33, 54)}, LauncherUiUtils.dp(this, 14)));
 
             ImageView preview = new ImageView(this);
             preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            preview.setBackground(roundRect(new int[]{Color.rgb(12, 16, 28), Color.rgb(20, 26, 43)}, dp(10)));
-            preview.setPadding(dp(4), dp(4), dp(4), dp(4));
+            preview.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(12, 16, 28), Color.rgb(20, 26, 43)}, LauncherUiUtils.dp(this, 10)));
+            preview.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4));
             android.graphics.drawable.Drawable image = null;
             try {
                 if (info.previewImage != 0) {
@@ -915,31 +915,31 @@ public class MainActivity extends Activity {
                 catch (Exception ignored) { }
             }
             if (image != null) preview.setImageDrawable(image);
-            row.addView(preview, new LinearLayout.LayoutParams(dp(100), dp(86)));
+            row.addView(preview, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 100), LauncherUiUtils.dp(this, 86)));
 
             LinearLayout details = new LinearLayout(this);
             details.setOrientation(LinearLayout.VERTICAL);
             details.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(0, -2, 1f);
-            detailsParams.leftMargin = dp(12);
-            TextView name = text(String.valueOf(info.loadLabel(packageManager)), 15, Color.rgb(246, 248, 255), true);
+            detailsParams.leftMargin = LauncherUiUtils.dp(this, 12);
+            TextView name = LauncherUiUtils.text(this, String.valueOf(info.loadLabel(packageManager)), 15, Color.rgb(246, 248, 255), true);
             name.setMaxLines(2);
-            TextView provider = text(info.provider.getPackageName(), 11, Color.rgb(158, 171, 202), false);
+            TextView provider = LauncherUiUtils.text(this, info.provider.getPackageName(), 11, Color.rgb(158, 171, 202), false);
             provider.setMaxLines(1);
             provider.setSingleLine(true);
             provider.setEllipsize(android.text.TextUtils.TruncateAt.END);
             details.addView(name, new LinearLayout.LayoutParams(-1, -2));
             LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(-1, -2);
-            providerParams.topMargin = dp(4);
+            providerParams.topMargin = LauncherUiUtils.dp(this, 4);
             details.addView(provider, providerParams);
             row.addView(details, detailsParams);
 
-            TextView add = text("＋", 25, Color.rgb(178, 198, 255), true);
+            TextView add = LauncherUiUtils.text(this, "＋", 25, Color.rgb(178, 198, 255), true);
             add.setGravity(Gravity.CENTER);
-            row.addView(add, new LinearLayout.LayoutParams(dp(32), dp(48)));
+            row.addView(add, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 48)));
 
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = dp(8);
+            rowParams.bottomMargin = LauncherUiUtils.dp(this, 8);
             list.addView(row, rowParams);
             row.setOnClickListener(v -> {
                 dialog.dismiss();
@@ -949,10 +949,10 @@ public class MainActivity extends Activity {
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
         panel.addView(scroll, scrollParams);
 
-        TextView cancel = text("Cancel", 14, Color.rgb(190, 201, 230), true);
+        TextView cancel = LauncherUiUtils.text(this, "Cancel", 14, Color.rgb(190, 201, 230), true);
         cancel.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, dp(44));
-        cancelParams.topMargin = dp(4);
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 44));
+        cancelParams.topMargin = LauncherUiUtils.dp(this, 4);
         panel.addView(cancel, cancelParams);
         cancel.setOnClickListener(v -> dialog.dismiss());
 
@@ -967,8 +967,8 @@ public class MainActivity extends Activity {
         dialog.show();
         if (dialog.getWindow() != null) {
             int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - dp(28),
-                    Math.min(screenHeight - dp(48), dp(570)));
+            dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 28),
+                    Math.min(screenHeight - LauncherUiUtils.dp(this, 48), LauncherUiUtils.dp(this, 570)));
         }
         panel.setAlpha(0f);
         panel.setScaleX(0.96f);
@@ -1098,16 +1098,16 @@ public class MainActivity extends Activity {
     private void showWallpaperCropper(Bitmap bitmap, java.io.File savedImage) {
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int screenH = getResources().getDisplayMetrics().heightPixels;
-        int cropH = Math.max(dp(220), Math.min((int)(screenH * 0.56f), screenH - dp(190)));
-        int cropW = Math.max(dp(120), Math.round(cropH * screenW / (float)Math.max(1, screenH)));
+        int cropH = Math.max(LauncherUiUtils.dp(this, 220), Math.min((int)(screenH * 0.56f), screenH - LauncherUiUtils.dp(this, 190)));
+        int cropW = Math.max(LauncherUiUtils.dp(this, 120), Math.round(cropH * screenW / (float)Math.max(1, screenH)));
         WallpaperCropView preview = new WallpaperCropView(this, bitmap);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(14), dp(14), dp(14), dp(12));
-        panel.setBackground(roundRect(new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, dp(22)));
-        panel.addView(text("Crop wallpaper", 20, Color.WHITE, true));
-        TextView hint = text("Drag the image to adjust framing", 12, Color.rgb(185, 198, 225), false);
-        hint.setPadding(0, dp(4), 0, dp(10));
+        panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
+        panel.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, LauncherUiUtils.dp(this, 22)));
+        panel.addView(LauncherUiUtils.text(this, "Crop wallpaper", 20, Color.WHITE, true));
+        TextView hint = LauncherUiUtils.text(this, "Drag the image to adjust framing", 12, Color.rgb(185, 198, 225), false);
+        hint.setPadding(0, LauncherUiUtils.dp(this, 4), 0, LauncherUiUtils.dp(this, 10));
         panel.addView(hint);
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.BLACK);
@@ -1115,17 +1115,17 @@ public class MainActivity extends Activity {
         panel.addView(frame, new LinearLayout.LayoutParams(-1, cropH));
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        TextView cancel = text("Cancel", 14, Color.LTGRAY, true);
-        cancel.setPadding(dp(14), dp(12), dp(14), dp(12));
-        TextView use = text("Use wallpaper", 14, Color.WHITE, true);
-        use.setPadding(dp(14), dp(12), dp(14), dp(12));
+        TextView cancel = LauncherUiUtils.text(this, "Cancel", 14, Color.LTGRAY, true);
+        cancel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
+        TextView use = LauncherUiUtils.text(this, "Use wallpaper", 14, Color.WHITE, true);
+        use.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         actions.addView(cancel); actions.addView(use); panel.addView(actions);
         Dialog dialog = new Dialog(this);
         dialog.setContentView(panel);
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dialog.getWindow().setLayout(Math.min(screenW - dp(24), cropW + dp(36)), -2);
+            dialog.getWindow().setLayout(Math.min(screenW - LauncherUiUtils.dp(this, 24), cropW + LauncherUiUtils.dp(this, 36)), -2);
         }
         cancel.setOnClickListener(v -> { dialog.dismiss(); if (!bitmap.isRecycled()) bitmap.recycle(); });
         use.setOnClickListener(v -> {
@@ -1157,8 +1157,8 @@ public class MainActivity extends Activity {
         FrameLayout page = (FrameLayout) pagesStrip.getChildAt(currentPage);
         AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
         widget.setAppWidget(widgetId, info);
-        addWidgetContainer(page, widget, widgetId, currentPage, dp(8), dp(8),
-                Math.max(dp(180), page.getWidth() / 2), Math.max(dp(100), page.getHeight() / 4));
+        addWidgetContainer(page, widget, widgetId, currentPage, LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 8),
+                Math.max(LauncherUiUtils.dp(this, 180), page.getWidth() / 2), Math.max(LauncherUiUtils.dp(this, 100), page.getHeight() / 4));
         String stored = prefs.getString(KEY_WIDGET_IDS, "");
         String entry = widgetId + ":" + currentPage;
         if (!containsWidgetId(stored, widgetId)) {
@@ -1190,12 +1190,12 @@ public class MainActivity extends Activity {
         final View resizeHandle = new View(this);
         GradientDrawable handleBg = new GradientDrawable();
         handleBg.setColor(Color.rgb(115, 159, 255));
-        handleBg.setCornerRadius(dp(5));
+        handleBg.setCornerRadius(LauncherUiUtils.dp(this, 5));
         resizeHandle.setBackground(handleBg);
         resizeHandle.setVisibility(View.GONE);
-        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.RIGHT | Gravity.BOTTOM);
+        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(LauncherUiUtils.dp(this, 26), LauncherUiUtils.dp(this, 26), Gravity.RIGHT | Gravity.BOTTOM);
         container.addView(resizeHandle, handleLp);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(dp(140), width), Math.max(dp(90), height), Gravity.TOP | Gravity.LEFT);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(LauncherUiUtils.dp(this, 140), width), Math.max(LauncherUiUtils.dp(this, 90), height), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = x;
         lp.topMargin = y;
         page.addView(container, lp);
@@ -1204,8 +1204,8 @@ public class MainActivity extends Activity {
         // A slim grip at the top of each widget owns launcher edit gestures,
         // leaving the widget's normal content fully interactive.
         final View gestureGrip = new View(this);
-        gestureGrip.setBackground(roundRect(new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, dp(8)));
-        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, dp(28), Gravity.TOP);
+        gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
+        FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28), Gravity.TOP);
         container.addView(gestureGrip, gripLp);
 
         final int[] editMode = {0}; // 0 idle, 1 moving
@@ -1216,13 +1216,13 @@ public class MainActivity extends Activity {
         Runnable clearEditChrome = () -> {
             resizeHandle.setVisibility(View.GONE);
             container.setBackground(null);
-            gestureGrip.setBackground(roundRect(new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, dp(8)));
+            gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
         };
         movePress[0] = () -> {
             editMode[0] = 1;
             resizeHandle.setVisibility(View.VISIBLE);
-            container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
-            gestureGrip.setBackground(roundRect(new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, dp(8)));
+            container.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
+            gestureGrip.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(80, 128, 245), Color.rgb(54, 92, 196)}, LauncherUiUtils.dp(this, 8)));
             Toast.makeText(this, "Move widget", Toast.LENGTH_SHORT).show();
         };
         menuPress[0] = () -> {
@@ -1249,7 +1249,7 @@ public class MainActivity extends Activity {
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                 } else if (which == 1) {
                     resizeHandle.setVisibility(View.VISIBLE);
-                    container.setBackground(roundRect(new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, dp(8)));
+                    container.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(this, 8)));
                     Toast.makeText(this, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
                     int destination = Math.max(pageIndex + 1, pagesStrip.getChildCount());
@@ -1257,11 +1257,11 @@ public class MainActivity extends Activity {
                     FrameLayout destinationPage = (FrameLayout) pagesStrip.getChildAt(destination);
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
                     FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
-                            Math.min(container.getLayoutParams().width, Math.max(dp(140), destinationPage.getWidth())),
-                            Math.min(container.getLayoutParams().height, Math.max(dp(90), destinationPage.getHeight())),
+                            Math.min(container.getLayoutParams().width, Math.max(LauncherUiUtils.dp(this, 140), destinationPage.getWidth())),
+                            Math.min(container.getLayoutParams().height, Math.max(LauncherUiUtils.dp(this, 90), destinationPage.getHeight())),
                             Gravity.TOP | Gravity.LEFT);
-                    moved.leftMargin = dp(8);
-                    moved.topMargin = dp(40);
+                    moved.leftMargin = LauncherUiUtils.dp(this, 8);
+                    moved.topMargin = LauncherUiUtils.dp(this, 40);
                     destinationPage.addView(container, moved);
                     currentPage = destination;
                     saveWidgetGeometry(widgetId, destination, container);
@@ -1288,7 +1288,7 @@ public class MainActivity extends Activity {
             if (action == MotionEvent.ACTION_MOVE) {
                 float dx = event.getRawX() - down[0];
                 float dy = event.getRawY() - down[1];
-                if (editMode[0] == 0 && (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10))) {
+                if (editMode[0] == 0 && (Math.abs(dx) > LauncherUiUtils.dp(this, 10) || Math.abs(dy) > LauncherUiUtils.dp(this, 10))) {
                     handler.removeCallbacks(movePress[0]);
                     handler.removeCallbacks(menuPress[0]);
                     return true;
@@ -1324,9 +1324,9 @@ public class MainActivity extends Activity {
             }
             if (action == MotionEvent.ACTION_MOVE) {
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                current.width = Math.max(dp(140), Math.min(page.getWidth() - current.leftMargin,
+                current.width = Math.max(LauncherUiUtils.dp(this, 140), Math.min(page.getWidth() - current.leftMargin,
                         origin[2] + Math.round(event.getRawX() - down[0])));
-                current.height = Math.max(dp(90), Math.min(page.getHeight() - current.topMargin,
+                current.height = Math.max(LauncherUiUtils.dp(this, 90), Math.min(page.getHeight() - current.topMargin,
                         origin[3] + Math.round(event.getRawY() - down[1])));
                 container.setLayoutParams(current);
                 return true;
@@ -1384,10 +1384,10 @@ public class MainActivity extends Activity {
                 if (exists) continue;
                 AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
                 if (info == null) continue;
-                int width = prefs.getInt("widget_w_" + id, Math.max(dp(180), page.getWidth() / 2));
-                int height = prefs.getInt("widget_h_" + id, Math.max(dp(100), page.getHeight() / 4));
-                int x = prefs.getInt("widget_x_" + id, dp(8));
-                int y = prefs.getInt("widget_y_" + id, dp(8));
+                int width = prefs.getInt("widget_w_" + id, Math.max(LauncherUiUtils.dp(this, 180), page.getWidth() / 2));
+                int height = prefs.getInt("widget_h_" + id, Math.max(LauncherUiUtils.dp(this, 100), page.getHeight() / 4));
+                int x = prefs.getInt("widget_x_" + id, LauncherUiUtils.dp(this, 8));
+                int y = prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8));
                 AppWidgetHostView widget = widgetHost.createView(this, id, info);
                 widget.setAppWidget(id, info);
                 addWidgetContainer(page, widget, id, pageIndex, x, y, width, height);
@@ -1491,14 +1491,14 @@ public class MainActivity extends Activity {
                 clockText.setTextSize(40);
                 clockText.setLetterSpacing(0.035f);
                 clockText.setTextColor(Color.rgb(87, 229, 255));
-                clockText.setShadowLayer(dp(4), 0f, 0f, Color.argb(125, 0, 190, 255));
+                clockText.setShadowLayer(LauncherUiUtils.dp(this, 4), 0f, 0f, Color.argb(125, 0, 190, 255));
                 break;
             case 2: // Neon Circuit: heavy geometric system sans, strong block-like digits.
                 clockText.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
                 clockText.setTextSize(38);
                 clockText.setLetterSpacing(0.015f);
                 clockText.setTextColor(Color.rgb(112, 255, 190));
-                clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(105, 0, 255, 135));
+                clockText.setShadowLayer(LauncherUiUtils.dp(this, 5), 0f, 0f, Color.argb(105, 0, 255, 135));
                 break;
             case 3: // Tech Minimal: thin, airy futuristic typography with no glow.
                 clockText.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
@@ -1511,21 +1511,21 @@ public class MainActivity extends Activity {
                 clockText.setTextSize(39);
                 clockText.setLetterSpacing(0.09f);
                 clockText.setTextColor(Color.rgb(125, 255, 150));
-                clockText.setShadowLayer(dp(3), 0f, 0f, Color.argb(95, 60, 255, 100));
+                clockText.setShadowLayer(LauncherUiUtils.dp(this, 3), 0f, 0f, Color.argb(95, 60, 255, 100));
                 break;
             case 5: // Square Pixel: custom chunky square-pixel numerals, not a system font.
                 clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
                 clockText.setTextSize(40);
                 clockText.setLetterSpacing(0f);
                 clockText.setTextColor(Color.rgb(145, 255, 170));
-                clockText.setShadowLayer(dp(2), 0f, 0f, Color.argb(70, 60, 255, 100));
+                clockText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, 0f, Color.argb(70, 60, 255, 100));
                 break;
             default: // Digital: fixed-width digital readout with bold squared-off glyphs.
                 clockText.setTypeface(Typeface.create("sans-serif-monospace", Typeface.BOLD));
                 clockText.setTextSize(40);
                 clockText.setLetterSpacing(0.055f);
                 clockText.setTextColor(Color.rgb(118, 204, 255));
-                clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(135, 40, 132, 255));
+                clockText.setShadowLayer(LauncherUiUtils.dp(this, 5), 0f, 0f, Color.argb(135, 40, 132, 255));
                 break;
         }
     }
@@ -1539,23 +1539,6 @@ public class MainActivity extends Activity {
         applyClockStyle();
         applyBrandVisibility();
     }
-
-    private TextView text(String value, float size, int color, boolean bold) {
-        TextView v = new TextView(this);
-        v.setText(value);
-        v.setTextSize(size);
-        v.setTextColor(color);
-        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return v;
-    }
-
-    private GradientDrawable roundRect(int[] colors, int radius) {
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors);
-        d.setCornerRadius(dp(radius));
-        return d;
-    }
-
-    private int dp(float value) { return (int)(value * getResources().getDisplayMetrics().density + 0.5f); }
 
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
     private int getDrawerColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS))); }
@@ -1583,28 +1566,28 @@ public class MainActivity extends Activity {
     }
 
     private void addSection(LinearLayout panel, String title) {
-        TextView header = text(title.toUpperCase(Locale.getDefault()), 11, Color.rgb(146, 171, 239), true);
+        TextView header = LauncherUiUtils.text(this, title.toUpperCase(Locale.getDefault()), 11, Color.rgb(146, 171, 239), true);
         header.setLetterSpacing(0.10f);
-        header.setPadding(dp(4), dp(15), dp(4), dp(7));
+        header.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 15), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 7));
         panel.addView(header, new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void addSettingRow(LinearLayout panel, String icon, String title, String detail, Runnable action) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(10), dp(8), dp(10), dp(8));
-        row.setBackground(roundRect(new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, dp(15)));
+        row.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
+        row.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, LauncherUiUtils.dp(this, 15)));
         LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
-        rp.bottomMargin = dp(6);
-        TextView glyph = text(icon, 19, Color.rgb(177, 198, 255), true);
+        rp.bottomMargin = LauncherUiUtils.dp(this, 6);
+        TextView glyph = LauncherUiUtils.text(this, icon, 19, Color.rgb(177, 198, 255), true);
         glyph.setGravity(Gravity.CENTER);
-        row.addView(glyph, new LinearLayout.LayoutParams(dp(34), dp(38)));
+        row.addView(glyph, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 34), LauncherUiUtils.dp(this, 38)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(dp(9), 0, 0, 0);
-        copy.addView(text(title, 14, Color.WHITE, true));
-        TextView sub = text(detail, 11, Color.rgb(176, 187, 213), false);
-        sub.setPadding(0, dp(2), 0, 0);
+        copy.setPadding(LauncherUiUtils.dp(this, 9), 0, 0, 0);
+        copy.addView(LauncherUiUtils.text(this, title, 14, Color.WHITE, true));
+        TextView sub = LauncherUiUtils.text(this, detail, 11, Color.rgb(176, 187, 213), false);
+        sub.setPadding(0, LauncherUiUtils.dp(this, 2), 0, 0);
         copy.addView(sub);
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
         row.setOnClickListener(v -> action.run());
@@ -1612,19 +1595,19 @@ public class MainActivity extends Activity {
     }
 
     private void addChoiceRow(LinearLayout panel, String title, int selected, String[] choices, IntAction onSelect) {
-        TextView heading = text(title, 14, Color.WHITE, true);
-        heading.setPadding(dp(4), dp(5), dp(4), dp(8));
+        TextView heading = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
+        heading.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
         panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout choicesRow = new LinearLayout(this);
         choicesRow.setGravity(Gravity.CENTER_VERTICAL);
         for (int i = 0; i < choices.length; i++) {
             final int value = i;
-            TextView chip = text(choices[i], 12, i == selected ? Color.WHITE : Color.rgb(196, 205, 228), i == selected);
+            TextView chip = LauncherUiUtils.text(this, choices[i], 12, i == selected ? Color.WHITE : Color.rgb(196, 205, 228), i == selected);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(5), dp(10), dp(5), dp(10));
-            chip.setBackground(roundRect(i == selected ? new int[]{Color.rgb(73, 99, 177), Color.rgb(73, 74, 157)} : new int[]{Color.rgb(34, 41, 62), Color.rgb(28, 34, 51)}, dp(12)));
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(40), 1f);
-            cp.setMargins(dp(2), 0, dp(2), dp(8));
+            chip.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 10));
+            chip.setBackground(LauncherUiUtils.roundRect(this, i == selected ? new int[]{Color.rgb(73, 99, 177), Color.rgb(73, 74, 157)} : new int[]{Color.rgb(34, 41, 62), Color.rgb(28, 34, 51)}, LauncherUiUtils.dp(this, 12)));
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, LauncherUiUtils.dp(this, 40), 1f);
+            cp.setMargins(LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 8));
             choicesRow.addView(chip, cp);
             chip.setOnClickListener(v -> onSelect.onSelect(value));
         }
@@ -1657,13 +1640,13 @@ public class MainActivity extends Activity {
             panel = new LinearLayout(this);
             panel.setTag("home_studio_panel");
             panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setPadding(dp(16), dp(12), dp(16), dp(14));
-            panel.setBackground(roundRect(new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, dp(24)));
-            TextView title = text("Home Studio", 23, Color.WHITE, true);
-            title.setPadding(dp(4), dp(5), dp(4), dp(3));
+            panel.setPadding(LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14));
+            panel.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, LauncherUiUtils.dp(this, 24)));
+            TextView title = LauncherUiUtils.text(this, "Home Studio", 23, Color.WHITE, true);
+            title.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 3));
             panel.addView(title);
-            TextView subtitle = text("Personalize your home and app drawer", 12, Color.rgb(179, 191, 221), false);
-            subtitle.setPadding(dp(4), 0, dp(4), dp(7));
+            TextView subtitle = LauncherUiUtils.text(this, "Personalize your home and app drawer", 12, Color.rgb(179, 191, 221), false);
+            subtitle.setPadding(LauncherUiUtils.dp(this, 4), 0, LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 7));
             panel.addView(subtitle);
             scroll = new android.widget.ScrollView(this);
             scroll.setTag("home_studio_scroll");
@@ -1730,7 +1713,7 @@ public class MainActivity extends Activity {
         addSettingRow(content, "☷", "Drawer spacing", prefs.getInt(KEY_DRAWER_SPACING, 8) <= 5 ? "Compact" : "Comfortable", () -> {
             int spacing = prefs.getInt(KEY_DRAWER_SPACING, 8) <= 5 ? 10 : 4;
             prefs.edit().putInt(KEY_DRAWER_SPACING, spacing).apply();
-            drawerGrid.setVerticalSpacing(dp(spacing)); drawerGrid.setHorizontalSpacing(dp(spacing / 2));
+            drawerGrid.setVerticalSpacing(LauncherUiUtils.dp(this, spacing)); drawerGrid.setHorizontalSpacing(LauncherUiUtils.dp(this, spacing / 2));
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
@@ -1797,7 +1780,7 @@ public class MainActivity extends Activity {
             prefs.edit().clear().apply();
             homePackages.clear(); currentPage = 0; restoreHomeApps();
             applyHomeWallpaper(); drawerScreen.setBackground(drawerBackground());
-            drawerGrid.setNumColumns(getDrawerColumns()); drawerGrid.setVerticalSpacing(dp(8)); drawerGrid.setHorizontalSpacing(dp(4));
+            drawerGrid.setNumColumns(getDrawerColumns()); drawerGrid.setVerticalSpacing(LauncherUiUtils.dp(this, 8)); drawerGrid.setHorizontalSpacing(LauncherUiUtils.dp(this, 4));
             applyBrandVisibility(); loadApps(); renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
@@ -1813,8 +1796,8 @@ public class MainActivity extends Activity {
         }
         boolean wasShowing = dialog.isShowing();
         if (!wasShowing) dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(480)),
-                Math.min(getResources().getDisplayMetrics().heightPixels - dp(70), dp(720)));
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 24), LauncherUiUtils.dp(this, 480)),
+                Math.min(getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 70), LauncherUiUtils.dp(this, 720)));
         if (restoreScrollY > 0) scroll.post(() -> scroll.scrollTo(0, restoreScrollY));
         if (animateOpening && !wasShowing) {
             panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
