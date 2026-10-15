@@ -139,6 +139,7 @@ public class MainActivity extends Activity {
     private boolean pageSwipeActive = false;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
+    private boolean gestureStartedOnDrawerGrid = false;
     private float wheelSwipeProgress = 0f;
     private int wheelSwipeDirection = 0;
     private float longPressDownX, longPressDownY;
@@ -261,6 +262,7 @@ public class MainActivity extends Activity {
             pageSwipeActive = false;
             pageSwipeChildCancelled = false;
             verticalSwipeClaimed = false;
+            gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
@@ -278,7 +280,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_MOVE) {
             // Claim vertical gestures from every surface (icons, widgets, and drawer
             // included) so child views cannot consume the swipe before the launcher.
-            if (!verticalSwipeClaimed
+            if (!verticalSwipeClaimed && !gestureStartedOnDrawerGrid
                     && Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dy) > Math.abs(dx) * 1.15f) {
                 verticalSwipeClaimed = true;
@@ -358,9 +360,9 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
-            if (verticalSwipeClaimed
+            if (!gestureStartedOnDrawerGrid && (verticalSwipeClaimed
                     || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
-                        && Math.abs(dy) > Math.abs(dx) * 1.15f)) {
+                        && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
                 if (dy < 0f) {
                     showDrawer();
                 } else {
@@ -386,6 +388,18 @@ public class MainActivity extends Activity {
             // Vertical gestures are claimed in ACTION_MOVE above.
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    private boolean touchStartedOnDrawerGrid(float rawX, float rawY) {
+        if (drawerGrid == null) return false;
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            if (target == drawerGrid) return true;
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return false;
     }
 
     private boolean touchStartedOnContactShortcut(float rawX, float rawY) {
@@ -633,7 +647,7 @@ public class MainActivity extends Activity {
         applyClockStyle();
         clockGroup.addView(clockText);
         amPmText = new TextView(this);
-        amPmText.setTextColor(Color.rgb(176, 182, 193));
+        amPmText.setTextColor(clockText.getCurrentTextColor());
         amPmText.setTextSize(8);
         amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
@@ -2761,16 +2775,22 @@ public class MainActivity extends Activity {
             naturalClockWidth = Math.max(1f,
                     clockText.getPaint().measureText(clockText.getText().toString()));
         }
-        final float lengthScale = Math.min(requestedLengthScale,
-                maxContentWidth / naturalClockWidth);
+        final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
+                && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        // Only the custom LED renderer had a clipping issue at large sizes.
+        // Preserve the full requested scaling for every other clock style.
+        final float lengthScale = sevenSegment
+                ? Math.min(requestedLengthScale, maxContentWidth / naturalClockWidth)
+                : requestedLengthScale;
         final int renderedClockWidth = Math.max(1,
                 (int) Math.ceil(naturalClockWidth * lengthScale));
         final int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
-        final int naturalWidthPx = Math.min(maxContentWidth, Math.max(1, (int) Math.ceil(naturalClockWidth)));
+        final int naturalWidthPx = Math.max(1, (int) Math.ceil(naturalClockWidth));
+        final int clockWithMarkerWidth = renderedClockWidth + markerWidth + LauncherUiUtils.dp(this, 2);
         final int contentWidth = Math.min(maxContentWidth,
-                Math.max(naturalWidthPx, dateWidth) + LauncherUiUtils.dp(this, 4));
+                Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4));
         final int rowHeight = Math.max(1,
                 LauncherUiUtils.dp(this, Math.round(114f * breadthScale)));
 
@@ -2810,7 +2830,7 @@ public class MainActivity extends Activity {
         clockText.setScaleY(breadthScale);
         // Scale around the left edge, then compensate so center/right aligned
         // clocks stay aligned by their visible edge rather than their unscaled box.
-        float horizontalScaleOffset = Math.max(0f, naturalClockWidth - renderedClockWidth);
+        float horizontalScaleOffset = naturalClockWidth - renderedClockWidth;
         clockText.setTranslationX(alignment == Gravity.RIGHT
                 ? horizontalScaleOffset
                 : (alignment == Gravity.CENTER_HORIZONTAL ? horizontalScaleOffset * 0.5f : 0f));
@@ -2826,17 +2846,25 @@ public class MainActivity extends Activity {
         }
 
         if (dateText != null) {
-            dateText.setGravity(alignment);
+            // Keep the date at the quarter points for left/right modes: halfway
+            // between the screen center and the corresponding screen edge.
+            dateText.setGravity(Gravity.CENTER);
             ViewGroup.LayoutParams dateParams = dateText.getLayoutParams();
             if (dateParams != null) {
-                dateParams.width = contentWidth;
+                dateParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
                 dateText.setLayoutParams(dateParams);
             }
+            float quarterScreen = screenWidth * 0.25f;
+            dateText.setTranslationX(alignment == Gravity.LEFT
+                    ? -quarterScreen
+                    : (alignment == Gravity.RIGHT ? quarterScreen : 0f));
         }
 
         if (amPmText != null) {
-            amPmText.setTextSize(Math.max(6f,
-                    Math.min(9f, 78f * Math.min(lengthScale, breadthScale) * 0.10f)));
+            amPmText.setTextColor(clockText.getCurrentTextColor());
+            amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            amPmText.setTextSize(Math.max(7f,
+                    Math.min(10f, 78f * Math.min(lengthScale, breadthScale) * 0.10f)));
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
@@ -2847,13 +2875,13 @@ public class MainActivity extends Activity {
                         ? contentWidth - naturalWidthPx
                         : (alignment == Gravity.CENTER_HORIZONTAL
                             ? (contentWidth - naturalWidthPx) / 2 : 0);
+                int gap = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0,
                         clockLayoutLeft + Math.round(horizontalScaleOffset)
-                                + renderedClockWidth - markerParams.width);
-                // The marker follows the scaled clock's bottom edge, independent
-                // of row height or the selected horizontal position.
+                                + renderedClockWidth - markerParams.width - gap);
+                // Tuck AM/PM into the lower-right corner with a small, visible gap.
                 markerParams.topMargin = Math.max(0,
-                        rowHeight - markerParams.height - LauncherUiUtils.dp(this, 2));
+                        rowHeight - markerParams.height - gap);
                 amPmText.setLayoutParams(markerParams);
             }
         }
