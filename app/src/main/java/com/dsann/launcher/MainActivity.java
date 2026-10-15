@@ -280,19 +280,25 @@ public class MainActivity extends Activity {
                     View face = pagesStrip.getChildAt(i);
                     face.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                     face.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
-                    // Rotate every page around its centre rather than an outer edge.
-                    face.setPivotX(face.getWidth() / 2f);
+                    // Use the viewport's centre line as the shared vertical hinge.
+                    // The current face hinges at its centre; the incoming face hinges
+                    // at the edge that meets the viewport centre, not at its own centre.
+                    float faceWidth = face.getWidth();
                     face.setPivotY(face.getHeight() / 2f);
                     if (i == currentPage) {
+                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY(-progress * getPageRotationDegrees());
                         face.setAlpha(1f - Math.min(0.18f, Math.abs(progress) * 0.18f));
                     } else if (i == currentPage + 1 && progress < 0f) {
+                        face.setPivotX(0f);
                         face.setRotationY((1f + progress) * -getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
+                        face.setPivotX(faceWidth);
                         face.setRotationY((1f - progress) * getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else {
+                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY(0f);
                         face.setAlpha(1f);
                     }
