@@ -130,6 +130,7 @@ public class MainActivity extends Activity {
     private float gestureDownX, gestureDownY;
     private boolean gestureStartedOnAppCell = false;
     private boolean gestureStartedOnWidget = false;
+    private boolean gestureStartedOnContactShortcut = false;
     private boolean pageSwipeActive = false;
     private boolean pageSwipeChildCancelled = false;
     private float wheelSwipeProgress = 0f;
@@ -256,6 +257,7 @@ public class MainActivity extends Activity {
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
+            gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
             handler.removeCallbacks(homeLongPress);
             // Widget gestures belong to the widget interaction handler, never the
             // launcher's global long-press/customization or drawer gesture.
@@ -347,7 +349,7 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            boolean verticalSwipe = !gestureStartedOnWidget
+            boolean verticalSwipe = !gestureStartedOnWidget && !gestureStartedOnAppCell && !gestureStartedOnContactShortcut
                     && Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
@@ -362,6 +364,17 @@ public class MainActivity extends Activity {
             }
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    private boolean touchStartedOnContactShortcut(float rawX, float rawY) {
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            if ("launcher_contact_shortcut".equals(target.getTag())) return true;
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return false;
     }
 
     private boolean touchStartedOnWidget(float rawX, float rawY) {
@@ -738,12 +751,15 @@ public class MainActivity extends Activity {
         }
         if (chosenPage == null) return;
 
-        LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setGravity(Gravity.CENTER);
+        FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
-        tile.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3),
+        tile.setClipChildren(false);
+        LinearLayout tileContent = new LinearLayout(this);
+        tileContent.setOrientation(LinearLayout.VERTICAL);
+        tileContent.setGravity(Gravity.CENTER);
+        tileContent.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3),
                 LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3));
+        tile.addView(tileContent, new FrameLayout.LayoutParams(-1, -1));
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         boolean iconLoaded = false;
@@ -767,7 +783,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        tile.addView(icon, new LinearLayout.LayoutParams(
+        tileContent.addView(icon, new LinearLayout.LayoutParams(
                 LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38)));
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 11, Color.WHITE, true);
@@ -776,7 +792,7 @@ public class MainActivity extends Activity {
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
         labelParams.topMargin = LauncherUiUtils.dp(this, 3);
-        tile.addView(label, labelParams);
+        tileContent.addView(label, labelParams);
         int tileWidth = Math.min(pageViewport.getWidth() - chosenLeft, cellW * shortcutSpanX);
         int tileHeight = Math.min(pageViewport.getHeight() - chosenTop, cellH * shortcutSpanY);
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
@@ -2323,6 +2339,11 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Clock size", 50, 120, getClockSize(), " sp", value -> {
             prefs.edit().putInt(KEY_CLOCK_SIZE, value).apply();
             applyClockPositionAndSize();
+            if (homeScreen != null) {
+                homeScreen.requestLayout();
+                if (pageViewport != null) pageViewport.requestLayout();
+                if (pagesStrip != null) pagesStrip.requestLayout();
+            }
         });
         addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_POSITION, value).apply();
