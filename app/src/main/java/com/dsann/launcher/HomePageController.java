@@ -125,14 +125,19 @@ final class HomePageController {
         host.restoreWidgetsOnPages();
         host.getPageIndicator().setVisibility(prefs.getBoolean(showPageIndicatorKey, true) ? View.VISIBLE : View.GONE);
         host.getPageIndicator().setText((host.getCurrentPage() + 1) + "  /  " + host.getPages().size());
-        host.getPagesStrip().setTranslationX(-host.getCurrentPage() * pageWidth);
+        host.getPagesStrip().animate().cancel();
+        host.getPagesStrip().setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        float targetX = -host.getCurrentPage() * pageWidth;
         if (animate) {
-            host.getPagesStrip().setRotationY(-18f);
-            host.getPagesStrip().setScaleX(0.94f);
-            host.getPagesStrip().animate().rotationY(0f).scaleX(1f).setDuration(360).start();
-        } else {
             host.getPagesStrip().setRotationY(0f);
             host.getPagesStrip().setScaleX(1f);
+            host.getPagesStrip().animate().translationX(targetX).setDuration(210L)
+                    .withEndAction(() -> host.getPagesStrip().setLayerType(View.LAYER_TYPE_NONE, null)).start();
+        } else {
+            host.getPagesStrip().setTranslationX(targetX);
+            host.getPagesStrip().setRotationY(0f);
+            host.getPagesStrip().setScaleX(1f);
+            host.getPagesStrip().setLayerType(View.LAYER_TYPE_NONE, null);
         }
     
     }
