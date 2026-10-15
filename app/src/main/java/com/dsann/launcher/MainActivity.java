@@ -2689,7 +2689,9 @@ public class MainActivity extends Activity {
         clockText.invalidate();
     }
 
-private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
+private interface IntSliderAction { void onChange(int value); }
+
+    private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
