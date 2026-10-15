@@ -75,7 +75,7 @@ public final class SevenSegmentClockTextView extends TextView {
         for (int i = 0; i < raw.length(); i++) {
             char ch = raw.charAt(i);
             if (Character.digit(ch, 10) >= 0) digits++;
-            else if (ch == ':' || ch == '\\uFF1A' || ch == '.' || ch == '\\u2236') colons++;
+            else if (!Character.isWhitespace(ch)) colons++;
         }
         if (digits == 0) return;
 
