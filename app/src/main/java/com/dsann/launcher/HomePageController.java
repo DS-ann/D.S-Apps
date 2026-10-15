@@ -156,7 +156,18 @@ final class HomePageController {
             FrameLayout page = (FrameLayout) strip.getChildAt(pageIndex);
             page.setClipChildren(false);
             List<String> pagePackages = host.getPages().get(pageIndex);
-            int rows = Math.max(homeRows, (pagePackages.size() + columns - 1) / columns);
+            int fallbackHeight = Math.max(LauncherUiUtils.dp(activity, 360),
+                    activity.getResources().getDisplayMetrics().heightPixels
+                            - LauncherUiUtils.dp(activity, 260));
+            int pageHeight = host.getPageViewport() != null
+                    && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
+                    ? host.getPageViewport().getHeight() : fallbackHeight;
+            int configuredIconSize = prefs.getInt(iconSizeKey, 48);
+            int cellHeight = LauncherUiUtils.dp(activity, Math.max(56, configuredIconSize + 28));
+            // Each app owns one fixed-height grid slot. Compute the number of rows
+            // from the usable workspace height so no slot extends into the dock.
+            int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
+            rows = Math.max(rows, (pagePackages.size() + columns - 1) / columns);
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
                 if (host.findApp(packageName) == null) continue;
@@ -170,20 +181,7 @@ final class HomePageController {
                             }
                         }).getView(itemIndex, null, page);
                 cell.setTag("launcher_app:" + packageName);
-                int fallbackHeight = Math.max(LauncherUiUtils.dp(activity, 360),
-                        activity.getResources().getDisplayMetrics().heightPixels
-                                - LauncherUiUtils.dp(activity, 260));
-                int pageHeight = host.getPageViewport() != null
-                        && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
-                        ? host.getPageViewport().getHeight() : fallbackHeight;
                 int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1), pageWidth / columns);
-                // Keep app rows packed at a consistent height. Dividing the whole
-                // viewport by row count stretches every row to fill empty space,
-                // which makes icons drift down whenever the viewport gets taller.
-                // Use the configured icon size plus room for its label instead.
-                int configuredIconSize = prefs.getInt(iconSizeKey, 48);
-                int cellHeight = LauncherUiUtils.dp(activity,
-                        Math.max(56, configuredIconSize + 28));
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
@@ -207,6 +205,8 @@ final class HomePageController {
                 int configuredIconSize = prefs.getInt(iconSizeKey, 48);
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         Math.max(56, configuredIconSize + 28));
+                int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
+                actualRows = Math.max(actualRows, (pagePackages.size() + columns - 1) / columns);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
@@ -220,16 +220,17 @@ final class HomePageController {
                     float savedX = prefs.getFloat(iconXKey + childPackage,
                             defaultCol / (float) Math.max(1, columns - 1));
                     float savedY = prefs.getFloat(iconYKey + childPackage,
-                            defaultRow / (float) Math.max(1, rows - 1));
+                            defaultRow / (float) Math.max(1, actualRows - 1));
                     int col = Math.max(0, Math.min(columns - 1,
                             Math.round(savedX * Math.max(1, columns - 1))));
-                    int row = Math.max(0, Math.min(rows - 1,
-                            Math.round(savedY * Math.max(1, rows - 1))));
+                    int row = Math.max(0, Math.min(actualRows - 1,
+                            Math.round(savedY * Math.max(1, actualRows - 1))));
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
                     actual.leftMargin = col * actualCellWidth;
-                    actual.topMargin = row * actualCellHeight;
+                    actual.topMargin = Math.min(Math.max(0, page.getHeight() - actualCellHeight),
+                            row * actualCellHeight);
                     child.setLayoutParams(actual);
                 }
             });
