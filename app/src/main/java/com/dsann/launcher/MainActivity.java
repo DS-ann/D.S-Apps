@@ -626,15 +626,17 @@ public class MainActivity extends Activity {
                         }
                     }
                     FrameLayout page = (FrameLayout) view.getParent();
-                    int pageWidth = Math.max(1, pageViewport.getWidth());
-                    int[] viewportLocation = new int[2];
-                    pageViewport.getLocationOnScreen(viewportLocation);
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
-                    int maxY = Math.max(0, page.getHeight() - view.getHeight());
-                    lp.leftMargin = Math.max(0, Math.min(Math.max(0, pageWidth - view.getWidth()),
-                            Math.round(event.getRawX() - viewportLocation[0] - view.getWidth() / 2f)));
+                    int pageWidth = Math.max(1, page.getWidth());
                     int[] pageLocation = new int[2];
                     page.getLocationOnScreen(pageLocation);
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    int maxX = Math.max(0, page.getWidth() - view.getWidth());
+                    int maxY = Math.max(0, page.getHeight() - view.getHeight());
+                    // Convert screen coordinates into the source page's own coordinate space.
+                    // Compensate for the temporary translation used to preview a cross-page drag.
+                    float pageOffsetX = view.getTranslationX();
+                    lp.leftMargin = Math.max(0, Math.min(maxX,
+                            Math.round(event.getRawX() - pageLocation[0] - view.getWidth() / 2f - pageOffsetX)));
                     lp.topMargin = Math.max(0, Math.min(maxY,
                             Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f)));
                     view.setLayoutParams(lp);
@@ -692,9 +694,14 @@ public class MainActivity extends Activity {
                         occupant.setLayoutParams(otherLp);
                         saveIconSlot(otherPackage, sourceCol, sourceRow, columns);
                     }
+                    // Persist the destination page before rebuilding the view hierarchy.
+                    // The dragged view intentionally stays attached to its source page until UP;
+                    // reparenting during MOVE cancels Android's active touch target.
                     saveIconSlot(packageName, targetCol, targetRow, columns);
-                    prefs.edit().putInt(KEY_ICON_PAGE + packageName, movedAcrossPage ? destinationPage : sourcePage).apply();
-                    currentPage = movedAcrossPage ? destinationPage : currentPage;
+                    int committedPage = movedAcrossPage ? destinationPage : sourcePage;
+                    prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
+                    ensurePageExists(committedPage);
+                    currentPage = committedPage;
                     view.setTranslationX(0f);
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
                     iconDragging = false;
