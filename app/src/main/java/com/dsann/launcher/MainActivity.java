@@ -62,7 +62,9 @@ public class MainActivity extends Activity {
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final String KEY_PAGE_TRANSITION = "page_transition";
-    private static final String KEY_CLOCK_SIZE = "clock_size";
+    private static final String KEY_CLOCK_SIZE = "clock_size"; // Legacy preference; retained for compatibility.
+    private static final String KEY_CLOCK_LENGTH = "clock_length_percent";
+    private static final String KEY_CLOCK_BREADTH = "clock_breadth_percent";
     private static final String KEY_CLOCK_POSITION = "clock_position";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
     private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
@@ -1184,6 +1186,23 @@ public class MainActivity extends Activity {
                     iconOriginalPageIndex = -1;
                     iconEdgeLatch = 0;
                     renderHomePages(false);
+                    // After dropping an app, move it out of any widget footprint on the
+                    // destination page. Re-run after layout so saved and visible positions agree.
+                    final int collisionPageIndex = committedPage;
+                    pageViewport.post(() -> {
+                        if (pagesStrip == null || collisionPageIndex >= pagesStrip.getChildCount()) return;
+                        FrameLayout collisionPage = (FrameLayout) pagesStrip.getChildAt(collisionPageIndex);
+                        collisionPage.post(() -> {
+                            for (int wi = 0; wi < collisionPage.getChildCount(); wi++) {
+                                View item = collisionPage.getChildAt(wi);
+                                Object tag = item.getTag();
+                                if (tag instanceof String && ((String) tag).startsWith("launcher_widget:")
+                                        && item instanceof FrameLayout) {
+                                    resolveWidgetIconCollisions(collisionPage, (FrameLayout) item);
+                                }
+                            }
+                        });
+                    });
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP && longPressTriggered) {
@@ -1286,52 +1305,85 @@ public class MainActivity extends Activity {
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
 
-        // Parallax uses a real strip translation with small opposing depth offsets.
-        // Keeping the same page instances attached avoids widget detach/rebind churn.
+        // Parallax is a layered depth transition: the workspace strip moves normally,
+        // while the outgoing and incoming pages travel at different rates and scale apart.
+        // Page instances remain attached, so live widgets are not detached during the swipe.
         if (effect == 2) {
             pagesStrip.setTranslationX(-from * width - direction * width * progress);
-            outgoing.setPivotX(width * 0.5f);
+            outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
-            outgoing.setScaleX(1f - 0.045f * progress);
-            outgoing.setScaleY(1f - 0.025f * progress);
-            outgoing.setAlpha(1f - 0.12f * progress);
-            outgoing.setTranslationX(-direction * width * 0.10f * progress);
+            outgoing.setRotationY(direction * 5f * progress);
+            outgoing.setTranslationX(-direction * width * 0.30f * progress);
+            outgoing.setTranslationY(-height * 0.025f * progress);
+            outgoing.setScaleX(1f - 0.12f * progress);
+            outgoing.setScaleY(1f - 0.07f * progress);
+            outgoing.setAlpha(1f - 0.28f * progress);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
                 View incoming = pagesStrip.getChildAt(to);
-                incoming.setPivotX(incoming.getWidth() * 0.5f);
+                incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setScaleX(0.955f + 0.045f * progress);
-                incoming.setScaleY(0.975f + 0.025f * progress);
-                incoming.setAlpha(0.88f + 0.12f * progress);
-                incoming.setTranslationX(direction * width * 0.10f * (1f - progress));
+                incoming.setRotationY(-direction * 5f * (1f - progress));
+                incoming.setTranslationX(direction * width * 0.30f * (1f - progress));
+                incoming.setTranslationY(height * 0.025f * (1f - progress));
+                incoming.setScaleX(0.88f + 0.12f * progress);
+                incoming.setScaleY(0.93f + 0.07f * progress);
+                incoming.setAlpha(0.72f + 0.28f * progress);
             }
             return;
         }
 
-        // Wheel keeps its adjustable rotation; Cube always turns exactly one 90-degree face.
-        float angle = effect == 1 ? 90f
-                : (effect == 3 ? 90f : Math.min(90f, getPageRotationDegrees()));
-        float signedAngle = direction > 0 ? angle * progress : -angle * progress;
-        outgoing.setPivotX(direction > 0 ? width : 0f);
-        outgoing.setPivotY(height * 0.5f);
         outgoing.setCameraDistance(10000f * density);
-        outgoing.setRotationY(signedAngle);
-        outgoing.setScaleX(effect == 3 ? 1f - 0.07f * progress : 1f);
-        outgoing.setScaleY(effect == 3 ? 1f - 0.025f * progress : 1f);
-        outgoing.setAlpha(effect == 3 ? 1f - 0.18f * progress : 1f);
-        outgoing.setTranslationZ(effect == 1 ? -density * 12f * progress : 0f);
-
-        if (to >= 0 && to < pagesStrip.getChildCount()) {
-            View incoming = pagesStrip.getChildAt(to);
-            incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
-            incoming.setPivotY(incoming.getHeight() * 0.5f);
-            incoming.setCameraDistance(10000f * density);
-            float incomingAngle = 90f * (1f - progress);
-            incoming.setRotationY(direction > 0 ? -incomingAngle : incomingAngle);
-            incoming.setScaleX(effect == 3 ? 0.93f + 0.07f * progress : 1f);
-            incoming.setScaleY(effect == 3 ? 0.975f + 0.025f * progress : 1f);
-            incoming.setAlpha(effect == 3 ? 0.82f + 0.18f * progress : 1f);
-            incoming.setTranslationZ(effect == 1 ? density * 12f * progress : 0f);
+        if (effect == 1) {
+            // 3D Cube: rotate each face around the shared vertical edge with depth separation.
+            outgoing.setPivotX(direction > 0 ? width : 0f);
+            outgoing.setPivotY(height * 0.5f);
+            outgoing.setRotationY(direction * 90f * progress);
+            outgoing.setTranslationZ(-density * 28f * progress);
+            outgoing.setTranslationX(-direction * width * 0.04f * progress);
+            if (to >= 0 && to < pagesStrip.getChildCount()) {
+                View incoming = pagesStrip.getChildAt(to);
+                incoming.setCameraDistance(10000f * density);
+                incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
+                incoming.setPivotY(incoming.getHeight() * 0.5f);
+                incoming.setRotationY(-direction * 90f * (1f - progress));
+                incoming.setTranslationZ(density * 28f * progress);
+                incoming.setTranslationX(direction * width * 0.04f * (1f - progress));
+            }
+        } else if (effect == 3) {
+            // Page Flip: hinge from the top edge on the X axis, like a turning sheet.
+            outgoing.setPivotX(width * 0.5f);
+            outgoing.setPivotY(0f);
+            outgoing.setRotationX(direction * 82f * progress);
+            outgoing.setRotationY(direction * 5f * progress);
+            outgoing.setScaleX(1f - 0.04f * progress);
+            outgoing.setAlpha(1f - 0.22f * progress);
+            if (to >= 0 && to < pagesStrip.getChildCount()) {
+                View incoming = pagesStrip.getChildAt(to);
+                incoming.setCameraDistance(10000f * density);
+                incoming.setPivotX(incoming.getWidth() * 0.5f);
+                incoming.setPivotY(0f);
+                incoming.setRotationX(-direction * 82f * (1f - progress));
+                incoming.setRotationY(-direction * 5f * (1f - progress));
+                incoming.setScaleX(0.96f + 0.04f * progress);
+                incoming.setAlpha(0.78f + 0.22f * progress);
+            }
+        } else {
+            // 3D Wheel: broad rotation around the page center, controlled by the rotation slider.
+            float angle = Math.min(180f, getPageRotationDegrees());
+            outgoing.setPivotX(width * 0.5f);
+            outgoing.setPivotY(height * 0.5f);
+            outgoing.setRotationY(direction * angle * progress);
+            outgoing.setScaleX(1f - 0.035f * progress);
+            outgoing.setScaleY(1f - 0.025f * progress);
+            if (to >= 0 && to < pagesStrip.getChildCount()) {
+                View incoming = pagesStrip.getChildAt(to);
+                incoming.setCameraDistance(10000f * density);
+                incoming.setPivotX(incoming.getWidth() * 0.5f);
+                incoming.setPivotY(incoming.getHeight() * 0.5f);
+                incoming.setRotationY(-direction * angle * (1f - progress));
+                incoming.setScaleX(0.965f + 0.035f * progress);
+                incoming.setScaleY(0.975f + 0.025f * progress);
+            }
         }
     }
 
@@ -2389,14 +2441,13 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_PAGE_TRANSITION, value).apply();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSliderRow(content, "Clock size", 50, 120, getClockSize(), " sp", value -> {
-            prefs.edit().putInt(KEY_CLOCK_SIZE, value).apply();
+        addSliderRow(content, "Clock length", 60, 150, getClockLength(), "%", value -> {
+            prefs.edit().putInt(KEY_CLOCK_LENGTH, value).apply();
             applyClockPositionAndSize();
-            if (homeScreen != null) {
-                homeScreen.requestLayout();
-                if (pageViewport != null) pageViewport.requestLayout();
-                if (pagesStrip != null) pagesStrip.requestLayout();
-            }
+        });
+        addSliderRow(content, "Clock breadth", 60, 150, getClockBreadth(), "%", value -> {
+            prefs.edit().putInt(KEY_CLOCK_BREADTH, value).apply();
+            applyClockPositionAndSize();
         });
         addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_POSITION, value).apply();
@@ -2526,8 +2577,12 @@ public class MainActivity extends Activity {
         return Math.max(50, Math.min(180, prefs == null ? 90 : prefs.getInt(KEY_PAGE_ROTATION, 90)));
     }
 
-    private int getClockSize() {
-        return Math.max(50, Math.min(120, prefs == null ? 78 : prefs.getInt(KEY_CLOCK_SIZE, 78)));
+    private int getClockLength() {
+        return Math.max(60, Math.min(150, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_LENGTH, 100)));
+    }
+
+    private int getClockBreadth() {
+        return Math.max(60, Math.min(150, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_BREADTH, 100)));
     }
 
     private int getClockPosition() {
@@ -2553,19 +2608,30 @@ public class MainActivity extends Activity {
         if (clockGroup != null) {
             FrameLayout.LayoutParams groupParams = (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.CENTER_VERTICAL;
-            groupParams.height = LauncherUiUtils.dp(this, Math.round(getClockSize() * 1.46f));
+            groupParams.height = LauncherUiUtils.dp(this, Math.round(114f * getClockBreadth() / 100f));
             groupParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
             clockGroup.setLayoutParams(groupParams);
         }
         clockText.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         if (dateText != null) dateText.setGravity(alignment);
-        int size = getClockSize();
-        clockText.setTextSize(size);
-        int height = LauncherUiUtils.dp(this, Math.round(size * 1.46f));
+        // Keep the typography base fixed; the two controls independently stretch the
+        // visible clock horizontally (length) and vertically (breadth).
+        final float lengthScale = getClockLength() / 100f;
+        final float breadthScale = getClockBreadth() / 100f;
+        clockText.setTextSize(78f);
+        clockText.setPivotX(0f);
+        clockText.setPivotY(0f);
+        clockText.setScaleX(lengthScale);
+        clockText.setScaleY(breadthScale);
+        if (clockRow != null) {
+            clockRow.setClipChildren(false);
+            clockRow.setClipToPadding(false);
+        }
+        int height = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
         ViewGroup.LayoutParams clockParams = clockText.getLayoutParams();
         if (clockParams != null) {
             clockParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-            clockParams.height = height;
+            clockParams.height = LauncherUiUtils.dp(this, 114);
             clockText.setLayoutParams(clockParams);
         }
         if (clockRow != null) {
