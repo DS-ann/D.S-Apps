@@ -193,8 +193,9 @@ public class MainActivity extends Activity {
         super.onResume();
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
+        // loadApps() refreshes the home only when shortcuts actually disappear.
+        // Rebuilding every icon view whenever returning from any app caused visible stutter.
         loadApps();
-        if (!drawerOpen && root != null) renderHomePages(false);
         try { widgetHost.startListening(); } catch (Exception ignored) {}
     }
 
