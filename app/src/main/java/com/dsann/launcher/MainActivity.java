@@ -1553,6 +1553,20 @@ public class MainActivity extends Activity {
     private void applyClockStyle() {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         LauncherClockStyler.apply(this, clockText, style);
+        if (clockText instanceof SevenSegmentClockTextView) {
+            SevenSegmentClockTextView ledClock = (SevenSegmentClockTextView) clockText;
+            // Reassert the selected mode after every style refresh (including the
+            // minute-boundary clock update) and keep the custom glyph paint visible.
+            boolean ledMode = style == 5;
+            if (ledMode) {
+                clockText.setVisibility(View.VISIBLE);
+                clockText.setAlpha(1f);
+                clockText.setTextColor(Color.WHITE);
+                clockText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+            }
+            ledClock.setSevenSegmentMode(ledMode);
+            ledClock.invalidate();
+        }
     }
 
     private void updateClock() {
