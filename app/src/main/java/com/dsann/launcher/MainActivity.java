@@ -609,7 +609,7 @@ public class MainActivity extends Activity {
                     if (moveToNextPage) {
                         // Edge-drag always opens the next page, even when this page
                         // still has unused grid capacity.
-                        int destinationPage = currentPage + 1;
+                        int destinationPage = Math.max(currentPage + 1, pages.size());
                         ensurePageExists(destinationPage);
                         prefs.edit().putInt(KEY_ICON_PAGE + packageName, destinationPage)
                                 .putFloat(KEY_ICON_X + packageName, 0f)
