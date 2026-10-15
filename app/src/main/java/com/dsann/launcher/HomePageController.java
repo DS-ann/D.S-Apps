@@ -28,6 +28,7 @@ final class HomePageController {
         ResolveInfo findApp(String packageName);
         void installHomeIconTouch(View cell, String packageName);
         void restoreWidgetsOnPages();
+        void syncWidgetViewsToPages();
         void launchApp(ResolveInfo app);
         void showAppOptions(ResolveInfo app, boolean onHome);
     }
@@ -72,48 +73,109 @@ final class HomePageController {
     }
 
     void renderHomePages(boolean animate) {
-        if (host.getPagesStrip() == null) return;
-        // Clear focus from the actual focused descendant before detaching page trees.
-        // Clearing only the strip and each page is insufficient when focus belongs to
-        // an AppWidgetHostView nested inside a widget container.
         LinearLayout strip = host.getPagesStrip();
-        clearFocusRecursively(strip);
-        strip.clearFocus();
-        strip.removeAllViews();
-        int pageWidth = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(activity, 40));
+        if (strip == null) return;
+
+        // Match the page count to the persisted model without destroying the page strip.
+        // Keeping page containers alive avoids detaching AppWidgetHostViews on every icon
+        // move, which is safer for widgets that own focus or active touch state.
+        int pageWidth = host.getPageViewport() != null && host.getPageViewport().getWidth() > 0
+                ? host.getPageViewport().getWidth()
+                : Math.max(1, activity.getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(activity, 40));
+        int requiredPages = Math.max(1, host.getPages().size());
+        while (strip.getChildCount() < requiredPages) {
+            FrameLayout newPage = new FrameLayout(activity);
+            newPage.setClipChildren(false);
+            strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
+        }
+
+        // Rebuild shortcut cells only. Existing widget containers remain attached to their
+        // page objects and are synchronized to their persisted page indexes separately.
+        for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
+            View pageView = strip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            for (int childIndex = page.getChildCount() - 1; childIndex >= 0; childIndex--) {
+                View child = page.getChildAt(childIndex);
+                Object tag = child.getTag();
+                if (tag instanceof String && ((String) tag).startsWith("launcher_app:")) {
+                    child.animate().cancel();
+                    page.removeViewAt(childIndex);
+                }
+            }
+        }
+
+        host.syncWidgetViewsToPages();
+
+        // Empty trailing pages are removed only after widget containers have been moved
+        // to the page indicated by the normalized model.
+        while (strip.getChildCount() > requiredPages) {
+            int lastIndex = strip.getChildCount() - 1;
+            View last = strip.getChildAt(lastIndex);
+            if (last instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) last;
+                for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                    View child = group.getChildAt(i);
+                    Object tag = child.getTag();
+                    if (tag instanceof String && ((String) tag).startsWith("launcher_widget:")) {
+                        // Do not discard a widget if stale UI state left it on a trailing page.
+                        FrameLayout fallback = (FrameLayout) strip.getChildAt(Math.max(0, requiredPages - 1));
+                        ViewParent parent = child.getParent();
+                        if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(child);
+                        fallback.addView(child);
+                    } else {
+                        group.removeViewAt(i);
+                    }
+                }
+            }
+            strip.removeViewAt(lastIndex);
+        }
+
         int columns = host.getHomeColumns();
         int rows = homeRows;
-        for (int pageIndex = 0; pageIndex < host.getPages().size(); pageIndex++) {
-            FrameLayout page = new FrameLayout(activity);
+        for (int pageIndex = 0; pageIndex < requiredPages; pageIndex++) {
+            FrameLayout page = (FrameLayout) strip.getChildAt(pageIndex);
             page.setClipChildren(false);
             List<String> pagePackages = host.getPages().get(pageIndex);
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
                 if (host.findApp(packageName) == null) continue;
-                View cell = new LauncherAppAdapter(activity, prefs, packageManager, host.getAllApps(), host.getDrawerApps(), pagePackages,
+                View cell = new LauncherAppAdapter(activity, prefs, packageManager,
+                        host.getAllApps(), host.getDrawerApps(), pagePackages,
                         false, iconSizeKey, fontSizeKey, showLabelsKey,
                         new LauncherAppAdapter.Actions() {
                             @Override public void onAppClick(ResolveInfo app) { host.launchApp(app); }
-                            @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { host.showAppOptions(app, onHome); }
+                            @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
+                                host.showAppOptions(app, onHome);
+                            }
                         }).getView(itemIndex, null, page);
                 cell.setTag("launcher_app:" + packageName);
-                int fallbackHeight = Math.max(LauncherUiUtils.dp(activity, 360), activity.getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(activity, 260));
-                int pageHeight = host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100) ? host.getPageViewport().getHeight() : fallbackHeight;
+                int fallbackHeight = Math.max(LauncherUiUtils.dp(activity, 360),
+                        activity.getResources().getDisplayMetrics().heightPixels
+                                - LauncherUiUtils.dp(activity, 260));
+                int pageHeight = host.getPageViewport() != null
+                        && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
+                        ? host.getPageViewport().getHeight() : fallbackHeight;
                 int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1), pageWidth / columns);
                 int cellHeight = Math.max(LauncherUiUtils.dp(activity, 1), pageHeight / rows);
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
                 int defaultRow = (itemIndex / columns) % rows;
-                float savedX = prefs.getFloat(iconXKey + packageName, defaultCol / (float) Math.max(1, columns - 1));
-                float savedY = prefs.getFloat(iconYKey + packageName, defaultRow / (float) Math.max(1, rows - 1));
-                int col = Math.max(0, Math.min(columns - 1, Math.round(savedX * Math.max(1, columns - 1))));
-                int row = Math.max(0, Math.min(rows - 1, Math.round(savedY * Math.max(1, rows - 1))));
+                float savedX = prefs.getFloat(iconXKey + packageName,
+                        defaultCol / (float) Math.max(1, columns - 1));
+                float savedY = prefs.getFloat(iconYKey + packageName,
+                        defaultRow / (float) Math.max(1, rows - 1));
+                int col = Math.max(0, Math.min(columns - 1,
+                        Math.round(savedX * Math.max(1, columns - 1))));
+                int row = Math.max(0, Math.min(rows - 1,
+                        Math.round(savedY * Math.max(1, rows - 1))));
                 lp.leftMargin = col * cellWidth;
                 lp.topMargin = row * cellHeight;
                 page.addView(cell, lp);
                 host.installHomeIconTouch(cell, packageName);
             }
-            host.getPagesStrip().addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
                 int actualCellWidth = Math.max(1, page.getWidth() / columns);
@@ -121,16 +183,21 @@ final class HomePageController {
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
-                    if (!(childTag instanceof String) || !((String) childTag).startsWith("launcher_app:")) continue;
+                    if (!(childTag instanceof String)
+                            || !((String) childTag).startsWith("launcher_app:")) continue;
                     String childPackage = ((String) childTag).substring("launcher_app:".length());
                     int orderIndex = pagePackages.indexOf(childPackage);
                     if (orderIndex < 0) continue;
                     int defaultCol = orderIndex % columns;
                     int defaultRow = (orderIndex / columns) % rows;
-                    float savedX = prefs.getFloat(iconXKey + childPackage, defaultCol / (float) Math.max(1, columns - 1));
-                    float savedY = prefs.getFloat(iconYKey + childPackage, defaultRow / (float) Math.max(1, rows - 1));
-                    int col = Math.max(0, Math.min(columns - 1, Math.round(savedX * Math.max(1, columns - 1))));
-                    int row = Math.max(0, Math.min(rows - 1, Math.round(savedY * Math.max(1, rows - 1))));
+                    float savedX = prefs.getFloat(iconXKey + childPackage,
+                            defaultCol / (float) Math.max(1, columns - 1));
+                    float savedY = prefs.getFloat(iconYKey + childPackage,
+                            defaultRow / (float) Math.max(1, rows - 1));
+                    int col = Math.max(0, Math.min(columns - 1,
+                            Math.round(savedX * Math.max(1, columns - 1))));
+                    int row = Math.max(0, Math.min(rows - 1,
+                            Math.round(savedY * Math.max(1, rows - 1))));
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
@@ -140,30 +207,28 @@ final class HomePageController {
                 }
             });
         }
+
         host.restoreWidgetsOnPages();
-        host.getPageIndicator().setVisibility(prefs.getBoolean(showPageIndicatorKey, true) ? View.VISIBLE : View.GONE);
-        host.getPageIndicator().setText((host.getCurrentPage() + 1) + "  /  " + host.getPages().size());
-        host.getPagesStrip().animate().cancel();
-        host.getPagesStrip().setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        if (host.getPageIndicator() != null) {
+            host.getPageIndicator().setVisibility(
+                    prefs.getBoolean(showPageIndicatorKey, true) ? View.VISIBLE : View.GONE);
+            host.getPageIndicator().setText(
+                    (host.getCurrentPage() + 1) + "  /  " + requiredPages);
+        }
+        strip.animate().cancel();
+        strip.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         float targetX = -host.getCurrentPage() * pageWidth;
         if (animate) {
-            // Lightweight 3D page-turn hint: small rotation, no scaling or heavy overshoot.
-            // Keep the strip on a hardware layer only for the short transition.
-            host.getPagesStrip().setCameraDistance(12000f * activity.getResources().getDisplayMetrics().density);
-            host.getPagesStrip().setRotationY(host.getCurrentPage() > 0 ? 3f : -3f);
-            host.getPagesStrip().setScaleX(1f);
-            host.getPagesStrip().animate()
-                    .translationX(targetX)
-                    .rotationY(0f)
-                    .setDuration(220L)
-                    .withEndAction(() -> host.getPagesStrip().setLayerType(View.LAYER_TYPE_NONE, null))
-                    .start();
+            strip.setCameraDistance(12000f * activity.getResources().getDisplayMetrics().density);
+            strip.setRotationY(host.getCurrentPage() > 0 ? 3f : -3f);
+            strip.setScaleX(1f);
+            strip.animate().translationX(targetX).rotationY(0f).setDuration(220L)
+                    .withEndAction(() -> strip.setLayerType(View.LAYER_TYPE_NONE, null)).start();
         } else {
-            host.getPagesStrip().setTranslationX(targetX);
-            host.getPagesStrip().setRotationY(0f);
-            host.getPagesStrip().setScaleX(1f);
-            host.getPagesStrip().setLayerType(View.LAYER_TYPE_NONE, null);
+            strip.setTranslationX(targetX);
+            strip.setRotationY(0f);
+            strip.setScaleX(1f);
+            strip.setLayerType(View.LAYER_TYPE_NONE, null);
         }
-    
     }
 }
