@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
     private TextView clockText;
     private TextView dateText;
     private TextView pageIndicator;
-    private AppAdapter drawerAdapter;
+    private LauncherAppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
     private List<ResolveInfo> drawerApps = new ArrayList<>();
     private final List<String> homePackages = new ArrayList<>();
@@ -351,7 +351,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
         hp.topMargin = dp(8);
         homeScreen.addView(hero, hp);
-        clockText = new SquarePixelClockTextView(this);
+        clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
         clockText.setText("--:--");
         clockText.setTextSize(40);
         clockText.setTextColor(Color.WHITE);
@@ -402,7 +402,12 @@ public class MainActivity extends Activity {
         drawerGrid.setHorizontalSpacing(dp(prefs.getInt(KEY_DRAWER_SPACING, 8) / 2));
         drawerGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         drawerGrid.setSelector(android.R.color.transparent);
-        drawerAdapter = new AppAdapter(true);
+        drawerAdapter = new LauncherAppAdapter(this, prefs, packageManager, allApps, drawerApps, null,
+                true, KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE, KEY_SHOW_DRAWER_LABELS,
+                new LauncherAppAdapter.Actions() {
+                    @Override public void onAppClick(ResolveInfo app) { launchApp(app); }
+                    @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { showAppOptions(app, onHome); }
+                });
         drawerGrid.setAdapter(drawerAdapter);
         drawerScreen.addView(drawerGrid, new LinearLayout.LayoutParams(-1, 0, 1f));
         drawerGrid.setOnItemLongClickListener((parent, view, position, id) -> {
@@ -426,7 +431,12 @@ public class MainActivity extends Activity {
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
                 if (findApp(packageName) == null) continue;
-                View cell = new AppAdapter(false, pagePackages).getView(itemIndex, null, page);
+                View cell = new LauncherAppAdapter(this, prefs, packageManager, allApps, drawerApps, pagePackages,
+                        false, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_HOME_LABELS,
+                        new LauncherAppAdapter.Actions() {
+                            @Override public void onAppClick(ResolveInfo app) { launchApp(app); }
+                            @Override public void onAppLongClick(ResolveInfo app, boolean onHome) { showAppOptions(app, onHome); }
+                        }).getView(itemIndex, null, page);
                 cell.setTag("launcher_app:" + packageName);
                 int fallbackHeight = Math.max(dp(360), getResources().getDisplayMetrics().heightPixels - dp(260));
                 int pageHeight = pageViewport.getHeight() > dp(100) ? pageViewport.getHeight() : fallbackHeight;
@@ -952,7 +962,7 @@ public class MainActivity extends Activity {
         int screenH = getResources().getDisplayMetrics().heightPixels;
         int cropH = Math.max(dp(220), Math.min((int)(screenH * 0.56f), screenH - dp(190)));
         int cropW = Math.max(dp(120), Math.round(cropH * screenW / (float)Math.max(1, screenH)));
-        CropView preview = new CropView(bitmap);
+        WallpaperCropView preview = new WallpaperCropView(this, bitmap);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(14), dp(14), dp(14), dp(12));
@@ -995,39 +1005,6 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Couldn't crop this image", Toast.LENGTH_LONG).show();
             }
         });
-    }
-
-    private final class CropView extends View {
-        private final Bitmap bitmap;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        private float scale, x, y, lastX, lastY;
-        CropView(Bitmap bitmap) { super(MainActivity.this); this.bitmap = bitmap; }
-        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-            scale = Math.max(w / (float)bitmap.getWidth(), h / (float)bitmap.getHeight());
-            x = (w - bitmap.getWidth() * scale) / 2f;
-            y = (h - bitmap.getHeight() * scale) / 2f;
-        }
-        @Override protected void onDraw(Canvas canvas) {
-            canvas.drawBitmap(bitmap, null, new RectF(x, y, x + bitmap.getWidth() * scale, y + bitmap.getHeight() * scale), paint);
-        }
-        @Override public boolean onTouchEvent(MotionEvent event) {
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) { lastX = event.getX(); lastY = event.getY(); return true; }
-            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                x += event.getX() - lastX; y += event.getY() - lastY;
-                lastX = event.getX(); lastY = event.getY();
-                x = Math.min(0, Math.max(getWidth() - bitmap.getWidth() * scale, x));
-                y = Math.min(0, Math.max(getHeight() - bitmap.getHeight() * scale, y));
-                invalidate(); return true;
-            }
-            return true;
-        }
-        Bitmap crop() {
-            int left = Math.max(0, (int)Math.floor(-x / scale));
-            int top = Math.max(0, (int)Math.floor(-y / scale));
-            int width = Math.min(bitmap.getWidth() - left, Math.round(getWidth() / scale));
-            int height = Math.min(bitmap.getHeight() - top, Math.round(getHeight() / scale));
-            return Bitmap.createBitmap(bitmap, left, top, width, height);
-        }
     }
 
     private void addWidgetToCurrentPage(AppWidgetProviderInfo info, int widgetId) {
@@ -1170,68 +1147,6 @@ public class MainActivity extends Activity {
     }
 
     /** Draws the selected clock in a chunky 5x7 square-pixel font. */
-    private class SquarePixelClockTextView extends TextView {
-        private final Paint pixelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final String[] digitRows = new String[]{
-                "01110/11011/11011/11011/11011/11011/01110",
-                "00100/01100/00100/00100/00100/00100/01110",
-                "01110/11011/00011/00110/01100/11000/11111",
-                "11110/00011/00011/01110/00011/00011/11110",
-                "00011/00111/01011/10011/11111/00011/00011",
-                "11111/11000/11000/11110/00011/00011/11110",
-                "01110/11000/11000/11110/11011/11011/01110",
-                "11111/00011/00110/00100/01100/01100/01100",
-                "01110/11011/11011/01110/11011/11011/01110",
-                "01110/11011/11011/01111/00011/00011/01110"
-        };
-
-        SquarePixelClockTextView(android.content.Context context) {
-            super(context);
-            setGravity(Gravity.CENTER_VERTICAL);
-            setSingleLine(true);
-        }
-
-        @Override protected void onDraw(Canvas canvas) {
-            if (prefs == null || prefs.getInt(KEY_CLOCK_STYLE, 0) != 5) {
-                super.onDraw(canvas);
-                return;
-            }
-            String value = getText() == null ? "" : getText().toString();
-            if (value.length() == 0) return;
-            float cell = getTextSize() / 9.0f;
-            float block = cell * 0.82f;
-            float advance = cell * 6.0f;
-            float total = value.length() * advance - cell;
-            float left = Math.max(getPaddingLeft(), (getWidth() - total) / 2.0f);
-            float top = (getHeight() - cell * 7.0f) / 2.0f;
-            pixelPaint.setColor(getCurrentTextColor());
-            pixelPaint.setStyle(Paint.Style.FILL);
-            pixelPaint.setShadowLayer(dp(1), 0f, 0f, Color.argb(70, 60, 255, 100));
-            for (int i = 0; i < value.length(); i++) {
-                char ch = value.charAt(i);
-                if (ch == ':') {
-                    drawPixel(canvas, left + i * advance + cell * 2.0f, top + cell * 2.0f, block);
-                    drawPixel(canvas, left + i * advance + cell * 2.0f, top + cell * 5.0f, block);
-                    continue;
-                }
-                if (ch < '0' || ch > '9') continue;
-                String[] rows = digitRows[ch - '0'].split("/");
-                for (int row = 0; row < 7; row++) {
-                    for (int col = 0; col < 5; col++) {
-                        if (rows[row].charAt(col) == '1') {
-                            drawPixel(canvas, left + i * advance + col * cell, top + row * cell, block);
-                        }
-                    }
-                }
-            }
-            pixelPaint.clearShadowLayer();
-        }
-
-        private void drawPixel(Canvas canvas, float x, float y, float size) {
-            canvas.drawRect(x, y, x + size, y + size, pixelPaint);
-        }
-    }
-
     private void applyClockStyle() {
         if (clockText == null) return;
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
@@ -1307,63 +1222,6 @@ public class MainActivity extends Activity {
     }
 
     private int dp(float value) { return (int)(value * getResources().getDisplayMetrics().density + 0.5f); }
-
-    private class AppAdapter extends BaseAdapter {
-        private final boolean drawer;
-        private final List<String> fixedPackages;
-        AppAdapter(boolean drawer) { this(drawer, null); }
-        AppAdapter(boolean drawer, List<String> fixedPackages) { this.drawer = drawer; this.fixedPackages = fixedPackages; }
-        private List<ResolveInfo> items() {
-            if (drawer) return drawerApps;
-            List<ResolveInfo> out = new ArrayList<>();
-            if (fixedPackages != null) for (String p : fixedPackages) { ResolveInfo app = findApp(p); if (app != null) out.add(app); }
-            return out;
-        }
-        @Override public int getCount() { return items().size(); }
-        @Override public Object getItem(int position) { return items().get(position); }
-        @Override public long getItemId(int position) { return position; }
-        @Override public View getView(int position, View recycled, ViewGroup parent) {
-            LinearLayout cell;
-            ImageView icon;
-            TextView label;
-            if (recycled instanceof LinearLayout) {
-                cell = (LinearLayout) recycled;
-                icon = (ImageView) cell.getChildAt(0);
-                label = (TextView) cell.getChildAt(1);
-            } else {
-                cell = new LinearLayout(MainActivity.this);
-                cell.setOrientation(LinearLayout.VERTICAL);
-                cell.setGravity(Gravity.CENTER);
-                cell.setPadding(dp(2), dp(7), dp(2), dp(7));
-                icon = new ImageView(MainActivity.this);
-                icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                int iconSize = prefs == null ? 48 : prefs.getInt(drawer ? KEY_DRAWER_ICON_SIZE : KEY_ICON_SIZE, 48);
-                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize));
-                ip.gravity = Gravity.CENTER;
-                cell.addView(icon, ip);
-                label = text("", 10, Color.rgb(236, 239, 249), false);
-                label.setGravity(Gravity.CENTER);
-                label.setMaxLines(2);
-                label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
-            }
-            ResolveInfo app = items().get(position);
-            int iconSize = prefs == null ? 48 : prefs.getInt(drawer ? KEY_DRAWER_ICON_SIZE : KEY_ICON_SIZE, 48);
-            ViewGroup.LayoutParams iconLp = icon.getLayoutParams();
-            if (iconLp != null && (iconLp.width != dp(iconSize) || iconLp.height != dp(iconSize))) {
-                iconLp.width = dp(iconSize); iconLp.height = dp(iconSize); icon.setLayoutParams(iconLp);
-            }
-            icon.setImageDrawable(app.loadIcon(packageManager));
-            label.setText(app.loadLabel(packageManager));
-            int fontChoice = prefs.getInt(drawer ? KEY_DRAWER_FONT_SIZE : KEY_HOME_FONT_SIZE, drawer ? 1 : 1);
-            label.setTextSize(new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))]);
-            label.setVisibility(prefs.getBoolean(drawer ? KEY_SHOW_DRAWER_LABELS : KEY_SHOW_HOME_LABELS, true) ? View.VISIBLE : View.GONE);
-            cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
-            cell.setOnClickListener(v -> launchApp(app));
-            cell.setOnLongClickListener(v -> { showAppOptions(app, !drawer); return true; });
-            return cell;
-        }
-    }
 
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
     private int getDrawerColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS))); }
