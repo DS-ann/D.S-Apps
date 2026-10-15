@@ -2,14 +2,16 @@ package com.dsann.launcher;
 
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.Paint;
 import android.graphics.Color;
-import android.graphics.Path;
+import android.graphics.Paint;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.widget.TextView;
 
-/** TextView-backed seven-segment digital clock face; native text is used for other presets. */
+/**
+ * A real seven-segment LED renderer for the launcher clock.
+ * TextView still owns the value and accessibility text; only the glyph rendering changes.
+ */
 public final class SevenSegmentClockTextView extends TextView {
     private final Paint segmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean sevenSegmentMode;
@@ -28,12 +30,22 @@ public final class SevenSegmentClockTextView extends TextView {
         setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         setSingleLine(true);
         setIncludeFontPadding(false);
+        segmentPaint.setStrokeCap(Paint.Cap.ROUND);
+        segmentPaint.setStrokeJoin(Paint.Join.ROUND);
+        segmentPaint.setStyle(Paint.Style.STROKE);
     }
 
     public void setSevenSegmentMode(boolean enabled) {
+        if (sevenSegmentMode == enabled) return;
         sevenSegmentMode = enabled;
+        setLayerType(ViewLayerType(), null);
         invalidate();
         requestLayout();
+    }
+
+    // Kept separate so this class stays compatible with Android 6 (API 23).
+    private int ViewLayerType() {
+        return android.view.View.LAYER_TYPE_SOFTWARE;
     }
 
     @Override protected void onDraw(Canvas canvas) {
@@ -43,89 +55,94 @@ public final class SevenSegmentClockTextView extends TextView {
         }
 
         String raw = getText() == null ? "" : getText().toString();
-        StringBuilder valueBuilder = new StringBuilder();
+        StringBuilder display = new StringBuilder();
         for (int i = 0; i < raw.length(); i++) {
             char ch = raw.charAt(i);
             int digit = Character.digit(ch, 10);
-            if (digit >= 0) valueBuilder.append((char) ('0' + digit));
-            else if (ch == ':') valueBuilder.append(':');
+            if (digit >= 0) display.append((char) ('0' + digit));
+            else if (ch == ':' || ch == '\uFF1A') display.append(':');
         }
-        String value = valueBuilder.toString();
-        if (value.isEmpty()) return;
+        String value = display.toString();
+        if (value.length() == 0) return;
 
-        float availableWidth = Math.max(1f, getWidth() - getPaddingLeft() - getPaddingRight());
-        float availableHeight = Math.max(1f, getHeight() - getPaddingTop() - getPaddingBottom());
-        int digitCount = 0;
-        for (int i = 0; i < value.length(); i++) if (value.charAt(i) >= '0' && value.charAt(i) <= '9') digitCount++;
-        int colonCount = value.length() - digitCount;
-        float unit = Math.min(availableHeight * 0.88f,
-                availableWidth / Math.max(1f, digitCount * 0.62f + colonCount * 0.30f + 0.08f));
-        float digitWidth = unit * 0.52f;
-        float digitHeight = unit * 0.88f;
-        float horizontalLength = digitWidth * 0.72f;
-        float verticalLength = digitHeight * 0.34f;
-        float stroke = Math.max(2f, unit * 0.085f);
-        float advance = unit * 0.62f;
-        float totalWidth = digitCount * advance + colonCount * unit * 0.30f;
-        float x = getPaddingLeft() + Math.max(0f, availableWidth - totalWidth);
-        float y = getPaddingTop() + (availableHeight - digitHeight) / 2f;
+        float leftBound = getPaddingLeft();
+        float rightBound = getWidth() - getPaddingRight();
+        float topBound = getPaddingTop();
+        float bottomBound = getHeight() - getPaddingBottom();
+        float availableWidth = Math.max(1f, rightBound - leftBound);
+        float availableHeight = Math.max(1f, bottomBound - topBound);
 
-        segmentPaint.setStyle(Paint.Style.STROKE);
-        segmentPaint.setStrokeCap(Paint.Cap.ROUND);
-        segmentPaint.setStrokeJoin(Paint.Join.ROUND);
-        segmentPaint.setStrokeWidth(stroke);
+        int digits = 0;
+        int colons = 0;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) == ':') colons++;
+            else digits++;
+        }
+        if (digits == 0) return;
+
+        // The whole string is sized as one unit, so 12-hour and 24-hour formats fit.
+        float widthUnits = digits * 0.72f + colons * 0.34f;
+        float unit = Math.min(availableHeight * 0.91f, availableWidth / widthUnits);
+        float digitWidth = unit * 0.56f;
+        float digitHeight = unit * 0.92f;
+        float advance = unit * 0.72f;
+        float totalWidth = digits * advance + colons * unit * 0.34f;
+        float x = rightBound - totalWidth;
+        float y = topBound + (availableHeight - digitHeight) / 2f;
+        float stroke = Math.max(2f, unit * 0.075f);
+        float inset = stroke * 0.72f;
+        float halfStroke = stroke / 2f;
+        float mid = y + digitHeight / 2f;
         int color = getCurrentTextColor();
-        float half = stroke / 2f;
+
+        canvas.save();
+        canvas.clipRect(leftBound, topBound, rightBound, bottomBound);
+        segmentPaint.setStrokeWidth(stroke);
+        segmentPaint.setStyle(Paint.Style.STROKE);
 
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
             if (ch == ':') {
                 segmentPaint.setStyle(Paint.Style.FILL);
                 segmentPaint.setColor(Color.argb(235, Color.red(color), Color.green(color), Color.blue(color)));
-                float dotRadius = stroke * 0.65f;
-                canvas.drawCircle(x + unit * 0.10f, y + digitHeight * 0.36f, dotRadius, segmentPaint);
-                canvas.drawCircle(x + unit * 0.10f, y + digitHeight * 0.68f, dotRadius, segmentPaint);
+                float radius = Math.max(2f, stroke * 0.62f);
+                float dotX = x + unit * 0.15f;
+                canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
+                canvas.drawCircle(dotX, y + digitHeight * 0.68f, radius, segmentPaint);
                 segmentPaint.setStyle(Paint.Style.STROKE);
-                x += unit * 0.30f;
+                x += unit * 0.34f;
                 continue;
             }
-            if (ch < '0' || ch > '9') continue;
 
-            // Segment order: top, upper-right, lower-right, bottom, lower-left, upper-left, middle.
-            boolean[] active = segments(ch);
-            float left = x + half;
-            float right = x + digitWidth - half;
-            float top = y + half;
-            float bottom = y + digitHeight - half;
-            float mid = y + digitHeight / 2f;
-            float inset = stroke * 0.65f;
-
+            float l = x + halfStroke;
+            float r = x + digitWidth - halfStroke;
+            float t = y + halfStroke;
+            float b = y + digitHeight - halfStroke;
+            float m = mid;
             float[][] lines = new float[][] {
-                    {left + inset, top, right - inset, top},
-                    {right, top + inset, right, mid - inset},
-                    {right, mid + inset, right, bottom - inset},
-                    {left + inset, bottom, right - inset, bottom},
-                    {left, mid + inset, left, bottom - inset},
-                    {left, top + inset, left, mid - inset},
-                    {left + inset, mid, right - inset, mid}
+                    {l + inset, t, r - inset, t},             // A: top
+                    {r, t + inset, r, m - inset},             // B: upper right
+                    {r, m + inset, r, b - inset},             // C: lower right
+                    {l + inset, b, r - inset, b},             // D: bottom
+                    {l, m + inset, l, b - inset},             // E: lower left
+                    {l, t + inset, l, m - inset},             // F: upper left
+                    {l + inset, m, r - inset, m}              // G: middle
             };
 
-            // A faint unlit segment gives the display a real LED-panel appearance.
-            segmentPaint.setColor(Color.argb(25, Color.red(color), Color.green(color), Color.blue(color)));
+            // Draw dim, unlit segments first, then the lit segments above them.
+            segmentPaint.setColor(Color.argb(28, Color.red(color), Color.green(color), Color.blue(color)));
             for (float[] line : lines) canvas.drawLine(line[0], line[1], line[2], line[3], segmentPaint);
+            boolean[] lit = segments(ch);
             segmentPaint.setColor(color);
-            segmentPaint.setShadowLayer(unit * 0.035f, 0f, 0f,
-                    Color.argb(100, Color.red(color), Color.green(color), Color.blue(color)));
-            for (int segment = 0; segment < lines.length; segment++) {
-                if (active[segment]) {
-                    float[] line = lines[segment];
+            for (int j = 0; j < lines.length; j++) {
+                if (lit[j]) {
+                    float[] line = lines[j];
                     canvas.drawLine(line[0], line[1], line[2], line[3], segmentPaint);
                 }
             }
-            segmentPaint.clearShadowLayer();
             x += advance;
         }
-        segmentPaint.setStyle(Paint.Style.FILL);
+        canvas.restore();
     }
 
     private boolean[] segments(char digit) {
