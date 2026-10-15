@@ -104,6 +104,7 @@ public class MainActivity extends Activity {
         }
     };
     private boolean drawerOpen = false;
+    private boolean drawerAtTopOnGestureDown = true;
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
             updateClock();
@@ -131,6 +132,7 @@ public class MainActivity extends Activity {
             longPressDownX = event.getX();
             longPressDownY = event.getY();
             longPressTriggered = false;
+            drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             handler.removeCallbacks(homeLongPress);
             if (!drawerOpen && !touchStartedOnAppCell(event.getRawX(), event.getRawY())) handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
@@ -144,7 +146,7 @@ public class MainActivity extends Activity {
             float dx = event.getX() - gestureDownX;
             float dy = event.getY() - gestureDownY;
             boolean verticalSwipe = Math.abs(dy) > dp(65) && Math.abs(dy) > Math.abs(dx)
-                    && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0));
+                    && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
             boolean horizontalSwipe = !drawerOpen && Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy);
             if (verticalSwipe || horizontalSwipe) {
                 // Cancel the child click before handling a swipe, otherwise a swipe
@@ -581,6 +583,13 @@ public class MainActivity extends Activity {
 
     private void previousPage() {
         if (currentPage > 0) { currentPage--; renderHomePages(true); }
+    }
+
+    private boolean isDrawerAtTop() {
+        if (drawerGrid == null || drawerGrid.getChildCount() == 0) return true;
+        if (drawerGrid.getFirstVisiblePosition() > 0) return false;
+        View first = drawerGrid.getChildAt(0);
+        return first == null || first.getTop() >= drawerGrid.getPaddingTop();
     }
 
     private void showHome() {
@@ -1093,11 +1102,23 @@ public class MainActivity extends Activity {
         });
         addSettingRow(content, "▧", "Choose photo wallpaper", "Select an image from this device", () -> {
             dialog.dismiss();
-            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            pick.addCategory(Intent.CATEGORY_OPENABLE); pick.setType("image/*");
-            pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            try { startActivityForResult(pick, REQUEST_WALLPAPER); }
-            catch (Exception e) { Toast.makeText(this, "No image picker is available", Toast.LENGTH_LONG).show(); }
+            // GET_CONTENT is supported by older Android 6 gallery/file-picker apps.
+            // The selected image is copied into private storage in onActivityResult.
+            Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            pick.setType("image/*");
+            try { startActivityForResult(Intent.createChooser(pick, "Choose wallpaper"), REQUEST_WALLPAPER); }
+            catch (Exception e) {
+                try {
+                    Intent documents = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    documents.addCategory(Intent.CATEGORY_OPENABLE);
+                    documents.setType("image/*");
+                    documents.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                    startActivityForResult(documents, REQUEST_WALLPAPER);
+                } catch (Exception ignored) {
+                    Toast.makeText(this, "No image picker is available", Toast.LENGTH_LONG).show();
+                }
+            }
         });
         addSettingRow(content, "▣", "System wallpaper picker", "Open Android wallpaper settings", () -> {
             dialog.dismiss();
