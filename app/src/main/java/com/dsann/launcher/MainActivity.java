@@ -491,11 +491,11 @@ public class MainActivity extends Activity {
         clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
         clockText.setText("--:--");
         clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        clockText.setTextSize(40);
+        clockText.setTextSize(52); // 30% larger than the previous 40sp clock
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
         clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
-        clockText.setLetterSpacing(0.055f);
+        clockText.setLetterSpacing(0.008f); // Keep the time and AM/PM tightly spaced
         applyClockStyle();
         hero.addView(clockText);
         dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
@@ -1251,7 +1251,7 @@ public class MainActivity extends Activity {
         if (!prefs.getBoolean(KEY_24_HOUR, false) && clockValue.length() >= 2) {
             int suffixStart = clockValue.length() - 2;
             android.text.SpannableString styled = new android.text.SpannableString(clockValue);
-            styled.setSpan(new android.text.style.RelativeSizeSpan(0.52f), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            styled.setSpan(new android.text.style.RelativeSizeSpan(0.42f), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             styled.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             clockText.setText(styled);
         } else {
