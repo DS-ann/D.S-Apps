@@ -83,7 +83,12 @@ public final class SquarePixelClockTextView extends TextView {
             }
         }
         String value = visible.toString();
-        if (value.length() == 0) return;
+        // Never leave the clock blank if a locale formatter returns an unexpected
+        // string; the native TextView is a safe fallback.
+        if (value.length() == 0) {
+            super.onDraw(canvas);
+            return;
+        }
         float availableWidth = Math.max(1f, getWidth() - getPaddingLeft() - getPaddingRight());
         float availableHeight = Math.max(1f, getHeight() - getPaddingTop() - getPaddingBottom());
         float naturalCell = getTextSize() / 7.4f;
@@ -96,7 +101,8 @@ public final class SquarePixelClockTextView extends TextView {
         float block = cell * 0.82f;
         float advance = cell * 5.8f;
         float total = value.length() * advance - cell * 0.8f;
-        float left = getPaddingLeft() + Math.max(0f, (availableWidth - total) / 2.0f);
+        // Keep the time aligned to the right edge of the clock panel, like the other styles.
+        float left = getPaddingLeft() + Math.max(0f, availableWidth - total);
         float top = getPaddingTop() + Math.max(0f, (availableHeight - cell * 7.0f) / 2.0f);
         pixelPaint.setColor(getCurrentTextColor());
         pixelPaint.setStyle(Paint.Style.FILL);
