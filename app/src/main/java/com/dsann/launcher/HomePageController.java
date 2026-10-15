@@ -61,7 +61,6 @@ final class HomePageController {
     void renderHomePages(boolean animate) {
         if (host.getPagesStrip() == null) return;
         host.getPagesStrip().removeAllViews();
-        host.rebuildPages();
         int pageWidth = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(activity, 40));
         int columns = host.getHomeColumns();
         int rows = homeRows;
