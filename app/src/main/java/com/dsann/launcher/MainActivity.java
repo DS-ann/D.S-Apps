@@ -1085,27 +1085,27 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         clockText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
         switch (style) {
-            case 1: // Cyber HUD: compact technical lettering with cyan edge glow.
-                clockText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
-                clockText.setTextSize(39);
-                clockText.setLetterSpacing(0.075f);
+            case 1: // Cyber HUD: sharply condensed, italic display lettering.
+                clockText.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC));
+                clockText.setTextSize(40);
+                clockText.setLetterSpacing(0.035f);
                 clockText.setTextColor(Color.rgb(87, 229, 255));
                 clockText.setShadowLayer(dp(4), 0f, 0f, Color.argb(125, 0, 190, 255));
                 break;
-            case 2: // Neon Circuit: vivid green terminal-inspired digital readout.
-                clockText.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+            case 2: // Neon Circuit: heavy geometric system sans, strong block-like digits.
+                clockText.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
                 clockText.setTextSize(38);
-                clockText.setLetterSpacing(0.025f);
+                clockText.setLetterSpacing(0.015f);
                 clockText.setTextColor(Color.rgb(112, 255, 190));
                 clockText.setShadowLayer(dp(5), 0f, 0f, Color.argb(105, 0, 255, 135));
                 break;
-            case 3: // Tech Minimal: restrained futuristic typography, no glow.
-                clockText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                clockText.setTextSize(42);
-                clockText.setLetterSpacing(0.035f);
+            case 3: // Tech Minimal: thin, airy futuristic typography with no glow.
+                clockText.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+                clockText.setTextSize(44);
+                clockText.setLetterSpacing(0.065f);
                 clockText.setTextColor(Color.rgb(225, 237, 255));
                 break;
-            default: // Digital: crisp monospaced digits with a cool blue display glow.
+            default: // Digital: fixed-width digital readout with bold squared-off glyphs.
                 clockText.setTypeface(Typeface.create("sans-serif-monospace", Typeface.BOLD));
                 clockText.setTextSize(40);
                 clockText.setLetterSpacing(0.055f);
