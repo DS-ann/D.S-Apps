@@ -280,7 +280,9 @@ public class MainActivity extends Activity {
             }
             // A true wheel/cylinder turn: the two page surfaces pivot on their shared
             // vertical edge. Keep the strip stationary while the finger controls the angle.
-            if (!drawerOpen && !gestureStartedOnWidget && !gestureStartedOnContactShortcut
+            // Let a clear horizontal swipe starting on a widget change pages too.
+            // The widget's touch stream is cancelled once the swipe threshold is crossed.
+            if (!drawerOpen && !gestureStartedOnContactShortcut
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dx) > Math.abs(dy) * 1.15f) {
@@ -729,6 +731,11 @@ public class MainActivity extends Activity {
                 ? Math.max(1, Math.min(columns, prefs.getInt(KEY_SHORTCUT_SPAN_X, 1))) : 1;
         int shortcutSpanY = savedHeightDp > 0
                 ? Math.max(1, Math.min(rows, prefs.getInt(KEY_SHORTCUT_SPAN_Y, 1))) : 1;
+        // Check the complete resized shortcut footprint, not only its first grid cell.
+        int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
+                savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp) : cellW * shortcutSpanX));
+        int desiredTileHeight = Math.max(1, Math.min(pageViewport.getHeight(),
+                savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp) : cellH * shortcutSpanY));
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
@@ -736,8 +743,12 @@ public class MainActivity extends Activity {
             FrameLayout page = (FrameLayout) pageView;
             for (int row = 0; row < rows && chosenPage == null; row++) {
                 for (int col = 0; col < columns && chosenPage == null; col++) {
-                    android.graphics.Rect candidate = new android.graphics.Rect(
-                            col * cellW, row * cellH, (col + 1) * cellW, (row + 1) * cellH);
+                    int candidateLeft = col * cellW;
+                    int candidateTop = row * cellH;
+                    if (candidateLeft + desiredTileWidth > pageViewport.getWidth()
+                            || candidateTop + desiredTileHeight > pageViewport.getHeight()) continue;
+                    android.graphics.Rect candidate = new android.graphics.Rect(candidateLeft, candidateTop,
+                            candidateLeft + desiredTileWidth, candidateTop + desiredTileHeight);
                     boolean occupied = false;
                     for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                         View child = page.getChildAt(childIndex);
@@ -808,14 +819,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
         labelParams.topMargin = LauncherUiUtils.dp(this, 3);
         tileContent.addView(label, labelParams);
-        int tileWidth = savedWidthDp > 0
-                ? Math.min(pageViewport.getWidth() - chosenLeft, LauncherUiUtils.dp(this, savedWidthDp))
-                : Math.min(pageViewport.getWidth() - chosenLeft, cellW * shortcutSpanX);
-        int tileHeight = savedHeightDp > 0
-                ? Math.min(pageViewport.getHeight() - chosenTop, LauncherUiUtils.dp(this, savedHeightDp))
-                : Math.min(pageViewport.getHeight() - chosenTop, cellH * shortcutSpanY);
+        int tileWidth = Math.min(pageViewport.getWidth() - chosenLeft, desiredTileWidth);
+        int tileHeight = Math.min(pageViewport.getHeight() - chosenTop, desiredTileHeight);
+        // Keep the real layout bounds equal to the resized tile; do not inflate it to a grid cell.
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
-                Math.max(cellW, tileWidth), Math.max(cellH, tileHeight), Gravity.TOP | Gravity.LEFT);
+                Math.max(1, tileWidth), Math.max(1, tileHeight), Gravity.TOP | Gravity.LEFT);
         tileParams.leftMargin = chosenLeft;
         tileParams.topMargin = chosenTop;
         chosenPage.addView(tile, tileParams);
@@ -2315,6 +2323,28 @@ public class MainActivity extends Activity {
                 saveIconSlot(pkg, bestCol, bestRow, columns);
             }
         }
+        // If a widget is moved over the contact shortcut, place the shortcut again
+        // using its complete bounds and check both home pages.
+        View contactShortcut = null;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if ("launcher_contact_shortcut".equals(child.getTag())) {
+                contactShortcut = child;
+                break;
+            }
+        }
+        if (contactShortcut != null) {
+            FrameLayout.LayoutParams shortcutLp = (FrameLayout.LayoutParams) contactShortcut.getLayoutParams();
+            android.graphics.Rect widgetBounds = new android.graphics.Rect(wx1, wy1, wx2, wy2);
+            android.graphics.Rect shortcutBounds = new android.graphics.Rect(shortcutLp.leftMargin,
+                    shortcutLp.topMargin, shortcutLp.leftMargin + contactShortcut.getWidth(),
+                    shortcutLp.topMargin + contactShortcut.getHeight());
+            if (android.graphics.Rect.intersects(widgetBounds, shortcutBounds)) {
+                int pageIndex = pagesStrip == null ? 0 : pagesStrip.indexOfChild(page);
+                prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex == 0 ? 1 : 0).apply();
+                renderSavedContactShortcut();
+            }
+        }
     }
 
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
@@ -2655,7 +2685,8 @@ public class MainActivity extends Activity {
         int rowHeight = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
         if (clockRow != null) {
             ViewGroup.LayoutParams rowParams = clockRow.getLayoutParams();
-            if (rowParams != null) { rowParams.width = contentWidth; rowParams.height = rowHeight; clockRow.setLayoutParams(rowParams); }
+            // Use the full screen width as the alignment reference, not a narrow content row.
+            if (rowParams != null) { rowParams.width = ViewGroup.LayoutParams.MATCH_PARENT; rowParams.height = rowHeight; clockRow.setLayoutParams(rowParams); }
             clockRow.setClipChildren(false);
             clockRow.setClipToPadding(false);
         }
@@ -2694,9 +2725,12 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
                 markerParams.width = LauncherUiUtils.dp(this, 18);
                 markerParams.height = LauncherUiUtils.dp(this, 12);
-                markerParams.gravity = Gravity.RIGHT | Gravity.BOTTOM;
-                markerParams.rightMargin = 0;
-                markerParams.bottomMargin = 0;
+                // Position AM/PM against the rendered digits, not the group/date width.
+                markerParams.gravity = Gravity.LEFT | Gravity.TOP;
+                markerParams.leftMargin = Math.max(0, (int) Math.ceil(
+                        clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale)
+                        - markerParams.width);
+                markerParams.topMargin = Math.max(0, rowHeight - markerParams.height);
                 amPmText.setLayoutParams(markerParams);
             }
         }
