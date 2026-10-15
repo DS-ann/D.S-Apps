@@ -118,6 +118,7 @@ public class MainActivity extends Activity {
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
     private boolean gestureStartedOnAppCell = false;
+    private boolean gestureStartedOnWidget = false;
     private boolean pageSwipeActive = false;
     private boolean pageSwipeChildCancelled = false;
     private float longPressDownX, longPressDownY;
@@ -237,8 +238,12 @@ public class MainActivity extends Activity {
             pageSwipeChildCancelled = false;
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
+            gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             handler.removeCallbacks(homeLongPress);
-            if (!drawerOpen && !gestureStartedOnAppCell) handler.postDelayed(homeLongPress, 2000L);
+            // Widget gestures belong to the widget interaction handler, never the
+            // launcher's global long-press/customization or drawer gesture.
+            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget)
+                handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
         }
 
@@ -336,7 +341,8 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+            boolean verticalSwipe = !gestureStartedOnWidget
+                    && Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
             if (verticalSwipe) {
@@ -350,6 +356,28 @@ public class MainActivity extends Activity {
             }
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    private boolean touchStartedOnWidget(float rawX, float rawY) {
+        return viewAtRawPointIsWidget(root, rawX, rawY);
+    }
+
+    private boolean viewAtRawPointIsWidget(View view, float rawX, float rawY) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return false;
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        float localX = rawX - location[0];
+        float localY = rawY - location[1];
+        if (localX < 0 || localY < 0 || localX >= view.getWidth() || localY >= view.getHeight())
+            return false;
+        if (view instanceof AppWidgetHostView) return true;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                if (viewAtRawPointIsWidget(group.getChildAt(i), rawX, rawY)) return true;
+            }
+        }
+        return false;
     }
 
     @Override public void onBackPressed() {
@@ -520,14 +548,14 @@ public class MainActivity extends Activity {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setGravity(Gravity.RIGHT);
-        hero.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
+        hero.setPadding(LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 2));
         hero.setClipChildren(false);
         hero.setClipToPadding(false);
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
-                Math.max(LauncherUiUtils.dp(this, 220), (int) ((getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) * 0.82f)),
-                -2);
-        hp.gravity = Gravity.RIGHT;
-        hp.topMargin = LauncherUiUtils.dp(this, 8);
+        // Give the clock the full usable width; a large LED clock must not be
+        // measured inside the old 82%-width panel and clipped at its left edge.
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, -2);
+        hp.gravity = Gravity.TOP;
+        hp.topMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(hero, hp);
         clockPanel = hero;
         applyClockPanelColor(false);
@@ -580,7 +608,7 @@ public class MainActivity extends Activity {
         pageViewport.setClipToPadding(false);
         pageViewport.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        pp.topMargin = LauncherUiUtils.dp(this, 12);
+        pp.topMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(pageViewport, pp);
 
         // The viewport stays fixed while the page strip moves inside it.
