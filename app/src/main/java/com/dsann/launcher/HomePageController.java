@@ -134,7 +134,7 @@ final class HomePageController {
         }
 
         int columns = host.getHomeColumns();
-        int rows = homeRows;
+        int rows = Math.max(homeRows, (host.getPages().get(0).size() + columns - 1) / columns);
         for (int pageIndex = 0; pageIndex < requiredPages; pageIndex++) {
             FrameLayout page = (FrameLayout) strip.getChildAt(pageIndex);
             page.setClipChildren(false);
