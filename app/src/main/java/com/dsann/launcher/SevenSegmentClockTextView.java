@@ -15,6 +15,7 @@ import android.widget.TextView;
 public final class SevenSegmentClockTextView extends TextView {
     private final Paint segmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean sevenSegmentMode;
+    private int segmentColor = Color.WHITE;
 
     public SevenSegmentClockTextView(Context context) {
         super(context);
@@ -37,7 +38,17 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     public void setSevenSegmentMode(boolean enabled) {
-        sevenSegmentMode = enabled;
+        if (enabled) {
+            int current = getCurrentTextColor();
+            if (Color.alpha(current) != 0) segmentColor = current;
+            sevenSegmentMode = true;
+            // Keep TextView's layout/accessibility value, but prevent its ordinary
+            // glyphs from competing with the custom LED segments.
+            super.setTextColor(Color.TRANSPARENT);
+        } else {
+            sevenSegmentMode = false;
+            super.setTextColor(segmentColor);
+        }
         setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
         invalidate();
         requestLayout();
@@ -94,7 +105,7 @@ public final class SevenSegmentClockTextView extends TextView {
         float thickness = Math.max(3f, digitWidth * 0.17f);
         float half = thickness / 2f;
         float mid = y + digitHeight / 2f;
-        int color = getCurrentTextColor();
+        int color = segmentColor;
         int unlitColor = Color.argb(34, Color.red(color), Color.green(color), Color.blue(color));
 
         canvas.save();
