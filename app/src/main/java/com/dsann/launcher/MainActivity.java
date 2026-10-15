@@ -343,7 +343,7 @@ public class MainActivity extends Activity {
         // Rendering never infers page membership from the current view hierarchy.
         HomePageModel.Result result = HomePageModel.rebuild(
                 prefs, homePackages, widgetManager, currentPage, pageCapacity(),
-                KEY_ICON_PAGE, KEY_WIDGET_IDS);
+                KEY_ICON_PAGE, KEY_WIDGET_IDS, KEY_ICON_X, KEY_ICON_Y, getHomeColumns(), HOME_ROWS);
         pages.clear();
         pages.addAll(result.pages);
         currentPage = result.currentPage;
