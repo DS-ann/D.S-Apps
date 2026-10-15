@@ -1364,9 +1364,8 @@ public class MainActivity extends Activity {
         // not a wheel carrying the next page into the viewport.
         pagesStrip.setTranslationX(-from * width
                 - ((effect == 0 || effect == 2) ? direction * width * progress : 0f));
-        outgoing.setAlpha(1f);
-        // Fade the incoming page in with swipe progress. Keep each transition's
-        // existing geometry and rotation untouched; only its visibility changes.
+        // Cross-fade the pages without changing any transition geometry.
+        outgoing.setAlpha(1f - progress);
         if (incomingFace != null) incomingFace.setAlpha(progress);
         if (effect == 2) {
             outgoing.setPivotX(direction > 0 ? width : 0f);
@@ -2695,8 +2694,17 @@ public class MainActivity extends Activity {
     private void applyClockPositionAndSize() {
         if (clockPanel == null || clockText == null) return;
         int alignment = clockGravity();
-        final float lengthScale = getClockLength() / 100f;
+        final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
+        // Keep large clock settings inside the physical screen width. The slider
+        // remains unchanged; only the rendered scale is capped when it would clip.
+        final float naturalClockWidth = Math.max(1f,
+                clockText.getPaint().measureText(clockText.getText().toString()));
+        final int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        final int horizontalSafety = LauncherUiUtils.dp(this, 24);
+        final float maxClockWidth = Math.max(1f, screenWidth - horizontalSafety);
+        final float lengthScale = Math.min(requestedLengthScale,
+                maxClockWidth / naturalClockWidth);
         clockPanel.setGravity(alignment);
         LinearLayout.LayoutParams panelParams = (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
         panelParams.gravity = Gravity.TOP;
@@ -2708,7 +2716,9 @@ public class MainActivity extends Activity {
         int clockWidth = (int) Math.ceil(clockText.getPaint().measureText(clockText.getText().toString()) * lengthScale);
         int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
-        int contentWidth = Math.max(clockWidth, dateWidth) + LauncherUiUtils.dp(this, 20);
+        int maxContentWidth = Math.max(1, screenWidth - horizontalSafety);
+        int contentWidth = Math.min(maxContentWidth,
+                Math.max(clockWidth, dateWidth) + LauncherUiUtils.dp(this, 20));
         int rowHeight = LauncherUiUtils.dp(this, Math.round(114f * breadthScale));
         if (clockRow != null) {
             ViewGroup.LayoutParams rowParams = clockRow.getLayoutParams();
