@@ -172,6 +172,7 @@ public class MainActivity extends Activity {
                         MainActivity.this.showActionDialog(title, icons, labels, callback);
                     }
                     @Override public void setCurrentPage(int page) { currentPage = page; }
+                    @Override public void showPage(int page, boolean animate) { MainActivity.this.showPage(page, animate); }
                     @Override public LinearLayout getPagesStrip() { return pagesStrip; }
                     @Override public void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer) {
                         MainActivity.this.resolveWidgetIconCollisions(page, widgetContainer);
