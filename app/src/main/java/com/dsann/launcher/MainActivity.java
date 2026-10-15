@@ -197,7 +197,6 @@ public class MainActivity extends Activity {
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
-        packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
         packageFilter.addDataScheme("package");
         registerReceiver(packageChangesReceiver, packageFilter);
         packageReceiverRegistered = true;
@@ -403,9 +402,7 @@ public class MainActivity extends Activity {
         super.onResume();
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
-        // loadApps() refreshes the home only when shortcuts actually disappear.
-        // Rebuilding every icon view whenever returning from any app caused visible stutter.
-        loadApps();
+        // The app list is loaded at startup and refreshed only by package add/remove broadcasts.
         try { widgetHost.startListening(); } catch (Exception ignored) {}
     }
 
@@ -1355,7 +1352,6 @@ public class MainActivity extends Activity {
     private void showDrawer() {
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
-            loadApps();
         });
     }
 
