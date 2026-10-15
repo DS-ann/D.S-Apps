@@ -113,6 +113,8 @@ public class MainActivity extends Activity {
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
     private boolean gestureStartedOnAppCell = false;
+    private boolean pageSwipeActive = false;
+    private boolean pageSwipeChildCancelled = false;
     private float longPressDownX, longPressDownY;
     private boolean longPressTriggered = false;
     private boolean iconDragArmed = false;
@@ -219,48 +221,94 @@ public class MainActivity extends Activity {
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
             gestureDownX = event.getX();
             gestureDownY = event.getY();
             longPressDownX = event.getX();
             longPressDownY = event.getY();
             longPressTriggered = false;
+            pageSwipeActive = false;
+            pageSwipeChildCancelled = false;
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             handler.removeCallbacks(homeLongPress);
             if (!drawerOpen && !gestureStartedOnAppCell) handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
         }
-        if (event.getAction() == MotionEvent.ACTION_MOVE) {
-            if (Math.abs(event.getX() - longPressDownX) > LauncherUiUtils.dp(this, 12) || Math.abs(event.getY() - longPressDownY) > LauncherUiUtils.dp(this, 12)) handler.removeCallbacks(homeLongPress);
+
+        float dx = event.getX() - gestureDownX;
+        float dy = event.getY() - gestureDownY;
+        if (action == MotionEvent.ACTION_MOVE) {
+            if (Math.abs(event.getX() - longPressDownX) > LauncherUiUtils.dp(this, 12)
+                    || Math.abs(event.getY() - longPressDownY) > LauncherUiUtils.dp(this, 12)) {
+                handler.removeCallbacks(homeLongPress);
+            }
+            // Move the strip continuously with the finger. The old implementation waited
+            // until ACTION_UP, so users saw no live page movement while dragging.
+            if (!drawerOpen && pagesStrip != null && pagesStrip.getChildCount() > 1
+                    && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
+                    && Math.abs(dx) > Math.abs(dy) * 1.15f) {
+                if (!pageSwipeActive) {
+                    pageSwipeActive = true;
+                    pagesStrip.animate().cancel();
+                }
+                if (!pageSwipeChildCancelled) {
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    super.dispatchTouchEvent(cancel);
+                    cancel.recycle();
+                    pageSwipeChildCancelled = true;
+                }
+                int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
+                        ? pageViewport.getWidth()
+                        : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                                - LauncherUiUtils.dp(this, 40));
+                float proposed = -currentPage * pageWidth + dx;
+                pagesStrip.setTranslationX(Math.max(-pageWidth, Math.min(0f, proposed)));
+                return true;
+            }
+            return pageSwipeActive || super.dispatchTouchEvent(event);
         }
-        if (event.getAction() == MotionEvent.ACTION_CANCEL || event.getAction() == MotionEvent.ACTION_UP) handler.removeCallbacks(homeLongPress);
-        if (event.getAction() == MotionEvent.ACTION_UP) {
+
+        if (action == MotionEvent.ACTION_CANCEL) {
+            handler.removeCallbacks(homeLongPress);
+            if (pageSwipeActive) {
+                pageSwipeActive = false;
+                showPage(currentPage, true);
+                return true;
+            }
+            return super.dispatchTouchEvent(event);
+        }
+
+        if (action == MotionEvent.ACTION_UP) {
+            handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
-            float dx = event.getX() - gestureDownX;
-            float dy = event.getY() - gestureDownY;
-            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65) && Math.abs(dy) > Math.abs(dx)
+            if (pageSwipeActive) {
+                pageSwipeActive = false;
+                int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
+                        ? pageViewport.getWidth()
+                        : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                                - LauncherUiUtils.dp(this, 40));
+                int destination = currentPage;
+                if (Math.abs(dx) > Math.max(LauncherUiUtils.dp(this, 65), pageWidth * 0.18f)) {
+                    if (dx < 0 && currentPage < pages.size() - 1) destination = currentPage + 1;
+                    else if (dx > 0 && currentPage > 0) destination = currentPage - 1;
+                }
+                showPage(destination, true);
+                return true;
+            }
+
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+                    && Math.abs(dy) > Math.abs(dx)
                     && ((!drawerOpen && dy < 0) || (drawerOpen && dy > 0 && drawerAtTopOnGestureDown));
-            // A horizontal swipe must work from every workspace surface, including app
-            // icons and interactive widgets. The gesture wins on ACTION_UP and sends
-            // ACTION_CANCEL to the child so it cannot launch an app or keep a drag active.
-            boolean horizontalSwipe = Math.abs(dx) > LauncherUiUtils.dp(this, 65)
-                    && Math.abs(dx) > Math.abs(dy);
-            if (verticalSwipe || horizontalSwipe) {
-                // Cancel the child click before handling a swipe, otherwise a swipe
-                // beginning on an icon can accidentally launch that app on ACTION_UP.
+            if (verticalSwipe) {
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
                 super.dispatchTouchEvent(cancel);
                 cancel.recycle();
-                if (verticalSwipe) {
-                    if (!drawerOpen && dy < 0) showDrawer();
-                    else showHome();
-                } else if (dx < 0) {
-                    nextPage();
-                } else {
-                    previousPage();
-                }
+                if (!drawerOpen && dy < 0) showDrawer();
+                else showHome();
                 return true;
             }
         }
@@ -857,7 +905,6 @@ public class MainActivity extends Activity {
     private void showPage(int requestedPage, boolean animate) {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
-        int previousPage = currentPage;
         currentPage = Math.max(0, Math.min(lastPage, requestedPage));
         if (pagesStrip == null) return;
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
@@ -866,58 +913,22 @@ public class MainActivity extends Activity {
                         - LauncherUiUtils.dp(this, 40));
         float targetX = -currentPage * pageWidth;
         pagesStrip.animate().cancel();
-        int pageCount = pagesStrip.getChildCount();
-        for (int i = 0; i < pageCount; i++) {
+        // Keep the page faces flat and let the complete strip follow the finger.
+        // This avoids the blank/clipped faces seen with 3D rotation on some devices.
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View page = pagesStrip.getChildAt(i);
             page.animate().cancel();
             page.setRotationY(0f);
-            page.setScaleX(1f);
             page.setAlpha(1f);
-            page.setPivotX(page.getWidth() > 0 ? page.getWidth() / 2f : pageWidth / 2f);
-            page.setPivotY(page.getHeight() > 0 ? page.getHeight() / 2f : pageViewport.getHeight() / 2f);
+            page.setLayerType(View.LAYER_TYPE_NONE, null);
         }
-        if (animate && previousPage != currentPage && previousPage >= 0 && previousPage < pageCount
-                && currentPage >= 0 && currentPage < pageCount) {
-            final float direction = currentPage > previousPage ? 1f : -1f;
-            final float cameraDistance = 12000f * getResources().getDisplayMetrics().density;
-            final View outgoingPage = pagesStrip.getChildAt(previousPage);
-            final View incomingPage = pagesStrip.getChildAt(currentPage);
-            // Hardware layers are important here: older Android versions may otherwise
-            // flatten/skip simultaneous 3D rotation and translation on complex widget pages.
-            outgoingPage.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-            incomingPage.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-            outgoingPage.setCameraDistance(cameraDistance);
-            incomingPage.setCameraDistance(cameraDistance);
-            outgoingPage.setPivotX(outgoingPage.getWidth() / 2f);
-            incomingPage.setPivotX(incomingPage.getWidth() / 2f);
-            outgoingPage.setPivotY(outgoingPage.getHeight() / 2f);
-            incomingPage.setPivotY(incomingPage.getHeight() / 2f);
-            incomingPage.setRotationY(direction * 90f);
-            incomingPage.setAlpha(1f);
-            outgoingPage.setAlpha(1f);
-            pagesStrip.setScaleX(1f);
-            android.view.animation.Interpolator turn = new android.view.animation.AccelerateDecelerateInterpolator();
-            pagesStrip.animate().translationX(targetX).setDuration(520L).setInterpolator(turn).start();
-            outgoingPage.animate().rotationY(-direction * 90f).alpha(0.75f)
-                    .setDuration(520L).setInterpolator(turn).withEndAction(new Runnable() {
-                        @Override public void run() {
-                            outgoingPage.setRotationY(0f);
-                            outgoingPage.setAlpha(1f);
-                            outgoingPage.setLayerType(View.LAYER_TYPE_NONE, null);
-                        }
-                    }).start();
-            incomingPage.animate().rotationY(0f).alpha(1f)
-                    .setDuration(520L).setInterpolator(turn).withEndAction(new Runnable() {
-                        @Override public void run() {
-                            incomingPage.setRotationY(0f);
-                            incomingPage.setAlpha(1f);
-                            incomingPage.setLayerType(View.LAYER_TYPE_NONE, null);
-                        }
-                    }).start();
+        if (animate) {
+            pagesStrip.animate().translationX(targetX)
+                    .setDuration(240L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
         } else {
             pagesStrip.setTranslationX(targetX);
-            pagesStrip.setRotationY(0f);
-            pagesStrip.setScaleX(1f);
         }
         if (pageIndicator != null) {
             boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
