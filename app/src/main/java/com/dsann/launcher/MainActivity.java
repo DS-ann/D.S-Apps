@@ -435,18 +435,18 @@ public class MainActivity extends Activity {
 
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12));
-        // A smoked-glass black panel: translucent enough to let the wallpaper subtly show through.
-        hero.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.argb(188, 17, 20, 27), Color.argb(168, 8, 10, 15)}, LauncherUiUtils.dp(this, 22)));
+        hero.setGravity(Gravity.RIGHT);
+        hero.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
-                Math.max(LauncherUiUtils.dp(this, 180), (getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) / 2),
+                Math.max(LauncherUiUtils.dp(this, 150), (getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40)) / 2),
                 -2);
-        hp.gravity = Gravity.CENTER_HORIZONTAL;
+        hp.gravity = Gravity.RIGHT;
         hp.topMargin = LauncherUiUtils.dp(this, 8);
         homeScreen.addView(hero, hp);
         applyClockPanelColor(false);
         clockText = new SquarePixelClockTextView(this, prefs, KEY_CLOCK_STYLE);
         clockText.setText("--:--");
+        clockText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         clockText.setTextSize(40);
         clockText.setTextColor(Color.WHITE);
         clockText.setIncludeFontPadding(false);
@@ -456,6 +456,7 @@ public class MainActivity extends Activity {
         hero.addView(clockText);
         dateText = LauncherUiUtils.text(this, "", 13, Color.rgb(190, 201, 218), false);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.NORMAL));
+        dateText.setGravity(Gravity.RIGHT);
         dateText.setLetterSpacing(0.075f);
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
         dp.topMargin = LauncherUiUtils.dp(this, 3);
@@ -563,11 +564,10 @@ public class MainActivity extends Activity {
                     int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(this, 28) ? 1
                             : event.getRawX() <= LauncherUiUtils.dp(this, 28) ? -1 : 0;
                     if (edge == 0) iconEdgeLatch = 0;
+                    int sourceIndex = iconOriginalPageIndex;
                     if (edge != 0 && edge != iconEdgeLatch) {
                         iconEdgeLatch = edge;
-                        int sourceIndex = view.getParent() instanceof View
-                                ? pagesStrip.indexOfChild((View) view.getParent()) : iconDragPageIndex;
-                        int destination = sourceIndex + edge;
+                        int destination = iconDragPageIndex + edge;
                         if (destination >= 0 && destination <= 20) {
                             ensurePageExists(destination);
                             while (pagesStrip.getChildCount() <= destination) {
@@ -576,42 +576,27 @@ public class MainActivity extends Activity {
                                 pagesStrip.addView(newPage, new LinearLayout.LayoutParams(
                                         Math.max(1, pageViewport.getWidth()), -1));
                             }
-                            if (destination != sourceIndex) {
-                                FrameLayout targetPage = (FrameLayout) pagesStrip.getChildAt(destination);
-                                ViewGroup oldParent = (ViewGroup) view.getParent();
-                                FrameLayout.LayoutParams movedLp = (FrameLayout.LayoutParams) view.getLayoutParams();
-                                oldParent.removeView(view);
-                                targetPage.addView(view, movedLp);
-                                iconDragPageIndex = destination;
-                                currentPage = destination;
-                                int pageWidth = Math.max(1, pageViewport.getWidth());
-                                pagesStrip.setTranslationX(-destination * pageWidth);
-                                int[] viewportLocation = new int[2];
-                                pageViewport.getLocationOnScreen(viewportLocation);
-                                int[] targetLocation = new int[2];
-                                targetPage.getLocationOnScreen(targetLocation);
-                                movedLp.leftMargin = Math.max(0, Math.min(
-                                        Math.max(0, pageWidth - view.getWidth()),
-                                        Math.round(event.getRawX() - viewportLocation[0] - view.getWidth() / 2f)));
-                                movedLp.topMargin = Math.max(0, Math.min(
-                                        Math.max(0, targetPage.getHeight() - view.getHeight()),
-                                        Math.round(event.getRawY() - targetLocation[1] - view.getHeight() / 2f)));
-                                view.setLayoutParams(movedLp);
-                                iconOriginalLeft = movedLp.leftMargin;
-                                iconOriginalTop = movedLp.topMargin;
-                                iconTouchRawX = event.getRawX();
-                                iconTouchRawY = event.getRawY();
-                                if (pageIndicator != null) pageIndicator.setText((currentPage + 1) + "  /  " + pages.size());
-                                return true;
-                            }
+                            iconDragPageIndex = destination;
+                            currentPage = destination;
+                            int pageWidth = Math.max(1, pageViewport.getWidth());
+                            pagesStrip.setTranslationX(-destination * pageWidth);
+                            // Do not detach the touched view mid-gesture: Android cancels its touch target.
+                            view.setTranslationX((destination - sourceIndex) * pageWidth);
+                            if (pageIndicator != null) pageIndicator.setText((currentPage + 1) + "  /  " + Math.max(pages.size(), destination + 1));
                         }
                     }
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                     FrameLayout page = (FrameLayout) view.getParent();
-                    int maxX = Math.max(0, page.getWidth() - view.getWidth());
+                    int pageWidth = Math.max(1, pageViewport.getWidth());
+                    int[] viewportLocation = new int[2];
+                    pageViewport.getLocationOnScreen(viewportLocation);
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                     int maxY = Math.max(0, page.getHeight() - view.getHeight());
-                    lp.leftMargin = Math.max(0, Math.min(maxX, iconOriginalLeft + Math.round(dx)));
-                    lp.topMargin = Math.max(0, Math.min(maxY, iconOriginalTop + Math.round(dy)));
+                    lp.leftMargin = Math.max(0, Math.min(Math.max(0, pageWidth - view.getWidth()),
+                            Math.round(event.getRawX() - viewportLocation[0] - view.getWidth() / 2f)));
+                    int[] pageLocation = new int[2];
+                    page.getLocationOnScreen(pageLocation);
+                    lp.topMargin = Math.max(0, Math.min(maxY,
+                            Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f)));
                     view.setLayoutParams(lp);
                 }
                 return true;
@@ -620,60 +605,57 @@ public class MainActivity extends Activity {
                 if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
                 if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 if (iconDragging) {
-                    FrameLayout page = (FrameLayout) view.getParent();
-                    int[] releaseLocation = new int[2];
-                    page.getLocationOnScreen(releaseLocation);
-                    FrameLayout.LayoutParams dragged = (FrameLayout.LayoutParams) view.getLayoutParams();
-                    // Detect the edge from both the finger and the icon bounds. Touch events
-                    // can be clipped by the icon cell before the finger reaches the screen edge.
-                    int sourcePage = pagesStrip.indexOfChild(page);
-                    boolean moveToNextPage = iconDragPageIndex >= 0 && iconDragPageIndex != iconOriginalPageIndex;
-                    int columns = getHomeColumns();
-                    int rows = HOME_ROWS;
-                    int cellWidth = Math.max(1, page.getWidth() / columns);
-                    int cellHeight = Math.max(1, page.getHeight() / rows);
-                    int targetCol = Math.max(0, Math.min(columns - 1, (dragged.leftMargin + view.getWidth() / 2) / cellWidth));
-                    int targetRow = Math.max(0, Math.min(rows - 1, (dragged.topMargin + view.getHeight() / 2) / cellHeight));
-                    int sourceCol = Math.max(0, Math.min(columns - 1, Math.round((float) iconOriginalLeft / cellWidth)));
-                    int sourceRow = Math.max(0, Math.min(rows - 1, Math.round((float) iconOriginalTop / cellHeight)));
+                    FrameLayout sourceView = (FrameLayout) view.getParent();
+                    int sourcePage = pagesStrip.indexOfChild(sourceView);
+                    int destinationPage = Math.max(0, iconDragPageIndex);
+                    boolean movedAcrossPage = destinationPage != iconOriginalPageIndex;
+                    FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
+                            ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
+                    int columns = getHomeColumns(), rows = HOME_ROWS;
+                    int cellWidth = Math.max(1, targetPage.getWidth() / columns);
+                    int cellHeight = Math.max(1, targetPage.getHeight() / rows);
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    int targetCol = Math.max(0, Math.min(columns - 1, lp.leftMargin / cellWidth));
+                    int targetRow = Math.max(0, Math.min(rows - 1, lp.topMargin / cellHeight));
+                    int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
+                    int sourceCellHeight = Math.max(1, sourceView.getHeight() / rows);
+                    int sourceCol = Math.max(0, Math.min(columns - 1, iconOriginalLeft / sourceCellWidth));
+                    int sourceRow = Math.max(0, Math.min(rows - 1, iconOriginalTop / sourceCellHeight));
+                    boolean[][] occupied = new boolean[rows][columns];
                     View occupant = null;
                     String otherPackage = null;
-                    for (int i = 0; i < page.getChildCount(); i++) {
-                        View candidate = page.getChildAt(i);
-                        if (candidate == view || !(candidate.getTag() instanceof String)) continue;
-                        String candidateTag = (String) candidate.getTag();
-                        if (!candidateTag.startsWith("launcher_app:")) continue;
-                        FrameLayout.LayoutParams candidateLp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
-                        int candidateCol = Math.max(0, Math.min(columns - 1, Math.round((float) candidateLp.leftMargin / cellWidth)));
-                        int candidateRow = Math.max(0, Math.min(rows - 1, Math.round((float) candidateLp.topMargin / cellHeight)));
-                        if (candidateCol == targetCol && candidateRow == targetRow) {
+                    for (int i = 0; i < targetPage.getChildCount(); i++) {
+                        View candidate = targetPage.getChildAt(i);
+                        if (candidate == view || !(candidate.getTag() instanceof String)
+                                || !((String) candidate.getTag()).startsWith("launcher_app:")) continue;
+                        FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
+                        int cc = Math.max(0, Math.min(columns - 1, Math.round((float) cp.leftMargin / cellWidth)));
+                        int cr = Math.max(0, Math.min(rows - 1, Math.round((float) cp.topMargin / cellHeight)));
+                        occupied[cr][cc] = true;
+                        if (cc == targetCol && cr == targetRow) {
                             occupant = candidate;
-                            otherPackage = candidateTag.substring("launcher_app:".length());
-                            break;
+                            otherPackage = ((String) candidate.getTag()).substring("launcher_app:".length());
                         }
                     }
-                    if (occupant != null) {
+                    if (movedAcrossPage || occupant != null) {
+                        int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
+                        for (int row = 0; row < rows; row++) for (int col = 0; col < columns; col++) {
+                            if (occupied[row][col]) continue;
+                            int distance = Math.abs(col - targetCol) + Math.abs(row - targetRow);
+                            if (distance < bestDistance) { bestDistance = distance; bestCol = col; bestRow = row; }
+                        }
+                        if (bestCol >= 0) { targetCol = bestCol; targetRow = bestRow; }
+                    } else if (occupant != null) {
                         FrameLayout.LayoutParams otherLp = (FrameLayout.LayoutParams) occupant.getLayoutParams();
-                        otherLp.leftMargin = sourceCol * cellWidth;
-                        otherLp.topMargin = sourceRow * cellHeight;
+                        otherLp.leftMargin = sourceCol * sourceCellWidth;
+                        otherLp.topMargin = sourceRow * sourceCellHeight;
                         occupant.setLayoutParams(otherLp);
                         saveIconSlot(otherPackage, sourceCol, sourceRow, columns);
                     }
-                    dragged.leftMargin = targetCol * cellWidth;
-                    dragged.topMargin = targetRow * cellHeight;
-                    view.setLayoutParams(dragged);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
-                    if (moveToNextPage) {
-                        int destinationPage = Math.max(0, iconDragPageIndex);
-                        prefs.edit().putInt(KEY_ICON_PAGE + packageName, destinationPage)
-                                .putFloat(KEY_ICON_X + packageName, targetCol / (float) Math.max(1, columns - 1))
-                                .putFloat(KEY_ICON_Y + packageName, targetRow / (float) Math.max(1, rows - 1))
-                                .apply();
-                        currentPage = destinationPage;
-                    } else {
-                        prefs.edit().putInt(KEY_ICON_PAGE + packageName,
-                                sourcePage >= 0 ? sourcePage : currentPage).apply();
-                    }
+                    prefs.edit().putInt(KEY_ICON_PAGE + packageName, movedAcrossPage ? destinationPage : sourcePage).apply();
+                    currentPage = movedAcrossPage ? destinationPage : currentPage;
+                    view.setTranslationX(0f);
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
                     iconDragging = false;
                     iconDragArmed = false;
@@ -1210,7 +1192,16 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockText == null || dateText == null) return;
         Date now = new Date();
-        clockText.setText(new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mm a", Locale.getDefault()).format(now));
+        String clockValue = new SimpleDateFormat(prefs.getBoolean(KEY_24_HOUR, false) ? "HH:mm" : "hh:mm a", Locale.getDefault()).format(now);
+        if (!prefs.getBoolean(KEY_24_HOUR, false) && clockValue.length() >= 2) {
+            int suffixStart = clockValue.length() - 2;
+            android.text.SpannableString styled = new android.text.SpannableString(clockValue);
+            styled.setSpan(new android.text.style.RelativeSizeSpan(0.52f), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            styled.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), suffixStart, clockValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            clockText.setText(styled);
+        } else {
+            clockText.setText(clockValue);
+        }
         dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
         dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
         applyClockStyle();
@@ -1224,19 +1215,22 @@ public class MainActivity extends Activity {
         if (!(hero instanceof LinearLayout)) return;
         int minute = new Date().getMinutes();
         int phase = (minute / 5) % 4;
-        int[][] palettes = new int[][] {
-                {Color.rgb(21, 30, 55), Color.rgb(8, 12, 22)},
-                {Color.rgb(26, 38, 62), Color.rgb(10, 13, 25)},
-                {Color.rgb(34, 27, 55), Color.rgb(9, 12, 24)},
-                {Color.rgb(20, 39, 47), Color.rgb(8, 13, 20)}
+        int[][] tones = new int[][] {
+                {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
-        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.TL_BR, palettes[phase]);
-        next.setCornerRadius(LauncherUiUtils.dp(this, 22));
+        int[] tone = tones[phase];
+        int side = Color.argb(51, tone[0], tone[1], tone[2]); // 20% opacity at the outside edge
+        int centre = Color.argb(0, tone[0], tone[1], tone[2]);
+        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.RIGHT_LEFT,
+                new int[] {side, Color.argb(28, tone[0], tone[1], tone[2]), centre});
+        next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         if (animate) {
-            hero.animate().alpha(0.88f).setDuration(100L).withEndAction(() -> {
-                hero.setBackground(next);
-                hero.animate().alpha(1f).setDuration(180L).start();
-            }).start();
+            hero.setBackground(next);
+            next.setAlpha(0);
+            android.animation.ValueAnimator fade = android.animation.ValueAnimator.ofInt(0, 255);
+            fade.setDuration(260L);
+            fade.addUpdateListener(a -> next.setAlpha((Integer) a.getAnimatedValue()));
+            fade.start();
         } else {
             hero.setBackground(next);
         }
