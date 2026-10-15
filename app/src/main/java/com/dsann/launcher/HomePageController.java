@@ -202,7 +202,6 @@ final class HomePageController {
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
                 int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                int configuredIconSize = prefs.getInt(iconSizeKey, 48);
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         Math.max(56, configuredIconSize + 28));
                 int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
