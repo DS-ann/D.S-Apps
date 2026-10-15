@@ -718,36 +718,14 @@ public class MainActivity extends Activity {
     }
 
     private void showHome() {
-        drawerOpen = false;
-        drawerScreen.animate().cancel();
-        homeScreen.animate().cancel();
-        homeScreen.setVisibility(View.VISIBLE);
-        homeScreen.setAlpha(0.82f);
-        homeScreen.setScaleX(0.96f);
-        homeScreen.setScaleY(0.96f);
-        homeScreen.setTranslationY(LauncherUiUtils.dp(this, 24));
-        drawerScreen.animate().alpha(0f).translationY(LauncherUiUtils.dp(this, 40)).scaleX(0.96f).scaleY(0.96f)
-                .rotationX(-7f).setDuration(260).withEndAction(() -> drawerScreen.setVisibility(View.GONE)).start();
-        homeScreen.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
-                .setDuration(340).start();
+        LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen, () -> drawerOpen = false);
     }
 
     private void showDrawer() {
-        drawerOpen = true;
-        loadApps();
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
-        drawerScreen.setVisibility(View.VISIBLE);
-        drawerScreen.setAlpha(0f);
-        drawerScreen.setScaleX(0.92f);
-        drawerScreen.setScaleY(0.92f);
-        drawerScreen.setTranslationY(getResources().getDisplayMetrics().heightPixels * 0.16f);
-        drawerScreen.setRotationX(10f);
-        drawerScreen.setPivotY(0f);
-        homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).translationY(-LauncherUiUtils.dp(this, 22))
-                .setDuration(250).withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
-        drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).rotationX(0f)
-                .setDuration(420).start();
+        LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
+            drawerOpen = true;
+            loadApps();
+        });
     }
 
     private void addToHome(String packageName) {
