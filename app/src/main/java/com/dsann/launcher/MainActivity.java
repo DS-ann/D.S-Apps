@@ -511,10 +511,6 @@ public class MainActivity extends Activity {
                     FrameLayout page = (FrameLayout) view.getParent();
                     int maxX = Math.max(0, page.getWidth() - view.getWidth());
                     int maxY = Math.max(0, page.getHeight() - view.getHeight());
-                    float rawCenterX = iconOriginalLeft + Math.round(dx) + view.getWidth() / 2f;
-                    if (rawCenterX > page.getWidth() - dp(12) && currentPage == pages.size() - 1) {
-                        ensurePageExists(currentPage + 1);
-                    }
                     lp.leftMargin = Math.max(0, Math.min(maxX, iconOriginalLeft + Math.round(dx)));
                     lp.topMargin = Math.max(0, Math.min(maxY, iconOriginalTop + Math.round(dy)));
                     view.setLayoutParams(lp);
