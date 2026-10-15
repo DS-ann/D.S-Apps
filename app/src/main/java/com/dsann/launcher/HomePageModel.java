@@ -105,7 +105,7 @@ final class HomePageModel {
 
         StringBuilder normalizedWidgets = new StringBuilder();
         for (Integer id : validWidgetIds) {
-            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\\n');
+            if (normalizedWidgets.length() > 0) normalizedWidgets.append('\n');
             normalizedWidgets.append(id).append(":0");
         }
         edit.putString(widgetIdsKey, normalizedWidgets.toString());
