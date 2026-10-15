@@ -201,22 +201,8 @@ final class WidgetInteractionController {
                     if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
                             || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
                     cancelWidgetTouch.run();
-                    int screenWidth = activity.getResources().getDisplayMetrics().widthPixels;
-                    int edge = event.getRawX() >= screenWidth - LauncherUiUtils.dp(activity, 28) ? 1
-                            : event.getRawX() <= LauncherUiUtils.dp(activity, 28) ? -1 : 0;
-                    if (edge == 0) edgeLatch[0] = 0;
-                    else if (edge != edgeLatch[0]) {
-                        edgeLatch[0] = edge;
-                        int current = listener.getCurrentPage();
-                        if (edge > 0) {
-                            listener.ensurePageExists(current + 1);
-                            listener.setCurrentPage(current + 1);
-                            listener.showPage(current + 1, true);
-                        } else if (current > 0) {
-                            listener.setCurrentPage(current - 1);
-                            listener.showPage(current - 1, true);
-                        }
-                    }
+                    // Fixed two-screen workspace: widget dragging never changes screens.
+                    edgeLatch[0] = 0;
                     LinearLayout strip = listener.getPagesStrip();
                     ViewParent currentParent = container.getParent();
                     int sourceIndex = strip == null || !(currentParent instanceof View)
@@ -249,8 +235,9 @@ final class WidgetInteractionController {
                     LinearLayout strip = listener.getPagesStrip();
                     FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
-                    int destinationPage = action == MotionEvent.ACTION_CANCEL
-                            ? originalPageAtDown[0] : listener.getCurrentPage();
+                    // A widget can be repositioned on its own screen, but never transferred
+                    // to the other screen by dragging.
+                    int destinationPage = originalPageAtDown[0];
                     listener.ensurePageExists(destinationPage);
                     FrameLayout targetPage = strip != null && destinationPage < strip.getChildCount()
                             && strip.getChildAt(destinationPage) instanceof FrameLayout
