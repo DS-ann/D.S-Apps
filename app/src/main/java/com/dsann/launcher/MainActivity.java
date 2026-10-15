@@ -1073,7 +1073,7 @@ public class MainActivity extends Activity {
                 return;
             } catch (Exception ignored) {}
         }
-        addWidgetToPage(info, pendingWidgetId, pendingWidgetTargetPage)
+        addWidgetToPage(info, pendingWidgetId, pendingWidgetTargetPage);
         pendingWidgetId = -1;
         pendingWidgetInfo = null;
     }
@@ -1110,7 +1110,7 @@ public class MainActivity extends Activity {
                 configureOrAddWidget(boundInfo);
                 return;
             }
-            addWidgetToPage(info, pendingWidgetId, pendingWidgetTargetPage)
+            addWidgetToPage(info, pendingWidgetId, pendingWidgetTargetPage);
             pendingWidgetId = -1;
             pendingWidgetInfo = null;
             return;
