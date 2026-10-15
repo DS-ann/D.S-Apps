@@ -1985,9 +1985,7 @@ public class MainActivity extends Activity {
     }
 
     private long animationDuration(long baseMillis) {
-        int speed = prefs == null ? 1 : prefs.getInt(KEY_ANIMATION_SPEED, 1);
-        float multiplier = speed == 0 ? 1.5f : (speed == 2 ? 0.65f : 1f);
-        return Math.max(60L, Math.round(baseMillis * multiplier));
+        return LauncherMotion.duration(this, baseMillis);
     }
 
     private int clockGravity() {
