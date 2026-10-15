@@ -15,7 +15,7 @@ import android.widget.TextView;
 public final class SevenSegmentClockTextView extends TextView {
     private final Paint segmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean sevenSegmentMode;
-    private int segmentColor = Color.WHITE;
+    private int segmentColor = Color.rgb(196, 200, 209);
 
     public SevenSegmentClockTextView(Context context) {
         super(context);
