@@ -14,7 +14,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Shared app-cell renderer for the home screen and app drawer. */
 public final class LauncherAppAdapter extends BaseAdapter {
@@ -34,6 +36,8 @@ public final class LauncherAppAdapter extends BaseAdapter {
     private final String fontSizeKey;
     private final String showLabelsKey;
     private final Actions actions;
+    private final Map<String, String> labelCache = new HashMap<>();
+    private final Map<String, android.graphics.drawable.Drawable.ConstantState> iconCache = new HashMap<>();
 
     public LauncherAppAdapter(Activity activity, SharedPreferences preferences, PackageManager packageManager,
             List<ResolveInfo> allApps, List<ResolveInfo> drawerApps, List<String> fixedPackages,
@@ -84,7 +88,41 @@ public final class LauncherAppAdapter extends BaseAdapter {
         return label;
     }
 
-    @Override public int getCount() { return items().size(); }
+    private String key(ResolveInfo app) {
+        if (app == null || app.activityInfo == null) return "";
+        return app.activityInfo.packageName + "/" + app.activityInfo.name;
+    }
+
+    private String cachedLabel(ResolveInfo app) {
+        String key = key(app);
+        String value = labelCache.get(key);
+        if (value == null) {
+            value = String.valueOf(app.loadLabel(packageManager));
+            labelCache.put(key, value);
+        }
+        return value;
+    }
+
+    private android.graphics.drawable.Drawable cachedIcon(ResolveInfo app) {
+        String key = key(app);
+        android.graphics.drawable.Drawable.ConstantState state = iconCache.get(key);
+        if (state == null) {
+            android.graphics.drawable.Drawable loaded = app.loadIcon(packageManager);
+            if (loaded == null) return null;
+            state = loaded.getConstantState();
+            if (state != null) iconCache.put(key, state);
+            return loaded;
+        }
+        return state.newDrawable(activity.getResources());
+    }
+
+    /** Called only when PackageManager reports an installed-app change. */
+    public void clearPackageCaches() {
+        labelCache.clear();
+        iconCache.clear();
+    }
+
+    @Override public int getCount() { return drawer ? drawerApps.size() : items().size(); }
     @Override public Object getItem(int position) { return items().get(position); }
     @Override public long getItemId(int position) { return position; }
 
@@ -120,8 +158,8 @@ public final class LauncherAppAdapter extends BaseAdapter {
             iconParams.height = dp(iconSize);
             icon.setLayoutParams(iconParams);
         }
-        icon.setImageDrawable(app.loadIcon(packageManager));
-        final String fullLabel = String.valueOf(app.loadLabel(packageManager));
+        icon.setImageDrawable(cachedIcon(app));
+        final String fullLabel = cachedLabel(app);
         label.setTag(fullLabel);
         label.setText(fullLabel);
         int fontChoice = preferences == null ? 1 : preferences.getInt(fontSizeKey, 1);
