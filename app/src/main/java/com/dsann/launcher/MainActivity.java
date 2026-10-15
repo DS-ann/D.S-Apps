@@ -32,6 +32,7 @@ import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.ScrollView;
 import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -859,19 +860,120 @@ public class MainActivity extends Activity {
             }
         });
         List<AppWidgetProviderInfo> available = new ArrayList<>();
-        for (AppWidgetProviderInfo info : providers) if (info != null && info.provider != null) available.add(info);
+        for (AppWidgetProviderInfo info : providers) {
+            if (info != null && info.provider != null) available.add(info);
+        }
         if (available.isEmpty()) {
             Toast.makeText(this, "No installed app widgets are available", Toast.LENGTH_LONG).show();
             return;
         }
-        String[] labels = new String[available.size()];
-        String[] icons = new String[available.size()];
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(16), dp(14), dp(16), dp(12));
+        panel.setBackground(roundRect(new int[]{Color.rgb(19, 24, 42), Color.rgb(12, 16, 30)}, dp(20)));
+
+        TextView title = text("Choose a widget", 20, Color.WHITE, true);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        panel.addView(title, new LinearLayout.LayoutParams(-1, dp(42)));
+
+        TextView subtitle = text("Preview each widget before adding it", 12, Color.rgb(165, 177, 207), false);
+        subtitle.setGravity(Gravity.CENTER_VERTICAL);
+        panel.addView(subtitle, new LinearLayout.LayoutParams(-1, dp(28)));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setClipToPadding(false);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, dp(440));
+        scrollParams.topMargin = dp(8);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+
         for (int i = 0; i < available.size(); i++) {
+            final int index = i;
             AppWidgetProviderInfo info = available.get(i);
-            labels[i] = String.valueOf(info.loadLabel(packageManager));
-            icons[i] = "▦";
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(10), dp(10), dp(10));
+            row.setBackground(roundRect(new int[]{Color.rgb(34, 42, 67), Color.rgb(27, 33, 54)}, dp(14)));
+
+            ImageView preview = new ImageView(this);
+            preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            preview.setBackground(roundRect(new int[]{Color.rgb(12, 16, 28), Color.rgb(20, 26, 43)}, dp(10)));
+            preview.setPadding(dp(4), dp(4), dp(4), dp(4));
+            android.graphics.drawable.Drawable image = null;
+            try {
+                if (info.previewImage != 0) {
+                    image = info.loadPreviewImage(this, getResources().getDisplayMetrics().densityDpi);
+                }
+            } catch (Exception ignored) { }
+            if (image == null) {
+                try { image = info.loadIcon(this, getResources().getDisplayMetrics().densityDpi); }
+                catch (Exception ignored) { }
+            }
+            if (image != null) preview.setImageDrawable(image);
+            row.addView(preview, new LinearLayout.LayoutParams(dp(100), dp(86)));
+
+            LinearLayout details = new LinearLayout(this);
+            details.setOrientation(LinearLayout.VERTICAL);
+            details.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(0, -2, 1f);
+            detailsParams.leftMargin = dp(12);
+            TextView name = text(String.valueOf(info.loadLabel(packageManager)), 15, Color.rgb(246, 248, 255), true);
+            name.setMaxLines(2);
+            TextView provider = text(info.provider.getPackageName(), 11, Color.rgb(158, 171, 202), false);
+            provider.setMaxLines(1);
+            provider.setSingleLine(true);
+            provider.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            details.addView(name, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout.LayoutParams providerParams = new LinearLayout.LayoutParams(-1, -2);
+            providerParams.topMargin = dp(4);
+            details.addView(provider, providerParams);
+            row.addView(details, detailsParams);
+
+            TextView add = text("＋", 25, Color.rgb(178, 198, 255), true);
+            add.setGravity(Gravity.CENTER);
+            row.addView(add, new LinearLayout.LayoutParams(dp(32), dp(48)));
+
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = dp(8);
+            list.addView(row, rowParams);
+            row.setOnClickListener(v -> {
+                dialog.dismiss();
+                beginBindingWidget(available.get(index));
+            });
         }
-        showActionDialog("Choose a widget", icons, labels, (dialog, which) -> beginBindingWidget(available.get(which)));
+        scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
+        panel.addView(scroll, scrollParams);
+
+        TextView cancel = text("Cancel", 14, Color.rgb(190, 201, 230), true);
+        cancel.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, dp(44));
+        cancelParams.topMargin = dp(4);
+        panel.addView(cancel, cancelParams);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setContentView(panel);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams windowParams = dialog.getWindow().getAttributes();
+            windowParams.dimAmount = 0.58f;
+            dialog.getWindow().setAttributes(windowParams);
+        }
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - dp(28),
+                    Math.min(screenHeight - dp(48), dp(570)));
+        }
+        panel.setAlpha(0f);
+        panel.setScaleX(0.96f);
+        panel.setScaleY(0.96f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
     }
 
     private void beginBindingWidget(AppWidgetProviderInfo info) {
