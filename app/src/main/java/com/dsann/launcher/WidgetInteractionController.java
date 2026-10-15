@@ -138,7 +138,6 @@ final class WidgetInteractionController {
                     listener.ensurePageExists(destination);
                     listener.saveWidgetGeometry(widgetId, destination, container);
                     listener.setCurrentPage(destination);
-                    listener.resolveWidgetCollisions((FrameLayout) listener.getPagesStrip().getChildAt(destination), container);
                     listener.renderHomePages(true);
                     Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
                 }
