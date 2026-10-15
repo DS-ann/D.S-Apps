@@ -110,19 +110,16 @@ final class WidgetInteractionController {
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
                     int destination = widgetPage[0] + 1;
-                    listener.ensurePageExists(destination);
-                    FrameLayout destinationPage = (FrameLayout) listener.getPagesStrip().getChildAt(destination);
-                    if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
-                    FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
-                            Math.min(container.getLayoutParams().width, Math.max(LauncherUiUtils.dp(activity, 140), destinationPage.getWidth())),
-                            Math.min(container.getLayoutParams().height, Math.max(LauncherUiUtils.dp(activity, 90), destinationPage.getHeight())),
-                            Gravity.TOP | Gravity.LEFT);
+                    // Persist the destination first, then rebuild the page strip. The
+                    // destination view may not exist yet when the widget is on the last page.
+                    FrameLayout.LayoutParams moved = (FrameLayout.LayoutParams) container.getLayoutParams();
                     moved.leftMargin = LauncherUiUtils.dp(activity, 8);
                     moved.topMargin = LauncherUiUtils.dp(activity, 40);
-                    destinationPage.addView(container, moved);
+                    container.setLayoutParams(moved);
                     widgetPage[0] = destination;
-                    listener.setCurrentPage(destination);
+                    listener.ensurePageExists(destination);
                     listener.saveWidgetGeometry(widgetId, destination, container);
+                    listener.setCurrentPage(destination);
                     listener.renderHomePages(true);
                     Toast.makeText(activity, "Widget moved to next page", Toast.LENGTH_SHORT).show();
                 }
