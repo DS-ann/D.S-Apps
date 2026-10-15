@@ -190,7 +190,13 @@ final class WidgetInteractionController {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                listener.saveWidgetGeometry(widgetId, pageIndex, container);
+                if (container.getChildAt(0) instanceof AppWidgetHostView) {
+                    WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
+                            widgetId, (AppWidgetHostView) container.getChildAt(0),
+                            activity.getResources().getDisplayMetrics().density,
+                            container.getLayoutParams().width, container.getLayoutParams().height);
+                }
+                listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                 return true;
             }
             return true;
