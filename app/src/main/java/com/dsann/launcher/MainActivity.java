@@ -310,15 +310,17 @@ public class MainActivity extends Activity {
                     // Both faces use the same shared edge as their hinge. This avoids
                     // the two pages rotating around unrelated axes and looking warped.
                     if (i == currentPage) {
-                        face.setPivotX(dx < 0 ? faceWidth : 0f);
+                        // Treat each page as a plane turning around the shared
+                        // vertical centre axis (Y), rather than hinging at its edge.
+                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY(-progress * getPageRotationDegrees());
                         face.setAlpha(1f - Math.min(0.08f, Math.abs(progress) * 0.08f));
                     } else if (i == currentPage + 1 && progress < 0f) {
-                        face.setPivotX(0f);
+                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY((1f + progress) * -getPageRotationDegrees());
                         face.setAlpha(1f);
                     } else if (i == currentPage - 1 && progress > 0f) {
-                        face.setPivotX(faceWidth);
+                        face.setPivotX(faceWidth / 2f);
                         face.setRotationY((1f - progress) * getPageRotationDegrees());
                         face.setAlpha(1f);
                     }
