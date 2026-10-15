@@ -72,7 +72,15 @@ public final class SquarePixelClockTextView extends TextView {
         StringBuilder visible = new StringBuilder();
         for (int i = 0; i < rawValue.length(); i++) {
             char ch = rawValue.charAt(i);
-            if ((ch >= '0' && ch <= '9') || ch == ':') visible.append(ch);
+            // SimpleDateFormat may emit locale-specific Unicode numerals. Normalize
+            // every decimal digit to ASCII so the custom 5x7 pixel glyph lookup works
+            // regardless of the device language/numbering system.
+            int digit = Character.digit(ch, 10);
+            if (digit >= 0) {
+                visible.append((char) ('0' + digit));
+            } else if (ch == ':') {
+                visible.append(ch);
+            }
         }
         String value = visible.toString();
         if (value.length() == 0) return;
