@@ -885,10 +885,14 @@ public class MainActivity extends Activity {
         int shortcutSpanY = savedHeightDp > 0
                 ? Math.max(1, Math.min(rows, prefs.getInt(KEY_SHORTCUT_SPAN_Y, 1))) : 1;
         // Check the complete resized shortcut footprint, not only its first grid cell.
+        // Default contact shortcuts use a compact visual footprint, not a full
+        // invisible grid cell. Explicitly resized shortcuts retain their saved size.
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
-                savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp) : cellW * shortcutSpanX));
+                savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
+                        : Math.min(cellW, LauncherUiUtils.dp(this, 64))));
         int desiredTileHeight = Math.max(1, Math.min(pageViewport.getHeight(),
-                savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp) : cellH * shortcutSpanY));
+                savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp)
+                        : Math.min(cellH, LauncherUiUtils.dp(this, 64))));
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
@@ -896,8 +900,8 @@ public class MainActivity extends Activity {
             FrameLayout page = (FrameLayout) pageView;
             for (int row = 0; row < rows && chosenPage == null; row++) {
                 for (int col = 0; col < columns && chosenPage == null; col++) {
-                    int candidateLeft = col * cellW;
-                    int candidateTop = row * cellH;
+                    int candidateLeft = col * cellW + Math.max(0, (cellW - desiredTileWidth) / 2);
+                    int candidateTop = row * cellH + Math.max(0, (cellH - desiredTileHeight) / 2);
                     if (candidateLeft + desiredTileWidth > pageViewport.getWidth()
                             || candidateTop + desiredTileHeight > pageViewport.getHeight()) continue;
                     android.graphics.Rect candidate = new android.graphics.Rect(candidateLeft, candidateTop,
@@ -922,8 +926,8 @@ public class MainActivity extends Activity {
                     }
                     if (!occupied) {
                         chosenPage = page;
-                        chosenLeft = col * cellW;
-                        chosenTop = row * cellH;
+                        chosenLeft = candidateLeft;
+                        chosenTop = candidateTop;
                     }
                 }
             }
@@ -3017,22 +3021,22 @@ public class MainActivity extends Activity {
         clockText.setPivotX(0f);
         // Preserve the clock's original top-aligned scaling behaviour.
         clockText.setPivotY(0f);
-        clockText.setScaleX(lengthScale);
+        // The seven-segment renderer can fit its glyphs to an exact measured width.
+        // Constrain its actual view width instead of scaling a WRAP_CONTENT view:
+        // Android's scale transform does not change layout bounds and previously
+        // allowed the LED digits to draw beyond the requested length.
+        clockText.setScaleX(sevenSegment ? 1f : lengthScale);
         clockText.setScaleY(breadthScale);
         clockText.setTranslationY(0f);
-        // Scale around the left edge, then compensate so center/right aligned
-        // clocks stay aligned by their visible edge rather than their unscaled box.
-        float horizontalScaleOffset = naturalClockWidth - renderedClockWidth;
-        clockText.setTranslationX(alignment == Gravity.RIGHT
+        float horizontalScaleOffset = sevenSegment ? 0f : naturalClockWidth - renderedClockWidth;
+        clockText.setTranslationX(sevenSegment ? 0f : (alignment == Gravity.RIGHT
                 ? horizontalScaleOffset
-                : (alignment == Gravity.CENTER_HORIZONTAL ? horizontalScaleOffset * 0.5f : 0f));
+                : (alignment == Gravity.CENTER_HORIZONTAL ? horizontalScaleOffset * 0.5f : 0f)));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            textParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            textParams.width = sevenSegment ? renderedClockWidth : ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
-            // Align the actual glyph view inside its measured group. This is
-            // essential for right/center positioning with the custom LED renderer.
             textParams.gravity = alignment | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
@@ -3066,15 +3070,16 @@ public class MainActivity extends Activity {
                 // Match the clock TextView's actual gravity and scale transform.
                 // Its view keeps the natural width; the visible glyph is shortened
                 // by scaleX and shifted back toward the selected alignment.
-                int naturalViewWidth = Math.max(1, (int) Math.ceil(naturalClockWidth));
+                int naturalViewWidth = sevenSegment ? renderedClockWidth
+                        : Math.max(1, (int) Math.ceil(naturalClockWidth));
                 int clockViewLeft = alignment == Gravity.RIGHT
                         ? contentWidth - naturalViewWidth
                         : (alignment == Gravity.CENTER_HORIZONTAL
                             ? (contentWidth - naturalViewWidth) / 2 : 0);
                 float visibleClockLeft = clockViewLeft
-                        + (alignment == Gravity.RIGHT ? horizontalScaleOffset
+                        + (sevenSegment ? 0f : (alignment == Gravity.RIGHT ? horizontalScaleOffset
                             : (alignment == Gravity.CENTER_HORIZONTAL
-                                ? horizontalScaleOffset * 0.5f : 0f));
+                                ? horizontalScaleOffset * 0.5f : 0f)));
                 float visibleClockRight = visibleClockLeft + renderedClockWidth;
                 int gap = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0, Math.min(
