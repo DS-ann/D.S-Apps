@@ -172,6 +172,7 @@ public class MainActivity extends Activity {
     private boolean gestureStartedOnAppCell = false;
     private boolean gestureStartedOnWidget = false;
     private boolean gestureStartedOnContactShortcut = false;
+    private boolean gestureStartedOnResizeHandle = false;
     private boolean pageSwipeActive = false;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
@@ -308,6 +309,7 @@ public class MainActivity extends Activity {
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
+            gestureStartedOnResizeHandle = touchStartedOnResizeHandle(event.getRawX(), event.getRawY());
             // Resize grips live in the root overlay and sit partly outside the
             // clock's normal hit rectangle. Test them BEFORE outside-tap dismissal.
             clockResizeEdge = clockWidgetEditing
@@ -404,11 +406,15 @@ public class MainActivity extends Activity {
                 cancel.recycle();
                 return true;
             }
-            // A decisive vertical swipe on any home item opens the launcher surface
-            // instead of being swallowed by the app icon or widget's own touch handler.
-            // Clock gestures are excluded: once the down event hits the clock, its
-            // gesture remains reserved for clock movement/resizing until release.
-            if (!drawerOpen && !gestureStartedOnClock && !verticalSwipeClaimed && verticalSwipe) {
+            // A held item gesture belongs to its move/resize controller, not workspace navigation.
+            // Fast vertical swipes can still start on home items; explicit resize handles are reserved.
+            boolean heldItemGesture = (gestureStartedOnAppCell || gestureStartedOnWidget
+                    || gestureStartedOnContactShortcut)
+                    && event.getEventTime() - event.getDownTime() > 450L;
+            boolean itemManipulation = gestureStartedOnResizeHandle || iconDragArmed || iconDragging
+                    || heldItemGesture;
+            if (!drawerOpen && !gestureStartedOnClock && !itemManipulation
+                    && !verticalSwipeClaimed && verticalSwipe) {
                 verticalSwipeClaimed = true;
                 handler.removeCallbacks(homeLongPress);
                 handler.removeCallbacks(clockWidgetLongPress);
@@ -432,7 +438,9 @@ public class MainActivity extends Activity {
             // otherwise moving/resizing a widget can rotate pages underneath it.
             // Page changes remain available from the free workspace surface.
             if (!drawerOpen && !gestureStartedOnWidget && !gestureStartedOnContactShortcut
-                    && !gestureStartedOnClock && pagesStrip != null && pagesStrip.getChildCount() > 1
+                    && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
+                    && !heldItemGesture && !gestureStartedOnClock
+                    && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dx) > Math.abs(dy) * 1.15f) {
                 int direction = dx < 0f ? 1 : -1;
@@ -674,6 +682,20 @@ public class MainActivity extends Activity {
             }
         }
         return 0;
+    }
+
+    private boolean touchStartedOnResizeHandle(float rawX, float rawY) {
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            Object tag = target.getTag();
+            if ("launcher_widget_resize_handle".equals(tag)
+                    || "launcher_shortcut_resize_handle".equals(tag)
+                    || "launcher_clock_resize_handle".equals(tag)) return true;
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return false;
     }
 
     private boolean touchStartedOnContactShortcut(float rawX, float rawY) {
@@ -1469,6 +1491,7 @@ public class MainActivity extends Activity {
         gripBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
         resizeGrip.setBackground(gripBackground);
         resizeGrip.setVisibility(View.GONE);
+        resizeGrip.setTag("launcher_shortcut_resize_handle");
         FrameLayout.LayoutParams gripParams = new FrameLayout.LayoutParams(
                 LauncherUiUtils.dp(this, 36), LauncherUiUtils.dp(this, 36), Gravity.RIGHT | Gravity.BOTTOM);
         tile.addView(resizeGrip, gripParams);
