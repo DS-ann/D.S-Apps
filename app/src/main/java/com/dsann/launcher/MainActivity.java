@@ -413,7 +413,7 @@ public class MainActivity extends Activity {
                     && event.getEventTime() - event.getDownTime() > 450L;
             boolean itemManipulation = gestureStartedOnResizeHandle || iconDragArmed || iconDragging
                     || heldItemGesture;
-            if (!drawerOpen && !gestureStartedOnClock && !itemManipulation
+            if (!drawerOpen && !itemManipulation
                     && !verticalSwipeClaimed && verticalSwipe) {
                 verticalSwipeClaimed = true;
                 handler.removeCallbacks(homeLongPress);
@@ -439,7 +439,7 @@ public class MainActivity extends Activity {
             // Page changes remain available from the free workspace surface.
             if (!drawerOpen && !gestureStartedOnContactShortcut
                     && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
-                    && !heldItemGesture && !gestureStartedOnClock
+                    && !heldItemGesture
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dx) > Math.abs(dy) * 1.15f) {
@@ -518,7 +518,7 @@ public class MainActivity extends Activity {
                     || ((gestureStartedOnAppCell || gestureStartedOnWidget
                         || gestureStartedOnContactShortcut)
                         && event.getEventTime() - event.getDownTime() > 450L);
-            if (!drawerOpen && !gestureStartedOnClock && !itemManipulationOnRelease
+            if (!drawerOpen && !itemManipulationOnRelease
                     && (verticalSwipeClaimed
                         || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                             && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
