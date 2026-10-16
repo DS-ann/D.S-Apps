@@ -272,6 +272,49 @@ final class LauncherScreenTransitions {
         animator.start();
     }
 
+    /** Return a cancelled finger-driven close gesture to the fully open drawer. */
+    static void finishDrawerSwipeToDrawer(Activity activity, LinearLayout homeScreen,
+                                          LinearLayout drawerScreen, Runnable markDrawerOpen,
+                                          int effect, float swipeProgress) {
+        final float start = Math.max(0f, Math.min(1f, swipeProgress));
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        homeScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setVisibility(View.VISIBLE);
+        android.animation.ValueAnimator animator =
+                android.animation.ValueAnimator.ofFloat(start, 1f);
+        animator.setDuration(LauncherMotion.duration(activity,
+                Math.max(110L, (long) (300L * (1f - start)))));
+        animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        animator.addUpdateListener(value ->
+                updateDrawerSwipe(activity, homeScreen, drawerScreen, effect,
+                        (Float) value.getAnimatedValue()));
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                markDrawerOpen.run();
+                homeScreen.setVisibility(View.GONE);
+                homeScreen.setAlpha(1f);
+                homeScreen.setRotationX(0f);
+                homeScreen.setRotationY(0f);
+                homeScreen.setTranslationX(0f);
+                homeScreen.setTranslationY(0f);
+                homeScreen.setTranslationZ(0f);
+                homeScreen.setScaleX(1f);
+                homeScreen.setScaleY(1f);
+                drawerScreen.setVisibility(View.VISIBLE);
+                drawerScreen.setAlpha(1f);
+                drawerScreen.setRotationX(0f);
+                drawerScreen.setRotationY(0f);
+                drawerScreen.setTranslationX(0f);
+                drawerScreen.setTranslationY(0f);
+                drawerScreen.setTranslationZ(0f);
+                drawerScreen.setScaleX(1f);
+                drawerScreen.setScaleY(1f);
+            }
+        });
+        animator.start();
+    }
+
     static void cancelDrawerSwipe(Activity activity, LinearLayout homeScreen,
                                  LinearLayout drawerScreen, int effect) {
         homeScreen.animate().cancel();
