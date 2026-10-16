@@ -22,6 +22,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.Gravity;
@@ -3549,15 +3550,23 @@ public class MainActivity extends Activity {
                 new int[] {leftEdge, leftMid, Color.argb(22, 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
+        // Keep the colored background 20% narrower than its clock panel, centered.
+        // Only the background is inset; clock glyphs and AM/PM retain their geometry.
+        int backgroundWidth = hero.getWidth() > 0 ? hero.getWidth()
+                : Math.max(LauncherUiUtils.dp(this, 96),
+                        getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 24));
+        int horizontalInset = Math.max(1, Math.round(backgroundWidth * 0.10f));
+        InsetDrawable centeredBackground = new InsetDrawable(next,
+                horizontalInset, 0, horizontalInset, 0);
         if (animate) {
-            hero.setBackground(next);
+            hero.setBackground(centeredBackground);
             next.setAlpha(0);
             android.animation.ValueAnimator fade = android.animation.ValueAnimator.ofInt(0, 255);
             fade.setDuration(animationDuration(260L));
             fade.addUpdateListener(a -> next.setAlpha((Integer) a.getAnimatedValue()));
             fade.start();
         } else {
-            hero.setBackground(next);
+            hero.setBackground(centeredBackground);
         }
     }
 
@@ -4203,16 +4212,11 @@ public class MainActivity extends Activity {
                 dateParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
                 dateText.setLayoutParams(dateParams);
             }
-            // Keep the 7-segment date legible at a fixed visual size while the
-            // clock panel is resized by counter-scaling it against its parent.
-            if (sevenSegment) {
-                dateText.setTextSize(15f);
-                dateText.setScaleX(1f / Math.max(0.01f, lengthScale));
-                dateText.setScaleY(1f / Math.max(0.01f, breadthScale));
-            } else {
-                dateText.setScaleX(1f);
-                dateText.setScaleY(1f);
-            }
+            // Use the same date size for every clock style. Counter-scale it so
+            // panel resizing does not change the date's visual size.
+            dateText.setTextSize(15f);
+            dateText.setScaleX(1f / Math.max(0.01f, lengthScale));
+            dateText.setScaleY(1f / Math.max(0.01f, breadthScale));
             dateText.setTranslationX(0f);
         }
 
