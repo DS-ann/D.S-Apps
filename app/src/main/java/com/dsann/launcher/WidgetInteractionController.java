@@ -157,6 +157,7 @@ final class WidgetInteractionController {
         }));
         movePress[0] = () -> {
             editMode[0] = 1;
+            LauncherUiUtils.startMoveHint(container, activity);
             listener.setWorkspaceGridVisible(true, container);
             resizeHandle.setVisibility(View.VISIBLE);
             container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
@@ -164,6 +165,7 @@ final class WidgetInteractionController {
             Toast.makeText(activity, "Move widget", Toast.LENGTH_SHORT).show();
         };
         menuPress[0] = () -> {
+            LauncherUiUtils.stopMoveHint(container);
             menuShown[0] = true;
             cancelWidgetTouch.run();
             editMode[0] = 0;
@@ -233,6 +235,7 @@ final class WidgetInteractionController {
                     return true;
                 }
                 if (editMode[0] == 1) {
+                    LauncherUiUtils.stopMoveHint(container);
                     if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
                             || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
                     listener.setWorkspaceGridVisible(true, container);
@@ -264,6 +267,7 @@ final class WidgetInteractionController {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                LauncherUiUtils.stopMoveHint(container);
                 handler.removeCallbacks(movePress[0]);
                 handler.removeCallbacks(menuPress[0]);
                 if (editMode[0] == 1) {
