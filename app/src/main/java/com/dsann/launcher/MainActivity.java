@@ -2974,8 +2974,9 @@ public class MainActivity extends Activity {
                 (int) Math.ceil(naturalClockWidth * lengthScale));
         final int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
-        final int naturalWidthPx = Math.max(1, (int) Math.ceil(naturalClockWidth));
         final int clockWithMarkerWidth = renderedClockWidth + markerWidth + LauncherUiUtils.dp(this, 2);
+        // Both clock and date rows use the same full-width hero background. The
+        // compact clock group itself stays sized to its rendered contents.
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4);
         // Keep the clock's reserved layout footprint constant. Scaling the glyph
         // must not increase the hero's measured height and steal vertical space from
@@ -3062,17 +3063,30 @@ public class MainActivity extends Activity {
                 markerParams.width = LauncherUiUtils.dp(this, 22);
                 markerParams.height = LauncherUiUtils.dp(this, 12);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
-                int clockLayoutLeft = alignment == Gravity.RIGHT
-                        ? contentWidth - naturalWidthPx
+                // Match the clock TextView's actual gravity and scale transform.
+                // Its view keeps the natural width; the visible glyph is shortened
+                // by scaleX and shifted back toward the selected alignment.
+                int naturalViewWidth = Math.max(1, (int) Math.ceil(naturalClockWidth));
+                int clockViewLeft = alignment == Gravity.RIGHT
+                        ? contentWidth - naturalViewWidth
                         : (alignment == Gravity.CENTER_HORIZONTAL
-                            ? (contentWidth - naturalWidthPx) / 2 : 0);
+                            ? (contentWidth - naturalViewWidth) / 2 : 0);
+                float visibleClockLeft = clockViewLeft
+                        + (alignment == Gravity.RIGHT ? horizontalScaleOffset
+                            : (alignment == Gravity.CENTER_HORIZONTAL
+                                ? horizontalScaleOffset * 0.5f : 0f));
+                float visibleClockRight = visibleClockLeft + renderedClockWidth;
                 int gap = LauncherUiUtils.dp(this, 2);
-                markerParams.leftMargin = Math.max(0,
-                        clockLayoutLeft + Math.round(horizontalScaleOffset)
-                                + renderedClockWidth - markerParams.width - gap);
-                // Tuck AM/PM into the lower-right corner with a small, visible gap.
+                markerParams.leftMargin = Math.max(0, Math.min(
+                        contentWidth - markerParams.width,
+                        Math.round(visibleClockRight - markerParams.width - gap)));
+                // Anchor vertically to the scaled clock's lower edge, not the
+                // unscaled 114dp TextView height. Keep a gap before the date row.
+                int visibleClockHeight = Math.max(1,
+                        (int) Math.ceil(LauncherUiUtils.dp(this, 114) * breadthScale));
                 markerParams.topMargin = Math.max(0,
-                        rowHeight - markerParams.height - gap);
+                        Math.min(rowHeight - markerParams.height,
+                                visibleClockHeight - markerParams.height - gap));
                 amPmText.setLayoutParams(markerParams);
             }
         }
