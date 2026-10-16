@@ -169,13 +169,26 @@ public final class LauncherAppAdapter extends BaseAdapter {
             icon.setImageDrawable(null);
         }
         final String fullLabel = cachedLabel(app);
-        label.setTag(fullLabel);
-        label.setText(fullLabel);
+        if (!fullLabel.equals(label.getTag())) {
+            label.setTag(fullLabel);
+        }
+        // Avoid resetting identical text on every GridView bind. TextView.setText()
+        // invalidates and can trigger fresh text measurement during drawer animations,
+        // which appears as intermittent label flicker on slower devices.
+        if (!fullLabel.contentEquals(label.getText())) {
+            label.setText(fullLabel);
+        }
         int fontChoice = preferences == null ? 1 : preferences.getInt(fontSizeKey, 1);
-        label.setTextSize(new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))]);
+        float targetTextSize = new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))];
+        if (label.getTextSize() != dp(targetTextSize)) {
+            label.setTextSize(targetTextSize);
+        }
         // Native ellipsizing avoids posting a measurement task for every recycled cell.
-        label.setVisibility(preferences == null || preferences.getBoolean(showLabelsKey, true)
-                ? View.VISIBLE : View.GONE);
+        int targetVisibility = preferences == null || preferences.getBoolean(showLabelsKey, true)
+                ? View.VISIBLE : View.GONE;
+        if (label.getVisibility() != targetVisibility) {
+            label.setVisibility(targetVisibility);
+        }
         cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
         cell.setOnClickListener(v -> { if (actions != null) actions.onAppClick(app); });
         cell.setOnLongClickListener(v -> {
