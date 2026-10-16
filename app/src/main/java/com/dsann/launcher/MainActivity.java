@@ -4140,11 +4140,6 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_CLOCK_BG_OPACITY, value).apply();
             applyClockPanelColor(false);
         });
-        addChoiceRow(content, "Clock alignment", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
-            prefs.edit().putInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage), value).apply();
-            applyClockPositionAndSize();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
-        });
         addChoiceRow(content, "Clock visual style", prefs.getInt(KEY_CLOCK_STYLE, 0),
                 new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "7-Segment Digital"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
@@ -4179,9 +4174,12 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
-        addSliderRow(content, "Cube rotation angle", 30, 180, getCubeRotationDegrees(), "°", value -> {
-            prefs.edit().putInt(KEY_CUBE_ROTATION, value).apply();
-        });
+        // Display a user-facing scale offset by 40 degrees; keep the stored animation
+        // angle unchanged. Thus the existing internal 130° appears as 90° in Home Studio.
+        addMappedSliderRow(content, "Cube rotation angle", 0, 140,
+                Math.max(0, Math.min(140, getCubeRotationDegrees() - 40)), "°", value -> {
+                    prefs.edit().putInt(KEY_CUBE_ROTATION, value + 40).apply();
+                });
         addChoiceRow(content, "Animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
             prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
@@ -4641,7 +4639,7 @@ public class MainActivity extends Activity {
                 // requested 37 dp right / 3 dp down adjustment together with the
                 // background. Counter-scaling here left the marker outside the panel
                 // when the user reduced the clock size.
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 34));
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 24));
                 amPmText.setTranslationY(LauncherUiUtils.dp(this, 3));
             }
         }
@@ -4731,6 +4729,39 @@ public class MainActivity extends Activity {
     }
 
     private interface IntSliderAction { void onChange(int value); }
+
+    private void addMappedSliderRow(LinearLayout panel, String title, int min, int max, int current,
+            String suffix, IntSliderAction action) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7));
+        block.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, LauncherUiUtils.dp(this, 14)));
+        LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
+        blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+        TextView label = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
+        TextView valueLabel = LauncherUiUtils.text(this, current + suffix, 12, Color.rgb(177, 198, 255), true);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
+        heading.addView(valueLabel);
+        block.addView(heading);
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(max - min);
+        seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 38)));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int value = min + progress;
+                valueLabel.setText(value + suffix);
+                if (fromUser) action.onChange(value);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        panel.addView(block, blockParams);
+    }
 
     private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
