@@ -114,6 +114,8 @@ public class MainActivity extends Activity {
     private interface IntAction { void onSelect(int value); }
     private final int BG = Color.rgb(10, 13, 24);
     private final Handler handler = new Handler();
+    private boolean clockUpdatesActive = false;
+    private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
     private AppWidgetManager widgetManager;
@@ -225,6 +227,7 @@ public class MainActivity extends Activity {
     };
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
+            if (!clockUpdatesActive) return;
             updateClock();
             // Align refreshes to the system minute boundary instead of drifting
             // from the time at which the launcher was opened.
@@ -234,6 +237,7 @@ public class MainActivity extends Activity {
     };
     private final BroadcastReceiver timeChangesReceiver = new BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, Intent intent) {
+            if (!clockUpdatesActive) return;
             handler.removeCallbacks(clockUpdater);
             updateClock();
             long remainder = System.currentTimeMillis() % 60000L;
@@ -908,6 +912,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        clockUpdatesActive = true;
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
         // The app list is loaded at startup and refreshed only by package add/remove broadcasts.
@@ -915,6 +920,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        clockUpdatesActive = false;
         handler.removeCallbacks(clockUpdater);
         try { widgetHost.stopListening(); } catch (Exception ignored) {}
         super.onPause();
@@ -2351,9 +2357,11 @@ public class MainActivity extends Activity {
             pagesStrip.animate().translationX(targetX)
                     .setDuration(animationDuration(240L))
                     .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(this::releasePageLayers)
                     .start();
         } else {
             pagesStrip.setTranslationX(targetX);
+            releasePageLayers();
         }
         if (pageIndicator != null) {
             boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
@@ -2502,7 +2510,7 @@ public class MainActivity extends Activity {
                 activateClockForPage(currentPage);
                 pagesStrip.setTranslationX(-settledPage * (float) width);
                 resetPageTransforms();
-                preparePageLayersForSwipe(currentPage);
+                releasePageLayers();
                 wheelSwipeProgress = 0f;
                 wheelSwipeDirection = 0;
                 if (pageIndicator != null) {
@@ -2537,6 +2545,13 @@ public class MainActivity extends Activity {
      * The active gesture then changes transforms on cached surfaces instead of
      * paying the layer-creation cost during the first frames of a swipe.
      */
+    private void releasePageLayers() {
+        if (pagesStrip == null) return;
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            pagesStrip.getChildAt(i).setLayerType(View.LAYER_TYPE_NONE, null);
+        }
+    }
+
     private void preparePageLayersForSwipe(int pageIndex) {
         if (pagesStrip == null) return;
         int count = pagesStrip.getChildCount();
@@ -3421,6 +3436,9 @@ public class MainActivity extends Activity {
 
     private void applyClockStyle() {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+        if (clockText == null) return;
+        Integer previousStyle = appliedClockStyles.get(clockText);
+        if (previousStyle != null && previousStyle.intValue() == style) return;
         LauncherClockStyler.apply(this, clockText, style);
         // Apply the same restrained silver tone to every clock preset, including 7-segment.
         clockText.setTextColor(Color.rgb(196, 200, 209));
@@ -3439,6 +3457,7 @@ public class MainActivity extends Activity {
             ledClock.setSevenSegmentMode(ledMode);
             ledClock.invalidate();
         }
+        appliedClockStyles.put(clockText, style);
     }
 
     private void updateClock() {
@@ -3505,9 +3524,8 @@ public class MainActivity extends Activity {
             clockText.setText(displayClock);
             dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
             dateText.setText(dateValue);
-            applyClockPositionAndSize();
-            applyClockStyle();
-            applyClockPanelColor(false);
+            // Layout, typography and panel appearance are configuration-driven and
+            // are applied when the clock is created or settings change, not every minute.
         }
         activateClockForPage(restorePage);
         updateClockResizeHandles();
