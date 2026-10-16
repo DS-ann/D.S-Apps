@@ -1247,10 +1247,40 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams raw = tile.getLayoutParams();
                     if (raw instanceof FrameLayout.LayoutParams) {
                         FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) raw;
+                        int previousWidth = p.width;
+                        int previousHeight = p.height;
                         p.width = Math.max(cellW, Math.min(pageViewport.getWidth() - p.leftMargin,
                                 resizeBasePx[0] + Math.round(event.getRawX() - resizeStart[0])));
                         p.height = Math.max(cellH, Math.min(pageViewport.getHeight() - p.topMargin,
                                 resizeBasePx[1] + Math.round(event.getRawY() - resizeStart[1])));
+                        // A shortcut may not be resized through an app, widget, or another
+                        // placed item. Reject that frame instead of creating a hidden overlap.
+                        boolean overlapsPlacedItem = false;
+                        int tileRight = p.leftMargin + p.width;
+                        int tileBottom = p.topMargin + p.height;
+                        for (int i = 0; i < chosenPage.getChildCount(); i++) {
+                            View other = chosenPage.getChildAt(i);
+                            if (other == tile || !(other.getTag() instanceof String)) continue;
+                            String otherTag = (String) other.getTag();
+                            if (!otherTag.startsWith("launcher_app:")
+                                    && !otherTag.startsWith("launcher_widget:")
+                                    && !"launcher_contact_shortcut".equals(otherTag)) continue;
+                            FrameLayout.LayoutParams otherParams =
+                                    (FrameLayout.LayoutParams) other.getLayoutParams();
+                            int otherWidth = other.getWidth() > 0 ? other.getWidth() : otherParams.width;
+                            int otherHeight = other.getHeight() > 0 ? other.getHeight() : otherParams.height;
+                            if (p.leftMargin < otherParams.leftMargin + otherWidth
+                                    && tileRight > otherParams.leftMargin
+                                    && p.topMargin < otherParams.topMargin + otherHeight
+                                    && tileBottom > otherParams.topMargin) {
+                                overlapsPlacedItem = true;
+                                break;
+                            }
+                        }
+                        if (overlapsPlacedItem) {
+                            p.width = previousWidth;
+                            p.height = previousHeight;
+                        }
                         tile.setLayoutParams(p);
                         refreshWorkspaceGrid();
                         // Grow the actual contact/app icon as the tile grows; changing only
