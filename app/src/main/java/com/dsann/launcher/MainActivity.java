@@ -3557,7 +3557,11 @@ public class MainActivity extends Activity {
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
-            clockText.setText(displayClock);
+            // Only update the TextView when its displayed value actually changes.
+            // This avoids needless layout invalidations from time/date broadcasts.
+            if (!displayClock.toString().contentEquals(clockText.getText())) {
+                clockText.setText(displayClock);
+            }
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
             if (!dateValue.contentEquals(dateText.getText())) dateText.setText(dateValue);
@@ -4443,10 +4447,13 @@ public class MainActivity extends Activity {
         // Keep the text glyphs inside the width reserved by the background.
         // A 1.10x non-LED scale enlarged the digits after panel width was measured,
         // causing the background to look too narrow on initial layout.
-        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : 1f);
+        // Make non-seven-segment digits 40% larger relative to the same background.
+        // This scales glyphs only; panel/background dimensions remain unchanged.
+        final float nonLedDigitScale = 1.4f;
+        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : nonLedDigitScale);
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
-        clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale);
+        clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale * nonLedDigitScale);
         // Nudge the seven-segment glyphs slightly left against the background.
         // Compensate for panel scaling so the offset remains a small 3 dp shift.
         clockText.setTranslationX(sevenSegment
