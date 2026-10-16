@@ -17,12 +17,14 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.ColorFilter;
+import android.graphics.PixelFormat;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.InsetDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.Gravity;
@@ -778,8 +780,7 @@ public class MainActivity extends Activity {
      */
     private void finishClockResize(boolean cancelled) {
         if (clockResizeEdge == 0 || clockPanel == null) return;
-        final int edge = clockResizeEdge;
-        final int generation = ++clockResizeGeneration;
+        ++clockResizeGeneration; // Invalidate delayed edge corrections from MOVE frames.
         clockResizeEdge = 0;
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
@@ -795,28 +796,13 @@ public class MainActivity extends Activity {
             clockPanel.setTranslationX(clockWidgetStartX);
             clockPanel.setTranslationY(clockWidgetStartY);
         } else {
-            clockPanel.post(() -> {
-                if (generation != clockResizeGeneration || clockPanel == null) return;
-                int[] now = new int[2];
-                clockPanel.getLocationOnScreen(now);
-                float targetX = clockWidgetStartScreenX;
-                float targetY = clockWidgetStartScreenY;
-                if (edge == 1) {
-                    float startVisualWidth = clockWidgetStartPanelWidth * clockWidgetStartPanelScaleX;
-                    float currentVisualWidth = clockPanel.getWidth() * clockPanel.getScaleX();
-                    targetX += startVisualWidth - currentVisualWidth;
-                } else if (edge == 3) {
-                    float startVisualHeight = clockWidgetStartPanelHeight
-                            * (clockWidgetStartBreadth / 100f);
-                    float currentVisualHeight = clockPanel.getHeight() * clockPanel.getScaleY();
-                    targetY += startVisualHeight - currentVisualHeight;
-                }
-                clockPanel.setTranslationX(clockPanel.getTranslationX() + targetX - now[0]);
-                clockPanel.setTranslationY(clockPanel.getTranslationY() + targetY - now[1]);
-                prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
-                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY()).apply();
-                updateClockResizeHandles();
-            });
+            // Commit the position as it appears at finger-up. Do not schedule another
+            // post-layout edge correction: it could run after the outside tap and make
+            // the placed clock jump a few pixels.
+            prefs.edit()
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
+                    .apply();
         }
         setWorkspaceGridVisible(false, null);
         updateClockResizeHandles();
@@ -1416,6 +1402,20 @@ public class MainActivity extends Activity {
         }
         activateClockForPage(currentPage);
         applyClockPositionAndSize();
+        // Page rebuilds are used by icon-shape, icon-background, size, font and
+        // label settings. Refresh both clock backgrounds after layout without moving them.
+        for (int pageIndex = 0; pageIndex < clockPanelsByPage.length; pageIndex++) {
+            final int targetPage = pageIndex;
+            final LinearLayout targetPanel = clockPanelsByPage[pageIndex];
+            if (targetPanel == null) continue;
+            targetPanel.post(() -> {
+                if (targetPanel.getParent() == null || clockPanelsByPage[targetPage] != targetPanel) return;
+                int previousPage = Math.max(0, Math.min(1, activeClockPage));
+                activateClockForPage(targetPage);
+                applyClockPanelColor(false);
+                activateClockForPage(previousPage);
+            });
+        }
     }
 
     private void buildDrawer() {
@@ -3671,9 +3671,9 @@ public class MainActivity extends Activity {
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
         for (View grip : clockEdgeHandles) if (grip != null) grip.setVisibility(View.VISIBLE);
         updateClockResizeHandles();
-        clockPanel.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
-                LauncherUiUtils.dp(this, 8)));
+        // Keep the clock's actual colour background visible during editing.
+        // The edge grips and workspace grid already communicate edit mode; replacing
+        // the background here made it appear to vanish while moving/resizing.
         setWorkspaceGridVisible(true, clockPanel);
         Toast.makeText(this, "Clock widget: drag to move; drag the middle of any edge to resize; tap outside to finish",
                 Toast.LENGTH_LONG).show();
@@ -3718,18 +3718,15 @@ public class MainActivity extends Activity {
                         Color.argb(Math.min(255, 22 * opacityScale / 100), 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
-        // Keep the background full-width and centered vertically. Shorten it
-        // by 20% for seven-segment clocks and 40% for all other clock styles.
-        // The clock glyphs, date, and AM/PM retain their existing geometry.
+        // Draw the shorter colour panel inside a zero-padding drawable. InsetDrawable
+        // reports its insets as background padding on some Android versions, which
+        // changes the LinearLayout's measured position when edit mode is dismissed.
+        // Drawing the inset internally keeps clock geometry independent from its background.
         boolean sevenSegmentBackground = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-        int backgroundHeight = hero.getHeight() > 0 ? hero.getHeight()
-                : LauncherUiUtils.dp(this, 140);
         float totalHeightReduction = sevenSegmentBackground ? 0.20f : 0.40f;
-        int verticalInset = Math.max(1,
-                Math.round(backgroundHeight * totalHeightReduction / 2f));
-        InsetDrawable centeredBackground = new InsetDrawable(next,
-                0, verticalInset, 0, verticalInset);
+        ClockPanelBackgroundDrawable centeredBackground =
+                new ClockPanelBackgroundDrawable(next, totalHeightReduction);
         if (animate) {
             hero.setBackground(centeredBackground);
             next.setAlpha(0);
@@ -4593,6 +4590,50 @@ public class MainActivity extends Activity {
 
 // Replacement span for non-seven-segment clocks: keep the colon's two dots
     // centered vertically in the clock row/background regardless of font preset.
+    /**
+     * A short clock background that never contributes padding to the widget.
+     * This prevents background refreshes from shifting the clock on Android 6.
+     */
+    private static final class ClockPanelBackgroundDrawable extends Drawable {
+        private final GradientDrawable gradient;
+        private final float totalHeightReduction;
+
+        ClockPanelBackgroundDrawable(GradientDrawable gradient, float totalHeightReduction) {
+            this.gradient = gradient;
+            this.totalHeightReduction = Math.max(0f, Math.min(0.8f, totalHeightReduction));
+        }
+
+        @Override public void draw(Canvas canvas) {
+            android.graphics.Rect bounds = getBounds();
+            int inset = Math.round(bounds.height() * totalHeightReduction / 2f);
+            gradient.setBounds(bounds.left, bounds.top + inset, bounds.right, bounds.bottom - inset);
+            gradient.draw(canvas);
+        }
+
+        @Override protected void onBoundsChange(android.graphics.Rect bounds) {
+            invalidateSelf();
+        }
+
+        @Override public void setAlpha(int alpha) {
+            gradient.setAlpha(alpha);
+            invalidateSelf();
+        }
+
+        @Override public void setColorFilter(ColorFilter colorFilter) {
+            gradient.setColorFilter(colorFilter);
+            invalidateSelf();
+        }
+
+        @Override public int getOpacity() {
+            return PixelFormat.TRANSLUCENT;
+        }
+
+        @Override public boolean getPadding(android.graphics.Rect padding) {
+            padding.set(0, 0, 0, 0);
+            return false;
+        }
+    }
+
     private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
         private final float rowCenterY;
 
