@@ -1515,6 +1515,17 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            // Finish resize gestures here before they can fall through to launcher
+            // gesture handling. Without this reset, the resize flag stayed armed
+            // after finger-up and later swipes could keep changing clock dimensions.
+            if (clockResizeEdge != 0) {
+                handler.removeCallbacks(clockWidgetLongPress);
+                clockResizeEdge = 0;
+                clockWidgetDragging = false;
+                setWorkspaceGridVisible(false, null);
+                updateClockResizeHandles();
+                return true;
+            }
                 if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
                 if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 if (iconDragging) {
