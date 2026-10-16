@@ -592,8 +592,15 @@ public class MainActivity extends Activity {
                     && (verticalSwipeClaimed
                         || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                             && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
-                if (dy < 0f) showDrawer(drawerSwipeProgress);
-                else openControlCenter();
+                if (dy < 0f) {
+                    // Finish the interactive opening from the current finger-driven pose.
+                    // Do not rely on property animations that can leave the two surfaces mid-transition.
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                    drawerSwipeVisualActive = false;
+                } else {
+                    openControlCenter();
+                }
                 return true;
             }
             if (pageSwipeActive) {
@@ -4041,10 +4048,6 @@ public class MainActivity extends Activity {
                 char ch = value.charAt(i);
                 if (Character.digit(ch, 10) >= 0) digits++;
                 else if (!Character.isWhitespace(ch)) separators++;
-                if (i == 1 && (ch == ':' || ch == '\uFF1A' || ch == '.' || ch == '\u2236')) {
-                    // Match SevenSegmentClockTextView's blank leading hour cell.
-                    digits++;
-                }
             }
             float clockHeight = LauncherUiUtils.dp(this, 114)
                     - clockText.getPaddingTop() - clockText.getPaddingBottom();
