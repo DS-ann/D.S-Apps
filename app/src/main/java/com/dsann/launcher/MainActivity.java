@@ -809,7 +809,7 @@ public class MainActivity extends Activity {
         // The model always returns exactly two stable screens; it never compacts empty pages.
         HomePageModel.Result result = HomePageModel.rebuild(
                 prefs, homePackages, widgetManager, currentPage, pageCapacity(),
-                KEY_ICON_PAGE, KEY_WIDGET_IDS, KEY_ICON_X, KEY_ICON_Y, getHomeColumns(), HOME_ROWS);
+                KEY_ICON_PAGE, KEY_WIDGET_IDS, KEY_ICON_X, KEY_ICON_Y, getHomeColumns(), getHomeGridRows());
         pages.clear();
         pages.addAll(result.pages);
         currentPage = result.currentPage;
@@ -1279,7 +1279,8 @@ public class MainActivity extends Activity {
                     boolean occupied = false;
                     for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                         View child = page.getChildAt(childIndex);
-                        if ("launcher_contact_shortcut".equals(child.getTag())) continue;
+                        if ("launcher_contact_shortcut".equals(child.getTag())
+                                || "launcher_clock_widget".equals(child.getTag())) continue;
                         android.graphics.Rect bounds;
                         ViewGroup.LayoutParams rawParams = child.getLayoutParams();
                         if (rawParams instanceof FrameLayout.LayoutParams) {
@@ -1323,7 +1324,8 @@ public class MainActivity extends Activity {
                         boolean occupied = false;
                         for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                             View child = page.getChildAt(childIndex);
-                            if ("launcher_contact_shortcut".equals(child.getTag())) continue;
+                            if ("launcher_contact_shortcut".equals(child.getTag())
+                                    || "launcher_clock_widget".equals(child.getTag())) continue;
                             FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
                                     ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
                             int childLeft = p != null ? p.leftMargin : child.getLeft();
@@ -2193,16 +2195,159 @@ public class MainActivity extends Activity {
     private void addToHome(String packageName) { addToHome(packageName, currentPage); }
 
     private void addToHome(String packageName, int requestedPage) {
-        if (packageName == null || packageName.equals(getPackageName()) || homePackages.contains(packageName)) return;
-        int targetPage = Math.max(0, Math.min(1, requestedPage));
+        if (packageName == null || packageName.trim().isEmpty()
+                || packageName.equals(getPackageName()) || homePackages.contains(packageName)) {
+            return;
+        }
+        if (findApp(packageName) == null) {
+            Toast.makeText(this, "That app is no longer available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int requested = Math.max(0, Math.min(1, requestedPage));
+        int targetPage = -1;
+        int[] freeSlot = null;
+        // Prefer the requested screen, but use the other screen when the first has
+        // no free cell. Never save an app that the renderer cannot place visibly.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            int candidatePage = (requested + attempt) % 2;
+            int[] candidateSlot = findFreeHomeAppSlot(candidatePage);
+            if (candidateSlot != null) {
+                targetPage = candidatePage;
+                freeSlot = candidateSlot;
+                break;
+            }
+        }
+        if (targetPage < 0 || freeSlot == null) {
+            Toast.makeText(this, "Both home screens are full. Remove or move an item first.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        int columns = getHomeColumns();
+        int rows = getHomeGridRows();
         homePackages.add(packageName);
-        prefs.edit().putInt(KEY_ICON_PAGE + packageName, targetPage).apply();
+        prefs.edit()
+                .putInt(KEY_ICON_PAGE + packageName, targetPage)
+                .putFloat(KEY_ICON_X + packageName,
+                        freeSlot[0] / (float) Math.max(1, columns - 1))
+                .putFloat(KEY_ICON_Y + packageName,
+                        freeSlot[1] / (float) Math.max(1, rows - 1))
+                .apply();
         persistHomeApps();
         rebuildPages();
         currentPage = targetPage;
         ensurePageExists(targetPage);
         renderHomePages(false);
         showPage(targetPage, false);
+        Toast.makeText(this, "Added to Home", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Returns the first free grid cell on a page. App icons reserve one whole cell;
+     * widgets and the custom shortcut reserve their real visible rectangle. Clock
+     * panels are intentionally ignored because they are overlays, not grid occupants.
+     */
+    private int[] findFreeHomeAppSlot(int pageIndex) {
+        int columns = getHomeColumns();
+        int width = pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth()
+                : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(this, 40));
+        int height = pageViewport != null && pageViewport.getHeight() > 0
+                ? pageViewport.getHeight()
+                : Math.max(LauncherUiUtils.dp(this, 360),
+                        getResources().getDisplayMetrics().heightPixels
+                                - LauncherUiUtils.dp(this, 260));
+        int cellWidth = Math.max(1, width / columns);
+        int cellHeight = LauncherUiUtils.dp(this,
+                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 96) + 28));
+        int rows = Math.max(1, height / cellHeight);
+        boolean[][] occupied = new boolean[rows][columns];
+
+        FrameLayout page = pagesStrip != null && pageIndex >= 0
+                && pageIndex < pagesStrip.getChildCount()
+                && pagesStrip.getChildAt(pageIndex) instanceof FrameLayout
+                ? (FrameLayout) pagesStrip.getChildAt(pageIndex) : null;
+
+        // Read existing app cells from the actual page when available. Fall back to
+        // persisted coordinates if that page has not been laid out yet.
+        boolean sawAppView = false;
+        if (page != null) {
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                Object rawTag = child.getTag();
+                if (!(rawTag instanceof String)
+                        || !((String) rawTag).startsWith("launcher_app:")) continue;
+                sawAppView = true;
+                ViewGroup.LayoutParams rawParams = child.getLayoutParams();
+                int left = child.getLeft(), top = child.getTop();
+                if (rawParams instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawParams;
+                    left = lp.leftMargin;
+                    top = lp.topMargin;
+                }
+                int col = Math.max(0, Math.min(columns - 1,
+                        Math.round(left / (float) cellWidth)));
+                int row = Math.max(0, Math.min(rows - 1,
+                        Math.round(top / (float) cellHeight)));
+                occupied[row][col] = true;
+            }
+        }
+        if (!sawAppView) {
+            for (String existing : homePackages) {
+                if (prefs.getInt(KEY_ICON_PAGE + existing, 0) != pageIndex) continue;
+                float sx = prefs.getFloat(KEY_ICON_X + existing, 0f);
+                float sy = prefs.getFloat(KEY_ICON_Y + existing, 0f);
+                int col = Math.max(0, Math.min(columns - 1,
+                        Math.round(sx * Math.max(1, columns - 1))));
+                int row = Math.max(0, Math.min(rows - 1,
+                        Math.round(sy * Math.max(1, rows - 1))));
+                occupied[row][col] = true;
+            }
+        }
+
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < columns; col++) {
+                if (occupied[row][col]) continue;
+                android.graphics.Rect cell = new android.graphics.Rect(
+                        col * cellWidth, row * cellHeight,
+                        Math.min(width, (col + 1) * cellWidth),
+                        Math.min(height, (row + 1) * cellHeight));
+                boolean blocked = false;
+                if (page != null) {
+                    for (int i = 0; i < page.getChildCount(); i++) {
+                        View child = page.getChildAt(i);
+                        Object rawTag = child.getTag();
+                        if (!(rawTag instanceof String)) continue;
+                        String tag = (String) rawTag;
+                        if ("launcher_clock_widget".equals(tag)
+                                || tag.startsWith("launcher_app:")
+                                || !tag.startsWith("launcher_widget:")
+                                    && !"launcher_contact_shortcut".equals(tag)) continue;
+                        ViewGroup.LayoutParams rawParams = child.getLayoutParams();
+                        int left = child.getLeft(), top = child.getTop();
+                        int childWidth = child.getWidth(), childHeight = child.getHeight();
+                        if (rawParams instanceof FrameLayout.LayoutParams) {
+                            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawParams;
+                            left = lp.leftMargin;
+                            top = lp.topMargin;
+                            if (lp.width > 0) childWidth = lp.width;
+                            if (lp.height > 0) childHeight = lp.height;
+                        }
+                        left += Math.round(child.getTranslationX());
+                        top += Math.round(child.getTranslationY());
+                        android.graphics.Rect bounds = new android.graphics.Rect(left, top,
+                                left + Math.max(0, childWidth), top + Math.max(0, childHeight));
+                        if (android.graphics.Rect.intersects(cell, bounds)) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                }
+                if (!blocked) return new int[]{col, row};
+            }
+        }
+        return null;
     }
 
     private void showSecondPageMenu() {
@@ -3134,7 +3279,18 @@ public class MainActivity extends Activity {
 
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
     private int getDrawerColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS))); }
-    private int pageCapacity() { return getHomeColumns() * HOME_ROWS; }
+
+    private int getHomeGridRows() {
+        int pageHeight = pageViewport != null && pageViewport.getHeight() > LauncherUiUtils.dp(this, 100)
+                ? pageViewport.getHeight()
+                : Math.max(LauncherUiUtils.dp(this, 360),
+                        getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
+        int cellHeight = LauncherUiUtils.dp(this,
+                Math.max(56, prefs == null ? 96 + 28 : prefs.getInt(KEY_ICON_SIZE, 96) + 28));
+        return Math.max(1, pageHeight / Math.max(1, cellHeight));
+    }
+
+    private int pageCapacity() { return getHomeColumns() * getHomeGridRows(); }
 
     private void clearIconPositions() {
         SharedPreferences.Editor editor = prefs.edit();
