@@ -43,12 +43,24 @@ final class HomePageModel {
         }
 
         SharedPreferences.Editor edit = prefs.edit();
+        int pageCapacity = Math.max(1, columns * rows);
+        int[] pageLoads = new int[PAGE_COUNT];
+        // Keep each screen within its real visible grid. If old versions stored too
+        // many apps on one page, migrate the overflow to the other page instead of
+        // letting the renderer silently omit shortcuts below the dock.
         for (String name : unique) {
-            int page = clampPage(prefs.getInt(iconPagePrefix + name, 0));
+            int preferredPage = clampPage(prefs.getInt(iconPagePrefix + name, 0));
+            int otherPage = 1 - preferredPage;
+            int page = preferredPage;
+            if (pageLoads[page] >= pageCapacity && pageLoads[otherPage] < pageCapacity) {
+                page = otherPage;
+            }
             pages.get(page).add(name);
+            pageLoads[page]++;
+            edit.putInt(iconPagePrefix + name, page);
         }
 
-        // Normalize positions within each screen only. Do not shift icons to another page.
+        // Normalize positions against the same row count used by the visible grid.
         for (int pageIndex = 0; pageIndex < PAGE_COUNT; pageIndex++) {
             List<String> items = pages.get(pageIndex);
             int effectiveRows = Math.max(rows, (items.size() + columns - 1) / columns);
