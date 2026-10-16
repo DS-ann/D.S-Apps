@@ -1230,9 +1230,10 @@ public class MainActivity extends Activity {
         int desiredPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1,
                 prefs.getInt(KEY_SHORTCUT_PAGE, 0)));
         int columns = Math.max(1, getHomeColumns());
-        int rows = HOME_ROWS;
+        int rows = getHomeGridRows();
         int cellW = Math.max(1, pageViewport.getWidth() / columns);
-        int cellH = Math.max(1, pageViewport.getHeight() / rows);
+        int cellH = LauncherUiUtils.dp(this,
+                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 96) + 28));
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) return;
 
         FrameLayout chosenPage = null;
@@ -2199,6 +2200,10 @@ public class MainActivity extends Activity {
                 || packageName.equals(getPackageName()) || homePackages.contains(packageName)) {
             return;
         }
+        if (dockPackages.contains(packageName)) {
+            Toast.makeText(this, "This app is already in the dock", Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (findApp(packageName) == null) {
             Toast.makeText(this, "That app is no longer available", Toast.LENGTH_SHORT).show();
             return;
@@ -2366,8 +2371,10 @@ public class MainActivity extends Activity {
         final int destinationPage = Math.max(0, Math.min(1, requestedPage));
         final List<ResolveInfo> available = new ArrayList<>();
         for (ResolveInfo app : allApps) {
+            if (app == null || app.activityInfo == null) continue;
             String packageName = app.activityInfo.packageName;
-            if (!packageName.equals(getPackageName()) && !homePackages.contains(packageName)) available.add(app);
+            if (!packageName.equals(getPackageName()) && !homePackages.contains(packageName)
+                    && !dockPackages.contains(packageName)) available.add(app);
         }
         if (available.isEmpty()) {
             Toast.makeText(this, "All apps are already on Home", Toast.LENGTH_SHORT).show();
