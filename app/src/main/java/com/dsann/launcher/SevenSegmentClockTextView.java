@@ -111,7 +111,17 @@ public final class SevenSegmentClockTextView extends TextView {
         String value = display.toString();
         // Never leave the clock invisible if an unexpected format reaches this view.
         if (value.length() == 0) {
+            // Keep the time legible if a device returns an unusual locale format.
             super.onDraw(canvas);
+            return;
+        }
+
+        // During a resize or parent relayout, Android can briefly dispatch draw
+        // before this custom view receives its final non-zero bounds. Avoid
+        // painting with empty geometry; the next layout will redraw the clock.
+        if (getWidth() <= getPaddingLeft() + getPaddingRight()
+                || getHeight() <= getPaddingTop() + getPaddingBottom()) {
+            postInvalidate();
             return;
         }
 
@@ -133,6 +143,8 @@ public final class SevenSegmentClockTextView extends TextView {
             return;
         }
 
+        // Use the final measured bounds for every frame. The custom LED glyphs
+        // must not depend on stale width calculations from before a resize.
         // The whole string is sized as one unit, so 12-hour and 24-hour formats fit.
         float widthUnits = digits * 0.72f + colons * 0.34f;
         float unit = Math.min(availableHeight * 0.91f, availableWidth / widthUnits);
