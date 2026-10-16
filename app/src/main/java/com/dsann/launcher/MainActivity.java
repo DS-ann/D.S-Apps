@@ -540,7 +540,9 @@ public class MainActivity extends Activity {
         clockPanel.getLocationOnScreen(panel);
         root.getLocationOnScreen(rootLoc);
         int w = clockPanel.getWidth();
-        int h = clockPanel.getHeight();
+        // Handles follow the scaled visual background rather than its fixed
+        // layout footprint, so the bottom grip stays on the visible edge.
+        int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
         int side = LauncherUiUtils.dp(this, 28);
         int thin = LauncherUiUtils.dp(this, 8);
         int[][] positions = new int[][] {
@@ -3283,10 +3285,13 @@ public class MainActivity extends Activity {
         final int rowHeight = LauncherUiUtils.dp(this, 114);
 
         clockPanel.setGravity(alignment);
+        clockPanel.setPivotY(0f);
+        // Scale the entire clock panel visually so the translucent background,
+        // clock, AM/PM marker, and date grow together. Its measured row remains
+        // fixed below, so this visual resize never pushes workspace items down.
+        clockPanel.setScaleY(breadthScale);
         LinearLayout.LayoutParams panelParams =
                 (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
-        // Size the translucent background to the same content footprint as the clock.
-        // The parent gravity preserves left/centre/right placement while resizing.
         panelParams.gravity = alignment | Gravity.TOP;
         panelParams.width = Math.max(LauncherUiUtils.dp(this, 96),
                 contentWidth + LauncherUiUtils.dp(this, 8));
@@ -3327,7 +3332,9 @@ public class MainActivity extends Activity {
         // view horizontally as well, rather than widening the canvas (which caused
         // the renderer to fit back to the same size and made length resizing appear broken).
         clockText.setScaleX(lengthScale);
-        clockText.setScaleY(breadthScale);
+        // Vertical scaling is applied to clockPanel so its background and date
+        // match the digits; applying it here as well would double-scale the clock.
+        clockText.setScaleY(1f);
         clockText.setTranslationY(0f);
         float horizontalScaleOffset = sevenSegment ? 0f : naturalClockWidth - renderedClockWidth;
         clockText.setTranslationX(sevenSegment ? 0f : (alignment == Gravity.RIGHT
@@ -3336,11 +3343,12 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            textParams.width = sevenSegment ? Math.max(1, (int) Math.ceil(naturalClockWidth))
-                    : ViewGroup.LayoutParams.WRAP_CONTENT;
+            // Let the custom LED TextView measure its own glyph width, as in the
+            // known-good launcher build. An explicit width here can constrain its
+            // custom onMeasure() and leave the seven-segment glyphs clipped.
+            textParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
-            textParams.gravity = (sevenSegment && alignment == Gravity.CENTER_HORIZONTAL
-                    ? Gravity.CENTER_HORIZONTAL : alignment) | Gravity.TOP;
+            textParams.gravity = alignment | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
 
