@@ -847,7 +847,7 @@ public class MainActivity extends Activity {
 
     private void setWorkspaceGridVisible(boolean visible, View movingView) {
         if (pagesStrip == null) return;
-        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int iconSize = prefs == null ? 96 : prefs.getInt(KEY_ICON_SIZE, 96);
         int cellWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth() / Math.max(1, getHomeColumns())
                 : LauncherUiUtils.dp(this, 90));
@@ -1040,7 +1040,7 @@ public class MainActivity extends Activity {
         dockContainer.setClipChildren(false);
         dockContainer.setClipToPadding(false);
         dockContainer.setElevation(LauncherUiUtils.dp(this, 4));
-        int initialDockIconSize = prefs.getInt(KEY_ICON_SIZE, 48);
+        int initialDockIconSize = prefs.getInt(KEY_ICON_SIZE, 96);
         LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1,
                 LauncherUiUtils.dp(this, Math.max(56, initialDockIconSize + 8)));
         dockParams.topMargin = LauncherUiUtils.dp(this, 2);
@@ -1460,7 +1460,7 @@ public class MainActivity extends Activity {
     private void renderDock() {
         if (dockContainer == null) return;
         dockContainer.removeAllViews();
-        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int iconSize = prefs == null ? 96 : prefs.getInt(KEY_ICON_SIZE, 96);
         ViewGroup.LayoutParams dockLayoutParams = dockContainer.getLayoutParams();
         int desiredHeight = LauncherUiUtils.dp(this, Math.max(56, iconSize + 8));
         if (dockLayoutParams != null && dockLayoutParams.height != desiredHeight) {
@@ -1590,7 +1590,7 @@ public class MainActivity extends Activity {
                     lp.leftMargin = Math.max(0, Math.min(maxX,
                             Math.round(event.getRawX() - pageLocation[0] - view.getWidth() / 2f - pageOffsetX)));
                     int slotHeight = LauncherUiUtils.dp(this,
-                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 96) + 28));
                     int gridRows = Math.max(1, page.getHeight() / slotHeight);
                     int requestedTop = Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f);
                     int snappedRow = Math.max(0, Math.min(gridRows - 1, requestedTop / slotHeight));
@@ -1658,7 +1658,7 @@ public class MainActivity extends Activity {
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
                     int columns = getHomeColumns();
                     int slotHeight = LauncherUiUtils.dp(this,
-                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 96) + 28));
                     // Fixed-size slots are shared by both screens. The usable page
                     // ends above the page indicator/dock, so a complete slot must fit.
                     int rows = Math.max(1,
@@ -2945,7 +2945,7 @@ public class MainActivity extends Activity {
         int columns = getHomeColumns();
         int cellWidth = Math.max(1, page.getWidth() / columns);
         int cellHeight = LauncherUiUtils.dp(this,
-                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 96) + 28));
         int rows = Math.max(1, page.getHeight() / cellHeight);
         FrameLayout.LayoutParams widgetLp = (FrameLayout.LayoutParams) widgetContainer.getLayoutParams();
         int wx1 = widgetLp.leftMargin, wy1 = widgetLp.topMargin;
@@ -3036,7 +3036,7 @@ public class MainActivity extends Activity {
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
         int slotHeight = LauncherUiUtils.dp(this,
-                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 96) + 28));
         int usableHeight = pageViewport != null && pageViewport.getHeight() > 0
                 ? pageViewport.getHeight()
                 : Math.max(slotHeight, getResources().getDisplayMetrics().heightPixels
@@ -3153,7 +3153,7 @@ public class MainActivity extends Activity {
             currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+        addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 96)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
