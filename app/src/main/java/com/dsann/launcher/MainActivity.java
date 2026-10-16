@@ -3463,7 +3463,42 @@ public class MainActivity extends Activity {
                     amPmText.setVisibility(View.VISIBLE);
                 }
             }
-            clockText.setText(clockValue.trim());
+            clockValue = clockValue.trim();
+            boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
+                    && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+            if (!sevenSegmentClock && !clockValue.isEmpty()) {
+                // Reserve a leading hour digit when the formatted hour is one
+                // digit, but render that zero transparently.
+                int firstDigit = -1;
+                for (int i = 0; i < clockValue.length(); i++) {
+                    if (Character.digit(clockValue.charAt(i), 10) >= 0) {
+                        firstDigit = i;
+                        break;
+                    }
+                }
+                if (firstDigit >= 0) {
+                    int hourEnd = firstDigit;
+                    while (hourEnd < clockValue.length()
+                            && Character.digit(clockValue.charAt(hourEnd), 10) >= 0) {
+                        hourEnd++;
+                    }
+                    if (hourEnd - firstDigit == 1 && hourEnd < clockValue.length()) {
+                        char hourDigit = clockValue.charAt(firstDigit);
+                        char invisibleZero = (char) (hourDigit - Character.digit(hourDigit, 10));
+                        android.text.SpannableString padded =
+                                new android.text.SpannableString(invisibleZero + clockValue);
+                        padded.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
+                                0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        clockText.setText(padded);
+                    } else {
+                        clockText.setText(clockValue);
+                    }
+                } else {
+                    clockText.setText(clockValue);
+                }
+            } else {
+                clockText.setText(clockValue);
+            }
             dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
             dateText.setText(dateValue);
             applyClockPositionAndSize();
@@ -3607,13 +3642,13 @@ public class MainActivity extends Activity {
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         // Keep the background full-width and centered vertically. Shorten it
-        // by 10% for seven-segment clocks and 30% for all other clock styles.
+        // by 20% for seven-segment clocks and 40% for all other clock styles.
         // The clock glyphs, date, and AM/PM retain their existing geometry.
         boolean sevenSegmentBackground = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         int backgroundHeight = hero.getHeight() > 0 ? hero.getHeight()
                 : LauncherUiUtils.dp(this, 140);
-        float totalHeightReduction = sevenSegmentBackground ? 0.10f : 0.30f;
+        float totalHeightReduction = sevenSegmentBackground ? 0.20f : 0.40f;
         int verticalInset = Math.max(1,
                 Math.round(backgroundHeight * totalHeightReduction / 2f));
         InsetDrawable centeredBackground = new InsetDrawable(next,
@@ -4365,12 +4400,12 @@ public class MainActivity extends Activity {
                                 baseClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
-            // For seven-segment only, shift the marker visually by exactly 1 dp
-            // right and 1 dp up, including at the maximum clock resize. The
-            // parent panel scales its children, so compensate for that scale here.
+            // For seven-segment only, shift the marker 2 dp right and 2 dp up
+            // relative to the digits. Compensate for parent scaling so the
+            // offset remains stable while resizing.
             if (sevenSegment) {
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 1) / Math.max(0.01f, lengthScale));
-                amPmText.setTranslationY(-LauncherUiUtils.dp(this, 1) / Math.max(0.01f, breadthScale));
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 2) / Math.max(0.01f, lengthScale));
+                amPmText.setTranslationY(-LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             } else {
                 // For every non-seven-segment style, bring AM/PM slightly closer
                 // to the clock's lower-right corner: 2 dp right and 2 dp up.
