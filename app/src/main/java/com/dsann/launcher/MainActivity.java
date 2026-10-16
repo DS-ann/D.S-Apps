@@ -477,11 +477,13 @@ public class MainActivity extends Activity {
             // controller. Do not let the launcher steal it for page navigation:
             // otherwise moving/resizing a widget can rotate pages underneath it.
             // Page changes remain available from the free workspace surface.
-            if (!drawerOpen && !gestureStartedOnContactShortcut
-                    && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
-                    && !heldItemGesture
-                    && pagesStrip != null && pagesStrip.getChildCount() > 1
-                    && (pageSwipeActive || (Math.abs(dx) > LauncherUiUtils.dp(this, 12)
+            if (!drawerOpen && pagesStrip != null && pagesStrip.getChildCount() > 1
+                    // Once a page swipe has claimed the touch stream, item long-press/drag
+                    // classification must not pause its progress midway through the gesture.
+                    && (pageSwipeActive || (!gestureStartedOnContactShortcut
+                        && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
+                        && !heldItemGesture
+                        && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                         // Permit diagonal swipes; once claimed, the gesture remains owned
                         // by the page transition regardless of later finger angle.
                         && Math.abs(dx) > Math.abs(dy) * 0.75f))) {
