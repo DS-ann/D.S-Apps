@@ -128,6 +128,9 @@ public final class SevenSegmentClockTextView extends TextView {
                 : (horizontalGravity == Gravity.CENTER_HORIZONTAL
                         ? leftBound + (availableWidth - totalWidth) / 2f
                         : rightBound - totalWidth);
+        // Intentionally crop half of the leading digit at the left edge, giving
+        // the seven-segment clock the requested left-shifted, edge-cut appearance.
+        x -= digitWidth * 0.5f;
         float y = topBound + (availableHeight - digitHeight) / 2f;
         float thickness = Math.max(3f, digitWidth * 0.17f);
         float half = thickness / 2f;
