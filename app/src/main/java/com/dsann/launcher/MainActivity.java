@@ -3975,7 +3975,7 @@ public class MainActivity extends Activity {
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Home app font size", prefs.getInt(KEY_HOME_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+        addChoiceRow(content, "Home app font size", prefs.getInt(KEY_HOME_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL", "Larger"}, value -> {
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -4051,7 +4051,7 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "App drawer font size", prefs.getInt(KEY_DRAWER_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+        addChoiceRow(content, "App drawer font size", prefs.getInt(KEY_DRAWER_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL", "Larger"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_FONT_SIZE, value).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
