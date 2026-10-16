@@ -141,7 +141,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
             cell.setPadding(dp(2), dp(7), dp(2), dp(7));
             icon = new ImageView(activity);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
+            int iconSize = preferences == null ? 96 : preferences.getInt(iconSizeKey, 96);
             LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize));
             iconParams.gravity = Gravity.CENTER;
             cell.addView(icon, iconParams);
@@ -151,7 +151,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         List<ResolveInfo> currentItems = items();
         if (position < 0 || position >= currentItems.size()) return cell;
         ResolveInfo app = currentItems.get(position);
-        int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
+        int iconSize = preferences == null ? 96 : preferences.getInt(iconSizeKey, 96);
         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
         if (iconParams != null && (iconParams.width != dp(iconSize) || iconParams.height != dp(iconSize))) {
             iconParams.width = dp(iconSize);
