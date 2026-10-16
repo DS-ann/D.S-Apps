@@ -4203,7 +4203,16 @@ public class MainActivity extends Activity {
                 dateParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
                 dateText.setLayoutParams(dateParams);
             }
-            // Keep the date inside the same resizable background as the clock.
+            // Keep the 7-segment date legible at a fixed visual size while the
+            // clock panel is resized by counter-scaling it against its parent.
+            if (sevenSegment) {
+                dateText.setTextSize(15f);
+                dateText.setScaleX(1f / Math.max(0.01f, lengthScale));
+                dateText.setScaleY(1f / Math.max(0.01f, breadthScale));
+            } else {
+                dateText.setScaleX(1f);
+                dateText.setScaleY(1f);
+            }
             dateText.setTranslationX(0f);
         }
 
@@ -4227,13 +4236,13 @@ public class MainActivity extends Activity {
                         contentWidth - markerParams.width,
                         (int) Math.ceil(naturalClockWidth) - markerParams.width
                                 - cornerInset - LauncherUiUtils.dp(this, 3)));
-                // Anchor vertically to the scaled clock's lower edge, not the
-                // unscaled 114dp TextView height. Keep a gap before the date row.
-                int visibleClockHeight = Math.max(1,
-                        (int) Math.ceil(LauncherUiUtils.dp(this, 114) * breadthScale));
+                // The entire panel already scales vertically. Keep this position
+                // in unscaled coordinates; scaling the margin too makes AM/PM travel
+                // faster than the background during resize.
+                int baseClockHeight = LauncherUiUtils.dp(this, 114);
                 markerParams.topMargin = Math.max(0,
                         Math.min(rowHeight - markerParams.height,
-                                visibleClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
+                                baseClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
         }
