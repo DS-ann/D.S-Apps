@@ -398,7 +398,7 @@ public class MainActivity extends Activity {
             }
             // In the drawer, only a downward pull starting at the very top closes it.
             // All other vertical gestures are left to the app grid for normal scrolling.
-            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dy) > Math.abs(dx) * 1.15f;
             if (drawerCloseSwipeClaimed) {
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
@@ -543,10 +543,8 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
-                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition(), 1f);
-                homeScreen.setVisibility(View.GONE);
-                drawerScreen.setVisibility(View.VISIBLE);
+                LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                        () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 return true;
             }
             if (drawerSwipeVisualActive) {
