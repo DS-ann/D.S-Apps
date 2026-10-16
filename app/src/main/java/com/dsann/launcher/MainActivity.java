@@ -603,9 +603,9 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
-                // Cancel/release must always settle to a stable endpoint. Progress is
-                // the remaining-open fraction for a downward close gesture.
-                if (drawerSwipeProgress > 0.10f) {
+                // Progress is the remaining-open fraction: a 10% downward
+                // swipe leaves progress at 90%, which is enough to close to Home.
+                if (drawerSwipeProgress > 0.90f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -652,8 +652,9 @@ public class MainActivity extends Activity {
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
-                // Complete toward whichever screen is nearest at finger release.
-                if (drawerSwipeProgress > 0.10f) {
+                // A 10% downward pull is enough to complete the drawer-to-Home
+                // transition; progress represents how much of the drawer remains open.
+                if (drawerSwipeProgress > 0.90f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -3564,10 +3565,10 @@ public class MainActivity extends Activity {
             // are applied when the clock is created or settings change, not every minute.
         }
         activateClockForPage(restorePage);
-        // Initial creation applies sizing before the real time/date text and its
-        // final glyph width exist. Recompute once with populated text so the first
-        // frame after install/update matches the geometry used after a manual resize.
-        applyClockPositionAndSize();
+        // A time/date refresh must only replace text. Re-running geometry here
+        // recalculates the panel from the current digits/date, so the background
+        // can shrink and the clock shifts horizontally at a minute/day boundary.
+        // Geometry is recalculated on creation, style changes, and explicit resize.
         updateClockResizeHandles();
         applyBrandVisibility();
     }
