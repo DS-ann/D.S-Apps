@@ -168,18 +168,20 @@ final class HomePageController {
             // from the usable workspace height so no slot extends into the dock.
             final int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
             boolean[][] occupiedSlots = new boolean[rows][columns];
+            LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
+                    host.getAllApps(), host.getDrawerApps(), pagePackages,
+                    false, iconSizeKey, fontSizeKey, showLabelsKey,
+                    new LauncherAppAdapter.Actions() {
+                        @Override public void onAppClick(ResolveInfo app) { host.launchApp(app); }
+                        @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
+                            host.showAppOptions(app, onHome);
+                        }
+                    });
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
                 String packageName = pagePackages.get(itemIndex);
-                if (host.findApp(packageName) == null) continue;
-                View cell = new LauncherAppAdapter(activity, prefs, packageManager,
-                        host.getAllApps(), host.getDrawerApps(), pagePackages,
-                        false, iconSizeKey, fontSizeKey, showLabelsKey,
-                        new LauncherAppAdapter.Actions() {
-                            @Override public void onAppClick(ResolveInfo app) { host.launchApp(app); }
-                            @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
-                                host.showAppOptions(app, onHome);
-                            }
-                        }).getView(itemIndex, null, page);
+                ResolveInfo app = host.findApp(packageName);
+                if (app == null) continue;
+                View cell = homeAdapter.getViewForApp(app, null, page);
                 cell.setTag("launcher_app:" + packageName);
                 int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1), pageWidth / columns);
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
