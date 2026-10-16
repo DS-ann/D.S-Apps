@@ -12,7 +12,7 @@ import android.graphics.drawable.Drawable;
 /** Draws an app icon with optional rounded-square backing and a selectable silhouette. */
 final class LauncherIconDrawable extends Drawable {
     static final int SHAPE_ORIGINAL = 0;
-    static final int SHAPE_ROUND = 1;
+    static final int SHAPE_TRIANGLE = 1;
     static final int SHAPE_PEAR = 2;
     static final int BACKGROUND_BLACK = 0;
     static final int BACKGROUND_WHITE = 1;
@@ -66,10 +66,13 @@ final class LauncherIconDrawable extends Drawable {
         if (rect.width() <= 0 || rect.height() <= 0) return;
 
         int save = canvas.save();
-        if (shape == SHAPE_ROUND) {
+        if (shape == SHAPE_TRIANGLE) {
+            // Equilateral-style triangle mask, centered and inset within the icon bounds.
             path.reset();
-            path.addCircle(rect.centerX(), rect.centerY(),
-                    Math.min(rect.width(), rect.height()) / 2f, Path.Direction.CW);
+            path.moveTo(rect.centerX(), rect.top);
+            path.lineTo(rect.right, rect.bottom);
+            path.lineTo(rect.left, rect.bottom);
+            path.close();
             canvas.clipPath(path);
         } else if (shape == SHAPE_PEAR) {
             // Pear silhouette: narrow rounded top, widening toward a full lower half.

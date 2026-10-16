@@ -4034,7 +4034,7 @@ public class MainActivity extends Activity {
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App icon shape", prefs.getInt("app_icon_shape", 0),
-                new String[]{"Original", "Round", "Pear"}, value -> {
+                new String[]{"Original", "Triangle", "Pear"}, value -> {
             prefs.edit().putInt("app_icon_shape", value).apply();
             renderHomePages(false);
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
