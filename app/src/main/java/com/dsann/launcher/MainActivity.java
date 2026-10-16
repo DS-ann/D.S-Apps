@@ -3345,7 +3345,9 @@ public class MainActivity extends Activity {
             clockGroup.setClipToPadding(false);
         }
 
-        clockText.setTextSize(78f);
+        // Keep LED geometry's measurement font consistent during direct handle-resize;
+        // applyClockPositionAndSize() can run without applyClockStyle() being called.
+        clockText.setTextSize(sevenSegment ? 110f : 78f);
         clockText.setPivotX(0f);
         // Preserve the clock's original top-aligned scaling behaviour.
         clockText.setPivotY(0f);
