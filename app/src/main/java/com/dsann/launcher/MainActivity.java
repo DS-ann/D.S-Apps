@@ -4166,10 +4166,15 @@ public class MainActivity extends Activity {
         clockText.setGravity(Gravity.LEFT | Gravity.TOP);
         clockText.setPivotX(0f);
         clockText.setPivotY(0f);
-        clockText.setScaleX(1f);
-        // Vertical scaling is applied to clockPanel so its background and date
-        // match the digits; applying it here as well would double-scale the clock.
-        clockText.setScaleY(1f);
+        // Enlarge only the non-LED clock glyphs: keep the panel/background,
+        // date, and AM/PM layout geometry unchanged. Center the extra width so
+        // it does not shift the clock's left/right alignment anchor.
+        clockText.setScaleX(sevenSegment ? 1f : 1.10f);
+        clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
+        // The panel still controls background/date height; only these glyphs
+        // receive the additional 20% height for non-seven-segment styles.
+        clockText.setScaleY(sevenSegment ? 1f : 1.20f);
+        clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() : 0f);
         clockText.setTranslationX(0f);
         clockText.setTranslationY(0f);
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
@@ -4216,7 +4221,8 @@ public class MainActivity extends Activity {
                 int cornerInset = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0, Math.min(
                         contentWidth - markerParams.width,
-                        (int) Math.ceil(naturalClockWidth) - markerParams.width - cornerInset));
+                        (int) Math.ceil(naturalClockWidth) - markerParams.width
+                                - cornerInset - LauncherUiUtils.dp(this, 3)));
                 // Anchor vertically to the scaled clock's lower edge, not the
                 // unscaled 114dp TextView height. Keep a gap before the date row.
                 int visibleClockHeight = Math.max(1,
