@@ -3560,7 +3560,14 @@ public class MainActivity extends Activity {
             // Only update the TextView when its displayed value actually changes.
             // This avoids needless layout invalidations from time/date broadcasts.
             if (!displayClock.toString().contentEquals(clockText.getText())) {
-                clockText.setText(displayClock);
+                // The seven-segment renderer draws within fixed bounds. Avoid
+                // text-metric-driven remeasurement as hour digits change (e.g. 1 -> 2).
+                if (sevenSegmentClock) {
+                    clockText.setText(displayClock, TextView.BufferType.NORMAL);
+                    clockText.postInvalidateOnAnimation();
+                } else {
+                    clockText.setText(displayClock);
+                }
             }
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
@@ -4001,7 +4008,7 @@ public class MainActivity extends Activity {
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
-            prefs.edit().putInt(KEY_ICON_SIZE, new int[]{48, 54, 60, 66}[value]).apply();
+            prefs.edit().putInt(KEY_ICON_SIZE, new int[]{54, 64, 74, 84}[value]).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "▣", "Rounded-square icon background",
@@ -4110,7 +4117,7 @@ public class MainActivity extends Activity {
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
-            prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{48, 54, 60, 66}[value]).apply();
+            prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{54, 64, 74, 84}[value]).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App drawer font size", Math.min(3, prefs.getInt(KEY_DRAWER_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
@@ -4605,7 +4612,7 @@ public class MainActivity extends Activity {
         // Match the nearest actual preset. Threshold-based legacy mapping caused
         // Large (64 dp) to be highlighted as XL and treated the default 96 dp
         // fallback as XL even when no size had ever been selected.
-        int[] sizes = {48, 54, 60, 66};
+        int[] sizes = {54, 64, 74, 84};
         int bestIndex = 0;
         int bestDistance = Math.abs(size - sizes[0]);
         for (int i = 1; i < sizes.length; i++) {
