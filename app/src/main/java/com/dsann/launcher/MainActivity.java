@@ -3263,8 +3263,13 @@ public class MainActivity extends Activity {
                     Math.max(LauncherUiUtils.dp(this, 90), availableHeight - LauncherUiUtils.dp(this, 80)));
             AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
             widget.setAppWidget(widgetId, info);
-            addWidgetContainer(page, widget, widgetId, targetPage, LauncherUiUtils.dp(this, 8),
-                    LauncherUiUtils.dp(this, 8), width, height);
+            int[] freeWidgetPosition = findFreeWidgetPosition(page, width, height);
+            if (freeWidgetPosition == null) {
+                try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
+                Toast.makeText(this, "No free space large enough for this widget on that screen", Toast.LENGTH_LONG).show();
+                return;
+            }
+            addWidgetContainer(page, widget, widgetId, targetPage, freeWidgetPosition[0], freeWidgetPosition[1], width, height);
             FrameLayout container = null;
             for (int i = 0; i < page.getChildCount(); i++) {
                 View child = page.getChildAt(i);
@@ -3288,6 +3293,41 @@ public class MainActivity extends Activity {
             }
             widgetHost.startListening();
         });
+    }
+
+    private int[] findFreeWidgetPosition(FrameLayout page, int widgetWidth, int widgetHeight) {
+        if (page == null) return null;
+        int pageWidth = page.getWidth() > 0 ? page.getWidth() : Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
+        int pageHeight = page.getHeight() > 0 ? page.getHeight() : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
+        int cellWidth = Math.max(1, pageWidth / getHomeColumns());
+        int cellHeight = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int maxLeft = Math.max(0, pageWidth - widgetWidth), maxTop = Math.max(0, pageHeight - widgetHeight);
+        for (int top = 0; top <= maxTop; top += cellHeight) {
+            for (int left = 0; left <= maxLeft; left += cellWidth) {
+                android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + widgetWidth, top + widgetHeight);
+                boolean blocked = false;
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    View child = page.getChildAt(i);
+                    Object rawTag = child.getTag();
+                    if (!(rawTag instanceof String)) continue;
+                    String tag = (String) rawTag;
+                    if ("launcher_clock_widget".equals(tag)) continue;
+                    ViewGroup.LayoutParams raw = child.getLayoutParams();
+                    int x = child.getLeft(), y = child.getTop(), w = child.getWidth(), h = child.getHeight();
+                    if (raw instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                        x = lp.leftMargin; y = lp.topMargin;
+                        if (lp.width > 0) w = lp.width;
+                        if (lp.height > 0) h = lp.height;
+                    }
+                    if (tag.startsWith("launcher_app:")) { w = cellWidth; h = cellHeight; }
+                    else if (!tag.startsWith("launcher_widget:") && !"launcher_contact_shortcut".equals(tag)) continue;
+                    if (w > 0 && h > 0 && android.graphics.Rect.intersects(candidate, new android.graphics.Rect(x, y, x + w, y + h))) { blocked = true; break; }
+                }
+                if (!blocked) return new int[]{left, top};
+            }
+        }
+        return null;
     }
 
     private boolean containsWidgetId(String stored, int widgetId) {
