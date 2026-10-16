@@ -4482,8 +4482,9 @@ public class MainActivity extends Activity {
         // at every clock length setting; the panel/background itself stays put.
         clockText.setTranslationX(sevenSegment
                 ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale) : 0f);
-        // No vertical offset: non-seven-segment clock remains centered in its background.
-        clockText.setTranslationY(0f);
+        // Move the clock digits 15 dp upward relative to the background for every style.
+        // Counter-scale the offset so the visual displacement remains 15 dp while resizing.
+        clockText.setTranslationY(-LauncherUiUtils.dp(this, 15) / Math.max(0.01f, breadthScale));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
