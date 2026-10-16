@@ -3286,6 +3286,10 @@ public class MainActivity extends Activity {
 
         clockPanel.setGravity(alignment);
         clockPanel.setPivotY(0f);
+        // Keep the scaled clock visually above workspace icons and shortcuts.
+        // Its actual hit bounds stay at the fixed layout size, so overlapping
+        // visuals do not steal touches from the shortcut underneath.
+        clockPanel.setElevation(LauncherUiUtils.dp(this, 8));
         // Scale the entire clock panel visually so the translucent background,
         // clock, AM/PM marker, and date grow together. Its measured row remains
         // fixed below, so this visual resize never pushes workspace items down.
