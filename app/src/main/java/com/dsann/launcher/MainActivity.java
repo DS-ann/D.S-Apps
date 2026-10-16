@@ -3593,13 +3593,17 @@ public class MainActivity extends Activity {
         // Preserve the time-driven colour cycling while applying the user's
         // saved opacity uniformly to every stop in the gradient.
         int opacity = Math.max(0, Math.min(100,
-                prefs == null ? 100 : prefs.getInt(KEY_CLOCK_BG_OPACITY, 100)));
-        int leftEdge = Color.argb(125 * opacity / 100, leftR, leftG, leftB);
-        int rightEdge = Color.argb(149 * opacity / 100, tone[0], tone[1], tone[2]);
-        int leftMid = Color.argb(72 * opacity / 100, leftR, leftG, leftB);
-        int rightMid = Color.argb(76 * opacity / 100, tone[0], tone[1], tone[2]);
+                prefs == null ? 50 : prefs.getInt(KEY_CLOCK_BG_OPACITY, 50)));
+        // 50% reproduces the original background alpha; 100% doubles it.
+        // Clamp each channel at 255 so stronger settings remain valid ARGB.
+        int opacityScale = opacity * 2;
+        int leftEdge = Color.argb(Math.min(255, 125 * opacityScale / 100), leftR, leftG, leftB);
+        int rightEdge = Color.argb(Math.min(255, 149 * opacityScale / 100), tone[0], tone[1], tone[2]);
+        int leftMid = Color.argb(Math.min(255, 72 * opacityScale / 100), leftR, leftG, leftB);
+        int rightMid = Color.argb(Math.min(255, 76 * opacityScale / 100), tone[0], tone[1], tone[2]);
         GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[] {leftEdge, leftMid, Color.argb(22 * opacity / 100, 125, 155, 235),
+                new int[] {leftEdge, leftMid,
+                        Color.argb(Math.min(255, 22 * opacityScale / 100), 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         // Restore the full background width and make only its height 20% shorter,
@@ -3916,7 +3920,7 @@ public class MainActivity extends Activity {
 
         addSection(content, "Clock");
         addSliderRow(content, "Clock background opacity", 0, 100,
-                prefs.getInt(KEY_CLOCK_BG_OPACITY, 100), "%", value -> {
+                prefs.getInt(KEY_CLOCK_BG_OPACITY, 50), "%", value -> {
             prefs.edit().putInt(KEY_CLOCK_BG_OPACITY, value).apply();
             applyClockPanelColor(false);
         });
