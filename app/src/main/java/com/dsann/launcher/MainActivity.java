@@ -603,17 +603,27 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
-                LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                        () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                // Cancel/release must always settle to a stable endpoint. Progress is
+                // the remaining-open fraction for a downward close gesture.
+                if (drawerSwipeProgress > 0.5f) {
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                } else {
+                    LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
+                }
                 return true;
             }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                // ACTION_CANCEL can arrive when Android transfers/intercepts the
-                // gesture. Treat a claimed upward drawer swipe like finger release:
-                // settle from its current pose instead of snapping back to home.
-                LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                        () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                // A cancelled upward opening settles to the nearest stable screen.
+                if (drawerSwipeProgress >= 0.5f) {
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                } else {
+                    LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
+                            getDrawerTransition());
+                }
                 return true;
             }
             if (pageSwipeActive) {
@@ -641,8 +651,15 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
-                LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
-                        () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
+                drawerCloseSwipeClaimed = false;
+                // Complete toward whichever screen is nearest at finger release.
+                if (drawerSwipeProgress > 0.5f) {
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                } else {
+                    LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
+                }
                 return true;
             }
             if (drawerSwipeVisualActive && dy >= 0f) {
@@ -662,10 +679,15 @@ public class MainActivity extends Activity {
                         || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                             && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
                 if (dy < 0f) {
-                    // Finish the interactive opening from the current finger-driven pose.
-                    // Do not rely on property animations that can leave the two surfaces mid-transition.
-                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                    // Finish from the current pose, but do not force a tiny partial
+                    // swipe all the way open. Always settle to home or drawer.
+                    if (drawerSwipeProgress >= 0.5f) {
+                        LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                                () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                    } else {
+                        LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
+                                getDrawerTransition());
+                    }
                     drawerSwipeVisualActive = false;
                 } else {
                     openControlCenter();
