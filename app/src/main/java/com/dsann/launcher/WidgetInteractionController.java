@@ -106,7 +106,7 @@ final class WidgetInteractionController {
         resizeHandle.setVisibility(View.GONE);
         FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(LauncherUiUtils.dp(activity, 26), LauncherUiUtils.dp(activity, 26), Gravity.RIGHT | Gravity.BOTTOM);
         container.addView(resizeHandle, handleLp);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(LauncherUiUtils.dp(activity, 140), width), Math.max(LauncherUiUtils.dp(activity, 90), height), Gravity.TOP | Gravity.LEFT);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(1, width), Math.max(1, height), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = x;
         lp.topMargin = y;
         page.addView(container, lp);
