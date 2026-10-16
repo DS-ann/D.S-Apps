@@ -4271,13 +4271,35 @@ public class MainActivity extends Activity {
         clockText.setGravity(Gravity.LEFT | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
         clockText.setPivotX(0f);
         clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() / 2f : 0f);
-        // Enlarge only the non-LED clock glyphs: keep the panel/background,
-        // date, and AM/PM layout geometry unchanged. Center the extra width so
-        // it does not shift the clock's left/right alignment anchor.
-        clockText.setScaleX(sevenSegment ? 1f : 1.10f);
+        // Normalize non-seven-segment glyph height across typography presets.
+        // Typeface choices have different cap-height metrics at the same 78sp,
+        // which otherwise makes some styles look smaller/larger. Use the default
+        // sans-serif-light preset as the visual-height reference while preserving
+        // each style's own typeface, weight, letter spacing, and shadow.
+        float normalizedNonLedHeightScale = 1.20f;
+        if (!sevenSegment) {
+            android.graphics.Paint referencePaint = new android.graphics.Paint(clockText.getPaint());
+            referencePaint.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+            android.graphics.Paint.FontMetrics referenceMetrics = referencePaint.getFontMetrics();
+            android.graphics.Paint.FontMetrics currentMetrics = clockText.getPaint().getFontMetrics();
+            float referenceHeight = referenceMetrics.descent - referenceMetrics.ascent;
+            float currentHeight = currentMetrics.descent - currentMetrics.ascent;
+            if (referenceHeight > 0f && currentHeight > 0f) {
+                normalizedNonLedHeightScale *= referenceHeight / currentHeight;
+            }
+        }
+        // Increase only the seven-segment glyph width by 0.2 cm. At 360 dpi,
+        // 0.2 cm is 28.35 physical pixels, or about 12.6 dp. Scale the glyph view
+        // around its center so the panel/background, date, and AM/PM stay unchanged.
+        float sevenSegmentExtraWidthDp = LauncherUiUtils.dp(this, 12.6f);
+        float sevenSegmentWidthScale = sevenSegment
+                ? (naturalClockWidth + sevenSegmentExtraWidthDp) / Math.max(1f, naturalClockWidth)
+                : 1f;
+        // Non-LED styles retain the same width treatment, now with consistent visual height.
+        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : 1.10f);
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
-        clockText.setScaleY(sevenSegment ? 1f : 1.20f);
+        clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale);
         clockText.setTranslationX(0f);
         // No vertical offset: non-seven-segment clock remains centered in its background.
         clockText.setTranslationY(0f);
