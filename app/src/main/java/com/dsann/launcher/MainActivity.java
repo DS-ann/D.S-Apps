@@ -662,11 +662,19 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
-            if (drawerSwipeVisualActive && dy >= 0f) {
+            if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition());
-                openControlCenter();
+                // A drawer-opening gesture owns the complete touch sequence. If the
+                // finger reverses or lifts mid-transition, settle to the nearest
+                // endpoint instead of starting control-center navigation or leaving
+                // the two surfaces in an intermediate pose.
+                if (drawerSwipeProgress >= 0.5f) {
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                } else {
+                    LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
+                            getDrawerTransition());
+                }
                 return true;
             }
             boolean itemManipulationOnRelease = gestureStartedOnClock || gestureStartedOnResizeHandle
@@ -3556,6 +3564,10 @@ public class MainActivity extends Activity {
             // are applied when the clock is created or settings change, not every minute.
         }
         activateClockForPage(restorePage);
+        // Initial creation applies sizing before the real time/date text and its
+        // final glyph width exist. Recompute once with populated text so the first
+        // frame after install/update matches the geometry used after a manual resize.
+        applyClockPositionAndSize();
         updateClockResizeHandles();
         applyBrandVisibility();
     }
