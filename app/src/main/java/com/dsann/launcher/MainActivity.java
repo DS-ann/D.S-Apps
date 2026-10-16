@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
     private static final String KEY_CUBE_ROTATION = "cube_rotation_degrees";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final String KEY_PAGE_TRANSITION = "page_transition";
+    private static final String KEY_DRAWER_TRANSITION = "drawer_transition";
+    private static final String KEY_DRAWER_OPACITY = "drawer_background_opacity";
     private static final String KEY_CLOCK_SIZE = "clock_size"; // Legacy preference; retained for compatibility.
     private static final String KEY_CLOCK_LENGTH = "clock_length_percent";
     private static final String KEY_CLOCK_BREADTH = "clock_breadth_percent";
@@ -2390,13 +2392,14 @@ public class MainActivity extends Activity {
     }
 
     private void showHome() {
-        LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen, () -> drawerOpen = false);
+        LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen, () -> drawerOpen = false,
+                getDrawerTransition());
     }
 
     private void showDrawer() {
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
-        });
+        }, getDrawerTransition());
     }
 
     private boolean addToHome(String packageName) { return addToHome(packageName, currentPage); }
@@ -3539,10 +3542,18 @@ public class MainActivity extends Activity {
 
     private GradientDrawable drawerBackground() {
         int theme = prefs == null ? 0 : prefs.getInt(KEY_COLOR_THEME, 0);
-        if (theme == 1) return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(8, 43, 63), Color.rgb(8, 17, 31)});
-        if (theme == 2) return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(49, 24, 76), Color.rgb(12, 13, 29)});
-        if (theme == 3) return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(36, 42, 55), Color.rgb(12, 15, 23)});
-        return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(15, 20, 36), Color.rgb(10, 13, 24)});
+        GradientDrawable background;
+        if (theme == 1) background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(8, 43, 63), Color.rgb(8, 17, 31)});
+        else if (theme == 2) background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(49, 24, 76), Color.rgb(12, 13, 29)});
+        else if (theme == 3) background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(36, 42, 55), Color.rgb(12, 15, 23)});
+        else background = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(15, 20, 36), Color.rgb(10, 13, 24)});
+        int opacity = prefs == null ? 100 : Math.max(0, Math.min(100, prefs.getInt(KEY_DRAWER_OPACITY, 100)));
+        background.setAlpha(Math.round(opacity * 2.55f));
+        return background;
+    }
+
+    private int getDrawerTransition() {
+        return Math.max(0, Math.min(3, prefs == null ? 0 : prefs.getInt(KEY_DRAWER_TRANSITION, 0)));
     }
 
     private void addSection(LinearLayout panel, String title) {
@@ -3692,6 +3703,16 @@ public class MainActivity extends Activity {
         });
 
         addSection(content, "App drawer");
+        addChoiceRow(content, "Drawer opening animation", getDrawerTransition(),
+                new String[]{"Current", "3D Card Flip", "Depth Slide", "Rotating Carousel"}, value -> {
+            prefs.edit().putInt(KEY_DRAWER_TRANSITION, value).apply();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addSliderRow(content, "Drawer background opacity", 0, 100,
+                prefs.getInt(KEY_DRAWER_OPACITY, 100), "%", value -> {
+            prefs.edit().putInt(KEY_DRAWER_OPACITY, value).apply();
+            if (drawerScreen != null) drawerScreen.setBackground(drawerBackground());
+        });
         addChoiceRow(content, "Drawer columns", getDrawerColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_COLUMNS, value + 3).apply();
             drawerGrid.setNumColumns(getDrawerColumns()); drawerAdapter.notifyDataSetChanged();
