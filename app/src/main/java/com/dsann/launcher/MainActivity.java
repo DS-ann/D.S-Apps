@@ -150,6 +150,7 @@ public class MainActivity extends Activity {
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
     private boolean clockWidgetDragging = false;
+    private boolean clockWidgetMoving = false;
     private float clockWidgetDownRawX, clockWidgetDownRawY;
     private float clockWidgetStartX, clockWidgetStartY;
     private int clockWidgetStartLength, clockWidgetStartBreadth;
@@ -324,6 +325,18 @@ public class MainActivity extends Activity {
             if (clockWidgetEditing && !gestureStartedOnClock) {
                 exitClockWidgetEditMode();
             }
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0) {
+                // In edit mode, a fresh touch on the clock belongs to clock movement,
+                // never to workspace page/drawer gestures.
+                clockWidgetMoving = true;
+                clockWidgetDownRawX = event.getRawX();
+                clockWidgetDownRawY = event.getRawY();
+                clockWidgetStartX = clockPanel.getTranslationX();
+                clockWidgetStartY = clockPanel.getTranslationY();
+                setWorkspaceGridVisible(true, clockPanel);
+                handler.removeCallbacks(clockWidgetLongPress);
+                return true;
+            }
             if (clockResizeEdge != 0 && clockWidgetEditing) {
                     clockWidgetDragging = true;
                     clockWidgetDownRawX = event.getRawX();
@@ -356,6 +369,19 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
         if (action == MotionEvent.ACTION_MOVE) {
+            if (clockWidgetMoving && clockWidgetEditing && clockPanel != null) {
+                float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
+                float moveX = (event.getRawX() - clockWidgetDownRawX) / density;
+                float moveY = (event.getRawY() - clockWidgetDownRawY) / density;
+                clockPanel.setTranslationX(clockWidgetStartX + moveX);
+                clockPanel.setTranslationY(clockWidgetStartY + moveY);
+                prefs.edit()
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
+                        .apply();
+                updateClockResizeHandles();
+                return true;
+            }
             if (clockResizeEdge != 0 && clockWidgetDragging) {
                 float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
                 int resizeDx = Math.round((event.getRawX() - clockWidgetDownRawX) / density);
@@ -431,7 +457,7 @@ public class MainActivity extends Activity {
             boolean heldItemGesture = (gestureStartedOnAppCell || gestureStartedOnWidget
                     || gestureStartedOnContactShortcut)
                     && event.getEventTime() - event.getDownTime() > 450L;
-            boolean itemManipulation = gestureStartedOnResizeHandle || iconDragArmed || iconDragging
+            boolean itemManipulation = gestureStartedOnClock || gestureStartedOnResizeHandle || iconDragArmed || iconDragging
                     || heldItemGesture;
             if (!drawerOpen && !itemManipulation
                     && !verticalSwipeClaimed && verticalSwipe) {
@@ -481,7 +507,7 @@ public class MainActivity extends Activity {
             if (!drawerOpen && pagesStrip != null && pagesStrip.getChildCount() > 1
                     // Once a page swipe has claimed the touch stream, item long-press/drag
                     // classification must not pause its progress midway through the gesture.
-                    && (pageSwipeActive || (!gestureStartedOnContactShortcut
+                    && (pageSwipeActive || (!gestureStartedOnClock && !gestureStartedOnContactShortcut
                         && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
                         && !heldItemGesture
                         && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
@@ -550,6 +576,20 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_CANCEL) {
             handler.removeCallbacks(clockWidgetLongPress);
+            if (clockWidgetMoving) {
+                clockWidgetMoving = false;
+                if (clockPanel != null) {
+                    clockPanel.setTranslationX(clockWidgetStartX);
+                    clockPanel.setTranslationY(clockWidgetStartY);
+                }
+                prefs.edit()
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockWidgetStartX)
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockWidgetStartY)
+                        .apply();
+                setWorkspaceGridVisible(false, null);
+                updateClockResizeHandles();
+                return true;
+            }
             if (clockResizeEdge != 0) {
                 finishClockResize(true);
                 return true;
@@ -582,6 +622,12 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(clockWidgetLongPress);
+            if (clockWidgetMoving) {
+                clockWidgetMoving = false;
+                setWorkspaceGridVisible(false, null);
+                updateClockResizeHandles();
+                return true;
+            }
             if (clockResizeEdge != 0) {
                 finishClockResize(false);
                 return true;
@@ -600,7 +646,7 @@ public class MainActivity extends Activity {
                 openControlCenter();
                 return true;
             }
-            boolean itemManipulationOnRelease = gestureStartedOnResizeHandle
+            boolean itemManipulationOnRelease = gestureStartedOnClock || gestureStartedOnResizeHandle
                     || iconDragArmed || iconDragging
                     || ((gestureStartedOnAppCell || gestureStartedOnWidget
                         || gestureStartedOnContactShortcut)
