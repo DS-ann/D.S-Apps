@@ -231,26 +231,38 @@ final class LauncherScreenTransitions {
             homeScreen.animate().alpha(0f).scaleX(0.89f).scaleY(0.89f)
                     .translationY(-LauncherUiUtils.dp(activity, 18)).translationZ(-density * 36f)
                     .setDuration(duration)
-                    .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
+                    .withEndAction(() -> {
+                        homeScreen.setVisibility(View.GONE);
+                        releaseTransitionLayer(homeScreen);
+                    }).start();
             drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
                     .translationX(0f).translationZ(0f).rotationX(0f)
-                    .setDuration(duration).start();
+                    .setDuration(duration)
+                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
         } else if (effect == 3) {
             homeScreen.animate().alpha(0f).rotationY(34f).translationX(-width * 0.12f)
                     .scaleX(0.92f).scaleY(0.92f)
                     .setDuration(duration)
-                    .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
+                    .withEndAction(() -> {
+                        homeScreen.setVisibility(View.GONE);
+                        releaseTransitionLayer(homeScreen);
+                    }).start();
             drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
                     .scaleX(1f).scaleY(1f)
-                    .setDuration(duration).start();
+                    .setDuration(duration)
+                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
         } else {
             homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f)
                     .translationY(-LauncherUiUtils.dp(activity, 22))
                     .setDuration(duration)
-                    .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
+                    .withEndAction(() -> {
+                        homeScreen.setVisibility(View.GONE);
+                        releaseTransitionLayer(homeScreen);
+                    }).start();
             drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
                     .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
-                    .setDuration(duration).start();
+                    .setDuration(duration)
+                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
         }
     }
 
