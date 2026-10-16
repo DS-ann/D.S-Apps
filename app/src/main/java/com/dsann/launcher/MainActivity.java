@@ -139,6 +139,9 @@ public class MainActivity extends Activity {
     private float clockWidgetDownRawX, clockWidgetDownRawY;
     private float clockWidgetStartX, clockWidgetStartY;
     private int clockWidgetStartLength, clockWidgetStartBreadth;
+    // 0 = none, 1 = left edge, 2 = right edge, 3 = top edge, 4 = bottom edge.
+    private int clockResizeEdge = 0;
+    private boolean gestureStartedOnClock = false;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
@@ -286,10 +289,26 @@ public class MainActivity extends Activity {
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
+            gestureStartedOnClock = touchStartedOnClock(event.getRawX(), event.getRawY());
+            clockResizeEdge = 0;
+            if (gestureStartedOnClock && clockWidgetEditing) {
+                clockResizeEdge = hitClockResizeEdge(event.getRawX(), event.getRawY());
+                if (clockResizeEdge != 0) {
+                    clockWidgetDragging = true;
+                    clockWidgetDownRawX = event.getRawX();
+                    clockWidgetDownRawY = event.getRawY();
+                    clockWidgetStartLength = getClockLength();
+                    clockWidgetStartBreadth = getClockBreadth();
+                    setWorkspaceGridVisible(true, clockPanel);
+                    return true;
+                }
+            }
             handler.removeCallbacks(homeLongPress);
-            // Widget gestures belong to the widget interaction handler, never the
-            // launcher's global long-press/customization or drawer gesture.
-            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget && !gestureStartedOnContactShortcut)
+            handler.removeCallbacks(clockWidgetLongPress);
+            // Clock edit/resize gestures must never be interpreted as workspace gestures.
+            if (gestureStartedOnClock && !drawerOpen) handler.postDelayed(clockWidgetLongPress, 650L);
+            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
+                    && !gestureStartedOnContactShortcut && !gestureStartedOnClock)
                 handler.postDelayed(homeLongPress, 2000L);
             return super.dispatchTouchEvent(event);
         }
@@ -297,6 +316,19 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
         if (action == MotionEvent.ACTION_MOVE) {
+            if (clockResizeEdge != 0 && clockWidgetDragging) {
+                float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
+                int dx = Math.round((event.getRawX() - clockWidgetDownRawX) / density);
+                int dy = Math.round((event.getRawY() - clockWidgetDownRawY) / density);
+                int lengthDelta = clockResizeEdge == 1 ? -dx : (clockResizeEdge == 2 ? dx : 0);
+                int breadthDelta = clockResizeEdge == 3 ? -dy : (clockResizeEdge == 4 ? dy : 0);
+                prefs.edit()
+                        .putInt(KEY_CLOCK_LENGTH, Math.max(80, Math.min(250, clockWidgetStartLength + lengthDelta)))
+                        .putInt(KEY_CLOCK_BREADTH, Math.max(80, Math.min(250, clockWidgetStartBreadth + breadthDelta)))
+                        .apply();
+                applyClockPositionAndSize();
+                return true;
+            }
             // In the drawer, only a downward pull starting at the very top closes it.
             // All other vertical gestures are left to the app grid for normal scrolling.
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
@@ -383,6 +415,13 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_CANCEL) {
+            handler.removeCallbacks(clockWidgetLongPress);
+            if (clockResizeEdge != 0) {
+                clockResizeEdge = 0;
+                clockWidgetDragging = false;
+                setWorkspaceGridVisible(false, null);
+                return true;
+            }
             handler.removeCallbacks(homeLongPress);
             if (pageSwipeActive) {
                 pageSwipeActive = false;
@@ -395,6 +434,13 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_UP) {
+            handler.removeCallbacks(clockWidgetLongPress);
+            if (clockResizeEdge != 0) {
+                clockResizeEdge = 0;
+                clockWidgetDragging = false;
+                setWorkspaceGridVisible(false, null);
+                return true;
+            }
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
@@ -439,6 +485,34 @@ public class MainActivity extends Activity {
             target = parent instanceof View ? (View) parent : null;
         }
         return false;
+    }
+
+    private boolean touchStartedOnClock(float rawX, float rawY) {
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            if (target == clockPanel || "launcher_clock_widget".equals(target.getTag())) return true;
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return false;
+    }
+
+    private int hitClockResizeEdge(float rawX, float rawY) {
+        if (clockPanel == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return 0;
+        int[] loc = new int[2];
+        clockPanel.getLocationOnScreen(loc);
+        float x = rawX - loc[0], y = rawY - loc[1];
+        float edge = LauncherUiUtils.dp(this, 28);
+        // Side handles sit at the centre of each edge, not in the corners.
+        if (Math.abs(y - clockPanel.getHeight() / 2f) <= edge
+                && x <= edge) return 1;
+        if (Math.abs(y - clockPanel.getHeight() / 2f) <= edge
+                && x >= clockPanel.getWidth() - edge) return 2;
+        if (Math.abs(x - clockPanel.getWidth() / 2f) <= edge && y <= edge) return 3;
+        if (Math.abs(x - clockPanel.getWidth() / 2f) <= edge
+                && y >= clockPanel.getHeight() - edge) return 4;
+        return 0;
     }
 
     private boolean touchStartedOnContactShortcut(float rawX, float rawY) {
@@ -2524,50 +2598,9 @@ public class MainActivity extends Activity {
         clockPanel.setTag("launcher_clock_widget");
         clockPanel.setClipChildren(false);
         clockPanel.setClipToPadding(false);
-        clockWidgetResizeHandle = new View(this);
-        GradientDrawable handle = new GradientDrawable();
-        handle.setColor(Color.rgb(115, 159, 255));
-        handle.setCornerRadius(LauncherUiUtils.dp(this, 5));
-        clockWidgetResizeHandle.setBackground(handle);
-        clockWidgetResizeHandle.setVisibility(View.GONE);
-        LinearLayout.LayoutParams handleParams = new LinearLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 22), LauncherUiUtils.dp(this, 22));
-        handleParams.gravity = Gravity.RIGHT;
-        clockPanel.addView(clockWidgetResizeHandle, handleParams);
-        clockWidgetResizeHandle.bringToFront();
-        clockWidgetResizeHandle.setOnTouchListener((view, event) -> {
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    clockWidgetDragging = true;
-                    clockWidgetDownRawX = event.getRawX();
-                    clockWidgetDownRawY = event.getRawY();
-                    clockWidgetStartLength = getClockLength();
-                    clockWidgetStartBreadth = getClockBreadth();
-                    view.getParent().requestDisallowInterceptTouchEvent(true);
-                    setWorkspaceGridVisible(true, clockPanel);
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    if (clockWidgetDragging) {
-                        int dx = Math.round((event.getRawX() - clockWidgetDownRawX)
-                                / Math.max(0.5f, getResources().getDisplayMetrics().density));
-                        int dy = Math.round((event.getRawY() - clockWidgetDownRawY)
-                                / Math.max(0.5f, getResources().getDisplayMetrics().density));
-                        prefs.edit()
-                                .putInt(KEY_CLOCK_LENGTH, Math.max(80, Math.min(250, clockWidgetStartLength + dx)))
-                                .putInt(KEY_CLOCK_BREADTH, Math.max(80, Math.min(250, clockWidgetStartBreadth + dy)))
-                                .apply();
-                        applyClockPositionAndSize();
-                    }
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    clockWidgetDragging = false;
-                    setWorkspaceGridVisible(false, null);
-                    if (view.getParent() != null) view.getParent().requestDisallowInterceptTouchEvent(false);
-                    return true;
-            }
-            return true;
-        });
+        // Resize hit targets are virtual edge grips handled before launcher gestures.
+        // Avoid adding physical children to this vertical layout: they used to push the
+        // clock/date downward and caused accidental control-centre/page gestures.
         clockPanel.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 clockWidgetDownRawX = event.getRawX();
@@ -2616,12 +2649,12 @@ public class MainActivity extends Activity {
     private final Runnable clockWidgetLongPress = () -> {
         if (clockPanel == null || drawerOpen) return;
         clockWidgetEditing = true;
-        if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.VISIBLE);
+        if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
         clockPanel.setBackground(LauncherUiUtils.roundRect(this,
                 new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
                 LauncherUiUtils.dp(this, 8)));
         setWorkspaceGridVisible(true, clockPanel);
-        Toast.makeText(this, "Clock widget: drag to move; drag blue handle to resize; tap outside to finish",
+        Toast.makeText(this, "Clock widget: drag to move; drag the middle of any edge to resize; tap outside to finish",
                 Toast.LENGTH_LONG).show();
     };
 
@@ -3122,9 +3155,16 @@ public class MainActivity extends Activity {
         clockPanel.setGravity(alignment);
         LinearLayout.LayoutParams panelParams =
                 (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
-        panelParams.gravity = Gravity.TOP;
-        panelParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        // Size the translucent background to the same content footprint as the clock.
+        // The parent gravity preserves left/centre/right placement while resizing.
+        panelParams.gravity = alignment | Gravity.TOP;
+        panelParams.width = Math.min(screenWidth - LauncherUiUtils.dp(this, 8),
+                Math.max(LauncherUiUtils.dp(this, 96), contentWidth + LauncherUiUtils.dp(this, 8)));
         clockPanel.setLayoutParams(panelParams);
+        clockPanel.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2),
+                LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2));
+        clockPanel.setClipChildren(false);
+        clockPanel.setClipToPadding(false);
 
         if (clockRow != null) {
             ViewGroup.LayoutParams rowParams = clockRow.getLayoutParams();
