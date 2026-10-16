@@ -126,18 +126,18 @@ final class LauncherScreenTransitions {
         if (effect == 1) {
             homeScreen.setPivotX(width * 0.5f);
             homeScreen.setPivotY(height * 0.5f);
-            drawerScreen.setPivotX(width * 0.5f);
+            drawerScreen.setPivotX(0f);
             drawerScreen.setPivotY(height * 0.5f);
             homeScreen.setAlpha(1f);
             drawerScreen.setAlpha(0f);
             drawerScreen.setScaleX(0.94f);
             drawerScreen.setScaleY(0.94f);
-            drawerScreen.setRotationY(-20f);
+            drawerScreen.setRotationY(-72f);
             homeScreen.animate().alpha(0f).rotationY(13f).scaleX(0.94f).scaleY(0.94f)
                     .setDuration(LauncherMotion.duration(activity, 280L))
                     .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
             drawerScreen.animate().alpha(1f).rotationY(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 370L)).start();
+                    .setDuration(LauncherMotion.duration(activity, 430L)).start();
         } else if (effect == 2) {
             homeScreen.setAlpha(1f);
             drawerScreen.setAlpha(0f);
