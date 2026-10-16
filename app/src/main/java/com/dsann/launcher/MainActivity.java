@@ -4266,22 +4266,21 @@ public class MainActivity extends Activity {
 
         // Keep the glyph view at the left edge of its content group. The group
         // itself is aligned as a unit, leaving a dedicated slot to the right for AM/PM.
-        clockText.setGravity(Gravity.LEFT | Gravity.TOP);
+        // Non-seven-segment glyphs are vertically centered in the clock row so
+        // their visual center aligns with the shortened, vertically centered background.
+        clockText.setGravity(Gravity.LEFT | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
         clockText.setPivotX(0f);
-        clockText.setPivotY(0f);
+        clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() / 2f : 0f);
         // Enlarge only the non-LED clock glyphs: keep the panel/background,
         // date, and AM/PM layout geometry unchanged. Center the extra width so
         // it does not shift the clock's left/right alignment anchor.
         clockText.setScaleX(sevenSegment ? 1f : 1.10f);
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
-        // The panel still controls background/date height; only these glyphs
-        // receive the additional 20% height for non-seven-segment styles.
+        // Scale non-seven-segment glyphs symmetrically around the row's center.
         clockText.setScaleY(sevenSegment ? 1f : 1.20f);
-        clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() : 0f);
         clockText.setTranslationX(0f);
-        // Lower only non-seven-segment glyphs within the existing background.
-        // Keep the panel, date, AM/PM marker, and seven-segment layout untouched.
-        clockText.setTranslationY(sevenSegment ? 0f : LauncherUiUtils.dp(this, 10));
+        // No vertical offset: non-seven-segment clock remains centered in its background.
+        clockText.setTranslationY(0f);
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
