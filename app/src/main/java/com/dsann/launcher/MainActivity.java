@@ -1229,6 +1229,7 @@ public class MainActivity extends Activity {
         final float[] resizeStart = {0f, 0f};
         final int[] resizeBase = {shortcutSpanX, shortcutSpanY};
         final int[] resizeBasePx = {tileWidth, tileHeight};
+        final FrameLayout shortcutResizePage = chosenPage;
         resizeGrip.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
@@ -1258,8 +1259,8 @@ public class MainActivity extends Activity {
                         boolean overlapsPlacedItem = false;
                         int tileRight = p.leftMargin + p.width;
                         int tileBottom = p.topMargin + p.height;
-                        for (int i = 0; i < chosenPage.getChildCount(); i++) {
-                            View other = chosenPage.getChildAt(i);
+                        for (int i = 0; i < shortcutResizePage.getChildCount(); i++) {
+                            View other = shortcutResizePage.getChildAt(i);
                             if (other == tile || !(other.getTag() instanceof String)) continue;
                             String otherTag = (String) other.getTag();
                             if (!otherTag.startsWith("launcher_app:")
