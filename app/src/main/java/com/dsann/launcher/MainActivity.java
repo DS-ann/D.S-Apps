@@ -4115,7 +4115,7 @@ public class MainActivity extends Activity {
                         (int) Math.ceil(LauncherUiUtils.dp(this, 114) * breadthScale));
                 markerParams.topMargin = Math.max(0,
                         Math.min(rowHeight - markerParams.height,
-                                visibleClockHeight - markerParams.height - gap));
+                                visibleClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
         }
