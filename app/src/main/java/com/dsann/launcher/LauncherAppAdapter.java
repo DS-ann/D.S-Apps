@@ -158,7 +158,16 @@ public final class LauncherAppAdapter extends BaseAdapter {
             iconParams.height = dp(iconSize);
             icon.setLayoutParams(iconParams);
         }
-        icon.setImageDrawable(cachedIcon(app));
+        android.graphics.drawable.Drawable appIcon = cachedIcon(app);
+        if (appIcon != null) {
+            boolean roundedSquareBackground = preferences != null
+                    && preferences.getBoolean("icon_rounded_square_background", false);
+            int iconShape = preferences == null ? LauncherIconDrawable.SHAPE_ORIGINAL
+                    : preferences.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL);
+            icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground, iconShape));
+        } else {
+            icon.setImageDrawable(null);
+        }
         final String fullLabel = cachedLabel(app);
         label.setTag(fullLabel);
         label.setText(fullLabel);
