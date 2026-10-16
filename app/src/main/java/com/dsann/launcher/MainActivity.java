@@ -653,7 +653,7 @@ public class MainActivity extends Activity {
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
                 // Complete toward whichever screen is nearest at finger release.
-                if (drawerSwipeProgress > 0.5f) {
+                if (drawerSwipeProgress > 0.30f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -668,7 +668,7 @@ public class MainActivity extends Activity {
                 // finger reverses or lifts mid-transition, settle to the nearest
                 // endpoint instead of starting control-center navigation or leaving
                 // the two surfaces in an intermediate pose.
-                if (drawerSwipeProgress >= 0.5f) {
+                if (drawerSwipeProgress >= 0.30f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
                 if (dy < 0f) {
                     // Finish from the current pose, but do not force a tiny partial
                     // swipe all the way open. Always settle to home or drawer.
-                    if (drawerSwipeProgress >= 0.5f) {
+                    if (drawerSwipeProgress >= 0.30f) {
                         LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                                 () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                     } else {
