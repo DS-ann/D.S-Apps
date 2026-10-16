@@ -44,6 +44,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -69,6 +70,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_SIZE = "clock_size"; // Legacy preference; retained for compatibility.
     private static final String KEY_CLOCK_LENGTH = "clock_length_percent";
     private static final String KEY_CLOCK_BREADTH = "clock_breadth_percent";
+    private static final String KEY_CLOCK_BG_OPACITY = "clock_background_opacity";
     private static final String KEY_CLOCK_POSITION = "clock_position";
     private static final String KEY_CLOCK_WIDGET_X = "clock_widget_x";
     private static final String KEY_CLOCK_WIDGET_Y = "clock_widget_y";
@@ -3588,12 +3590,16 @@ public class MainActivity extends Activity {
         int leftR = Math.max(55, Math.min(220, tone[0] * 2 / 3));
         int leftG = Math.max(150, Math.min(225, tone[1] + 28));
         int leftB = Math.max(170, Math.min(240, tone[2] + 18));
-        int leftEdge = Color.argb(125, leftR, leftG, leftB);
-        int rightEdge = Color.argb(149, tone[0], tone[1], tone[2]);
-        int leftMid = Color.argb(72, leftR, leftG, leftB);
-        int rightMid = Color.argb(76, tone[0], tone[1], tone[2]);
+        // Preserve the time-driven colour cycling while applying the user's
+        // saved opacity uniformly to every stop in the gradient.
+        int opacity = Math.max(0, Math.min(100,
+                prefs == null ? 100 : prefs.getInt(KEY_CLOCK_BG_OPACITY, 100)));
+        int leftEdge = Color.argb(125 * opacity / 100, leftR, leftG, leftB);
+        int rightEdge = Color.argb(149 * opacity / 100, tone[0], tone[1], tone[2]);
+        int leftMid = Color.argb(72 * opacity / 100, leftR, leftG, leftB);
+        int rightMid = Color.argb(76 * opacity / 100, tone[0], tone[1], tone[2]);
         GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[] {leftEdge, leftMid, Color.argb(22, 125, 155, 235),
+                new int[] {leftEdge, leftMid, Color.argb(22 * opacity / 100, 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
         // Restore the full background width and make only its height 20% shorter,
@@ -3909,6 +3915,11 @@ public class MainActivity extends Activity {
         });
 
         addSection(content, "Clock");
+        addSliderRow(content, "Clock background opacity", 0, 100,
+                prefs.getInt(KEY_CLOCK_BG_OPACITY, 100), "%", value -> {
+            prefs.edit().putInt(KEY_CLOCK_BG_OPACITY, value).apply();
+            applyClockPanelColor(false);
+        });
         addChoiceRow(content, "Clock alignment", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
             prefs.edit().putInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage), value).apply();
             applyClockPositionAndSize();
@@ -4138,8 +4149,35 @@ public class MainActivity extends Activity {
                     (digits * 0.72f + separators * 0.34f) * clockHeight * 0.91f
                     + clockText.getPaddingLeft() + clockText.getPaddingRight());
         } else {
+            // Measure a stable template, not the currently displayed digits.
+            // The clock is refreshed each minute; proportional fonts give digits
+            // different widths, and one-digit/two-digit hours can change the
+            // measured panel width. A fixed 23:58:58 sample preserves the active
+            // locale's separators and AM/PM formatting while reserving the same
+            // width throughout the day.
+            Calendar widthSample = Calendar.getInstance();
+            widthSample.set(Calendar.HOUR_OF_DAY, 23);
+            widthSample.set(Calendar.MINUTE, 58);
+            widthSample.set(Calendar.SECOND, 58);
+            widthSample.set(Calendar.MILLISECOND, 0);
+            String widthTemplate = DateFormat.getTimeFormat(this).format(widthSample.getTime());
+            if (!DateFormat.is24HourFormat(this)) {
+                String marker = new SimpleDateFormat("a", Locale.getDefault())
+                        .format(widthSample.getTime());
+                int markerAt = widthTemplate.toUpperCase(Locale.getDefault())
+                        .lastIndexOf(marker.toUpperCase(Locale.getDefault()));
+                if (markerAt >= 0) {
+                    widthTemplate = (widthTemplate.substring(0, markerAt)
+                            + widthTemplate.substring(markerAt + marker.length())).trim();
+                }
+            }
+            StringBuilder widestDigits = new StringBuilder(widthTemplate.length());
+            for (int i = 0; i < widthTemplate.length(); i++) {
+                char ch = widthTemplate.charAt(i);
+                widestDigits.append(Character.digit(ch, 10) >= 0 ? '8' : ch);
+            }
             naturalClockWidth = Math.max(1f,
-                    clockText.getPaint().measureText(clockText.getText().toString()));
+                    clockText.getPaint().measureText(widestDigits.toString()));
         }
         // Keep the clock glyph inside the available clock-panel width. The AM/PM
         // marker and small side insets share that width, so long clocks shrink
