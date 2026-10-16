@@ -65,9 +65,10 @@ final class LauncherDrawerController {
         grid.setHorizontalSpacing(LauncherUiUtils.dp(activity, spacing / 2));
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         grid.setSelector(android.R.color.transparent);
+        final Runnable[] closeSearchRef = new Runnable[1];
         LauncherAppAdapter adapter = new LauncherAppAdapter(activity, prefs, packageManager, allApps, drawerApps, null,
                 true, iconSizeKey, fontSizeKey, showLabelsKey, new LauncherAppAdapter.Actions() {
-                    @Override public void onAppClick(ResolveInfo app) { restoreApps.run(); actions.launchApp(app); }
+                    @Override public void onAppClick(ResolveInfo app) { if (closeSearchRef[0] != null) closeSearchRef[0].run(); actions.launchApp(app); }
                     @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
                         actions.showAppOptions(app, onHome);
                     }
@@ -117,6 +118,7 @@ final class LauncherDrawerController {
                     LauncherUiUtils.dp(activity, 44), -1));
             restoreApps.run();
         };
+        closeSearchRef[0] = closeSearch;
 
         searchButton.setOnClickListener(v -> {
             if (activeQuery[0] != null) return;
