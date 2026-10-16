@@ -2894,7 +2894,11 @@ public class MainActivity extends Activity {
         int rows = Math.max(1, page.getHeight() / cellHeight);
         FrameLayout.LayoutParams widgetLp = (FrameLayout.LayoutParams) widgetContainer.getLayoutParams();
         int wx1 = widgetLp.leftMargin, wy1 = widgetLp.topMargin;
-        int wx2 = wx1 + widgetContainer.getWidth(), wy2 = wy1 + widgetContainer.getHeight();
+        // Layout params update before getWidth()/getHeight() do. Use the requested
+        // geometry so resize-release collision checks see the new widget bounds.
+        int widgetWidth = widgetLp.width > 0 ? widgetLp.width : widgetContainer.getWidth();
+        int widgetHeight = widgetLp.height > 0 ? widgetLp.height : widgetContainer.getHeight();
+        int wx2 = wx1 + widgetWidth, wy2 = wy1 + widgetHeight;
         boolean[][] occupied = new boolean[rows][columns];
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
