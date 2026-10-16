@@ -3990,8 +3990,9 @@ public class MainActivity extends Activity {
         // Measure the panel at its natural width, then scale the complete panel.
         // This keeps the background, digits, AM/PM marker, and date in one resize
         // operation instead of shrinking only the clock glyphs inside a fixed panel.
-        final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
-                + markerWidth + LauncherUiUtils.dp(this, 1);
+        // AM/PM overlays the lower-right digit corner; it must not reserve a
+        // separate horizontal column, which offsets a centered clock to the left.
+        final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth);
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth)
                 + LauncherUiUtils.dp(this, 4);
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
@@ -4057,7 +4058,7 @@ public class MainActivity extends Activity {
 
         // Keep the glyph view at the left edge of its content group. The group
         // itself is aligned as a unit, leaving a dedicated slot to the right for AM/PM.
-        clockText.setGravity(Gravity.LEFT | Gravity.TOP);
+        clockText.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
         clockText.setPivotX(0f);
         clockText.setPivotY(0f);
         clockText.setScaleX(1f);
@@ -4074,7 +4075,7 @@ public class MainActivity extends Activity {
             // custom onMeasure() and leave the seven-segment glyphs clipped.
             textParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
-            textParams.gravity = Gravity.LEFT | Gravity.TOP;
+            textParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
 
