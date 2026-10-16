@@ -3466,9 +3466,10 @@ public class MainActivity extends Activity {
             clockValue = clockValue.trim();
             boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
                     && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+            android.text.SpannableStringBuilder displayClock =
+                    new android.text.SpannableStringBuilder(clockValue);
             if (!sevenSegmentClock && !clockValue.isEmpty()) {
-                // Reserve a leading hour digit when the formatted hour is one
-                // digit, but render that zero transparently.
+                // Reserve a leading invisible '1' when the hour has one digit.
                 int firstDigit = -1;
                 for (int i = 0; i < clockValue.length(); i++) {
                     if (Character.digit(clockValue.charAt(i), 10) >= 0) {
@@ -3485,20 +3486,20 @@ public class MainActivity extends Activity {
                     if (hourEnd - firstDigit == 1 && hourEnd < clockValue.length()) {
                         char hourDigit = clockValue.charAt(firstDigit);
                         char invisibleOne = (char) (hourDigit - Character.digit(hourDigit, 10) + 1);
-                        android.text.SpannableString padded =
-                                new android.text.SpannableString(invisibleOne + clockValue);
-                        padded.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
+                        displayClock.insert(0, invisibleOne);
+                        displayClock.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
                                 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                        clockText.setText(padded);
-                    } else {
-                        clockText.setText(clockValue);
                     }
-                } else {
-                    clockText.setText(clockValue);
                 }
-            } else {
-                clockText.setText(clockValue);
+                // Draw the colon's two dots at the vertical center of the clock
+                // view/background instead of using the font's naturally raised colon.
+                int colonAt = displayClock.toString().indexOf(':');
+                if (colonAt >= 0) {
+                    displayClock.setSpan(new CenteredColonSpan(),
+                            colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
             }
+            clockText.setText(displayClock);
             dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
             dateText.setText(dateValue);
             applyClockPositionAndSize();
@@ -4420,7 +4421,32 @@ public class MainActivity extends Activity {
         clockText.invalidate();
     }
 
-private interface IntSliderAction { void onChange(int value); }
+// Replacement span for non-seven-segment clocks: keep the colon's two dots
+    // centered vertically in the clock row/background regardless of font preset.
+    private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
+        @Override
+        public int getSize(Paint paint, CharSequence text, int start, int end,
+                Paint.FontMetricsInt fm) {
+            return Math.max(1, Math.round(paint.measureText(":")));
+        }
+
+        @Override
+        public void draw(Canvas canvas, CharSequence text, int start, int end,
+                float x, int top, int y, int bottom, Paint paint) {
+            Paint dots = new Paint(paint);
+            dots.setStyle(Paint.Style.FILL);
+            float radius = Math.max(1f, paint.getTextSize() * 0.045f);
+            float centerX = x + paint.measureText(":") / 2f;
+            // TextView is 114 dp tall and centered in the background. The parent
+            // applies vertical resizing around this same center point.
+            float centerY = (top + bottom) / 2f;
+            float gap = paint.getTextSize() * 0.18f;
+            canvas.drawCircle(centerX, centerY - gap, radius, dots);
+            canvas.drawCircle(centerX, centerY + gap, radius, dots);
+        }
+    }
+
+    private interface IntSliderAction { void onChange(int value); }
 
     private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
