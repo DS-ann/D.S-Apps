@@ -4300,7 +4300,10 @@ public class MainActivity extends Activity {
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
         clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale);
-        clockText.setTranslationX(0f);
+        // Nudge only the seven-segment digits slightly right against the
+        // background. Compensate for panel scaling so the offset stays 3 dp.
+        clockText.setTranslationX(sevenSegment
+                ? LauncherUiUtils.dp(this, 3) / Math.max(0.01f, lengthScale) : 0f);
         // No vertical offset: non-seven-segment clock remains centered in its background.
         clockText.setTranslationY(0f);
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
@@ -4369,8 +4372,14 @@ public class MainActivity extends Activity {
                 amPmText.setTranslationX(LauncherUiUtils.dp(this, 1) / Math.max(0.01f, lengthScale));
                 amPmText.setTranslationY(-LauncherUiUtils.dp(this, 1) / Math.max(0.01f, breadthScale));
             } else {
-                amPmText.setTranslationX(0f);
-                amPmText.setTranslationY(0f);
+                // For every non-seven-segment style, bring AM/PM slightly closer
+                // to the clock's lower-right corner: 2 dp right and 2 dp up.
+                // Counter-scale the offsets to keep their visual size constant
+                // while the complete panel is resized.
+                amPmText.setTranslationX(
+                        LauncherUiUtils.dp(this, 2) / Math.max(0.01f, lengthScale));
+                amPmText.setTranslationY(
+                        -LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             }
         }
         clockText.invalidate();
