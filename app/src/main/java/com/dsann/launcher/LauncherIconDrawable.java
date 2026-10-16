@@ -14,19 +14,33 @@ final class LauncherIconDrawable extends Drawable {
     static final int SHAPE_ORIGINAL = 0;
     static final int SHAPE_ROUND = 1;
     static final int SHAPE_PEAR = 2;
+    static final int BACKGROUND_BLACK = 0;
+    static final int BACKGROUND_WHITE = 1;
+    static final int BACKGROUND_GREY = 2;
+
+    static int backgroundColorForChoice(int choice) {
+        switch (choice) {
+            case BACKGROUND_WHITE: return Color.WHITE;
+            case BACKGROUND_GREY: return Color.GRAY;
+            case BACKGROUND_BLACK:
+            default: return Color.BLACK;
+        }
+    }
 
     private final Drawable source;
     private final boolean showBackground;
     private final int shape;
+    private final int backgroundColor;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private final Path path = new Path();
     private final android.graphics.Rect bounds = new android.graphics.Rect();
 
-    LauncherIconDrawable(Drawable source, boolean showBackground, int shape) {
+    LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor) {
         this.source = source;
         this.showBackground = showBackground;
         this.shape = shape;
+        this.backgroundColor = backgroundColor;
         setBounds(source.getBounds());
     }
 
@@ -41,7 +55,7 @@ final class LauncherIconDrawable extends Drawable {
         if (width <= 0 || height <= 0) return;
 
         if (showBackground) {
-            paint.setColor(Color.rgb(48, 55, 76));
+            paint.setColor(backgroundColor);
             paint.setStyle(Paint.Style.FILL);
             float corner = Math.min(width, height) * 0.23f;
             canvas.drawRoundRect(left, top, right, bottom, corner, corner, paint);

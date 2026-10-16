@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
     private static final String KEY_COLUMNS = "home_columns";
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
+    private static final String KEY_ICON_BACKGROUND_COLOR = "icon_background_color";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
@@ -2034,7 +2035,9 @@ public class MainActivity extends Activity {
                     android.graphics.drawable.Drawable dockIcon = app.loadIcon(packageManager);
                     icon.setImageDrawable(dockIcon == null ? null : new LauncherIconDrawable(
                             dockIcon, prefs.getBoolean("icon_rounded_square_background", false),
-                            prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL)));
+                            prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL),
+                            LauncherIconDrawable.backgroundColorForChoice(
+                                    prefs.getInt(KEY_ICON_BACKGROUND_COLOR, LauncherIconDrawable.BACKGROUND_BLACK))));
                     icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                             LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
@@ -3553,7 +3556,7 @@ public class MainActivity extends Activity {
                 // view/background instead of using the font's naturally raised colon.
                 int colonAt = displayClock.toString().indexOf(':');
                 if (colonAt >= 0) {
-                    displayClock.setSpan(new CenteredColonSpan(),
+                    displayClock.setSpan(new CenteredColonSpan(LauncherUiUtils.dp(this, 114) / 2f),
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
@@ -4017,6 +4020,17 @@ public class MainActivity extends Activity {
                     !prefs.getBoolean("icon_rounded_square_background", false)).apply();
             renderHomePages(false);
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+            renderDock();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "App icon background color",
+                Math.max(0, Math.min(2, prefs.getInt(KEY_ICON_BACKGROUND_COLOR, 0))),
+                new String[]{"Black", "White", "Grey"}, value -> {
+            prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR, value)
+                    .putBoolean("icon_rounded_square_background", true).apply();
+            renderHomePages(false);
+            if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+            renderDock();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App icon shape", prefs.getInt("app_icon_shape", 0),
@@ -4553,6 +4567,12 @@ public class MainActivity extends Activity {
 // Replacement span for non-seven-segment clocks: keep the colon's two dots
     // centered vertically in the clock row/background regardless of font preset.
     private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
+        private final float rowCenterY;
+
+        CenteredColonSpan(float rowCenterY) {
+            this.rowCenterY = rowCenterY;
+        }
+
         @Override
         public int getSize(Paint paint, CharSequence text, int start, int end,
                 Paint.FontMetricsInt fm) {
@@ -4572,9 +4592,10 @@ public class MainActivity extends Activity {
             // narrower advance pulls the next (minute) digit closer. A slight
             // left bias also tightens the gap on the hour side.
             float centerX = x + naturalWidth * 0.25f;
-            // TextView is 114 dp tall and centered in the background. The parent
-            // applies vertical resizing around this same center point.
-            float centerY = (top + bottom) / 2f;
+            // Anchor the dots to the actual 114 dp clock-row center, not the font
+            // line bounds (which vary by typeface and can sit above the background center).
+            // Parent resizing scales the row and this coordinate together.
+            float centerY = rowCenterY;
             float gap = paint.getTextSize() * 0.18f;
             canvas.drawCircle(centerX, centerY - gap, radius, dots);
             canvas.drawCircle(centerX, centerY + gap, radius, dots);
