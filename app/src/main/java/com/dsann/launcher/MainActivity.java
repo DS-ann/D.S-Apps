@@ -1641,16 +1641,28 @@ public class MainActivity extends Activity {
                     slotView.setOnLongClickListener(v -> {
                         showActionDialog("Dock app", new String[]{"−", "↗"},
                                 new String[]{"Remove from dock", "Move to home screen"}, (dialog, which) -> {
-                            if (which == 1 && !homePackages.contains(packageName)
-                                    && homePackages.size() >= pageCapacity()) {
-                                Toast.makeText(MainActivity.this, "Home screen is full.", Toast.LENGTH_SHORT).show();
-                                return;
+                            if (which == 1) {
+                                // Move through the same placement/space checks as any other
+                                // home shortcut. Remove from the dock first so addToHome does
+                                // not reject the intentional transfer as a duplicate.
+                                if (homePackages.contains(packageName)) {
+                                    dockPackages.remove(packageName);
+                                    persistDockApps();
+                                    renderHomePages(false);
+                                    return;
+                                }
+                                dockPackages.remove(packageName);
+                                persistDockApps();
+                                if (!addToHome(packageName)) {
+                                    dockPackages.add(packageName);
+                                    persistDockApps();
+                                    renderHomePages(false);
+                                }
+                            } else {
+                                dockPackages.remove(packageName);
+                                persistDockApps();
+                                renderHomePages(false);
                             }
-                            dockPackages.remove(packageName);
-                            if (which == 1 && !homePackages.contains(packageName)) homePackages.add(packageName);
-                            persistDockApps();
-                            persistHomeApps();
-                            renderHomePages(false);
                         });
                         return true;
                     });
@@ -2197,20 +2209,20 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void addToHome(String packageName) { addToHome(packageName, currentPage); }
+    private boolean addToHome(String packageName) { return addToHome(packageName, currentPage); }
 
-    private void addToHome(String packageName, int requestedPage) {
+    private boolean addToHome(String packageName, int requestedPage) {
         if (packageName == null || packageName.trim().isEmpty()
                 || packageName.equals(getPackageName()) || homePackages.contains(packageName)) {
-            return;
+            return false;
         }
         if (dockPackages.contains(packageName)) {
             Toast.makeText(this, "This app is already in the dock", Toast.LENGTH_SHORT).show();
-            return;
+            return false;
         }
         if (findApp(packageName) == null) {
             Toast.makeText(this, "That app is no longer available", Toast.LENGTH_SHORT).show();
-            return;
+            return false;
         }
         int requested = Math.max(0, Math.min(1, requestedPage));
         int targetPage = -1;
@@ -2229,7 +2241,7 @@ public class MainActivity extends Activity {
         if (targetPage < 0 || freeSlot == null) {
             Toast.makeText(this, "Both home screens are full. Remove or move an item first.",
                     Toast.LENGTH_LONG).show();
-            return;
+            return false;
         }
 
         int columns = getHomeColumns();
@@ -2249,6 +2261,7 @@ public class MainActivity extends Activity {
         renderHomePages(false);
         showPage(targetPage, false);
         Toast.makeText(this, "Added to Home", Toast.LENGTH_SHORT).show();
+        return true;
     }
 
     /**
