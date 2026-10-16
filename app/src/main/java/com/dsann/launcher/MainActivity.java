@@ -462,9 +462,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_CANCEL) {
             handler.removeCallbacks(clockWidgetLongPress);
             if (clockResizeEdge != 0) {
-                clockResizeEdge = 0;
-                clockWidgetDragging = false;
-                setWorkspaceGridVisible(false, null);
+                finishClockResize(true);
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
@@ -481,9 +479,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(clockWidgetLongPress);
             if (clockResizeEdge != 0) {
-                clockResizeEdge = 0;
-                clockWidgetDragging = false;
-                setWorkspaceGridVisible(false, null);
+                finishClockResize(false);
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
@@ -542,6 +538,55 @@ public class MainActivity extends Activity {
             target = parent instanceof View ? (View) parent : null;
         }
         return false;
+    }
+
+    /**
+     * Finalize one clock resize transaction. A normal release applies the last
+     * edge-anchor correction after layout; cancellation restores the complete
+     * starting geometry and invalidates any queued frame from the abandoned drag.
+     */
+    private void finishClockResize(boolean cancelled) {
+        if (clockResizeEdge == 0 || clockPanel == null) return;
+        final int edge = clockResizeEdge;
+        final int generation = ++clockResizeGeneration;
+        clockResizeEdge = 0;
+        clockWidgetDragging = false;
+        handler.removeCallbacks(clockWidgetLongPress);
+
+        if (cancelled) {
+            prefs.edit()
+                    .putInt(KEY_CLOCK_LENGTH, clockWidgetStartLength)
+                    .putInt(KEY_CLOCK_BREADTH, clockWidgetStartBreadth)
+                    .putFloat(KEY_CLOCK_WIDGET_X, clockWidgetStartX)
+                    .putFloat(KEY_CLOCK_WIDGET_Y, clockWidgetStartY)
+                    .apply();
+            applyClockPositionAndSize();
+            clockPanel.setTranslationX(clockWidgetStartX);
+            clockPanel.setTranslationY(clockWidgetStartY);
+        } else {
+            clockPanel.post(() -> {
+                if (generation != clockResizeGeneration || clockPanel == null) return;
+                int[] now = new int[2];
+                clockPanel.getLocationOnScreen(now);
+                float targetX = clockWidgetStartScreenX;
+                float targetY = clockWidgetStartScreenY;
+                if (edge == 1) {
+                    targetX += clockWidgetStartPanelWidth - clockPanel.getWidth();
+                } else if (edge == 3) {
+                    float startVisualHeight = clockWidgetStartPanelHeight
+                            * (clockWidgetStartBreadth / 100f);
+                    float currentVisualHeight = clockPanel.getHeight() * clockPanel.getScaleY();
+                    targetY += startVisualHeight - currentVisualHeight;
+                }
+                clockPanel.setTranslationX(clockPanel.getTranslationX() + targetX - now[0]);
+                clockPanel.setTranslationY(clockPanel.getTranslationY() + targetY - now[1]);
+                prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
+                        .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
+                updateClockResizeHandles();
+            });
+        }
+        setWorkspaceGridVisible(false, null);
+        updateClockResizeHandles();
     }
 
     private void updateClockResizeHandles() {
@@ -1953,7 +1998,8 @@ public class MainActivity extends Activity {
             clockPanel.setRotationY(0f);
             clockPanel.setRotationX(0f);
             clockPanel.setScaleX(1f);
-            clockPanel.setScaleY(1f);
+            // Page transitions must not erase the user's persisted clock breadth.
+            clockPanel.setScaleY(getClockBreadth() / 100f);
             clockPanel.setAlpha(1f);
             // Preserve the user's saved clock-widget position after the transition.
             clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f));
