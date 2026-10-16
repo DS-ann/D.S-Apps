@@ -49,6 +49,10 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     public void setSevenSegmentMode(boolean enabled) {
+        // Keep standard TextView measurement for every preset. A larger invisible
+        // measurement font gives WRAP_CONTENT enough width for the custom LED
+        // geometry; onDraw itself sizes the segments to the actual view bounds.
+        setTextSize(enabled ? 110f : 78f);
         if (enabled) {
             int current = getCurrentTextColor();
             if (Color.alpha(current) != 0) segmentColor = current;
@@ -63,32 +67,6 @@ public final class SevenSegmentClockTextView extends TextView {
         setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
         invalidate();
         requestLayout();
-    }
-
-    @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        // Let TextView measure height/font/accessibility normally. Only provide the
-        // width needed by our LED glyph geometry; drawing remains inside these bounds.
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-        if (!sevenSegmentMode) return;
-
-        String raw = getText() == null ? "" : getText().toString();
-        int digits = 0;
-        int separators = 0;
-        for (int i = 0; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
-            if (Character.digit(ch, 10) >= 0) digits++;
-            else if (ch == ':' || ch == '\uFF1A' || ch == '.' || ch == '\u2236') separators++;
-        }
-        if (digits == 0) return;
-
-        int contentHeight = Math.max(1,
-                getMeasuredHeight() - getPaddingTop() - getPaddingBottom());
-        float unit = contentHeight * 0.91f;
-        float widthUnits = digits * 0.72f + separators * 0.34f;
-        int desiredWidth = (int) Math.ceil(widthUnits * unit
-                + getPaddingLeft() + getPaddingRight());
-        int measuredWidth = resolveSize(desiredWidth, widthMeasureSpec);
-        setMeasuredDimension(measuredWidth, getMeasuredHeight());
     }
 
     @Override protected void onDraw(Canvas canvas) {
