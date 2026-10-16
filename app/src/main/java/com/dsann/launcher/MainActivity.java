@@ -4576,13 +4576,14 @@ public class MainActivity extends Activity {
                 amPmText.setTranslationX(LauncherUiUtils.dp(this, 7) / Math.max(0.01f, lengthScale));
                 amPmText.setTranslationY(-LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             } else {
-                // Non-seven-segment AM/PM: move 30 dp farther right and 5 dp
-                // lower relative to the clock background. Counter-scale offsets
-                // so their visual distance remains stable while resizing.
-                amPmText.setTranslationX(
-                        LauncherUiUtils.dp(this, 37) / Math.max(0.01f, lengthScale));
-                amPmText.setTranslationY(
-                        LauncherUiUtils.dp(this, 3) / Math.max(0.01f, breadthScale));
+                // Non-seven-segment AM/PM stays attached to the clock background.
+                // These offsets are intentionally in the panel's unscaled coordinate
+                // space: the panel's scaleX/scaleY must scale the marker's inset and
+                // requested 37 dp right / 3 dp down adjustment together with the
+                // background. Counter-scaling here left the marker outside the panel
+                // when the user reduced the clock size.
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 37));
+                amPmText.setTranslationY(LauncherUiUtils.dp(this, 3));
             }
         }
         clockText.invalidate();
