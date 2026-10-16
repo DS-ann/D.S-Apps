@@ -1994,7 +1994,10 @@ public class MainActivity extends Activity {
                 ResolveInfo app = findApp(packageName);
                 if (app != null) {
                     ImageView icon = new ImageView(this);
-                    icon.setImageDrawable(app.loadIcon(packageManager));
+                    android.graphics.drawable.Drawable dockIcon = app.loadIcon(packageManager);
+                    icon.setImageDrawable(dockIcon == null ? null : new LauncherIconDrawable(
+                            dockIcon, prefs.getBoolean("icon_rounded_square_background", false),
+                            prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL)));
                     icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                             LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
