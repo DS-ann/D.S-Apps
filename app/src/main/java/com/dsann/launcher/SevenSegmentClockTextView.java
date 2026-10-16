@@ -15,6 +15,7 @@ import android.widget.TextView;
 public final class SevenSegmentClockTextView extends TextView {
     private final Paint segmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean sevenSegmentMode;
+    private boolean segmentModeInitialized;
     private int segmentColor = Color.rgb(196, 200, 209);
     private final float[][] segmentRects = new float[7][4];
 
@@ -50,7 +51,8 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     public void setSevenSegmentMode(boolean enabled) {
-        if (sevenSegmentMode == enabled) return;
+        if (segmentModeInitialized && sevenSegmentMode == enabled) return;
+        segmentModeInitialized = true;
         // Keep standard TextView measurement for every preset. A larger invisible
         // measurement font gives WRAP_CONTENT enough width for the custom LED
         // geometry; onDraw itself sizes the segments to the actual view bounds.
