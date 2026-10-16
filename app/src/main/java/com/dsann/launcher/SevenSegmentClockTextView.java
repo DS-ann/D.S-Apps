@@ -132,14 +132,22 @@ public final class SevenSegmentClockTextView extends TextView {
         float digitHeight = unit * 0.92f;
         float advance = unit * 0.72f;
         float totalWidth = digits * advance + colons * unit * 0.34f;
+        int colonIndex = value.indexOf(':');
+        float dotX = leftBound + availableWidth * 0.48f;
+        // Position the hour and minute as two groups around the fixed colon.
+        // This keeps the dots between the two groups instead of moving only the dots
+        // over an otherwise left-aligned string. A blank leading hour cell still
+        // reserves the same space as a two-digit hour.
+        float hourStartX = colonIndex >= 0
+                ? dotX - unit * 0.17f - (colonIndex * advance)
+                : leftBound + (availableWidth - totalWidth) / 2f;
+        float minuteStartX = dotX + unit * 0.17f;
         int horizontalGravity = getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
-        float x = horizontalGravity == Gravity.LEFT ? leftBound
-                : (horizontalGravity == Gravity.CENTER_HORIZONTAL
-                        ? leftBound + (availableWidth - totalWidth) / 2f
-                        : rightBound - totalWidth);
-        // Intentionally crop half of the leading digit at the left edge, giving
-        // the seven-segment clock the requested left-shifted, edge-cut appearance.
-        x -= digitWidth * 0.5f;
+        if (colonIndex < 0 && horizontalGravity == Gravity.LEFT) hourStartX = leftBound;
+        else if (colonIndex < 0 && horizontalGravity == Gravity.RIGHT) {
+            hourStartX = rightBound - totalWidth;
+        }
+        float x = hourStartX;
         float y = topBound + (availableHeight - digitHeight) / 2f;
         float thickness = Math.max(3f, digitWidth * 0.17f);
         float half = thickness / 2f;
@@ -154,15 +162,17 @@ public final class SevenSegmentClockTextView extends TextView {
             if (ch == ':') {
                 segmentPaint.setColor(color);
                 float radius = Math.max(2.5f, thickness * 0.38f);
-                // Anchor the colon to the clock panel center, slightly left of center.
-                // Digit placement and the intentional leading-digit crop stay unchanged.
-                float dotX = leftBound + availableWidth * 0.48f;
+                // The colon is the fixed anchor between hour and minute.
                 canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
                 canvas.drawCircle(dotX, y + digitHeight * 0.68f, radius, segmentPaint);
-                x += unit * 0.34f;
+                x = minuteStartX;
                 continue;
             }
 
+            if (colonIndex >= 0 && i > colonIndex) {
+                int minuteDigitIndex = i - colonIndex - 1;
+                x = minuteStartX + minuteDigitIndex * advance;
+            }
             float l = x;
             float r = x + digitWidth;
             float t = y;
