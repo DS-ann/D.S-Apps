@@ -928,7 +928,51 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        if (chosenPage == null) return;
+        // Never report success while silently dropping the shortcut. If every
+        // full-size tile collides, retry with a compact one-cell tile on either page.
+        if (chosenPage == null) {
+            desiredTileWidth = Math.max(1, cellW);
+            desiredTileHeight = Math.max(1, Math.min(cellH, pageViewport.getHeight()));
+            for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
+                int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
+                View pageView = pagesStrip.getChildAt(pageIndex);
+                if (!(pageView instanceof FrameLayout)) continue;
+                FrameLayout page = (FrameLayout) pageView;
+                for (int row = 0; row < rows && chosenPage == null; row++) {
+                    for (int col = 0; col < columns && chosenPage == null; col++) {
+                        int left = col * cellW;
+                        int top = row * cellH;
+                        if (left + desiredTileWidth > pageViewport.getWidth()
+                                || top + desiredTileHeight > pageViewport.getHeight()) continue;
+                        android.graphics.Rect candidate = new android.graphics.Rect(left, top,
+                                left + desiredTileWidth, top + desiredTileHeight);
+                        boolean occupied = false;
+                        for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                            View child = page.getChildAt(childIndex);
+                            if ("launcher_contact_shortcut".equals(child.getTag())) continue;
+                            FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
+                                    ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
+                            int childLeft = p != null ? p.leftMargin : child.getLeft();
+                            int childTop = p != null ? p.topMargin : child.getTop();
+                            int childWidth = p != null && p.width > 0 ? p.width : child.getWidth();
+                            int childHeight = p != null && p.height > 0 ? p.height : child.getHeight();
+                            if (android.graphics.Rect.intersects(candidate, new android.graphics.Rect(
+                                    childLeft, childTop, childLeft + Math.max(0, childWidth),
+                                    childTop + Math.max(0, childHeight)))) { occupied = true; break; }
+                        }
+                        if (!occupied) {
+                            chosenPage = page;
+                            chosenLeft = left;
+                            chosenTop = top;
+                        }
+                    }
+                }
+            }
+        }
+        if (chosenPage == null) {
+            Toast.makeText(this, "No free space for the contact shortcut. Move or remove an item first.", Toast.LENGTH_LONG).show();
+            return;
+        }
 
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
@@ -2918,10 +2962,14 @@ public class MainActivity extends Activity {
         }
         final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-        // Clock length is a visual scale, not a layout-width constraint.
-        // Keep the user's requested scale; vertical layout is reserved separately.
+        // Keep the clock glyph inside the available clock-panel width. The AM/PM
+        // marker and small side insets share that width, so long clocks shrink
+        // automatically instead of drawing beyond the background.
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
-        final float lengthScale = requestedLengthScale;
+        final int panelWidth = Math.max(1, screenWidth - LauncherUiUtils.dp(this, 24));
+        final float maxClockWidth = Math.max(1f, panelWidth - markerWidth - LauncherUiUtils.dp(this, 6));
+        final float lengthScale = Math.min(requestedLengthScale,
+                maxClockWidth / Math.max(1f, naturalClockWidth));
         final int renderedClockWidth = Math.max(1,
                 (int) Math.ceil(naturalClockWidth * lengthScale));
         final int dateWidth = dateText == null ? 0
