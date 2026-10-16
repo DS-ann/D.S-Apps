@@ -65,39 +65,66 @@ final class LauncherIconDrawable extends Drawable {
         rect.set(left + inset, top + inset, right - inset, bottom - inset);
         if (rect.width() <= 0 || rect.height() <= 0) return;
 
-        int save = canvas.save();
+        if (shape == SHAPE_TRIANGLE || shape == SHAPE_PEAR) {
+            // Fill the selected silhouette with a contrasting color so it stands
+            // apart from the rounded-square tile even when the app icon is opaque.
+            setShapePath(rect);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(contrastingShapeColor());
+            canvas.drawPath(path, paint);
+
+            // Draw the original app artwork inset inside the silhouette, leaving
+            // a consistent contrasting rim visible around it.
+            RectF artworkRect = new RectF(rect);
+            float artworkInset = Math.min(rect.width(), rect.height()) * 0.16f;
+            artworkRect.inset(artworkInset, artworkInset);
+            if (artworkRect.width() > 0 && artworkRect.height() > 0) {
+                int save = canvas.save();
+                setShapePath(artworkRect);
+                canvas.clipPath(path);
+                source.setBounds(Math.round(artworkRect.left), Math.round(artworkRect.top),
+                        Math.round(artworkRect.right), Math.round(artworkRect.bottom));
+                source.draw(canvas);
+                canvas.restoreToCount(save);
+            }
+        } else {
+            source.setBounds(Math.round(rect.left), Math.round(rect.top),
+                    Math.round(rect.right), Math.round(rect.bottom));
+            source.draw(canvas);
+        }
+    }
+
+    private int contrastingShapeColor() {
+        if (backgroundColor == Color.WHITE) return Color.BLACK;
+        if (backgroundColor == Color.GRAY) return Color.rgb(48, 48, 48);
+        return Color.WHITE;
+    }
+
+    private void setShapePath(RectF target) {
+        path.reset();
         if (shape == SHAPE_TRIANGLE) {
-            // Equilateral-style triangle mask, centered and inset within the icon bounds.
-            path.reset();
-            path.moveTo(rect.centerX(), rect.top);
-            path.lineTo(rect.right, rect.bottom);
-            path.lineTo(rect.left, rect.bottom);
+            // Equilateral-style triangle, centered in the target bounds.
+            path.moveTo(target.centerX(), target.top);
+            path.lineTo(target.right, target.bottom);
+            path.lineTo(target.left, target.bottom);
             path.close();
-            canvas.clipPath(path);
         } else if (shape == SHAPE_PEAR) {
             // Pear silhouette: narrow rounded top, widening toward a full lower half.
-            path.reset();
-            path.moveTo(rect.centerX(), rect.top);
-            path.cubicTo(rect.left + rect.width() * 0.20f, rect.top,
-                    rect.left + rect.width() * 0.30f, rect.top + rect.height() * 0.24f,
-                    rect.left + rect.width() * 0.18f, rect.top + rect.height() * 0.43f);
-            path.cubicTo(rect.left - rect.width() * 0.02f, rect.top + rect.height() * 0.76f,
-                    rect.left + rect.width() * 0.19f, rect.bottom,
-                    rect.centerX(), rect.bottom);
-            path.cubicTo(rect.right - rect.width() * 0.19f, rect.bottom,
-                    rect.right + rect.width() * 0.02f, rect.top + rect.height() * 0.76f,
-                    rect.right - rect.width() * 0.18f, rect.top + rect.height() * 0.43f);
-            path.cubicTo(rect.right - rect.width() * 0.30f, rect.top + rect.height() * 0.24f,
-                    rect.right - rect.width() * 0.20f, rect.top,
-                    rect.centerX(), rect.top);
+            path.moveTo(target.centerX(), target.top);
+            path.cubicTo(target.left + target.width() * 0.20f, target.top,
+                    target.left + target.width() * 0.30f, target.top + target.height() * 0.24f,
+                    target.left + target.width() * 0.18f, target.top + target.height() * 0.43f);
+            path.cubicTo(target.left - target.width() * 0.02f, target.top + target.height() * 0.76f,
+                    target.left + target.width() * 0.19f, target.bottom,
+                    target.centerX(), target.bottom);
+            path.cubicTo(target.right - target.width() * 0.19f, target.bottom,
+                    target.right + target.width() * 0.02f, target.top + target.height() * 0.76f,
+                    target.right - target.width() * 0.18f, target.top + target.height() * 0.43f);
+            path.cubicTo(target.right - target.width() * 0.30f, target.top + target.height() * 0.24f,
+                    target.right - target.width() * 0.20f, target.top,
+                    target.centerX(), target.top);
             path.close();
-            canvas.clipPath(path);
         }
-
-        source.setBounds(Math.round(rect.left), Math.round(rect.top),
-                Math.round(rect.right), Math.round(rect.bottom));
-        source.draw(canvas);
-        canvas.restoreToCount(save);
     }
 
     @Override public void setAlpha(int alpha) {
