@@ -107,8 +107,6 @@ final class LauncherScreenTransitions {
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
         homeScreen.setCameraDistance(10000f * density);
@@ -187,6 +185,8 @@ final class LauncherScreenTransitions {
                            Runnable beforeOpen, int effect, float swipeProgress) {
         beforeOpen.run();
         float progress = Math.max(0f, Math.min(1f, swipeProgress));
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
         updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
         float remaining = 1f - progress;
         long duration = LauncherMotion.duration(activity, Math.max(100L, (long) (420L * remaining)));
@@ -226,6 +226,50 @@ final class LauncherScreenTransitions {
                     .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
                     .setDuration(duration).start();
         }
+    }
+
+    /**
+     * Complete a finger-driven drawer close. The release animation continues from
+     * the exact gesture pose instead of snapping into the canned showHome transition.
+     */
+    static void finishDrawerSwipeToHome(Activity activity, LinearLayout homeScreen,
+                                        LinearLayout drawerScreen, Runnable markDrawerClosed,
+                                        int effect, float swipeProgress) {
+        final float start = Math.max(0f, Math.min(1f, swipeProgress));
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        android.animation.ValueAnimator animator =
+                android.animation.ValueAnimator.ofFloat(start, 0f);
+        animator.setDuration(LauncherMotion.duration(activity,
+                Math.max(110L, (long) (300L * start))));
+        animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        animator.addUpdateListener(value ->
+                updateDrawerSwipe(activity, homeScreen, drawerScreen, effect,
+                        (Float) value.getAnimatedValue()));
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                markDrawerClosed.run();
+                homeScreen.setVisibility(View.VISIBLE);
+                homeScreen.setAlpha(1f);
+                homeScreen.setRotationX(0f);
+                homeScreen.setRotationY(0f);
+                homeScreen.setTranslationX(0f);
+                homeScreen.setTranslationY(0f);
+                homeScreen.setTranslationZ(0f);
+                homeScreen.setScaleX(1f);
+                homeScreen.setScaleY(1f);
+                drawerScreen.setVisibility(View.GONE);
+                drawerScreen.setAlpha(1f);
+                drawerScreen.setRotationX(0f);
+                drawerScreen.setRotationY(0f);
+                drawerScreen.setTranslationX(0f);
+                drawerScreen.setTranslationY(0f);
+                drawerScreen.setTranslationZ(0f);
+                drawerScreen.setScaleX(1f);
+                drawerScreen.setScaleY(1f);
+            }
+        });
+        animator.start();
     }
 
     static void cancelDrawerSwipe(Activity activity, LinearLayout homeScreen,
