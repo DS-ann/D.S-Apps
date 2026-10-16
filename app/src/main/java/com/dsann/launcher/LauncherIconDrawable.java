@@ -61,8 +61,8 @@ final class LauncherIconDrawable extends Drawable {
             canvas.drawRoundRect(left, top, right, bottom, corner, corner, paint);
         }
 
-        float inset = showBackground ? Math.min(width, height) * 0.10f : 0f;
-        rect.set(left + inset, top + inset, right - inset, bottom - inset);
+        // Use the full drawable bounds: no inset for any icon shape.
+        rect.set(left, top, right, bottom);
         if (rect.width() <= 0 || rect.height() <= 0) return;
 
         if (shape == SHAPE_TRIANGLE || shape == SHAPE_PEAR) {
