@@ -4572,11 +4572,11 @@ public class MainActivity extends Activity {
                                 baseClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
-            // For seven-segment only, shift the marker another 5 dp right
-            // (10 dp total) and 2 dp up relative to the digits. Compensate for
+            // For seven-segment only, shift the marker 3 dp left from the previous position
+            // (7 dp total) and 2 dp up relative to the digits. Compensate for
             // parent scaling so the offset remains stable while resizing.
             if (sevenSegment) {
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 10) / Math.max(0.01f, lengthScale));
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 7) / Math.max(0.01f, lengthScale));
                 amPmText.setTranslationY(-LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             } else {
                 // For every non-seven-segment style, shift AM/PM another 5 dp right
