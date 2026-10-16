@@ -134,6 +134,7 @@ public class MainActivity extends Activity {
     private FrameLayout clockGroup;
     private LinearLayout clockPanel;
     private View clockWidgetResizeHandle;
+    private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
     private boolean clockWidgetDragging = false;
     private float clockWidgetDownRawX, clockWidgetDownRawY;
@@ -491,11 +492,42 @@ public class MainActivity extends Activity {
         View target = findViewAt(root, (int) rawX, (int) rawY);
         while (target != null) {
             if (target == clockPanel || "launcher_clock_widget".equals(target.getTag())) return true;
+            for (View grip : clockEdgeHandles) if (target == grip) return true;
             if (target == root) break;
             android.view.ViewParent parent = target.getParent();
             target = parent instanceof View ? (View) parent : null;
         }
         return false;
+    }
+
+    private void updateClockResizeHandles() {
+        if (clockPanel == null || root == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
+        int[] panel = new int[2];
+        int[] rootLoc = new int[2];
+        clockPanel.getLocationOnScreen(panel);
+        root.getLocationOnScreen(rootLoc);
+        int w = clockPanel.getWidth();
+        int h = clockPanel.getHeight();
+        int side = LauncherUiUtils.dp(this, 28);
+        int thin = LauncherUiUtils.dp(this, 8);
+        int[][] positions = new int[][] {
+                {panel[0] - rootLoc[0], panel[1] - rootLoc[1] + h / 2 - side / 2},
+                {panel[0] - rootLoc[0] + w - thin, panel[1] - rootLoc[1] + h / 2 - side / 2},
+                {panel[0] - rootLoc[0] + w / 2 - side / 2, panel[1] - rootLoc[1]},
+                {panel[0] - rootLoc[0] + w / 2 - side / 2, panel[1] - rootLoc[1] + h - thin}
+        };
+        for (int i = 0; i < clockEdgeHandles.length; i++) {
+            View grip = clockEdgeHandles[i];
+            if (grip == null) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) grip.getLayoutParams();
+            lp.width = i < 2 ? thin : side;
+            lp.height = i < 2 ? side : thin;
+            lp.leftMargin = positions[i][0];
+            lp.topMargin = positions[i][1];
+            grip.setLayoutParams(lp);
+            grip.bringToFront();
+            grip.setVisibility(clockWidgetEditing ? View.VISIBLE : View.GONE);
+        }
     }
 
     private int hitClockResizeEdge(float rawX, float rawY) {
@@ -2598,9 +2630,23 @@ public class MainActivity extends Activity {
         clockPanel.setTag("launcher_clock_widget");
         clockPanel.setClipChildren(false);
         clockPanel.setClipToPadding(false);
-        // Resize hit targets are virtual edge grips handled before launcher gestures.
-        // Avoid adding physical children to this vertical layout: they used to push the
-        // clock/date downward and caused accidental control-centre/page gestures.
+        // Four visible resize grips are hosted by the root overlay, not inside the
+        // vertical clock layout, so they never add unwanted height to the clock/date.
+        for (int i = 0; i < clockEdgeHandles.length; i++) {
+            View grip = new View(this);
+            GradientDrawable gripBg = new GradientDrawable();
+            gripBg.setColor(Color.rgb(115, 159, 255));
+            gripBg.setCornerRadius(LauncherUiUtils.dp(this, 6));
+            grip.setBackground(gripBg);
+            grip.setVisibility(View.GONE);
+            clockEdgeHandles[i] = grip;
+            int size = LauncherUiUtils.dp(this, 28);
+            FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(
+                    i < 2 ? size : LauncherUiUtils.dp(this, 8),
+                    i < 2 ? LauncherUiUtils.dp(this, 8) : size);
+            root.addView(grip, gripLp);
+        }
+        updateClockResizeHandles();
         clockPanel.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 clockWidgetDownRawX = event.getRawX();
@@ -2650,6 +2696,8 @@ public class MainActivity extends Activity {
         if (clockPanel == null || drawerOpen) return;
         clockWidgetEditing = true;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
+        for (View grip : clockEdgeHandles) if (grip != null) grip.setVisibility(View.VISIBLE);
+        updateClockResizeHandles();
         clockPanel.setBackground(LauncherUiUtils.roundRect(this,
                 new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
                 LauncherUiUtils.dp(this, 8)));
@@ -2661,6 +2709,7 @@ public class MainActivity extends Activity {
     private void exitClockWidgetEditMode() {
         clockWidgetEditing = false;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
+        for (View grip : clockEdgeHandles) if (grip != null) grip.setVisibility(View.GONE);
         applyClockPanelColor(false);
         setWorkspaceGridVisible(false, null);
     }
@@ -3161,6 +3210,7 @@ public class MainActivity extends Activity {
         panelParams.width = Math.min(screenWidth - LauncherUiUtils.dp(this, 8),
                 Math.max(LauncherUiUtils.dp(this, 96), contentWidth + LauncherUiUtils.dp(this, 8)));
         clockPanel.setLayoutParams(panelParams);
+        clockPanel.post(() -> updateClockResizeHandles());
         clockPanel.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2));
         clockPanel.setClipChildren(false);
