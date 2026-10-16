@@ -3586,10 +3586,32 @@ public class MainActivity extends Activity {
     }
 
     private void addSection(LinearLayout panel, String title) {
-        TextView header = LauncherUiUtils.text(this, title.toUpperCase(Locale.getDefault()), 11, Color.rgb(146, 171, 239), true);
-        header.setLetterSpacing(0.10f);
-        header.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 15), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 7));
-        panel.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        // Give each category its own visual header so the settings don't read as
+        // one long list of identical controls.
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9));
+        headerRow.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.rgb(43, 58, 94), Color.rgb(28, 38, 66)}, LauncherUiUtils.dp(this, 12)));
+        String glyphText = "⚙";
+        int accent = Color.rgb(146, 171, 239);
+        if (title.toLowerCase(Locale.ROOT).contains("home")) { glyphText = "⌂"; accent = Color.rgb(119, 205, 255); }
+        else if (title.toLowerCase(Locale.ROOT).contains("clock")) { glyphText = "◷"; accent = Color.rgb(255, 196, 112); }
+        else if (title.toLowerCase(Locale.ROOT).contains("animation")) { glyphText = "↔"; accent = Color.rgb(196, 154, 255); }
+        else if (title.toLowerCase(Locale.ROOT).contains("drawer")) { glyphText = "▦"; accent = Color.rgb(111, 225, 190); }
+        else if (title.toLowerCase(Locale.ROOT).contains("appearance")) { glyphText = "◐"; accent = Color.rgb(255, 145, 185); }
+        else if (title.toLowerCase(Locale.ROOT).contains("manage")) { glyphText = "☷"; accent = Color.rgb(255, 186, 115); }
+        TextView glyph = LauncherUiUtils.text(this, glyphText, 20, accent, true);
+        glyph.setGravity(Gravity.CENTER);
+        headerRow.addView(glyph, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 30)));
+        TextView header = LauncherUiUtils.text(this, title, 15, Color.WHITE, true);
+        header.setPadding(LauncherUiUtils.dp(this, 8), 0, 0, 0);
+        headerRow.addView(header, new LinearLayout.LayoutParams(0, -2, 1f));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = LauncherUiUtils.dp(this, 14);
+        params.bottomMargin = LauncherUiUtils.dp(this, 9);
+        panel.addView(headerRow, params);
     }
 
     private void addSettingRow(LinearLayout panel, String icon, String title, String detail, Runnable action) {
@@ -3616,22 +3638,36 @@ public class MainActivity extends Activity {
 
     private void addChoiceRow(LinearLayout panel, String title, int selected, String[] choices, IntAction onSelect) {
         TextView heading = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
-        heading.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 8));
+        heading.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 7));
+        heading.setSingleLine(false);
         panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+
+        // Keep every option readable. Long labels (for example, animation names)
+        // must use their natural width instead of being squeezed into equal slots.
+        android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
+        horizontal.setHorizontalScrollBarEnabled(false);
+        horizontal.setFillViewport(false);
         LinearLayout choicesRow = new LinearLayout(this);
         choicesRow.setGravity(Gravity.CENTER_VERTICAL);
         for (int i = 0; i < choices.length; i++) {
             final int value = i;
-            TextView chip = LauncherUiUtils.text(this, choices[i], 12, i == selected ? Color.WHITE : Color.rgb(196, 205, 228), i == selected);
+            TextView chip = LauncherUiUtils.text(this, choices[i], 12,
+                    i == selected ? Color.WHITE : Color.rgb(196, 205, 228), i == selected);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 10));
-            chip.setBackground(LauncherUiUtils.roundRect(this, i == selected ? new int[]{Color.rgb(73, 99, 177), Color.rgb(73, 74, 157)} : new int[]{Color.rgb(34, 41, 62), Color.rgb(28, 34, 51)}, LauncherUiUtils.dp(this, 12)));
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, LauncherUiUtils.dp(this, 40), 1f);
-            cp.setMargins(LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 8));
+            chip.setSingleLine(true);
+            chip.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 10),
+                    LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 10));
+            chip.setBackground(LauncherUiUtils.roundRect(this,
+                    i == selected ? new int[]{Color.rgb(73, 99, 177), Color.rgb(73, 74, 157)}
+                            : new int[]{Color.rgb(34, 41, 62), Color.rgb(28, 34, 51)},
+                    LauncherUiUtils.dp(this, 12)));
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, LauncherUiUtils.dp(this, 40));
+            cp.setMargins(LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 8));
             choicesRow.addView(chip, cp);
             chip.setOnClickListener(v -> onSelect.onSelect(value));
         }
-        panel.addView(choicesRow);
+        horizontal.addView(choicesRow, new android.widget.HorizontalScrollView.LayoutParams(-2, -2));
+        panel.addView(horizontal, new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void showCustomizationMenu() {
@@ -3676,7 +3712,7 @@ public class MainActivity extends Activity {
             scroll.addView(content, new android.widget.ScrollView.LayoutParams(-1, -2));
         }
 
-        addSection(content, "Home screen");
+        addSection(content, "Home layout & icons");
         addChoiceRow(content, "Home columns", getHomeColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
             prefs.edit().putInt(KEY_COLUMNS, value + 3).apply();
             clearIconPositions();
@@ -3708,26 +3744,33 @@ public class MainActivity extends Activity {
             applyBrandVisibility(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
-        addSection(content, "Clock and motion");
+        addSection(content, "Clock");
+        addChoiceRow(content, "Clock alignment", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
+            prefs.edit().putInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage), value).apply();
+            applyClockPositionAndSize();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "Clock visual style", prefs.getInt(KEY_CLOCK_STYLE, 0),
+                new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "7-Segment Digital"}, value -> {
+            prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
+            updateClock();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+
+        addSection(content, "Page animations");
+        addChoiceRow(content, "Page transition effect", getPageTransition(),
+                new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
+            prefs.edit().putInt(KEY_PAGE_TRANSITION, value).apply();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
         addSliderRow(content, "Cube rotation angle", 30, 180, getCubeRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_CUBE_ROTATION, value).apply();
         });
-        addChoiceRow(content, "Launcher animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
+        addChoiceRow(content, "Animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
             prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
-        });
-        addChoiceRow(content, "Page transition effect", getPageTransition(),
-                new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
-            prefs.edit().putInt(KEY_PAGE_TRANSITION, value).apply();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
-        });
-        // Clock sizing is controlled directly by the widget's blue resize handle.
-        addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
-            prefs.edit().putInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage), value).apply();
-            applyClockPositionAndSize();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
@@ -3774,11 +3817,6 @@ public class MainActivity extends Activity {
         addChoiceRow(content, "Color theme", prefs.getInt(KEY_COLOR_THEME, 0), new String[]{"Midnight", "Ocean", "Violet", "Graphite"}, value -> {
             prefs.edit().putInt(KEY_COLOR_THEME, value).apply();
             drawerScreen.setBackground(drawerBackground()); applyHomeWallpaper();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
-        });
-        addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "7-Segment Digital"}, value -> {
-            prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
-            updateClock();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "12/24", "System clock format", DateFormat.is24HourFormat(this) ? "24-hour" : "12-hour", () -> {
