@@ -3596,14 +3596,13 @@ public class MainActivity extends Activity {
                 new int[] {leftEdge, leftMid, Color.argb(22, 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
-        // Keep the colored background 20% narrower than its clock panel, centered.
-        // Only the background is inset; clock glyphs and AM/PM retain their geometry.
-        int backgroundWidth = hero.getWidth() > 0 ? hero.getWidth()
-                : Math.max(LauncherUiUtils.dp(this, 96),
-                        getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 24));
-        int horizontalInset = Math.max(1, Math.round(backgroundWidth * 0.10f));
+        // Restore the full background width and make only its height 20% shorter,
+        // centered vertically. Clock glyphs and AM/PM retain their geometry.
+        int backgroundHeight = hero.getHeight() > 0 ? hero.getHeight()
+                : LauncherUiUtils.dp(this, 140);
+        int verticalInset = Math.max(1, Math.round(backgroundHeight * 0.10f));
         InsetDrawable centeredBackground = new InsetDrawable(next,
-                horizontalInset, 0, horizontalInset, 0);
+                0, verticalInset, 0, verticalInset);
         if (animate) {
             hero.setBackground(centeredBackground);
             next.setAlpha(0);
