@@ -4475,7 +4475,8 @@ public class MainActivity extends Activity {
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : nonLedDigitScale);
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
-        clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale * nonLedDigitScale);
+        // Make non-7-segment digits 20% taller without changing the clock background or 7-segment style.
+        clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale * nonLedDigitScale * 1.20f);
         // Shift the seven-segment digits 15 dp left relative to their background.
         // Compensate for panel scaling so the visual offset remains exactly 15 dp
         // at every clock length setting; the panel/background itself stays put.
