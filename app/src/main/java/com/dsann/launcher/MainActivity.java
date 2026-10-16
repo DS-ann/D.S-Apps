@@ -605,7 +605,7 @@ public class MainActivity extends Activity {
                 drawerCloseSwipeClaimed = false;
                 // Cancel/release must always settle to a stable endpoint. Progress is
                 // the remaining-open fraction for a downward close gesture.
-                if (drawerSwipeProgress > 0.5f) {
+                if (drawerSwipeProgress > 0.30f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -617,7 +617,7 @@ public class MainActivity extends Activity {
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
                 // A cancelled upward opening settles to the nearest stable screen.
-                if (drawerSwipeProgress >= 0.5f) {
+                if (drawerSwipeProgress >= 0.30f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -3996,7 +3996,7 @@ public class MainActivity extends Activity {
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 96)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
-            prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
+            prefs.edit().putInt(KEY_ICON_SIZE, new int[]{48, 56, 64, 72}[value]).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "▣", "Rounded-square icon background",
@@ -4014,7 +4014,7 @@ public class MainActivity extends Activity {
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Home app font size", prefs.getInt(KEY_HOME_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL", "Larger"}, value -> {
+        addChoiceRow(content, "Home app font size", Math.min(3, prefs.getInt(KEY_HOME_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -4097,10 +4097,10 @@ public class MainActivity extends Activity {
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
-            prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
+            prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{48, 56, 64, 72}[value]).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "App drawer font size", prefs.getInt(KEY_DRAWER_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL", "Larger"}, value -> {
+        addChoiceRow(content, "App drawer font size", Math.min(3, prefs.getInt(KEY_DRAWER_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_FONT_SIZE, value).apply();
             drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -4447,10 +4447,12 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            // Let the custom LED TextView measure its own glyph width, as in the
-            // known-good launcher build. An explicit width here can constrain its
-            // custom onMeasure() and leave the seven-segment glyphs clipped.
-            textParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            // Give the LED renderer the complete clock-group width. The colon is
+            // centered against the actual clock background, not a narrower
+            // wrap-content child containing only the digits.
+            textParams.width = sevenSegment
+                    ? ViewGroup.LayoutParams.MATCH_PARENT
+                    : ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
             textParams.gravity = Gravity.LEFT | Gravity.TOP;
             clockText.setLayoutParams(textParams);
