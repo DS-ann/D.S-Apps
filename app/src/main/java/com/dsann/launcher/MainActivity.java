@@ -3724,7 +3724,8 @@ public class MainActivity extends Activity {
         // Drawing the inset internally keeps clock geometry independent from its background.
         boolean sevenSegmentBackground = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-        float totalHeightReduction = sevenSegmentBackground ? 0.20f : 0.40f;
+        // Keep the coloured clock background at the full container height for both styles.
+        float totalHeightReduction = 0f;
         ClockPanelBackgroundDrawable centeredBackground =
                 new ClockPanelBackgroundDrawable(next, totalHeightReduction);
         if (animate) {
