@@ -1707,6 +1707,26 @@ public class MainActivity extends Activity {
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
 
+        // The clock lives above the page strip, so animate it with the same page
+        // transition rather than leaving it visually pinned while pages turn.
+        if (clockPanel != null) {
+            float phase = Math.max(0f, Math.min(1f, progress));
+            if (effect == 1) {
+                clockPanel.setRotationY(direction * getPageRotationDegrees() * phase);
+                clockPanel.setScaleX(1f - 0.035f * phase);
+                clockPanel.setAlpha(1f - 0.35f * phase);
+            } else if (effect == 3) {
+                clockPanel.setRotationY(-direction * 48f * phase);
+                clockPanel.setScaleX(1f - 0.04f * phase);
+                clockPanel.setAlpha(1f - 0.45f * phase);
+            } else {
+                clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)
+                        - direction * width * phase * 0.35f);
+                clockPanel.setAlpha(1f - 0.55f * phase);
+                clockPanel.setScaleX(1f - 0.025f * phase);
+            }
+        }
+
         View incomingFace = to >= 0 && to < pagesStrip.getChildCount() ? pagesStrip.getChildAt(to) : null;
         // Keep the two page views in their real neighbouring positions. Translating the
         // incoming face over the outgoing one caused the next page to pop into view.
@@ -1831,6 +1851,16 @@ public class MainActivity extends Activity {
     }
 
     private void resetPageTransforms() {
+        if (clockPanel != null) {
+            clockPanel.setRotationY(0f);
+            clockPanel.setRotationX(0f);
+            clockPanel.setScaleX(1f);
+            clockPanel.setScaleY(1f);
+            clockPanel.setAlpha(1f);
+            // Preserve the user's saved clock-widget position after the transition.
+            clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f));
+            clockPanel.setTranslationY(prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f));
+        }
         if (pagesStrip == null) return;
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View face = pagesStrip.getChildAt(i);
@@ -2665,15 +2695,10 @@ public class MainActivity extends Activity {
                     clockWidgetDragging = true;
                     float targetX = clockWidgetStartX + dx;
                     float targetY = clockWidgetStartY + dy;
-                    // Keep the clock entirely in its header band; it may be moved there,
-                    // but never over the two home pages, dock, or page controls.
-                    float maxX = Math.max(0f, homeScreen.getWidth() - clockPanel.getWidth());
-                    float minY = -clockPanel.getTop();
-                    float maxY = pageViewport == null ? 0f
-                            : Math.max(minY, pageViewport.getTop() - clockPanel.getTop()
-                                    - clockPanel.getHeight());
-                    clockPanel.setTranslationX(Math.max(0f, Math.min(maxX, targetX)));
-                    clockPanel.setTranslationY(Math.max(minY, Math.min(maxY, targetY)));
+                    // The clock is a free-positioned widget: do not constrain it to
+                    // the header band or reject overlaps with workspace content.
+                    clockPanel.setTranslationX(targetX);
+                    clockPanel.setTranslationY(targetY);
                     prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
                             .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
                     setWorkspaceGridVisible(true, clockPanel);
