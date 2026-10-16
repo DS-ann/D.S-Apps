@@ -154,7 +154,9 @@ public final class SevenSegmentClockTextView extends TextView {
             if (ch == ':') {
                 segmentPaint.setColor(color);
                 float radius = Math.max(2.5f, thickness * 0.38f);
-                float dotX = x + unit * 0.15f;
+                // Anchor the colon to the clock panel center, slightly left of center.
+                // Digit placement and the intentional leading-digit crop stay unchanged.
+                float dotX = leftBound + availableWidth * 0.48f;
                 canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
                 canvas.drawCircle(dotX, y + digitHeight * 0.68f, radius, segmentPaint);
                 x += unit * 0.34f;
