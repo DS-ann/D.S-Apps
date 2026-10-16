@@ -145,6 +145,8 @@ public class MainActivity extends Activity {
     private boolean clockWidgetLongPressActivated = false;
     // 0 = none, 1 = left edge, 2 = right edge, 3 = top edge, 4 = bottom edge.
     private int clockResizeEdge = 0;
+    // Invalidates stale layout callbacks when a newer resize frame or gesture starts.
+    private int clockResizeGeneration = 0;
     private boolean gestureStartedOnClock = false;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
@@ -314,6 +316,7 @@ public class MainActivity extends Activity {
                     clockWidgetStartScreenY = clockStartLocation[1];
                     clockWidgetStartPanelWidth = clockPanel.getWidth();
                     clockWidgetStartPanelHeight = clockPanel.getHeight();
+                    clockResizeGeneration++;
                     clockWidgetStartX = clockPanel.getTranslationX();
                     clockWidgetStartY = clockPanel.getTranslationY();
                     setWorkspaceGridVisible(true, clockPanel);
@@ -344,8 +347,11 @@ public class MainActivity extends Activity {
                         .apply();
                 applyClockPositionAndSize();
                 final int resizingEdge = clockResizeEdge;
+                final int resizeGeneration = ++clockResizeGeneration;
                 clockPanel.post(() -> {
-                    if (!clockWidgetDragging || clockResizeEdge != resizingEdge || clockPanel == null) return;
+                    // Complete the final geometry correction even if ACTION_UP arrived
+                    // before this layout callback ran; discard only stale resize frames.
+                    if (resizeGeneration != clockResizeGeneration || clockPanel == null) return;
                     int[] now = new int[2];
                     clockPanel.getLocationOnScreen(now);
                     float targetX = clockWidgetStartScreenX;
