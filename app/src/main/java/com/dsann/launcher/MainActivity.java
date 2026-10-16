@@ -518,6 +518,23 @@ public class MainActivity extends Activity {
                     float progress = Math.max(0f, Math.min(1f, Math.abs(dx) / (float) pageWidth));
                     wheelSwipeProgress = progress;
                     applyWheelSwipe(wheelSwipeDirection, progress);
+
+                    // Once the finger has carried the page fully across, commit that
+                    // page immediately instead of holding the finished cube/flip pose
+                    // until ACTION_UP. Rebase the gesture so a continued swipe remains
+                    // responsive and can move on to another page.
+                    if (progress >= 0.995f) {
+                        int completedPage = currentPage + wheelSwipeDirection;
+                        currentPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, completedPage));
+                        activateClockForPage(currentPage);
+                        pagesStrip.setTranslationX(-currentPage * (float) pageWidth);
+                        resetPageTransforms();
+                        preparePageLayersForSwipe(currentPage);
+                        wheelSwipeProgress = 0f;
+                        wheelSwipeDirection = 0;
+                        gestureDownX = event.getX();
+                        pageSwipeChildCancelled = true;
+                    }
                     return true;
                 } else if (pageSwipeActive) {
                     // If the finger crosses back past the origin, return the wheel
