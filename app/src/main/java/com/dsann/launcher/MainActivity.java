@@ -3513,7 +3513,7 @@ public class MainActivity extends Activity {
                 int gap = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0, Math.min(
                         contentWidth - markerParams.width,
-                        renderedClockWidth + gap));
+                        (int) Math.ceil(naturalClockWidth) + gap));
                 // Anchor vertically to the scaled clock's lower edge, not the
                 // unscaled 114dp TextView height. Keep a gap before the date row.
                 int visibleClockHeight = Math.max(1,
