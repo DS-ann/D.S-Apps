@@ -3938,6 +3938,21 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_ICON_SIZE, new int[]{40, 48, 56, 64}[value]).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
+        addSettingRow(content, "▣", "Rounded-square icon background",
+                prefs.getBoolean("icon_rounded_square_background", false) ? "On" : "Off", () -> {
+            prefs.edit().putBoolean("icon_rounded_square_background",
+                    !prefs.getBoolean("icon_rounded_square_background", false)).apply();
+            renderHomePages(false);
+            if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addChoiceRow(content, "App icon shape", prefs.getInt("app_icon_shape", 0),
+                new String[]{"Original", "Round", "Pear"}, value -> {
+            prefs.edit().putInt("app_icon_shape", value).apply();
+            renderHomePages(false);
+            if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
         addChoiceRow(content, "Home app font size", prefs.getInt(KEY_HOME_FONT_SIZE, 1), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
