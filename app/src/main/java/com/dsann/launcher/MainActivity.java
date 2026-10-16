@@ -1351,6 +1351,10 @@ public class MainActivity extends Activity {
             return;
         }
 
+        int actualShortcutPage = pagesStrip.indexOfChild(chosenPage);
+        if (actualShortcutPage >= 0 && actualShortcutPage != desiredPage) {
+            prefs.edit().putInt(KEY_SHORTCUT_PAGE, actualShortcutPage).apply();
+        }
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
         tile.setClipChildren(false);
