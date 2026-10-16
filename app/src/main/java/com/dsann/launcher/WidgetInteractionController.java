@@ -414,14 +414,24 @@ final class WidgetInteractionController {
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 listener.setWorkspaceGridVisible(false, null);
+                FrameLayout.LayoutParams finalParams =
+                        (FrameLayout.LayoutParams) container.getLayoutParams();
+                if (action == MotionEvent.ACTION_CANCEL) {
+                    // A cancelled resize must not commit a partial size. Restore the
+                    // dimensions captured at ACTION_DOWN, just as a cancelled move
+                    // restores its original position.
+                    finalParams.width = origin[2];
+                    finalParams.height = origin[3];
+                    container.setLayoutParams(finalParams);
+                }
                 if (container.getChildAt(0) instanceof AppWidgetHostView) {
                     WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
                             widgetId, (AppWidgetHostView) container.getChildAt(0),
                             activity.getResources().getDisplayMetrics().density,
-                            container.getLayoutParams().width, container.getLayoutParams().height);
+                            finalParams.width, finalParams.height);
                 }
                 listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
-                if (container.getParent() instanceof FrameLayout) {
+                if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout) {
                     listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
                 }
                 return true;
