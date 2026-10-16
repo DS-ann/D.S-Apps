@@ -1862,17 +1862,17 @@ public class MainActivity extends Activity {
             float phase = Math.max(0f, Math.min(1f, progress));
             if (effect == 1) {
                 clockPanel.setRotationY(direction * getPageRotationDegrees() * phase);
-                clockPanel.setScaleX(1f - 0.035f * phase);
+                clockPanel.setScaleX(getEffectiveClockLengthScale() * (1f - 0.035f * phase));
                 clockPanel.setAlpha(1f - 0.35f * phase);
             } else if (effect == 3) {
                 clockPanel.setRotationY(-direction * 48f * phase);
-                clockPanel.setScaleX(1f - 0.04f * phase);
+                clockPanel.setScaleX(getEffectiveClockLengthScale() * (1f - 0.04f * phase));
                 clockPanel.setAlpha(1f - 0.45f * phase);
             } else {
                 clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)
                         - direction * width * phase * 0.35f);
                 clockPanel.setAlpha(1f - 0.55f * phase);
-                clockPanel.setScaleX(1f - 0.025f * phase);
+                clockPanel.setScaleX(getEffectiveClockLengthScale() * (1f - 0.025f * phase));
             }
         }
 
@@ -2005,7 +2005,7 @@ public class MainActivity extends Activity {
             clockPanel.setRotationX(0f);
             // Restore both persisted dimensions after temporary page-transition
             // transforms; otherwise every page change silently resets clock size.
-            clockPanel.setScaleX(getClockLength() / 100f);
+            clockPanel.setScaleX(getEffectiveClockLengthScale());
             clockPanel.setScaleY(getClockBreadth() / 100f);
             clockPanel.setPivotX(clockGravity() == Gravity.RIGHT ? clockPanel.getWidth()
                     : (clockGravity() == Gravity.CENTER_HORIZONTAL ? clockPanel.getWidth() / 2f : 0f));
@@ -3330,6 +3330,14 @@ public class MainActivity extends Activity {
 
     private int getClockPosition() {
         return Math.max(0, Math.min(2, prefs == null ? 2 : prefs.getInt(KEY_CLOCK_POSITION, 2)));
+    }
+
+    private float getEffectiveClockLengthScale() {
+        float requested = getClockLength() / 100f;
+        if (clockPanel == null || clockPanel.getWidth() <= 0) return requested;
+        int available = Math.max(LauncherUiUtils.dp(this, 96),
+                getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 24));
+        return Math.min(requested, available / (float) clockPanel.getWidth());
     }
 
     private long animationDuration(long baseMillis) {
