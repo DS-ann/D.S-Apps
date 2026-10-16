@@ -170,6 +170,7 @@ public class MainActivity extends Activity {
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
     private float drawerSwipeProgress = 0f;
+    private boolean drawerSwipeVisualActive = false;
     private boolean gestureStartedOnAppCell = false;
     private boolean gestureStartedOnWidget = false;
     private boolean gestureStartedOnContactShortcut = false;
@@ -306,6 +307,7 @@ public class MainActivity extends Activity {
             verticalSwipeClaimed = false;
             drawerCloseSwipeClaimed = false;
             drawerSwipeProgress = 0f;
+            drawerSwipeVisualActive = false;
             gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
@@ -418,9 +420,14 @@ public class MainActivity extends Activity {
             if (!drawerOpen && !itemManipulation
                     && !verticalSwipeClaimed && verticalSwipe) {
                 verticalSwipeClaimed = true;
-                drawerSwipeProgress = Math.max(0f, Math.min(1f, Math.abs(dy)
-                        / (float) Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
-                                ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels)));
+                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
+                drawerSwipeProgress = Math.max(0f, Math.min(1f, -dy / (float) swipeHeight));
+                if (dy < 0f) {
+                    drawerSwipeVisualActive = true;
+                    LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                            getDrawerTransition(), drawerSwipeProgress);
+                }
                 handler.removeCallbacks(homeLongPress);
                 handler.removeCallbacks(clockWidgetLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
@@ -429,7 +436,18 @@ public class MainActivity extends Activity {
                 cancel.recycle();
                 return true;
             }
-            if (drawerCloseSwipeClaimed || verticalSwipeClaimed) return true;
+            if (verticalSwipeClaimed) {
+                if (dy < 0f || drawerSwipeVisualActive) {
+                    int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                            ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
+                    drawerSwipeProgress = Math.max(0f, Math.min(1f, -dy / (float) swipeHeight));
+                    if (dy < 0f) drawerSwipeVisualActive = true;
+                    LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                            getDrawerTransition(), drawerSwipeProgress);
+                }
+                return true;
+            }
+            if (drawerCloseSwipeClaimed) return true;
             if (Math.abs(event.getX() - longPressDownX) > LauncherUiUtils.dp(this, 12)
                     || Math.abs(event.getY() - longPressDownY) > LauncherUiUtils.dp(this, 12)) {
                 handler.removeCallbacks(homeLongPress);
@@ -496,6 +514,19 @@ public class MainActivity extends Activity {
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
+            if (drawerSwipeVisualActive && dy >= 0f) {
+                drawerSwipeVisualActive = false;
+                LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition());
+                openControlCenter();
+                return true;
+            }
+            if (drawerSwipeVisualActive) {
+                drawerSwipeVisualActive = false;
+                LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition());
+                return true;
+            }
             if (pageSwipeActive) {
                 pageSwipeActive = false;
                 int width = pageViewport != null && pageViewport.getWidth() > 0
