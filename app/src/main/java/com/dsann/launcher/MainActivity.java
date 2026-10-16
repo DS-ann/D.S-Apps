@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
     private static final String KEY_DRAWER_FONT_SIZE = "drawer_font_size";
     private static final String KEY_CLOCK_STYLE = "clock_style";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
+    private static final String KEY_CUBE_ROTATION = "cube_rotation_degrees";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final String KEY_PAGE_TRANSITION = "page_transition";
     private static final String KEY_CLOCK_SIZE = "clock_size"; // Legacy preference; retained for compatibility.
@@ -2211,7 +2212,8 @@ public class MainActivity extends Activity {
             // 3D Cube: rotate each face around the shared vertical edge with depth separation.
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
-            outgoing.setRotationY(direction * 78f * progress);
+            float cubeAngle = getCubeRotationDegrees();
+            outgoing.setRotationY(direction * cubeAngle * progress);
             outgoing.setTranslationZ(-density * 28f * progress);
             outgoing.setTranslationX(-direction * width * 0.04f * progress);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
@@ -2219,7 +2221,7 @@ public class MainActivity extends Activity {
                 incoming.setCameraDistance(10000f * density);
                 incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setRotationY(-direction * 78f * (1f - progress));
+                incoming.setRotationY(-direction * cubeAngle * (1f - progress));
                 incoming.setTranslationZ(density * 28f * progress);
                 incoming.setTranslationX(-direction * width + direction * width * 0.04f * (1f - progress));
             }
@@ -3648,8 +3650,11 @@ public class MainActivity extends Activity {
         });
 
         addSection(content, "Clock and motion");
-        addSliderRow(content, "Page rotation", 50, 180, getPageRotationDegrees(), "°", value -> {
+        addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
+        });
+        addSliderRow(content, "Cube rotation angle", 30, 180, getCubeRotationDegrees(), "°", value -> {
+            prefs.edit().putInt(KEY_CUBE_ROTATION, value).apply();
         });
         addChoiceRow(content, "Launcher animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
             prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
@@ -3783,6 +3788,11 @@ public class MainActivity extends Activity {
             panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
             panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(animationDuration(190)).start();
         }
+    }
+
+    private int getCubeRotationDegrees() {
+        return Math.max(30, Math.min(180,
+                prefs == null ? 90 : prefs.getInt(KEY_CUBE_ROTATION, 90)));
     }
 
     private int getPageRotationDegrees() {
