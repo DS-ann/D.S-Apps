@@ -568,8 +568,11 @@ public class MainActivity extends Activity {
             }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition());
+                // ACTION_CANCEL can arrive when Android transfers/intercepts the
+                // gesture. Treat a claimed upward drawer swipe like finger release:
+                // settle from its current pose instead of snapping back to home.
+                LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                        () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 return true;
             }
             if (pageSwipeActive) {
