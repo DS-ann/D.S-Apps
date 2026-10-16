@@ -142,6 +142,7 @@ public class MainActivity extends Activity {
     private int clockWidgetStartLength, clockWidgetStartBreadth;
     private int clockWidgetStartScreenX, clockWidgetStartScreenY;
     private int clockWidgetStartPanelWidth, clockWidgetStartPanelHeight;
+    private float clockWidgetStartPanelScaleX = 1f;
     private boolean clockWidgetLongPressActivated = false;
     // 0 = none, 1 = left edge, 2 = right edge, 3 = top edge, 4 = bottom edge.
     private int clockResizeEdge = 0;
@@ -316,6 +317,7 @@ public class MainActivity extends Activity {
                     clockWidgetStartScreenY = clockStartLocation[1];
                     clockWidgetStartPanelWidth = clockPanel.getWidth();
                     clockWidgetStartPanelHeight = clockPanel.getHeight();
+                    clockWidgetStartPanelScaleX = clockPanel.getScaleX();
                     clockResizeGeneration++;
                     clockWidgetStartX = clockPanel.getTranslationX();
                     clockWidgetStartY = clockPanel.getTranslationY();
@@ -359,7 +361,9 @@ public class MainActivity extends Activity {
                     // Preserve the opposite VISUAL edge. Vertical scaling changes
                     // the panel's drawn height while its reserved layout height stays fixed.
                     if (resizingEdge == 1) {
-                        targetX += clockWidgetStartPanelWidth - clockPanel.getWidth();
+                        float startVisualWidth = clockWidgetStartPanelWidth * clockWidgetStartPanelScaleX;
+                        float currentVisualWidth = clockPanel.getWidth() * clockPanel.getScaleX();
+                        targetX += startVisualWidth - currentVisualWidth;
                     } else if (resizingEdge == 3) {
                         float startVisualHeight = clockWidgetStartPanelHeight
                                 * (clockWidgetStartBreadth / 100f);
@@ -571,7 +575,9 @@ public class MainActivity extends Activity {
                 float targetX = clockWidgetStartScreenX;
                 float targetY = clockWidgetStartScreenY;
                 if (edge == 1) {
-                    targetX += clockWidgetStartPanelWidth - clockPanel.getWidth();
+                    float startVisualWidth = clockWidgetStartPanelWidth * clockWidgetStartPanelScaleX;
+                    float currentVisualWidth = clockPanel.getWidth() * clockPanel.getScaleX();
+                    targetX += startVisualWidth - currentVisualWidth;
                 } else if (edge == 3) {
                     float startVisualHeight = clockWidgetStartPanelHeight
                             * (clockWidgetStartBreadth / 100f);
@@ -1997,9 +2003,12 @@ public class MainActivity extends Activity {
         if (clockPanel != null) {
             clockPanel.setRotationY(0f);
             clockPanel.setRotationX(0f);
-            clockPanel.setScaleX(1f);
-            // Page transitions must not erase the user's persisted clock breadth.
+            // Restore both persisted dimensions after temporary page-transition
+            // transforms; otherwise every page change silently resets clock size.
+            clockPanel.setScaleX(getClockLength() / 100f);
             clockPanel.setScaleY(getClockBreadth() / 100f);
+            clockPanel.setPivotX(clockGravity() == Gravity.RIGHT ? clockPanel.getWidth()
+                    : (clockGravity() == Gravity.CENTER_HORIZONTAL ? clockPanel.getWidth() / 2f : 0f));
             clockPanel.setAlpha(1f);
             // Preserve the user's saved clock-widget position after the transition.
             clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f));
@@ -3372,21 +3381,23 @@ public class MainActivity extends Activity {
         // marker and small side insets share that width, so long clocks shrink
         // automatically instead of drawing beyond the background.
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
-        final int panelWidth = Math.max(1, screenWidth - LauncherUiUtils.dp(this, 24));
-        final float maxClockWidth = Math.max(1f, panelWidth - markerWidth - LauncherUiUtils.dp(this, 6));
-        // Keep the complete clock inside the available screen width. The requested
-        // percentage remains saved, but the effective scale is capped only when the
-        // natural clock plus its AM/PM marker would otherwise be clipped at an edge.
-        final float lengthScale = Math.min(requestedLengthScale,
-                maxClockWidth / naturalClockWidth);
-        final int renderedClockWidth = Math.max(1,
-                (int) Math.ceil(naturalClockWidth * lengthScale));
+        final int availablePanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
+                screenWidth - LauncherUiUtils.dp(this, 24));
         final int dateWidth = dateText == null ? 0
                 : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
-        final int clockWithMarkerWidth = renderedClockWidth + markerWidth + LauncherUiUtils.dp(this, 2);
-        // Both clock and date rows use the same full-width hero background. The
-        // compact clock group itself stays sized to its rendered contents.
-        final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4);
+        // Measure the panel at its natural width, then scale the complete panel.
+        // This keeps the background, digits, AM/PM marker, and date in one resize
+        // operation instead of shrinking only the clock glyphs inside a fixed panel.
+        final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
+                + markerWidth + LauncherUiUtils.dp(this, 2);
+        final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth)
+                + LauncherUiUtils.dp(this, 4);
+        final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
+                contentWidth + LauncherUiUtils.dp(this, 8));
+        // Respect the requested scale unless the entire panel would leave the
+        // available screen width. Do not apply a second scale to the clock text.
+        final float lengthScale = Math.min(requestedLengthScale,
+                availablePanelWidth / (float) Math.max(1, naturalPanelWidth));
         // Keep the clock's reserved layout footprint fixed at its original height.
         // Resizing is visual only: the glyph/background may overlap home items below,
         // but must never push icons, shortcuts, widgets, or the dock down the page.
@@ -3405,9 +3416,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams panelParams =
                 (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
         panelParams.gravity = alignment | Gravity.TOP;
-        panelParams.width = Math.max(LauncherUiUtils.dp(this, 96),
-                contentWidth + LauncherUiUtils.dp(this, 8));
+        panelParams.width = naturalPanelWidth;
         clockPanel.setLayoutParams(panelParams);
+        // Scale from the selected alignment anchor so left, center, and right
+        // positioning remain visually stable while changing the clock length.
+        clockPanel.setPivotX(alignment == Gravity.RIGHT ? panelParams.width
+                : (alignment == Gravity.CENTER_HORIZONTAL ? panelParams.width / 2f : 0f));
+        clockPanel.setScaleX(lengthScale);
         clockPanel.post(() -> updateClockResizeHandles());
         clockPanel.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2));
@@ -3441,7 +3456,7 @@ public class MainActivity extends Activity {
         clockText.setGravity(Gravity.LEFT | Gravity.TOP);
         clockText.setPivotX(0f);
         clockText.setPivotY(0f);
-        clockText.setScaleX(lengthScale);
+        clockText.setScaleX(1f);
         // Vertical scaling is applied to clockPanel so its background and date
         // match the digits; applying it here as well would double-scale the clock.
         clockText.setScaleY(1f);
