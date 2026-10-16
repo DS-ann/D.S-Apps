@@ -4454,9 +4454,10 @@ public class MainActivity extends Activity {
         // Keep the text glyphs inside the width reserved by the background.
         // A 1.10x non-LED scale enlarged the digits after panel width was measured,
         // causing the background to look too narrow on initial layout.
-        // Make non-seven-segment digits 40% larger relative to the same background.
-        // This scales glyphs only; panel/background dimensions remain unchanged.
-        final float nonLedDigitScale = 1.4f;
+        // Reduce the non-seven-segment glyph size by 20% from the previous
+        // 1.4x setting, keeping the background dimensions unchanged.
+        // The custom colon span remains vertically centered in the background.
+        final float nonLedDigitScale = 1.12f;
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : nonLedDigitScale);
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
