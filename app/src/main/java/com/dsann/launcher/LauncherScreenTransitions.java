@@ -101,6 +101,83 @@ final class LauncherScreenTransitions {
         }
     }
 
+    static void updateDrawerSwipe(Activity activity, LinearLayout homeScreen,
+                                   LinearLayout drawerScreen, int effect, float swipeProgress) {
+        float progress = Math.max(0f, Math.min(1f, swipeProgress));
+        float density = activity.getResources().getDisplayMetrics().density;
+        float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
+        float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        homeScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setVisibility(View.VISIBLE);
+        homeScreen.setCameraDistance(10000f * density);
+        drawerScreen.setCameraDistance(10000f * density);
+
+        // These poses are updated on every ACTION_MOVE: the drawer and home
+        // surface now track the finger rather than merely inheriting progress
+        // after release. Each selectable effect has a matching interactive pose.
+        if (effect == 1) {
+            homeScreen.setPivotX(width * 0.5f);
+            homeScreen.setPivotY(height * 0.5f);
+            drawerScreen.setPivotX(0f);
+            drawerScreen.setPivotY(height * 0.5f);
+            homeScreen.setAlpha(1f - progress);
+            homeScreen.setRotationY(13f * progress);
+            homeScreen.setScaleX(1f - 0.06f * progress);
+            homeScreen.setScaleY(1f - 0.06f * progress);
+            drawerScreen.setAlpha(progress);
+            drawerScreen.setRotationY(-72f * (1f - progress));
+            drawerScreen.setScaleX(0.94f + 0.06f * progress);
+            drawerScreen.setScaleY(0.94f + 0.06f * progress);
+            drawerScreen.setTranslationX(0f);
+            drawerScreen.setTranslationY(0f);
+        } else if (effect == 2) {
+            homeScreen.setAlpha(1f - progress);
+            homeScreen.setScaleX(1f - 0.11f * progress);
+            homeScreen.setScaleY(1f - 0.11f * progress);
+            homeScreen.setTranslationY(-LauncherUiUtils.dp(activity, 18) * progress);
+            homeScreen.setTranslationZ(-density * 36f * progress);
+            drawerScreen.setAlpha(progress);
+            drawerScreen.setScaleX(0.91f + 0.09f * progress);
+            drawerScreen.setScaleY(0.91f + 0.09f * progress);
+            drawerScreen.setTranslationY(height * 0.14f * (1f - progress));
+            drawerScreen.setTranslationZ(density * 42f * (1f - progress));
+            drawerScreen.setRotationX(0f);
+            drawerScreen.setTranslationX(0f);
+        } else if (effect == 3) {
+            homeScreen.setPivotX(width * 0.5f);
+            homeScreen.setPivotY(height * 0.5f);
+            drawerScreen.setPivotX(width * 0.5f);
+            drawerScreen.setPivotY(height * 0.5f);
+            homeScreen.setAlpha(1f - progress);
+            homeScreen.setRotationY(34f * progress);
+            homeScreen.setTranslationX(-width * 0.12f * progress);
+            homeScreen.setScaleX(1f - 0.08f * progress);
+            homeScreen.setScaleY(1f - 0.08f * progress);
+            drawerScreen.setAlpha(progress);
+            drawerScreen.setRotationY(-68f * (1f - progress));
+            drawerScreen.setTranslationX(width * 0.20f * (1f - progress));
+            drawerScreen.setScaleX(0.94f + 0.06f * progress);
+            drawerScreen.setScaleY(0.94f + 0.06f * progress);
+            drawerScreen.setTranslationY(0f);
+        } else {
+            homeScreen.setAlpha(1f - 0.18f * progress);
+            homeScreen.setScaleX(1f - 0.06f * progress);
+            homeScreen.setScaleY(1f - 0.06f * progress);
+            homeScreen.setTranslationY(-LauncherUiUtils.dp(activity, 22) * progress);
+            drawerScreen.setAlpha(progress);
+            drawerScreen.setScaleX(0.92f + 0.08f * progress);
+            drawerScreen.setScaleY(0.92f + 0.08f * progress);
+            drawerScreen.setTranslationY(height * 0.16f * (1f - progress));
+            drawerScreen.setRotationX(10f * (1f - progress));
+            drawerScreen.setPivotY(0f);
+            drawerScreen.setTranslationZ(0f);
+            drawerScreen.setRotationY(0f);
+            drawerScreen.setTranslationX(0f);
+        }
+    }
+
     static void showDrawer(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
                            Runnable beforeOpen, int effect) {
         showDrawer(activity, homeScreen, drawerScreen, beforeOpen, effect, 0f);
@@ -109,92 +186,66 @@ final class LauncherScreenTransitions {
     static void showDrawer(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
                            Runnable beforeOpen, int effect, float swipeProgress) {
         beforeOpen.run();
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
+        float progress = Math.max(0f, Math.min(1f, swipeProgress));
+        updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
+        float remaining = 1f - progress;
+        long duration = LauncherMotion.duration(activity, Math.max(100L, (long) (420L * remaining)));
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
-        homeScreen.setCameraDistance(10000f * density);
-        drawerScreen.setCameraDistance(10000f * density);
-        homeScreen.setVisibility(View.VISIBLE);
-        drawerScreen.setVisibility(View.VISIBLE);
-        // The release animation continues from the user's actual upward pull
-        // instead of restarting from a canned off-screen pose.
-        float progress = Math.max(0f, Math.min(1f, swipeProgress));
-        float remaining = 1f - progress;
-        drawerScreen.setAlpha(progress);
-        drawerScreen.setTranslationY(height * 0.16f * remaining);
-        drawerScreen.setScaleX(0.92f + 0.08f * progress);
-        drawerScreen.setScaleY(0.92f + 0.08f * progress);
-
-        homeScreen.setRotationX(0f);
-        homeScreen.setRotationY(0f);
-        homeScreen.setTranslationX(0f);
-        homeScreen.setTranslationZ(0f);
-        drawerScreen.setRotationX(0f);
-        drawerScreen.setRotationY(0f);
-        drawerScreen.setTranslationX(0f);
-        drawerScreen.setTranslationZ(0f);
 
         if (effect == 1) {
-            homeScreen.setPivotX(width * 0.5f);
-            homeScreen.setPivotY(height * 0.5f);
-            drawerScreen.setPivotX(0f);
-            drawerScreen.setPivotY(height * 0.5f);
-            homeScreen.setAlpha(1f);
-            drawerScreen.setAlpha(0f);
-            drawerScreen.setScaleX(0.94f);
-            drawerScreen.setScaleY(0.94f);
-            drawerScreen.setRotationY(-72f);
             homeScreen.animate().alpha(0f).rotationY(13f).scaleX(0.94f).scaleY(0.94f)
-                    .setDuration(LauncherMotion.duration(activity, 280L))
+                    .setDuration(duration)
                     .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
-            drawerScreen.animate().alpha(1f).rotationY(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 430L)).start();
+            drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
+                    .scaleX(1f).scaleY(1f)
+                    .setDuration(duration).start();
         } else if (effect == 2) {
-            homeScreen.setAlpha(1f);
-            drawerScreen.setAlpha(0f);
-            drawerScreen.setScaleX(0.91f);
-            drawerScreen.setScaleY(0.91f);
-            drawerScreen.setTranslationY(height * 0.14f);
-            drawerScreen.setTranslationZ(density * 42f);
             homeScreen.animate().alpha(0f).scaleX(0.89f).scaleY(0.89f)
                     .translationY(-LauncherUiUtils.dp(activity, 18)).translationZ(-density * 36f)
-                    .setDuration(LauncherMotion.duration(activity, 280L))
+                    .setDuration(duration)
                     .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
-            drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).translationZ(0f)
-                    .setDuration(LauncherMotion.duration(activity, 410L)).start();
+            drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                    .translationX(0f).translationZ(0f).rotationX(0f)
+                    .setDuration(duration).start();
         } else if (effect == 3) {
-            homeScreen.setPivotX(width * 0.5f);
-            homeScreen.setPivotY(height * 0.5f);
-            drawerScreen.setPivotX(width * 0.5f);
-            drawerScreen.setPivotY(height * 0.5f);
-            homeScreen.setAlpha(1f);
-            drawerScreen.setAlpha(0f);
-            drawerScreen.setRotationY(-68f);
-            drawerScreen.setTranslationX(width * 0.20f);
-            drawerScreen.setScaleX(0.94f);
-            drawerScreen.setScaleY(0.94f);
             homeScreen.animate().alpha(0f).rotationY(34f).translationX(-width * 0.12f)
                     .scaleX(0.92f).scaleY(0.92f)
-                    .setDuration(LauncherMotion.duration(activity, 310L))
+                    .setDuration(duration)
                     .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
-            drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 420L)).start();
+            drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
+                    .scaleX(1f).scaleY(1f)
+                    .setDuration(duration).start();
         } else {
-            // Original transition retained as the default and selectable option.
-            drawerScreen.setAlpha(progress);
-            drawerScreen.setScaleX(0.92f + 0.08f * progress);
-            drawerScreen.setScaleY(0.92f + 0.08f * progress);
-            drawerScreen.setTranslationY(height * 0.16f * remaining);
-            drawerScreen.setRotationX(10f * remaining);
-            drawerScreen.setPivotY(0f);
             homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f)
                     .translationY(-LauncherUiUtils.dp(activity, 22))
-                    .setDuration(LauncherMotion.duration(activity, 250L))
+                    .setDuration(duration)
                     .withEndAction(() -> homeScreen.setVisibility(View.GONE)).start();
-            drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).rotationX(0f)
-                    .setDuration(LauncherMotion.duration(activity, Math.max(120L, (long) (420L * remaining)))).start();
+            drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
+                    .setDuration(duration).start();
         }
     }
+
+    static void cancelDrawerSwipe(Activity activity, LinearLayout homeScreen,
+                                 LinearLayout drawerScreen, int effect) {
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        homeScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setVisibility(View.VISIBLE);
+        homeScreen.animate().alpha(1f).rotationX(0f).rotationY(0f).translationX(0f)
+                .translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
+                .setDuration(LauncherMotion.duration(activity, 180L)).start();
+        drawerScreen.animate().alpha(0f).rotationX(0f).rotationY(0f).translationX(0f)
+                .translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
+                .setDuration(LauncherMotion.duration(activity, 180L))
+                .withEndAction(() -> {
+                    drawerScreen.setVisibility(View.GONE);
+                    drawerScreen.setAlpha(1f);
+                    drawerScreen.setScaleX(1f);
+                    drawerScreen.setScaleY(1f);
+                }).start();
+    }
+
 }
