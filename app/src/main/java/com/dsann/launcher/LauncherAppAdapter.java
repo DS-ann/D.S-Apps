@@ -182,8 +182,16 @@ public final class LauncherAppAdapter extends BaseAdapter {
         if (!fullLabel.contentEquals(label.getText())) {
             label.setText(fullLabel);
         }
+        // Shift the saved font-size scale down one step for every app icon label:
+        // Medium -> Small, Large -> Medium, XL -> Large. The old XL option now
+        // renders at the former Large size, and XL is reached by the new Larger choice.
         int fontChoice = preferences == null ? 1 : preferences.getInt(fontSizeKey, 1);
         float targetTextSize = new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))];
+        targetTextSize = Math.min(18f, targetTextSize + 2f);
+        if (fontChoice == 0) targetTextSize = 9f;
+        else if (fontChoice == 1) targetTextSize = 9f;
+        else if (fontChoice == 2) targetTextSize = 10f;
+        else if (fontChoice == 3) targetTextSize = 12f;
         if (Math.abs(label.getTextSize() - targetTextSize * activity.getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
             label.setTextSize(targetTextSize);
         }
