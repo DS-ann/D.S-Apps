@@ -3486,7 +3486,7 @@ public class MainActivity extends Activity {
                     if (hourEnd - firstDigit == 1 && hourEnd < clockValue.length()) {
                         char hourDigit = clockValue.charAt(firstDigit);
                         char invisibleOne = (char) (hourDigit - Character.digit(hourDigit, 10) + 1);
-                        displayClock.insert(0, invisibleOne);
+                        displayClock.insert(0, String.valueOf(invisibleOne));
                         displayClock.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
                                 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
