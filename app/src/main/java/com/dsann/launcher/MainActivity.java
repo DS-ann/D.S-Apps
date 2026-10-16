@@ -513,9 +513,15 @@ public class MainActivity extends Activity {
                 showHome();
                 return true;
             }
-            if (!drawerOpen && !gestureStartedOnClock && (verticalSwipeClaimed
-                    || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
-                        && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
+            boolean itemManipulationOnRelease = gestureStartedOnResizeHandle
+                    || iconDragArmed || iconDragging
+                    || ((gestureStartedOnAppCell || gestureStartedOnWidget
+                        || gestureStartedOnContactShortcut)
+                        && event.getEventTime() - event.getDownTime() > 450L);
+            if (!drawerOpen && !gestureStartedOnClock && !itemManipulationOnRelease
+                    && (verticalSwipeClaimed
+                        || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
+                            && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
                 if (dy < 0f) showDrawer();
                 else openControlCenter();
                 return true;
