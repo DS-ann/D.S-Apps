@@ -4077,10 +4077,12 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            // Let the custom LED TextView measure its own glyph width, as in the
-            // known-good launcher build. An explicit width here can constrain its
-            // custom onMeasure() and leave the seven-segment glyphs clipped.
-            textParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            // Give the custom LED renderer the exact width its segment geometry
+            // needs. WRAP_CONTENT is based on the invisible measurement font and can
+            // vary with Android 6 font metrics, leaving the actual segments clipped.
+            textParams.width = sevenSegment
+                    ? Math.max(1, (int) Math.ceil(naturalClockWidth))
+                    : ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
             textParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.TOP;
             clockText.setLayoutParams(textParams);
