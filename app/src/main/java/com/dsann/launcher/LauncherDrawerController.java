@@ -67,7 +67,7 @@ final class LauncherDrawerController {
         grid.setSelector(android.R.color.transparent);
         LauncherAppAdapter adapter = new LauncherAppAdapter(activity, prefs, packageManager, allApps, drawerApps, null,
                 true, iconSizeKey, fontSizeKey, showLabelsKey, new LauncherAppAdapter.Actions() {
-                    @Override public void onAppClick(ResolveInfo app) { actions.launchApp(app); }
+                    @Override public void onAppClick(ResolveInfo app) { restoreApps.run(); actions.launchApp(app); }
                     @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
                         actions.showAppOptions(app, onHome);
                     }
@@ -76,11 +76,19 @@ final class LauncherDrawerController {
         screen.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout searchRow = new LinearLayout(activity);
-        searchRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        searchRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams searchRowParams =
                 new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 42));
         searchRowParams.topMargin = LauncherUiUtils.dp(activity, 2);
-        TextView searchButton = LauncherUiUtils.text(activity, "⌕", 27,
+        screen.addView(searchRow, searchRowParams);
+
+        // The search control lives in the drawer's bottom row. Tapping it expands
+        // that same row into an inline field, so the keyboard pushes the row up
+        // instead of covering it or opening a dialog.
+        final List<ResolveInfo> originalApps = new java.util.ArrayList<>(drawerApps);
+        final EditText[] activeQuery = new EditText[1];
+        final TextView searchButton = LauncherUiUtils.text(activity, "⌕", 27,
                 android.graphics.Color.WHITE, true);
         searchButton.setGravity(Gravity.CENTER);
         searchButton.setContentDescription("Search apps");
@@ -89,20 +97,56 @@ final class LauncherDrawerController {
                 LauncherUiUtils.dp(activity, 10), 0);
         searchRow.addView(searchButton, new LinearLayout.LayoutParams(
                 LauncherUiUtils.dp(activity, 44), -1));
-        screen.addView(searchRow, searchRowParams);
+
+        Runnable restoreApps = () -> {
+            drawerApps.clear();
+            drawerApps.addAll(originalApps);
+            adapter.notifyDataSetChanged();
+            grid.setSelection(0);
+        };
+        Runnable closeSearch = () -> {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) activity.getSystemService(
+                            Activity.INPUT_METHOD_SERVICE);
+            if (imm != null && activeQuery[0] != null) {
+                imm.hideSoftInputFromWindow(activeQuery[0].getWindowToken(), 0);
+            }
+            activeQuery[0] = null;
+            searchRow.removeAllViews();
+            searchRow.addView(searchButton, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(activity, 44), -1));
+            restoreApps.run();
+        };
 
         searchButton.setOnClickListener(v -> {
-            final List<ResolveInfo> originalApps = new java.util.ArrayList<>(drawerApps);
+            if (activeQuery[0] != null) return;
+            searchRow.removeAllViews();
             EditText queryInput = new EditText(activity);
+            activeQuery[0] = queryInput;
             queryInput.setSingleLine(true);
             queryInput.setHint("Search apps");
             queryInput.setTextSize(16);
-            queryInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
-            AlertDialog dialog = new AlertDialog.Builder(activity)
-                    .setTitle("Search apps")
-                    .setView(queryInput)
-                    .setNegativeButton("Close", (d, which) -> d.dismiss())
-                    .create();
+            queryInput.setTextColor(android.graphics.Color.WHITE);
+            queryInput.setHintTextColor(android.graphics.Color.LTGRAY);
+            queryInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            queryInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+            queryInput.setPadding(LauncherUiUtils.dp(activity, 12), 0,
+                    LauncherUiUtils.dp(activity, 8), 0);
+            queryInput.setBackground(LauncherUiUtils.roundRect(activity,
+                    new int[]{android.graphics.Color.rgb(35, 42, 61), android.graphics.Color.rgb(24, 30, 46)},
+                    LauncherUiUtils.dp(activity, 12)));
+            searchRow.addView(queryInput, new LinearLayout.LayoutParams(0, -1, 1f));
+
+            TextView closeButton = LauncherUiUtils.text(activity, "×", 25,
+                    android.graphics.Color.WHITE, true);
+            closeButton.setGravity(Gravity.CENTER);
+            closeButton.setContentDescription("Close app search");
+            closeButton.setBackgroundResource(android.R.drawable.list_selector_background);
+            searchRow.addView(closeButton, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(activity, 42), -1));
+            closeButton.setOnClickListener(closeView -> closeSearch.run());
+
             queryInput.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -128,15 +172,25 @@ final class LauncherDrawerController {
                 }
                 @Override public void afterTextChanged(Editable s) {}
             });
-            dialog.setOnDismissListener(d -> {
-                drawerApps.clear();
-                drawerApps.addAll(originalApps);
-                adapter.notifyDataSetChanged();
+            queryInput.setOnEditorActionListener((field, actionId, event) -> {
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                        && !drawerApps.isEmpty()) {
+                    ResolveInfo match = drawerApps.get(0);
+                    closeSearch.run();
+                    actions.launchApp(match);
+                    return true;
+                }
+                return false;
             });
-            dialog.show();
             queryInput.requestFocus();
+            queryInput.post(() -> {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager) activity.getSystemService(
+                                Activity.INPUT_METHOD_SERVICE);
+                if (imm != null) imm.showSoftInput(queryInput,
+                        android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            });
         });
-
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
         return new BuiltDrawer(screen, grid, adapter);
     }

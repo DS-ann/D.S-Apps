@@ -293,6 +293,7 @@ public class MainActivity extends Activity {
         // while retaining the system icons and reserving their inset for launcher content.
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(BG);
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         loadApps();
@@ -4583,7 +4584,7 @@ public class MainActivity extends Activity {
                 // requested 37 dp right / 3 dp down adjustment together with the
                 // background. Counter-scaling here left the marker outside the panel
                 // when the user reduced the clock size.
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 37));
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 34));
                 amPmText.setTranslationY(LauncherUiUtils.dp(this, 3));
             }
         }
