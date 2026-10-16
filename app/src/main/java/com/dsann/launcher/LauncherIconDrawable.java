@@ -21,6 +21,7 @@ final class LauncherIconDrawable extends Drawable {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private final Path path = new Path();
+    private final android.graphics.Rect bounds = new android.graphics.Rect();
 
     LauncherIconDrawable(Drawable source, boolean showBackground, int shape) {
         this.source = source;
@@ -30,18 +31,24 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     @Override public void draw(Canvas canvas) {
-        RectF bounds = new RectF(getBounds());
-        if (bounds.width() <= 0 || bounds.height() <= 0) return;
+        bounds.set(getBounds());
+        float left = bounds.left;
+        float top = bounds.top;
+        float right = bounds.right;
+        float bottom = bounds.bottom;
+        float width = right - left;
+        float height = bottom - top;
+        if (width <= 0 || height <= 0) return;
 
         if (showBackground) {
             paint.setColor(Color.rgb(48, 55, 76));
             paint.setStyle(Paint.Style.FILL);
-            float corner = Math.min(bounds.width(), bounds.height()) * 0.23f;
-            canvas.drawRoundRect(bounds, corner, corner, paint);
+            float corner = Math.min(width, height) * 0.23f;
+            canvas.drawRoundRect(left, top, right, bottom, corner, corner, paint);
         }
 
-        float inset = showBackground ? Math.min(bounds.width(), bounds.height()) * 0.10f : 0f;
-        rect.set(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset);
+        float inset = showBackground ? Math.min(width, height) * 0.10f : 0f;
+        rect.set(left + inset, top + inset, right - inset, bottom - inset);
         if (rect.width() <= 0 || rect.height() <= 0) return;
 
         int save = canvas.save();
