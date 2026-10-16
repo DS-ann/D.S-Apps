@@ -2663,8 +2663,17 @@ public class MainActivity extends Activity {
                 if (clockWidgetEditing && (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5))) {
                     clockWidgetDragging = true;
-                    clockPanel.setTranslationX(clockWidgetStartX + dx);
-                    clockPanel.setTranslationY(clockWidgetStartY + dy);
+                    float targetX = clockWidgetStartX + dx;
+                    float targetY = clockWidgetStartY + dy;
+                    // Keep the clock entirely in its header band; it may be moved there,
+                    // but never over the two home pages, dock, or page controls.
+                    float maxX = Math.max(0f, homeScreen.getWidth() - clockPanel.getWidth());
+                    float minY = -clockPanel.getTop();
+                    float maxY = pageViewport == null ? 0f
+                            : Math.max(minY, pageViewport.getTop() - clockPanel.getTop()
+                                    - clockPanel.getHeight());
+                    clockPanel.setTranslationX(Math.max(0f, Math.min(maxX, targetX)));
+                    clockPanel.setTranslationY(Math.max(minY, Math.min(maxY, targetY)));
                     prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
                             .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
                     setWorkspaceGridVisible(true, clockPanel);
