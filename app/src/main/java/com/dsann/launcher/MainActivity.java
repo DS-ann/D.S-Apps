@@ -482,10 +482,14 @@ public class MainActivity extends Activity {
                     && !heldItemGesture
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && (pageSwipeActive || (Math.abs(dx) > LauncherUiUtils.dp(this, 12)
-                        && Math.abs(dx) > Math.abs(dy) * 1.15f))) {
-                int direction = Math.abs(dx) > LauncherUiUtils.dp(this, 4)
-                        ? (dx < 0f ? 1 : -1)
-                        : (wheelSwipeDirection != 0 ? wheelSwipeDirection : (dx < 0f ? 1 : -1));
+                        // Permit diagonal swipes; once claimed, the gesture remains owned
+                        // by the page transition regardless of later finger angle.
+                        && Math.abs(dx) > Math.abs(dy) * 0.75f))) {
+                // Lock the direction chosen when the swipe is first claimed.
+                // Reversing the finger then rewinds progress instead of swapping faces
+                // underneath the gesture and leaving a 3D transform stranded.
+                int direction = pageSwipeActive && wheelSwipeDirection != 0
+                        ? wheelSwipeDirection : (dx < 0f ? 1 : -1);
                 int adjacent = currentPage + direction;
                 if (adjacent >= 0 && adjacent < pagesStrip.getChildCount()) {
                     if (!pageSwipeActive) {
@@ -517,26 +521,14 @@ public class MainActivity extends Activity {
                             ? pageViewport.getWidth()
                             : Math.max(1, getResources().getDisplayMetrics().widthPixels
                                     - LauncherUiUtils.dp(this, 40));
-                    float progress = Math.max(0f, Math.min(1f, Math.abs(dx) / (float) pageWidth));
+                    // Progress is signed against the locked direction. Moving back
+                    // toward the starting point reverses the transition smoothly to 0;
+                    // it must never change which neighbouring page is being animated.
+                    float directedDistance = -dx * wheelSwipeDirection;
+                    float progress = Math.max(0f, Math.min(1f,
+                            directedDistance / (float) pageWidth));
                     wheelSwipeProgress = progress;
                     applyWheelSwipe(wheelSwipeDirection, progress);
-
-                    // Once the finger has carried the page fully across, commit that
-                    // page immediately instead of holding the finished cube/flip pose
-                    // until ACTION_UP. Rebase the gesture so a continued swipe remains
-                    // responsive and can move on to another page.
-                    if (progress >= 0.995f) {
-                        int completedPage = currentPage + wheelSwipeDirection;
-                        currentPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, completedPage));
-                        activateClockForPage(currentPage);
-                        pagesStrip.setTranslationX(-currentPage * (float) pageWidth);
-                        resetPageTransforms();
-                        preparePageLayersForSwipe(currentPage);
-                        wheelSwipeProgress = 0f;
-                        wheelSwipeDirection = direction;
-                        gestureDownX = event.getX();
-                        pageSwipeChildCancelled = true;
-                    }
                     return true;
                 } else if (pageSwipeActive) {
                     // If the finger crosses back past the origin, return the wheel
@@ -632,9 +624,13 @@ public class MainActivity extends Activity {
                         : Math.max(1, getResources().getDisplayMetrics().widthPixels
                                 - LauncherUiUtils.dp(this, 40));
                 int destination = currentPage;
-                if (Math.abs(dx) > Math.max(LauncherUiUtils.dp(this, 65), pageWidth * 0.18f)) {
-                    if (dx < 0 && currentPage < pages.size() - 1) destination = currentPage + 1;
-                    else if (dx > 0 && currentPage > 0) destination = currentPage - 1;
+                // Require more than 30% of the page width at release. Velocity does
+                // not override this threshold, so a quick short flick cannot change pages.
+                if (wheelSwipeProgress > 0.30f) {
+                    int candidate = currentPage + wheelSwipeDirection;
+                    if (candidate >= 0 && candidate < pagesStrip.getChildCount()) {
+                        destination = candidate;
+                    }
                 }
                 finishPageSwipe(destination, pageWidth);
                 return true;
