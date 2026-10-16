@@ -91,6 +91,8 @@ public class MainActivity extends Activity {
     private static final String KEY_SHORTCUT_SPAN_Y = "contact_shortcut_span_y";
     private static final String KEY_SHORTCUT_WIDTH_DP = "contact_shortcut_width_dp";
     private static final String KEY_SHORTCUT_HEIGHT_DP = "contact_shortcut_height_dp";
+    private static final String KEY_SHORTCUT_X = "contact_shortcut_x";
+    private static final String KEY_SHORTCUT_Y = "contact_shortcut_y";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
@@ -1258,12 +1260,33 @@ public class MainActivity extends Activity {
             savedWidthDp = 0;
             savedHeightDp = 0;
         }
+        int defaultShortcutWidth = LauncherUiUtils.dp(this, 104);
+        int defaultShortcutHeight = LauncherUiUtils.dp(this, 112);
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
-                        : Math.min(cellW, compactShortcutSize)));
+                        : Math.min(cellW, defaultShortcutWidth)));
         int desiredTileHeight = Math.max(1, Math.min(pageViewport.getHeight(),
                 savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp)
-                        : Math.min(cellH, compactShortcutSize)));
+                        : Math.min(cellH, defaultShortcutHeight)));
+        // Restore a user-dragged position first, provided it is still visible and collision-free.
+        float savedX = prefs.getFloat(KEY_SHORTCUT_X, -1f);
+        float savedY = prefs.getFloat(KEY_SHORTCUT_Y, -1f);
+        if (savedX >= 0f && savedY >= 0f && desiredPage < pagesStrip.getChildCount()) {
+            View savedPageView = pagesStrip.getChildAt(desiredPage);
+            if (savedPageView instanceof FrameLayout) {
+                FrameLayout savedPage = (FrameLayout) savedPageView;
+                int maxLeft = Math.max(0, pageViewport.getWidth() - desiredTileWidth);
+                int maxTop = Math.max(0, pageViewport.getHeight() - desiredTileHeight);
+                int savedLeft = Math.round(Math.min(1f, savedX) * maxLeft);
+                int savedTop = Math.round(Math.min(1f, savedY) * maxTop);
+                if (isContactShortcutPositionFree(savedPage, null, savedLeft, savedTop,
+                        desiredTileWidth, desiredTileHeight)) {
+                    chosenPage = savedPage;
+                    chosenLeft = savedLeft;
+                    chosenTop = savedTop;
+                }
+            }
+        }
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
@@ -1347,14 +1370,19 @@ public class MainActivity extends Activity {
             }
         }
         if (chosenPage == null) {
-            Toast.makeText(this, "No free space for the contact shortcut. Move or remove an item first.", Toast.LENGTH_LONG).show();
+            // The caller that creates a shortcut reports failure. Rendering during a
+            // normal refresh must not emit a contradictory toast or claim success.
             return;
         }
 
         int actualShortcutPage = pagesStrip.indexOfChild(chosenPage);
         if (actualShortcutPage >= 0 && actualShortcutPage != desiredPage) {
-            prefs.edit().putInt(KEY_SHORTCUT_PAGE, actualShortcutPage).apply();
+            desiredPage = actualShortcutPage;
         }
+        float normalizedX = chosenLeft / (float) Math.max(1, pageViewport.getWidth() - desiredTileWidth);
+        float normalizedY = chosenTop / (float) Math.max(1, pageViewport.getHeight() - desiredTileHeight);
+        prefs.edit().putInt(KEY_SHORTCUT_PAGE, desiredPage)
+                .putFloat(KEY_SHORTCUT_X, normalizedX).putFloat(KEY_SHORTCUT_Y, normalizedY).apply();
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
         tile.setClipChildren(false);
@@ -1387,10 +1415,10 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = LauncherUiUtils.dp(this, 28);
+        int initialIconSize = LauncherUiUtils.dp(this, 52);
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         TextView label = LauncherUiUtils.text(this,
-                prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 11, Color.WHITE, true);
+                prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 12, Color.WHITE, true);
         label.setGravity(Gravity.CENTER);
         label.setMaxLines(2);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1516,6 +1544,92 @@ public class MainActivity extends Activity {
             }
             return true;
         });
+        // Long-press arms dragging; a stationary long-press still opens the options menu.
+        // This custom touch handler prevents the system long-click from stealing a drag.
+        final float[] shortcutTouchStart = {0f, 0f};
+        final int[] shortcutPositionStart = {chosenLeft, chosenTop};
+        final boolean[] shortcutDragArmed = {false};
+        final boolean[] shortcutDragging = {false};
+        final boolean[] shortcutPopupShown = {false};
+        final Runnable[] shortcutArmRunnable = {null};
+        final Runnable[] shortcutPopupRunnable = {null};
+        tile.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                shortcutTouchStart[0] = event.getRawX();
+                shortcutTouchStart[1] = event.getRawY();
+                shortcutPositionStart[0] = ((FrameLayout.LayoutParams) tile.getLayoutParams()).leftMargin;
+                shortcutPositionStart[1] = ((FrameLayout.LayoutParams) tile.getLayoutParams()).topMargin;
+                shortcutDragArmed[0] = false;
+                shortcutDragging[0] = false;
+                shortcutPopupShown[0] = false;
+                handler.removeCallbacks(shortcutArmRunnable[0]);
+                handler.removeCallbacks(shortcutPopupRunnable[0]);
+                shortcutArmRunnable[0] = () -> shortcutDragArmed[0] = true;
+                shortcutPopupRunnable[0] = () -> {
+                    if (!shortcutDragging[0] && tile.isAttachedToWindow()) {
+                        shortcutPopupShown[0] = true;
+                        tile.performLongClick();
+                    }
+                };
+                handler.postDelayed(shortcutArmRunnable[0], 250L);
+                handler.postDelayed(shortcutPopupRunnable[0], 650L);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                float dx = event.getRawX() - shortcutTouchStart[0];
+                float dy = event.getRawY() - shortcutTouchStart[1];
+                boolean moved = Math.abs(dx) > LauncherUiUtils.dp(this, 8)
+                        || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
+                if (moved && shortcutDragArmed[0] && !shortcutPopupShown[0]) {
+                    handler.removeCallbacks(shortcutPopupRunnable[0]);
+                    if (!shortcutDragging[0]) {
+                        shortcutDragging[0] = true;
+                        setWorkspaceGridVisible(true, tile);
+                        tile.bringToFront();
+                    }
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                    int[] pageLocation = new int[2];
+                    shortcutResizePage.getLocationOnScreen(pageLocation);
+                    p.leftMargin = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
+                            Math.round(event.getRawX() - pageLocation[0] - tile.getWidth() / 2f)));
+                    p.topMargin = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
+                            Math.round(event.getRawY() - pageLocation[1] - tile.getHeight() / 2f)));
+                    tile.setLayoutParams(p);
+                    refreshWorkspaceGrid();
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(shortcutArmRunnable[0]);
+                handler.removeCallbacks(shortcutPopupRunnable[0]);
+                if (shortcutDragging[0]) {
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                    int proposedLeft = p.leftMargin;
+                    int proposedTop = p.topMargin;
+                    if (!isContactShortcutPositionFree(shortcutResizePage, tile, proposedLeft, proposedTop,
+                            tile.getWidth(), tile.getHeight())) {
+                        p.leftMargin = shortcutPositionStart[0];
+                        p.topMargin = shortcutPositionStart[1];
+                        tile.setLayoutParams(p);
+                        Toast.makeText(this, "That spot is occupied", Toast.LENGTH_SHORT).show();
+                    } else {
+                        float density = getResources().getDisplayMetrics().density;
+                        prefs.edit().putInt(KEY_SHORTCUT_PAGE, pagesStrip.indexOfChild(shortcutResizePage))
+                                .putFloat(KEY_SHORTCUT_X, proposedLeft / (float) Math.max(1,
+                                        pageViewport.getWidth() - tile.getWidth()))
+                                .putFloat(KEY_SHORTCUT_Y, proposedTop / (float) Math.max(1,
+                                        pageViewport.getHeight() - tile.getHeight())).apply();
+                    }
+                    setWorkspaceGridVisible(false, null);
+                    shortcutDragging[0] = false;
+                } else if (!shortcutPopupShown[0] && action == MotionEvent.ACTION_UP) {
+                    tile.performClick();
+                }
+                return true;
+            }
+            return true;
+        });
         tile.setOnClickListener(v -> {
             if (resizeGrip.getVisibility() == View.VISIBLE) {
                 resizeGrip.setVisibility(View.GONE);
@@ -1563,7 +1677,8 @@ public class MainActivity extends Activity {
                     prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
                             .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
                             .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y)
-                            .remove(KEY_SHORTCUT_WIDTH_DP).remove(KEY_SHORTCUT_HEIGHT_DP).apply();
+                            .remove(KEY_SHORTCUT_WIDTH_DP).remove(KEY_SHORTCUT_HEIGHT_DP)
+                            .remove(KEY_SHORTCUT_X).remove(KEY_SHORTCUT_Y).apply();
                     renderHomePages(false);
                 } else if (which == 3) {
                     prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
@@ -1574,6 +1689,41 @@ public class MainActivity extends Activity {
             });
             return true;
         });
+    }
+
+    private boolean isContactShortcutPositionFree(FrameLayout page, View ignore, int left, int top,
+            int width, int height) {
+        if (page == null || width <= 0 || height <= 0) return false;
+        android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + width, top + height);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (child == ignore || "launcher_clock_widget".equals(child.getTag())
+                    || "launcher_contact_shortcut".equals(child.getTag())) continue;
+            FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
+                    ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
+            int childLeft = p != null ? p.leftMargin : child.getLeft();
+            int childTop = p != null ? p.topMargin : child.getTop();
+            int childWidth = p != null && p.width > 0 ? p.width : child.getWidth();
+            int childHeight = p != null && p.height > 0 ? p.height : child.getHeight();
+            if (childWidth > 0 && childHeight > 0 && android.graphics.Rect.intersects(candidate,
+                    new android.graphics.Rect(childLeft, childTop, childLeft + childWidth, childTop + childHeight))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean hasRenderedContactShortcut() {
+        if (pagesStrip == null) return false;
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            View page = pagesStrip.getChildAt(i);
+            if (!(page instanceof ViewGroup)) continue;
+            ViewGroup group = (ViewGroup) page;
+            for (int j = 0; j < group.getChildCount(); j++) {
+                if ("launcher_contact_shortcut".equals(group.getChildAt(j).getTag())) return true;
+            }
+        }
+        return false;
     }
 
     private void restoreDockApps() {
@@ -2655,8 +2805,18 @@ public class MainActivity extends Activity {
                 } else {
                     prefs.edit().remove(KEY_SHORTCUT_ICON).apply();
                 }
-                renderSavedContactShortcut();
-                Toast.makeText(this, "Contact shortcut added", Toast.LENGTH_SHORT).show();
+                handler.post(() -> {
+                    renderSavedContactShortcut();
+                    if (!hasRenderedContactShortcut()) {
+                        prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
+                                .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
+                                .remove(KEY_SHORTCUT_X).remove(KEY_SHORTCUT_Y).apply();
+                        Toast.makeText(this, "No free space for the shortcut. Move or remove an item first.",
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this, "Contact shortcut added", Toast.LENGTH_SHORT).show();
+                    }
+                });
             } catch (Exception e) {
                 Toast.makeText(this, "Couldn't add this shortcut", Toast.LENGTH_LONG).show();
             }
