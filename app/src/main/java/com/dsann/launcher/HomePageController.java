@@ -162,7 +162,7 @@ final class HomePageController {
             int pageHeight = host.getPageViewport() != null
                     && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
                     ? host.getPageViewport().getHeight() : fallbackHeight;
-            int configuredIconSize = prefs.getInt(iconSizeKey, 48);
+            int configuredIconSize = prefs.getInt(iconSizeKey, 96);
             int cellHeight = LauncherUiUtils.dp(activity, Math.max(56, configuredIconSize + 28));
             // Each app owns one fixed-height grid slot. Compute the number of rows
             // from the usable workspace height so no slot extends into the dock.
