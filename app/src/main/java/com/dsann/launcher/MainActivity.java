@@ -4496,12 +4496,12 @@ public class MainActivity extends Activity {
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
         clockText.setPivotY(rowHeight / 2f);
-        // Extend non-seven-segment digits 10 dp farther downward while keeping
+        // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
         // compensates for the centered pivot so the extra height goes downward.
         clockText.setScaleY(sevenSegment ? 1f
-                : normalizedNonLedHeightScale * nonLedDigitScale * (1.20f + 10f / 114f));
+                : normalizedNonLedHeightScale * nonLedDigitScale * (1.20f + 20f / 114f));
         // Shift the seven-segment digits 15 dp left relative to their background.
         // Compensate for panel scaling so the visual offset remains exactly 15 dp
         // at every clock length setting; the panel/background itself stays put.
@@ -4510,7 +4510,7 @@ public class MainActivity extends Activity {
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         clockText.setTranslationY(sevenSegment ? 0f
-                : -LauncherUiUtils.dp(this, 5) / Math.max(0.01f, breadthScale));
+                : -LauncherUiUtils.dp(this, 10) / Math.max(0.01f, breadthScale));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
@@ -4572,19 +4572,19 @@ public class MainActivity extends Activity {
                                 baseClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
-            // For seven-segment only, shift the marker 3 dp farther right
-            // (5 dp total) and 2 dp up relative to the digits. Compensate for
+            // For seven-segment only, shift the marker another 5 dp right
+            // (10 dp total) and 2 dp up relative to the digits. Compensate for
             // parent scaling so the offset remains stable while resizing.
             if (sevenSegment) {
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 5) / Math.max(0.01f, lengthScale));
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 10) / Math.max(0.01f, lengthScale));
                 amPmText.setTranslationY(-LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             } else {
-                // For every non-seven-segment style, bring AM/PM slightly closer
-                // to the clock's lower-right corner: 2 dp right and 2 dp up.
+                // For every non-seven-segment style, shift AM/PM another 5 dp right
+                // (7 dp total) and retain its 2 dp upward offset.
                 // Counter-scale the offsets to keep their visual size constant
                 // while the complete panel is resized.
                 amPmText.setTranslationX(
-                        LauncherUiUtils.dp(this, 2) / Math.max(0.01f, lengthScale));
+                        LauncherUiUtils.dp(this, 7) / Math.max(0.01f, lengthScale));
                 amPmText.setTranslationY(
                         -LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             }
