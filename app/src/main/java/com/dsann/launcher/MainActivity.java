@@ -1415,7 +1415,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 52), Math.min(desiredTileWidth, desiredTileHeight)));
+        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 96), Math.min(desiredTileWidth, desiredTileHeight)));
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         tileContent.setGravity(Gravity.CENTER);
         tileContent.setOrientation(LinearLayout.VERTICAL);
