@@ -514,13 +514,6 @@ public class MainActivity extends Activity {
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
-            if (drawerSwipeVisualActive && dy >= 0f) {
-                drawerSwipeVisualActive = false;
-                LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition());
-                openControlCenter();
-                return true;
-            }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
                 LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
@@ -547,6 +540,13 @@ public class MainActivity extends Activity {
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
                 showHome();
+                return true;
+            }
+            if (drawerSwipeVisualActive && dy >= 0f) {
+                drawerSwipeVisualActive = false;
+                LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition());
+                openControlCenter();
                 return true;
             }
             boolean itemManipulationOnRelease = gestureStartedOnResizeHandle
