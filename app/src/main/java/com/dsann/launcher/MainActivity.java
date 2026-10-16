@@ -333,7 +333,11 @@ public class MainActivity extends Activity {
             // vertical edge. Keep the strip stationary while the finger controls the angle.
             // Let a clear horizontal swipe starting on a widget change pages too.
             // The widget's touch stream is cancelled once the swipe threshold is crossed.
-            if (!drawerOpen && !gestureStartedOnContactShortcut
+            // A gesture that starts on a widget belongs to its own touch/drag
+            // controller. Do not let the launcher steal it for page navigation:
+            // otherwise moving/resizing a widget can rotate pages underneath it.
+            // Page changes remain available from the free workspace surface.
+            if (!drawerOpen && !gestureStartedOnWidget && !gestureStartedOnContactShortcut
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dx) > Math.abs(dy) * 1.15f) {
