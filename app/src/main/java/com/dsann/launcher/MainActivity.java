@@ -1524,6 +1524,23 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        // The app-slot finder accounts for app cells separately from widget bounds.
+        // Use it before geometric fallback so the shortcut can occupy a genuinely free cell.
+        for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
+            int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            int[] freeSlot = findFreeHomeAppSlot(pageIndex);
+            if (freeSlot == null) continue;
+            int left = freeSlot[0] * cellW + Math.max(0, (cellW - desiredTileWidth) / 2);
+            int top = freeSlot[1] * cellH + Math.max(0, (cellH - desiredTileHeight) / 2);
+            if (left + desiredTileWidth <= pageViewport.getWidth()
+                    && top + desiredTileHeight <= pageViewport.getHeight()) {
+                chosenPage = (FrameLayout) pageView;
+                chosenLeft = left;
+                chosenTop = top;
+            }
+        }
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
