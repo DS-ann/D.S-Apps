@@ -760,7 +760,7 @@ public class MainActivity extends Activity {
         clockGroup.setClipToPadding(false);
         clockText = new SevenSegmentClockTextView(this);
         clockText.setText("--:--");
-        clockText.setGravity(Gravity.LEFT | Gravity.TOP);
+        clockText.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
         clockText.setTextSize(78);
         clockText.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
@@ -899,12 +899,21 @@ public class MainActivity extends Activity {
         // Check the complete resized shortcut footprint, not only its first grid cell.
         // Default contact shortcuts use a compact visual footprint, not a full
         // invisible grid cell. Explicitly resized shortcuts retain their saved size.
+        int compactShortcutSize = LauncherUiUtils.dp(this, 64);
+        // Old builds could persist an oversized footprint even before the user
+        // deliberately resized it. Normalize those legacy values on restore.
+        if (savedWidthDp > 96 || savedHeightDp > 96) {
+            prefs.edit().remove(KEY_SHORTCUT_WIDTH_DP).remove(KEY_SHORTCUT_HEIGHT_DP)
+                    .putInt(KEY_SHORTCUT_SPAN_X, 1).putInt(KEY_SHORTCUT_SPAN_Y, 1).apply();
+            savedWidthDp = 0;
+            savedHeightDp = 0;
+        }
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
-                        : Math.min(cellW, LauncherUiUtils.dp(this, 64))));
+                        : Math.min(cellW, compactShortcutSize)));
         int desiredTileHeight = Math.max(1, Math.min(pageViewport.getHeight(),
                 savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp)
-                        : Math.min(cellH, LauncherUiUtils.dp(this, 64))));
+                        : Math.min(cellH, compactShortcutSize)));
         for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
             int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
             View pageView = pagesStrip.getChildAt(pageIndex);
@@ -2901,14 +2910,7 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_PAGE_TRANSITION, value).apply();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSliderRow(content, "Clock length", 80, 250, getClockLength(), "%", value -> {
-            prefs.edit().putInt(KEY_CLOCK_LENGTH, value).apply();
-            applyClockPositionAndSize();
-        });
-        addSliderRow(content, "Clock breadth", 80, 250, getClockBreadth(), "%", value -> {
-            prefs.edit().putInt(KEY_CLOCK_BREADTH, value).apply();
-            applyClockPositionAndSize();
-        });
+        // Clock sizing is controlled directly by the widget's blue resize handle.
         addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_POSITION, value).apply();
             applyClockPositionAndSize();
@@ -3162,7 +3164,8 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
             textParams.width = sevenSegment ? renderedClockWidth : ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
-            textParams.gravity = alignment | Gravity.TOP;
+            textParams.gravity = (sevenSegment && alignment == Gravity.CENTER_HORIZONTAL
+                    ? Gravity.CENTER_HORIZONTAL : alignment) | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
 
