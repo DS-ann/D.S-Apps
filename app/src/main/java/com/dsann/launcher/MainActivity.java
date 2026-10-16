@@ -346,7 +346,7 @@ public class MainActivity extends Activity {
             // Home gestures must not steal vertical movement from icons, widgets, or
             // contact shortcuts: those surfaces may be scrolling or being dragged.
             if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
-                    && !gestureStartedOnContactShortcut && !verticalSwipeClaimed
+                    && !gestureStartedOnContactShortcut && !gestureStartedOnClock && !verticalSwipeClaimed
                     && verticalSwipe) {
                 verticalSwipeClaimed = true;
                 handler.removeCallbacks(homeLongPress);
@@ -370,7 +370,7 @@ public class MainActivity extends Activity {
             // otherwise moving/resizing a widget can rotate pages underneath it.
             // Page changes remain available from the free workspace surface.
             if (!drawerOpen && !gestureStartedOnWidget && !gestureStartedOnContactShortcut
-                    && pagesStrip != null && pagesStrip.getChildCount() > 1
+                    && !gestureStartedOnClock && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dx) > Math.abs(dy) * 1.15f) {
                 int direction = dx < 0f ? 1 : -1;
@@ -448,7 +448,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
-                    && !gestureStartedOnContactShortcut && (verticalSwipeClaimed
+                    && !gestureStartedOnContactShortcut && !gestureStartedOnClock && (verticalSwipeClaimed
                     || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                         && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
                 if (dy < 0f) showDrawer();
@@ -3216,16 +3216,15 @@ public class MainActivity extends Activity {
         if (dateText != null) {
             // Keep the date at the quarter points for left/right modes: halfway
             // between the screen center and the corresponding screen edge.
-            dateText.setGravity(Gravity.CENTER);
+            dateText.setGravity(alignment == Gravity.LEFT ? Gravity.LEFT
+                    : (alignment == Gravity.RIGHT ? Gravity.RIGHT : Gravity.CENTER));
             ViewGroup.LayoutParams dateParams = dateText.getLayoutParams();
             if (dateParams != null) {
                 dateParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
                 dateText.setLayoutParams(dateParams);
             }
-            float quarterScreen = screenWidth * 0.25f;
-            dateText.setTranslationX(alignment == Gravity.LEFT
-                    ? -quarterScreen
-                    : (alignment == Gravity.RIGHT ? quarterScreen : 0f));
+            // Keep the date inside the same resizable background as the clock.
+            dateText.setTranslationX(0f);
         }
 
         if (amPmText != null) {
