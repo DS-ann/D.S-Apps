@@ -148,14 +148,14 @@ public final class LauncherAppAdapter extends BaseAdapter {
             cell.setPadding(dp(2), dp(7), dp(2), dp(7));
             icon = new ImageView(activity);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            int iconSize = preferences == null ? 96 : preferences.getInt(iconSizeKey, 96);
+            int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
             LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize));
             iconParams.gravity = Gravity.CENTER;
             cell.addView(icon, iconParams);
             label = makeLabel();
             cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
         }
-        int iconSize = preferences == null ? 96 : preferences.getInt(iconSizeKey, 96);
+        int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
         if (iconParams != null && (iconParams.width != dp(iconSize) || iconParams.height != dp(iconSize))) {
             iconParams.width = dp(iconSize);
