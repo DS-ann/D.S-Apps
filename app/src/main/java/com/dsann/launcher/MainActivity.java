@@ -4176,7 +4176,9 @@ public class MainActivity extends Activity {
         clockText.setScaleY(sevenSegment ? 1f : 1.20f);
         clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() : 0f);
         clockText.setTranslationX(0f);
-        clockText.setTranslationY(0f);
+        // Lower only non-seven-segment glyphs within the existing background.
+        // Keep the panel, date, AM/PM marker, and seven-segment layout untouched.
+        clockText.setTranslationY(sevenSegment ? 0f : LauncherUiUtils.dp(this, 10));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
