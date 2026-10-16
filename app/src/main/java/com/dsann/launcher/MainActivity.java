@@ -1172,9 +1172,11 @@ public class MainActivity extends Activity {
                         Gravity.TOP | Gravity.LEFT));
             }
             panel.setTranslationX(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex),
-                    prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f))));
+                    prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)));
             panel.setTranslationY(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex),
-                    prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f))));
+                    prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f)));
+            // Keep the clock above icons/widgets even after the page content is rebuilt.
+            panel.bringToFront();
         }
         activateClockForPage(currentPage);
         applyClockPositionAndSize();
