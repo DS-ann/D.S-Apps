@@ -319,10 +319,10 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_MOVE) {
             if (clockResizeEdge != 0 && clockWidgetDragging) {
                 float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
-                int dx = Math.round((event.getRawX() - clockWidgetDownRawX) / density);
-                int dy = Math.round((event.getRawY() - clockWidgetDownRawY) / density);
-                int lengthDelta = clockResizeEdge == 1 ? -dx : (clockResizeEdge == 2 ? dx : 0);
-                int breadthDelta = clockResizeEdge == 3 ? -dy : (clockResizeEdge == 4 ? dy : 0);
+                int resizeDx = Math.round((event.getRawX() - clockWidgetDownRawX) / density);
+                int resizeDy = Math.round((event.getRawY() - clockWidgetDownRawY) / density);
+                int lengthDelta = clockResizeEdge == 1 ? -resizeDx : (clockResizeEdge == 2 ? resizeDx : 0);
+                int breadthDelta = clockResizeEdge == 3 ? -resizeDy : (clockResizeEdge == 4 ? resizeDy : 0);
                 prefs.edit()
                         .putInt(KEY_CLOCK_LENGTH, Math.max(80, Math.min(250, clockWidgetStartLength + lengthDelta)))
                         .putInt(KEY_CLOCK_BREADTH, Math.max(80, Math.min(250, clockWidgetStartBreadth + breadthDelta)))
