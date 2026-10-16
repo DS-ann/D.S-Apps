@@ -4086,15 +4086,8 @@ public class MainActivity extends Activity {
                     (digits * 0.72f + separators * 0.34f) * clockHeight * 0.91f
                     + clockText.getPaddingLeft() + clockText.getPaddingRight());
         } else {
-            String clockValue = clockText.getText() == null ? "" : clockText.getText().toString();
-            naturalClockWidth = Math.max(1f, clockText.getPaint().measureText(clockValue));
-            // Paint.measureText() omits TextView letter spacing. Several presets use
-            // expanded tracking, so include it or the AM/PM marker and background
-            // edge are positioned too far from the actual final digit.
-            if (clockValue.length() > 1) {
-                naturalClockWidth += (clockValue.length() - 1)
-                        * clockText.getLetterSpacing() * clockText.getTextSize();
-            }
+            naturalClockWidth = Math.max(1f,
+                    clockText.getPaint().measureText(clockText.getText().toString()));
         }
         // Keep the clock glyph inside the available clock-panel width. The AM/PM
         // marker and small side insets share that width, so long clocks shrink
