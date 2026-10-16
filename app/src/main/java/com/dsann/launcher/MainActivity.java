@@ -3484,9 +3484,9 @@ public class MainActivity extends Activity {
                     }
                     if (hourEnd - firstDigit == 1 && hourEnd < clockValue.length()) {
                         char hourDigit = clockValue.charAt(firstDigit);
-                        char invisibleZero = (char) (hourDigit - Character.digit(hourDigit, 10));
+                        char invisibleOne = (char) (hourDigit - Character.digit(hourDigit, 10) + 1);
                         android.text.SpannableString padded =
-                                new android.text.SpannableString(invisibleZero + clockValue);
+                                new android.text.SpannableString(invisibleOne + clockValue);
                         padded.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
                                 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                         clockText.setText(padded);
@@ -4311,7 +4311,7 @@ public class MainActivity extends Activity {
         // which otherwise makes some styles look smaller/larger. Use the default
         // sans-serif-light preset as the visual-height reference while preserving
         // each style's own typeface, weight, letter spacing, and shadow.
-        float normalizedNonLedHeightScale = 1.20f;
+        float normalizedNonLedHeightScale = 1.30f;
         if (!sevenSegment) {
             android.graphics.Paint referencePaint = new android.graphics.Paint(clockText.getPaint());
             referencePaint.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
