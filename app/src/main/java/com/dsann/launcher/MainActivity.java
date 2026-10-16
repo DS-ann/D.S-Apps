@@ -400,9 +400,24 @@ public class MainActivity extends Activity {
             // All other vertical gestures are left to the app grid for normal scrolling.
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                     && Math.abs(dy) > Math.abs(dx) * 1.15f;
+            if (drawerCloseSwipeClaimed) {
+                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
+                drawerSwipeProgress = Math.max(0f, Math.min(1f, 1f - dy / (float) swipeHeight));
+                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition(), drawerSwipeProgress);
+                return true;
+            }
             if (drawerOpen && gestureStartedOnDrawerGrid && drawerAtTopOnGestureDown
-                    && dy > 0 && verticalSwipe && !drawerCloseSwipeClaimed) {
+                    && dy > 0 && verticalSwipe) {
                 drawerCloseSwipeClaimed = true;
+                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
+                drawerSwipeProgress = Math.max(0f, Math.min(1f, 1f - dy / (float) swipeHeight));
+                homeScreen.animate().cancel();
+                drawerScreen.animate().cancel();
+                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition(), drawerSwipeProgress);
                 handler.removeCallbacks(homeLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
@@ -464,8 +479,8 @@ public class MainActivity extends Activity {
                     && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
                     && !heldItemGesture
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
-                    && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
-                    && Math.abs(dx) > Math.abs(dy) * 1.15f) {
+                    && (pageSwipeActive || (Math.abs(dx) > LauncherUiUtils.dp(this, 12)
+                        && Math.abs(dx) > Math.abs(dy) * 1.15f))) {
                 int direction = dx < 0f ? 1 : -1;
                 int adjacent = currentPage + direction;
                 if (adjacent >= 0 && adjacent < pagesStrip.getChildCount()) {
@@ -502,6 +517,16 @@ public class MainActivity extends Activity {
                     wheelSwipeProgress = progress;
                     applyWheelSwipe(wheelSwipeDirection, progress);
                     return true;
+                } else if (pageSwipeActive) {
+                    // If the finger crosses back past the origin, return the wheel
+                    // to its neutral pose instead of leaving the pages frozen mid-turn.
+                    int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
+                            ? pageViewport.getWidth()
+                            : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                                    - LauncherUiUtils.dp(this, 40));
+                    wheelSwipeProgress = 0f;
+                    applyWheelSwipe(wheelSwipeDirection, 0f);
+                    return true;
                 }
             }
             return pageSwipeActive || super.dispatchTouchEvent(event);
@@ -514,6 +539,14 @@ public class MainActivity extends Activity {
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
+            if (drawerCloseSwipeClaimed) {
+                drawerCloseSwipeClaimed = false;
+                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition(), 1f);
+                homeScreen.setVisibility(View.GONE);
+                drawerScreen.setVisibility(View.VISIBLE);
+                return true;
+            }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
                 LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
@@ -539,7 +572,8 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
-                showHome();
+                LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
+                        () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
                 return true;
             }
             if (drawerSwipeVisualActive && dy >= 0f) {
