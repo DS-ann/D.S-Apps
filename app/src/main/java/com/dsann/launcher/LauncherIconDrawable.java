@@ -93,7 +93,7 @@ final class LauncherIconDrawable extends Drawable {
     private int contrastingShapeColor() {
         if (backgroundColor == Color.WHITE) return Color.BLACK;
         if (backgroundColor == Color.GRAY) return Color.rgb(72, 72, 72);
-        return Color.rgb(48, 48, 48);
+        return Color.rgb(62, 62, 62);
     }
 
     private void setShapePath(RectF target) {
