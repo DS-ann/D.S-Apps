@@ -3284,9 +3284,11 @@ public class MainActivity extends Activity {
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
         final int panelWidth = Math.max(1, screenWidth - LauncherUiUtils.dp(this, 24));
         final float maxClockWidth = Math.max(1f, panelWidth - markerWidth - LauncherUiUtils.dp(this, 6));
-        // Respect the requested scale even when it extends past the screen. The clock
-        // is an intentionally free-positioned widget and may overlap other home items.
-        final float lengthScale = requestedLengthScale;
+        // Keep the complete clock inside the available screen width. The requested
+        // percentage remains saved, but the effective scale is capped only when the
+        // natural clock plus its AM/PM marker would otherwise be clipped at an edge.
+        final float lengthScale = Math.min(requestedLengthScale,
+                maxClockWidth / naturalClockWidth);
         final int renderedClockWidth = Math.max(1,
                 (int) Math.ceil(naturalClockWidth * lengthScale));
         final int dateWidth = dateText == null ? 0
