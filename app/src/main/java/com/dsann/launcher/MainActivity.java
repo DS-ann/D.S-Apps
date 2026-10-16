@@ -440,6 +440,8 @@ public class MainActivity extends Activity {
                 drawerSwipeProgress = Math.max(0f, Math.min(1f, -dy / (float) swipeHeight));
                 if (dy < 0f) {
                     drawerSwipeVisualActive = true;
+                    homeScreen.animate().cancel();
+                    drawerScreen.animate().cancel();
                     LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
                             getDrawerTransition(), drawerSwipeProgress);
                 }
@@ -4041,6 +4043,10 @@ public class MainActivity extends Activity {
                 char ch = value.charAt(i);
                 if (Character.digit(ch, 10) >= 0) digits++;
                 else if (!Character.isWhitespace(ch)) separators++;
+                if (i == 1 && (ch == ':' || ch == '\uFF1A' || ch == '.' || ch == '\u2236')) {
+                    // Match SevenSegmentClockTextView's blank leading hour cell.
+                    digits++;
+                }
             }
             float clockHeight = LauncherUiUtils.dp(this, 114)
                     - clockText.getPaddingTop() - clockText.getPaddingBottom();
