@@ -99,6 +99,7 @@ final class WidgetInteractionController {
         widget.setFocusable(true);
         container.addView(widget, new FrameLayout.LayoutParams(-1, -1));
         final View resizeHandle = new View(activity);
+        resizeHandle.setTag("launcher_widget_resize_handle");
         GradientDrawable handleBg = new GradientDrawable();
         handleBg.setColor(Color.rgb(115, 159, 255));
         handleBg.setCornerRadius(LauncherUiUtils.dp(activity, 5));
