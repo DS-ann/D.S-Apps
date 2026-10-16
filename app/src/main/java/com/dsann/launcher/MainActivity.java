@@ -2416,10 +2416,19 @@ public class MainActivity extends Activity {
         animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
         animator.addUpdateListener(value -> applyWheelSwipe(direction, (Float) value.getAnimatedValue()));
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            private boolean cancelled;
+
+            @Override public void onAnimationCancel(android.animation.Animator animation) {
+                // A second touch, page rebuild, or lifecycle interruption can cancel
+                // the animator. Never leave a cube face rotated or the strip between pages.
+                cancelled = true;
+            }
+
             @Override public void onAnimationEnd(android.animation.Animator animation) {
-                currentPage = to;
+                int settledPage = cancelled ? from : to;
+                currentPage = settledPage;
                 activateClockForPage(currentPage);
-                pagesStrip.setTranslationX(-to * (float) width);
+                pagesStrip.setTranslationX(-settledPage * (float) width);
                 resetPageTransforms();
                 preparePageLayersForSwipe(currentPage);
                 wheelSwipeProgress = 0f;
