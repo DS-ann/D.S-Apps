@@ -3323,14 +3323,10 @@ public class MainActivity extends Activity {
         clockText.setPivotX(0f);
         // Preserve the clock's original top-aligned scaling behaviour.
         clockText.setPivotY(0f);
-        // The seven-segment renderer can fit its glyphs to an exact measured width.
-        // Constrain its actual view width instead of scaling a WRAP_CONTENT view:
-        // Android's scale transform does not change layout bounds and previously
-        // allowed the LED digits to draw beyond the requested length.
-        // The LED renderer's canvas draws at its natural aspect ratio. Scale its
-        // view horizontally as well, rather than widening the canvas (which caused
-        // the renderer to fit back to the same size and made length resizing appear broken).
-        clockText.setScaleX(lengthScale);
+        // Seven-segment digits must be measured at the requested rendered width.
+        // Let onMeasure/onDraw share that width; do not apply a second scale transform,
+        // which can make the glyph bounds disagree with the measured canvas.
+        clockText.setScaleX(sevenSegment ? 1f : lengthScale);
         clockText.setScaleY(breadthScale);
         clockText.setTranslationY(0f);
         float horizontalScaleOffset = sevenSegment ? 0f : naturalClockWidth - renderedClockWidth;
@@ -3340,7 +3336,7 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            textParams.width = sevenSegment ? Math.max(1, (int) Math.ceil(naturalClockWidth))
+            textParams.width = sevenSegment ? renderedClockWidth
                     : ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
             textParams.gravity = (sevenSegment && alignment == Gravity.CENTER_HORIZONTAL
