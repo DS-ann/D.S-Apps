@@ -1015,6 +1015,8 @@ public class MainActivity extends Activity {
         // Keep the date at a stable offset; the clock glyph may extend over items below.
         dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
+        // Detach before assigning FrameLayout.LayoutParams to this page overlay.
+        homeScreen.removeView(hero);
         applyClockPositionAndSize();
         applyClockPanelColor(false);
         clockPanelsByPage[0] = clockPanel;
@@ -1024,8 +1026,6 @@ public class MainActivity extends Activity {
         clockRowsByPage[0] = clockRow;
         clockGroupsByPage[0] = clockGroup;
         buildSecondPageClock();
-        // The clock is now a page overlay, not a header that consumes workspace height.
-        homeScreen.removeView(hero);
         activateClockForPage(0);
 
         pageViewport = new FrameLayout(this);
