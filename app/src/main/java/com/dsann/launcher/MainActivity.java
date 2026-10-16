@@ -66,6 +66,9 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_LENGTH = "clock_length_percent";
     private static final String KEY_CLOCK_BREADTH = "clock_breadth_percent";
     private static final String KEY_CLOCK_POSITION = "clock_position";
+    private static final String KEY_CLOCK_WIDGET_X = "clock_widget_x";
+    private static final String KEY_CLOCK_WIDGET_Y = "clock_widget_y";
+    private static final String KEY_CLOCK_WIDGET_ENABLED = "clock_widget_enabled";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
     private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
     private static final String KEY_SHOW_PAGE_INDICATOR = "show_page_indicator";
@@ -130,6 +133,12 @@ public class MainActivity extends Activity {
     private FrameLayout clockRow;
     private FrameLayout clockGroup;
     private LinearLayout clockPanel;
+    private View clockWidgetResizeHandle;
+    private boolean clockWidgetEditing = false;
+    private boolean clockWidgetDragging = false;
+    private float clockWidgetDownRawX, clockWidgetDownRawY;
+    private float clockWidgetStartX, clockWidgetStartY;
+    private int clockWidgetStartLength, clockWidgetStartBreadth;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
@@ -739,6 +748,9 @@ public class MainActivity extends Activity {
         hp.topMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(hero, hp);
         clockPanel = hero;
+        // Keep the existing clock as a launcher-local widget: it can be moved and
+        // resized in place without introducing AppWidgetHost overhead on Android 6.
+        installClockWidgetInteraction();
         applyClockPanelColor(false);
         clockRow = new FrameLayout(this);
         clockRow.setClipChildren(false);
@@ -2492,6 +2504,119 @@ public class MainActivity extends Activity {
         applyClockStyle();
         applyClockPanelColor(true);
         applyBrandVisibility();
+    }
+
+    private void installClockWidgetInteraction() {
+        if (clockPanel == null) return;
+        clockPanel.setTag("launcher_clock_widget");
+        clockPanel.setClipChildren(false);
+        clockPanel.setClipToPadding(false);
+        clockWidgetResizeHandle = new View(this);
+        GradientDrawable handle = new GradientDrawable();
+        handle.setColor(Color.rgb(115, 159, 255));
+        handle.setCornerRadius(LauncherUiUtils.dp(this, 5));
+        clockWidgetResizeHandle.setBackground(handle);
+        clockWidgetResizeHandle.setVisibility(View.GONE);
+        LinearLayout.LayoutParams handleParams = new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 22), LauncherUiUtils.dp(this, 22));
+        handleParams.gravity = Gravity.RIGHT;
+        clockPanel.addView(clockWidgetResizeHandle, handleParams);
+        clockWidgetResizeHandle.bringToFront();
+        clockWidgetResizeHandle.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    clockWidgetDragging = true;
+                    clockWidgetDownRawX = event.getRawX();
+                    clockWidgetDownRawY = event.getRawY();
+                    clockWidgetStartLength = getClockLength();
+                    clockWidgetStartBreadth = getClockBreadth();
+                    view.getParent().requestDisallowInterceptTouchEvent(true);
+                    setWorkspaceGridVisible(true, clockPanel);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (clockWidgetDragging) {
+                        int dx = Math.round((event.getRawX() - clockWidgetDownRawX)
+                                / Math.max(0.5f, getResources().getDisplayMetrics().density));
+                        int dy = Math.round((event.getRawY() - clockWidgetDownRawY)
+                                / Math.max(0.5f, getResources().getDisplayMetrics().density));
+                        prefs.edit()
+                                .putInt(KEY_CLOCK_LENGTH, Math.max(80, Math.min(250, clockWidgetStartLength + dx)))
+                                .putInt(KEY_CLOCK_BREADTH, Math.max(80, Math.min(250, clockWidgetStartBreadth + dy)))
+                                .apply();
+                        applyClockPositionAndSize();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    clockWidgetDragging = false;
+                    setWorkspaceGridVisible(false, null);
+                    if (view.getParent() != null) view.getParent().requestDisallowInterceptTouchEvent(false);
+                    return true;
+            }
+            return true;
+        });
+        clockPanel.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                clockWidgetDownRawX = event.getRawX();
+                clockWidgetDownRawY = event.getRawY();
+                clockWidgetStartX = clockPanel.getTranslationX();
+                clockWidgetStartY = clockPanel.getTranslationY();
+                handler.removeCallbacks(clockWidgetLongPress);
+                handler.postDelayed(clockWidgetLongPress, 650L);
+                return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                float dx = event.getRawX() - clockWidgetDownRawX;
+                float dy = event.getRawY() - clockWidgetDownRawY;
+                if (clockWidgetEditing && (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
+                        || Math.abs(dy) > LauncherUiUtils.dp(this, 5))) {
+                    clockWidgetDragging = true;
+                    clockPanel.setTranslationX(clockWidgetStartX + dx);
+                    clockPanel.setTranslationY(clockWidgetStartY + dy);
+                    prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
+                            .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
+                    setWorkspaceGridVisible(true, clockPanel);
+                } else if (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
+                        || Math.abs(dy) > LauncherUiUtils.dp(this, 8)) {
+                    handler.removeCallbacks(clockWidgetLongPress);
+                }
+                return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_UP
+                    || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(clockWidgetLongPress);
+                if (clockWidgetDragging) {
+                    clockWidgetDragging = false;
+                    setWorkspaceGridVisible(false, null);
+                } else if (clockWidgetEditing) {
+                    // Tap outside the resize grip exits edit mode.
+                    exitClockWidgetEditMode();
+                }
+                return true;
+            }
+            return true;
+        });
+        clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f));
+        clockPanel.setTranslationY(prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f));
+    }
+
+    private final Runnable clockWidgetLongPress = () -> {
+        if (clockPanel == null || drawerOpen) return;
+        clockWidgetEditing = true;
+        if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.VISIBLE);
+        clockPanel.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
+                LauncherUiUtils.dp(this, 8)));
+        setWorkspaceGridVisible(true, clockPanel);
+        Toast.makeText(this, "Clock widget: drag to move; drag blue handle to resize; tap outside to finish",
+                Toast.LENGTH_LONG).show();
+    };
+
+    private void exitClockWidgetEditMode() {
+        clockWidgetEditing = false;
+        if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
+        applyClockPanelColor(false);
+        setWorkspaceGridVisible(false, null);
     }
 
     private void applyClockPanelColor(boolean animate) {
