@@ -4037,9 +4037,14 @@ public class MainActivity extends Activity {
             final int restorePage = Math.max(0, Math.min(1, currentPage));
             for (int page = 0; page < clockPanelsByPage.length; page++) {
                 activateClockForPage(page);
+                final int pageIndex = page;
                 LinearLayout panel = clockPanel;
                 if (panel != null) panel.post(() -> {
-                    if (panel.getParent() != null) applyClockPanelColor(false);
+                    if (panel.getParent() == null) return;
+                    int previousPage = Math.max(0, Math.min(1, activeClockPage));
+                    activateClockForPage(pageIndex);
+                    applyClockPanelColor(false);
+                    activateClockForPage(previousPage);
                 });
             }
             activateClockForPage(restorePage);
