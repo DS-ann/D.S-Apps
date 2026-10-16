@@ -4235,11 +4235,21 @@ public class MainActivity extends Activity {
             String value = clockText.getText() == null ? "" : clockText.getText().toString();
             int digits = 0;
             int separators = 0;
+            int firstHourDigits = 0;
+            boolean stillReadingHour = true;
             for (int i = 0; i < value.length(); i++) {
                 char ch = value.charAt(i);
-                if (Character.digit(ch, 10) >= 0) digits++;
-                else if (!Character.isWhitespace(ch)) separators++;
+                if (Character.digit(ch, 10) >= 0) {
+                    digits++;
+                    if (stillReadingHour) firstHourDigits++;
+                } else if (!Character.isWhitespace(ch)) {
+                    separators++;
+                    stillReadingHour = false;
+                }
             }
+            // The LED renderer reserves an invisible leading cell for 1–9 hour
+            // values. Include that cell in the measured panel width too.
+            if (firstHourDigits == 1 && separators > 0) digits++;
             float clockHeight = LauncherUiUtils.dp(this, 114)
                     - clockText.getPaddingTop() - clockText.getPaddingBottom();
             naturalClockWidth = Math.max(1f,
