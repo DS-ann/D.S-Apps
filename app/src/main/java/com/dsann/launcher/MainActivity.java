@@ -3438,8 +3438,13 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         if (clockText == null) return;
         Integer previousStyle = appliedClockStyles.get(clockText);
-        if (previousStyle != null && previousStyle.intValue() == style) return;
-        LauncherClockStyler.apply(this, clockText, style);
+        // Always reassert the custom renderer mode. A cached style index is not
+        // proof that the active TextView still has the correct drawing mode,
+        // especially when switching between the two independent page clocks.
+        if (previousStyle == null || previousStyle.intValue() != style
+                || clockText instanceof SevenSegmentClockTextView) {
+            LauncherClockStyler.apply(this, clockText, style);
+        }
         // Apply the same restrained silver tone to every clock preset, including 7-segment.
         clockText.setTextColor(Color.rgb(196, 200, 209));
         if (clockText instanceof SevenSegmentClockTextView) {
@@ -4349,7 +4354,10 @@ public class MainActivity extends Activity {
         // which otherwise makes some styles look smaller/larger. Use the default
         // sans-serif-light preset as the visual-height reference while preserving
         // each style's own typeface, weight, letter spacing, and shadow.
-        float normalizedNonLedHeightScale = 1.30f;
+        // Keep non-LED glyphs within the same background bounds at startup.
+        // The old unconditional 1.30x glyph scale made the digits exceed the
+        // panel height before the user resized the clock.
+        float normalizedNonLedHeightScale = 1.0f;
         if (!sevenSegment) {
             android.graphics.Paint referencePaint = new android.graphics.Paint(clockText.getPaint());
             referencePaint.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
