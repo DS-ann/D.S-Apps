@@ -483,7 +483,9 @@ public class MainActivity extends Activity {
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
                     && (pageSwipeActive || (Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                         && Math.abs(dx) > Math.abs(dy) * 1.15f))) {
-                int direction = dx < 0f ? 1 : -1;
+                int direction = Math.abs(dx) > LauncherUiUtils.dp(this, 4)
+                        ? (dx < 0f ? 1 : -1)
+                        : (wheelSwipeDirection != 0 ? wheelSwipeDirection : (dx < 0f ? 1 : -1));
                 int adjacent = currentPage + direction;
                 if (adjacent >= 0 && adjacent < pagesStrip.getChildCount()) {
                     if (!pageSwipeActive) {
@@ -531,7 +533,7 @@ public class MainActivity extends Activity {
                         resetPageTransforms();
                         preparePageLayersForSwipe(currentPage);
                         wheelSwipeProgress = 0f;
-                        wheelSwipeDirection = 0;
+                        wheelSwipeDirection = direction;
                         gestureDownX = event.getX();
                         pageSwipeChildCancelled = true;
                     }
