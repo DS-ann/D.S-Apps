@@ -940,11 +940,9 @@ public class MainActivity extends Activity {
         dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(220, 0, 0, 0));
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, -2);
-        // Keep the date visually attached to the clock even when the clock's
-        // vertical resize scale makes its reserved row taller.
-        int clockBaseHeight = LauncherUiUtils.dp(this, 114);
-        int clockRowHeight = Math.max(1, (int) Math.ceil(clockBaseHeight * getClockBreadth() / 100f));
-        dp.topMargin = LauncherUiUtils.dp(this, 3) - Math.max(0, clockRowHeight - clockBaseHeight);
+        // The clock is an overlay widget: resizing must not reflow the home grid.
+        // Keep the date at a stable offset; the clock glyph may extend over items below.
+        dp.topMargin = LauncherUiUtils.dp(this, 3);
         hero.addView(dateText, dp);
         applyClockPositionAndSize();
         applyClockPanelColor(false);
@@ -3279,11 +3277,10 @@ public class MainActivity extends Activity {
         // Both clock and date rows use the same full-width hero background. The
         // compact clock group itself stays sized to its rendered contents.
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth) + LauncherUiUtils.dp(this, 4);
-        // Keep the clock's reserved layout footprint constant. Scaling the glyph
-        // must not increase the hero's measured height and steal vertical space from
-        // the home-page viewport (which made lower icons/widgets slide under the dock).
-        // The glyph itself scales visually; the surrounding home layout does not reflow.
-        final int rowHeight = Math.max(1, (int) Math.ceil(LauncherUiUtils.dp(this, 114) * breadthScale));
+        // Keep the clock's reserved layout footprint fixed at its original height.
+        // Resizing is visual only: the glyph/background may overlap home items below,
+        // but must never push icons, shortcuts, widgets, or the dock down the page.
+        final int rowHeight = LauncherUiUtils.dp(this, 114);
 
         clockPanel.setGravity(alignment);
         LinearLayout.LayoutParams panelParams =
@@ -3330,7 +3327,10 @@ public class MainActivity extends Activity {
         // Constrain its actual view width instead of scaling a WRAP_CONTENT view:
         // Android's scale transform does not change layout bounds and previously
         // allowed the LED digits to draw beyond the requested length.
-        clockText.setScaleX(sevenSegment ? 1f : lengthScale);
+        // The LED renderer's canvas draws at its natural aspect ratio. Scale its
+        // view horizontally as well, rather than widening the canvas (which caused
+        // the renderer to fit back to the same size and made length resizing appear broken).
+        clockText.setScaleX(lengthScale);
         clockText.setScaleY(breadthScale);
         clockText.setTranslationY(0f);
         float horizontalScaleOffset = sevenSegment ? 0f : naturalClockWidth - renderedClockWidth;
@@ -3340,7 +3340,8 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            textParams.width = sevenSegment ? renderedClockWidth : ViewGroup.LayoutParams.WRAP_CONTENT;
+            textParams.width = sevenSegment ? Math.max(1, (int) Math.ceil(naturalClockWidth))
+                    : ViewGroup.LayoutParams.WRAP_CONTENT;
             textParams.height = LauncherUiUtils.dp(this, 114);
             textParams.gravity = (sevenSegment && alignment == Gravity.CENTER_HORIZONTAL
                     ? Gravity.CENTER_HORIZONTAL : alignment) | Gravity.TOP;
@@ -3375,8 +3376,7 @@ public class MainActivity extends Activity {
                 // Match the clock TextView's actual gravity and scale transform.
                 // Its view keeps the natural width; the visible glyph is shortened
                 // by scaleX and shifted back toward the selected alignment.
-                int naturalViewWidth = sevenSegment ? renderedClockWidth
-                        : Math.max(1, (int) Math.ceil(naturalClockWidth));
+                int naturalViewWidth = Math.max(1, (int) Math.ceil(naturalClockWidth));
                 int clockViewLeft = alignment == Gravity.RIGHT
                         ? contentWidth - naturalViewWidth
                         : (alignment == Gravity.CENTER_HORIZONTAL
