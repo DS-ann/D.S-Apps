@@ -1260,8 +1260,8 @@ public class MainActivity extends Activity {
             savedWidthDp = 0;
             savedHeightDp = 0;
         }
-        int defaultShortcutWidth = LauncherUiUtils.dp(this, 104);
-        int defaultShortcutHeight = LauncherUiUtils.dp(this, 112);
+        int defaultShortcutWidth = LauncherUiUtils.dp(this, 52);
+        int defaultShortcutHeight = LauncherUiUtils.dp(this, 52);
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
                         : Math.min(cellW, defaultShortcutWidth)));
@@ -1386,11 +1386,11 @@ public class MainActivity extends Activity {
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
         tile.setClipChildren(false);
+        chosenPage.setClipChildren(false);
         LinearLayout tileContent = new LinearLayout(this);
         tileContent.setOrientation(LinearLayout.VERTICAL);
         tileContent.setGravity(Gravity.CENTER);
-        tileContent.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3),
-                LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 3));
+        tileContent.setPadding(0, 0, 0, 0);
         tile.addView(tileContent, new FrameLayout.LayoutParams(-1, -1));
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -1415,16 +1415,22 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = LauncherUiUtils.dp(this, 52);
+        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 52), Math.min(desiredTileWidth, desiredTileHeight)));
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
+        tileContent.setGravity(Gravity.CENTER);
+        tileContent.setOrientation(LinearLayout.VERTICAL);
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 12, Color.WHITE, true);
         label.setGravity(Gravity.CENTER);
         label.setMaxLines(2);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
-        labelParams.topMargin = LauncherUiUtils.dp(this, 3);
-        tileContent.addView(label, labelParams);
+        // The movable/collision tile is exactly the icon bounds. Keep the label
+        // visually below it without enlarging the shortcut tile itself.
+        FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
+                Math.max(1, desiredTileWidth + LauncherUiUtils.dp(this, 24)),
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        labelParams.topMargin = desiredTileHeight + LauncherUiUtils.dp(this, 3);
+        tile.addView(label, labelParams);
         int tileWidth = Math.min(pageViewport.getWidth() - chosenLeft, desiredTileWidth);
         int tileHeight = Math.min(pageViewport.getHeight() - chosenTop, desiredTileHeight);
         // Keep the real layout bounds equal to the resized tile; do not inflate it to a grid cell.
