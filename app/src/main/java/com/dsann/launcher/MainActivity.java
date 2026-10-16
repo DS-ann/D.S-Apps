@@ -601,9 +601,9 @@ public class MainActivity extends Activity {
         int[] rootLoc = new int[2];
         clockPanel.getLocationOnScreen(panel);
         root.getLocationOnScreen(rootLoc);
-        int w = clockPanel.getWidth();
-        // Handles follow the scaled visual background rather than its fixed
-        // layout footprint, so the bottom grip stays on the visible edge.
+        // Resize grips follow the transformed visual rectangle, not the
+        // fixed layout footprint reserved to keep home items from reflowing.
+        int w = Math.max(1, Math.round(clockPanel.getWidth() * clockPanel.getScaleX()));
         int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
         int side = LauncherUiUtils.dp(this, 28);
         int thin = LauncherUiUtils.dp(this, 8);
@@ -3499,8 +3499,9 @@ public class MainActivity extends Activity {
         if (amPmText != null) {
             amPmText.setTextColor(clockText.getCurrentTextColor());
             amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-            amPmText.setTextSize(Math.max(7f,
-                    Math.min(10f, 78f * Math.min(lengthScale, breadthScale) * 0.10f)));
+            // The panel itself scales horizontally and vertically, so keep the
+            // marker's base size constant to avoid applying the resize twice.
+            amPmText.setTextSize(9f);
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
