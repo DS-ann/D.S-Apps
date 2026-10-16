@@ -3258,6 +3258,11 @@ public class MainActivity extends Activity {
         final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
         final int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
+                && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        // Establish the selected preset's measurement font before measuring any width.
+        // Otherwise switching away from seven-segment measures one frame with its old font.
+        clockText.setTextSize(sevenSegment ? 110f : 78f);
 
         // The 7-segment view draws its own glyphs; Paint.measureText() does not
         // describe those glyphs and made its container too narrow. Calculate the
@@ -3282,8 +3287,6 @@ public class MainActivity extends Activity {
             naturalClockWidth = Math.max(1f,
                     clockText.getPaint().measureText(clockText.getText().toString()));
         }
-        final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
-                && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         // Keep the clock glyph inside the available clock-panel width. The AM/PM
         // marker and small side insets share that width, so long clocks shrink
         // automatically instead of drawing beyond the background.
@@ -3352,9 +3355,6 @@ public class MainActivity extends Activity {
             clockGroup.setClipToPadding(false);
         }
 
-        // Keep LED geometry's measurement font consistent during direct handle-resize;
-        // applyClockPositionAndSize() can run without applyClockStyle() being called.
-        clockText.setTextSize(sevenSegment ? 110f : 78f);
         clockText.setPivotX(0f);
         // Preserve the clock's original top-aligned scaling behaviour.
         clockText.setPivotY(0f);
