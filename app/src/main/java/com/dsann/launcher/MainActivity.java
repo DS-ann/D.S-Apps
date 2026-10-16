@@ -133,6 +133,13 @@ public class MainActivity extends Activity {
     private FrameLayout clockRow;
     private FrameLayout clockGroup;
     private LinearLayout clockPanel;
+    private final LinearLayout[] clockPanelsByPage = new LinearLayout[2];
+    private final TextView[] clockTextsByPage = new TextView[2];
+    private final TextView[] amPmTextsByPage = new TextView[2];
+    private final TextView[] dateTextsByPage = new TextView[2];
+    private final FrameLayout[] clockRowsByPage = new FrameLayout[2];
+    private final FrameLayout[] clockGroupsByPage = new FrameLayout[2];
+    private int activeClockPage = 0;
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
@@ -344,8 +351,8 @@ public class MainActivity extends Activity {
                 int lengthDelta = clockResizeEdge == 1 ? -resizeDx : (clockResizeEdge == 2 ? resizeDx : 0);
                 int breadthDelta = clockResizeEdge == 3 ? -resizeDy : (clockResizeEdge == 4 ? resizeDy : 0);
                 prefs.edit()
-                        .putInt(KEY_CLOCK_LENGTH, Math.max(80, Math.min(250, clockWidgetStartLength + lengthDelta)))
-                        .putInt(KEY_CLOCK_BREADTH, Math.max(80, Math.min(250, clockWidgetStartBreadth + breadthDelta)))
+                        .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), Math.max(80, Math.min(250, clockWidgetStartLength + lengthDelta)))
+                        .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), Math.max(80, Math.min(250, clockWidgetStartBreadth + breadthDelta)))
                         .apply();
                 applyClockPositionAndSize();
                 final int resizingEdge = clockResizeEdge;
@@ -372,8 +379,8 @@ public class MainActivity extends Activity {
                     }
                     clockPanel.setTranslationX(clockPanel.getTranslationX() + targetX - now[0]);
                     clockPanel.setTranslationY(clockPanel.getTranslationY() + targetY - now[1]);
-                    prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
-                            .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
+                    prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
+                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY()).apply();
                     updateClockResizeHandles();
                 });
                 return true;
@@ -559,10 +566,10 @@ public class MainActivity extends Activity {
 
         if (cancelled) {
             prefs.edit()
-                    .putInt(KEY_CLOCK_LENGTH, clockWidgetStartLength)
-                    .putInt(KEY_CLOCK_BREADTH, clockWidgetStartBreadth)
-                    .putFloat(KEY_CLOCK_WIDGET_X, clockWidgetStartX)
-                    .putFloat(KEY_CLOCK_WIDGET_Y, clockWidgetStartY)
+                    .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), clockWidgetStartLength)
+                    .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), clockWidgetStartBreadth)
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockWidgetStartX)
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockWidgetStartY)
                     .apply();
             applyClockPositionAndSize();
             clockPanel.setTranslationX(clockWidgetStartX);
@@ -586,8 +593,8 @@ public class MainActivity extends Activity {
                 }
                 clockPanel.setTranslationX(clockPanel.getTranslationX() + targetX - now[0]);
                 clockPanel.setTranslationY(clockPanel.getTranslationY() + targetY - now[1]);
-                prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
-                        .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
+                prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY()).apply();
                 updateClockResizeHandles();
             });
         }
@@ -1010,6 +1017,16 @@ public class MainActivity extends Activity {
         hero.addView(dateText, dp);
         applyClockPositionAndSize();
         applyClockPanelColor(false);
+        clockPanelsByPage[0] = clockPanel;
+        clockTextsByPage[0] = clockText;
+        amPmTextsByPage[0] = amPmText;
+        dateTextsByPage[0] = dateText;
+        clockRowsByPage[0] = clockRow;
+        clockGroupsByPage[0] = clockGroup;
+        buildSecondPageClock();
+        // The clock is now a page overlay, not a header that consumes workspace height.
+        homeScreen.removeView(hero);
+        activateClockForPage(0);
 
         pageViewport = new FrameLayout(this);
         // Permit the rotating faces to extend slightly beyond the viewport while turning.
@@ -1049,6 +1066,120 @@ public class MainActivity extends Activity {
         restoreDockApps();
     }
 
+    private String clockPrefKey(String key, int page) {
+        return page == 0 ? key : key + "_page_2";
+    }
+
+    private void activateClockForPage(int requestedPage) {
+        int page = Math.max(0, Math.min(1, requestedPage));
+        if (clockPanelsByPage[page] == null) return;
+        activeClockPage = page;
+        clockPanel = clockPanelsByPage[page];
+        clockText = clockTextsByPage[page];
+        amPmText = amPmTextsByPage[page];
+        dateText = dateTextsByPage[page];
+        clockRow = clockRowsByPage[page];
+        clockGroup = clockGroupsByPage[page];
+    }
+
+    private void buildSecondPageClock() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.RIGHT);
+        panel.setPadding(LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 2),
+                LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 2));
+        panel.setClipChildren(false);
+        panel.setClipToPadding(false);
+        panel.setTag("launcher_clock_widget");
+        panel.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.LEFT));
+
+        FrameLayout row = new FrameLayout(this);
+        row.setClipChildren(false);
+        row.setClipToPadding(false);
+        FrameLayout group = new FrameLayout(this);
+        group.setClipChildren(false);
+        group.setClipToPadding(false);
+        TextView digits = new SevenSegmentClockTextView(this);
+        digits.setText("--:--");
+        digits.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+        digits.setTextSize(78);
+        digits.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
+                Gravity.LEFT | Gravity.CENTER_VERTICAL));
+        digits.setTextColor(Color.rgb(196, 200, 209));
+        digits.setIncludeFontPadding(false);
+        digits.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+        digits.setLetterSpacing(0f);
+        group.addView(digits);
+
+        TextView marker = new TextView(this);
+        marker.setTextColor(digits.getCurrentTextColor());
+        marker.setTextSize(8);
+        marker.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        marker.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
+        marker.setIncludeFontPadding(false);
+        marker.setPadding(0, 0, 0, 0);
+        group.addView(marker, new FrameLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12),
+                Gravity.RIGHT | Gravity.BOTTOM));
+        row.addView(group, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
+                Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+        panel.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
+
+        TextView date = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
+        date.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.BOLD));
+        date.setGravity(Gravity.RIGHT);
+        date.setLetterSpacing(0.04f);
+        date.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
+                Color.argb(220, 0, 0, 0));
+        LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dateParams.topMargin = LauncherUiUtils.dp(this, 3);
+        panel.addView(date, dateParams);
+
+        clockPanelsByPage[1] = panel;
+        clockTextsByPage[1] = digits;
+        amPmTextsByPage[1] = marker;
+        dateTextsByPage[1] = date;
+        clockRowsByPage[1] = row;
+        clockGroupsByPage[1] = group;
+        activateClockForPage(1);
+        applyClockStyle();
+        applyClockPositionAndSize();
+        applyClockPanelColor(false);
+        installClockWidgetInteraction();
+        activateClockForPage(0);
+    }
+
+    private void attachClockPanelsToPages() {
+        if (pagesStrip == null) return;
+        for (int pageIndex = 0; pageIndex < clockPanelsByPage.length; pageIndex++) {
+            if (pageIndex >= pagesStrip.getChildCount()
+                    || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) continue;
+            LinearLayout panel = clockPanelsByPage[pageIndex];
+            if (panel == null) continue;
+            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+            if (panel.getParent() != page) {
+                if (panel.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) panel.getParent()).removeView(panel);
+                }
+                page.addView(panel, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP | Gravity.LEFT));
+            }
+            panel.setTranslationX(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex),
+                    prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f))));
+            panel.setTranslationY(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex),
+                    prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f))));
+        }
+        activateClockForPage(currentPage);
+        applyClockPositionAndSize();
+    }
+
     private void buildDrawer() {
         LauncherDrawerController.BuiltDrawer built = LauncherDrawerController.build(
                 this, root, prefs, packageManager, allApps, drawerApps, drawerBackground(),
@@ -1073,6 +1204,7 @@ public class MainActivity extends Activity {
         if (homePageController != null) homePageController.renderHomePages(animate);
         renderSavedContactShortcut();
         renderDock();
+        attachClockPanelsToPages();
     }
 
     private void renderSavedContactShortcut() {
@@ -1798,6 +1930,7 @@ public class MainActivity extends Activity {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
         currentPage = Math.max(0, Math.min(lastPage, requestedPage));
+        activateClockForPage(currentPage);
         if (pagesStrip == null) return;
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth()
@@ -1855,26 +1988,6 @@ public class MainActivity extends Activity {
         float height = Math.max(1, outgoing.getHeight());
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
-
-        // The clock lives above the page strip, so animate it with the same page
-        // transition rather than leaving it visually pinned while pages turn.
-        if (clockPanel != null) {
-            float phase = Math.max(0f, Math.min(1f, progress));
-            if (effect == 1) {
-                clockPanel.setRotationY(direction * getPageRotationDegrees() * phase);
-                clockPanel.setScaleX(getEffectiveClockLengthScale() * (1f - 0.035f * phase));
-                clockPanel.setAlpha(1f - 0.35f * phase);
-            } else if (effect == 3) {
-                clockPanel.setRotationY(-direction * 48f * phase);
-                clockPanel.setScaleX(getEffectiveClockLengthScale() * (1f - 0.04f * phase));
-                clockPanel.setAlpha(1f - 0.45f * phase);
-            } else {
-                clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)
-                        - direction * width * phase * 0.35f);
-                clockPanel.setAlpha(1f - 0.55f * phase);
-                clockPanel.setScaleX(getEffectiveClockLengthScale() * (1f - 0.025f * phase));
-            }
-        }
 
         View incomingFace = to >= 0 && to < pagesStrip.getChildCount() ? pagesStrip.getChildAt(to) : null;
         // Keep the two page views in their real neighbouring positions. Translating the
@@ -1984,6 +2097,7 @@ public class MainActivity extends Activity {
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 currentPage = to;
+                activateClockForPage(currentPage);
                 pagesStrip.setTranslationX(-to * (float) width);
                 resetPageTransforms();
                 preparePageLayersForSwipe(currentPage);
@@ -2000,20 +2114,6 @@ public class MainActivity extends Activity {
     }
 
     private void resetPageTransforms() {
-        if (clockPanel != null) {
-            clockPanel.setRotationY(0f);
-            clockPanel.setRotationX(0f);
-            // Restore both persisted dimensions after temporary page-transition
-            // transforms; otherwise every page change silently resets clock size.
-            clockPanel.setScaleX(getEffectiveClockLengthScale());
-            clockPanel.setScaleY(getClockBreadth() / 100f);
-            clockPanel.setPivotX(clockGravity() == Gravity.RIGHT ? clockPanel.getWidth()
-                    : (clockGravity() == Gravity.CENTER_HORIZONTAL ? clockPanel.getWidth() / 2f : 0f));
-            clockPanel.setAlpha(1f);
-            // Preserve the user's saved clock-widget position after the transition.
-            clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f));
-            clockPanel.setTranslationY(prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f));
-        }
         if (pagesStrip == null) return;
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View face = pagesStrip.getChildAt(i);
@@ -2777,34 +2877,39 @@ public class MainActivity extends Activity {
     }
 
     private void updateClock() {
-        if (clockText == null || dateText == null) return;
+        if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
         Date now = new Date();
-        // Follow Android's system time format, but keep the AM/PM marker in a
-        // separate small bold label so it never inherits the large digital font.
-        String clockValue = DateFormat.getTimeFormat(this).format(now);
+        String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
         boolean use24Hour = DateFormat.is24HourFormat(this);
-        if (amPmText != null) {
-            if (use24Hour) {
-                amPmText.setText("");
-                amPmText.setVisibility(View.GONE);
-            } else {
-                String marker = new SimpleDateFormat("a", Locale.getDefault()).format(now);
-                int markerAt = clockValue.toUpperCase(Locale.getDefault())
-                        .lastIndexOf(marker.toUpperCase(Locale.getDefault()));
-                if (markerAt >= 0) {
-                    clockValue = (clockValue.substring(0, markerAt)
-                            + clockValue.substring(markerAt + marker.length())).trim();
+        int restorePage = Math.max(0, Math.min(1, currentPage));
+        for (int page = 0; page < clockPanelsByPage.length; page++) {
+            activateClockForPage(page);
+            String clockValue = DateFormat.getTimeFormat(this).format(now);
+            if (amPmText != null) {
+                if (use24Hour) {
+                    amPmText.setText("");
+                    amPmText.setVisibility(View.GONE);
+                } else {
+                    String marker = new SimpleDateFormat("a", Locale.getDefault()).format(now);
+                    int markerAt = clockValue.toUpperCase(Locale.getDefault())
+                            .lastIndexOf(marker.toUpperCase(Locale.getDefault()));
+                    if (markerAt >= 0) {
+                        clockValue = (clockValue.substring(0, markerAt)
+                                + clockValue.substring(markerAt + marker.length())).trim();
+                    }
+                    amPmText.setText(marker);
+                    amPmText.setVisibility(View.VISIBLE);
                 }
-                amPmText.setText(marker);
-                amPmText.setVisibility(View.VISIBLE);
             }
+            clockText.setText(clockValue.trim());
+            dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
+            dateText.setText(dateValue);
+            applyClockPositionAndSize();
+            applyClockStyle();
+            applyClockPanelColor(false);
         }
-        clockText.setText(clockValue.trim());
-        dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
-        dateText.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now));
-        applyClockPositionAndSize();
-        applyClockStyle();
-        applyClockPanelColor(true);
+        activateClockForPage(restorePage);
+        updateClockResizeHandles();
         applyBrandVisibility();
     }
 
@@ -2816,6 +2921,7 @@ public class MainActivity extends Activity {
         // Four visible resize grips are hosted by the root overlay, not inside the
         // vertical clock layout, so they never add unwanted height to the clock/date.
         for (int i = 0; i < clockEdgeHandles.length; i++) {
+            if (clockEdgeHandles[i] != null) continue;
             View grip = new View(this);
             GradientDrawable gripBg = new GradientDrawable();
             gripBg.setColor(Color.rgb(115, 159, 255));
@@ -2830,8 +2936,10 @@ public class MainActivity extends Activity {
             root.addView(grip, gripLp);
         }
         updateClockResizeHandles();
+        final int panelPage = activeClockPage;
         clockPanel.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                activateClockForPage(panelPage);
                 clockWidgetLongPressActivated = false;
                 clockWidgetDownRawX = event.getRawX();
                 clockWidgetDownRawY = event.getRawY();
@@ -2853,8 +2961,8 @@ public class MainActivity extends Activity {
                     // the header band or reject overlaps with workspace content.
                     clockPanel.setTranslationX(targetX);
                     clockPanel.setTranslationY(targetY);
-                    prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
-                            .putFloat(KEY_CLOCK_WIDGET_Y, clockPanel.getTranslationY()).apply();
+                    prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
+                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY()).apply();
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
                 } else if (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
@@ -2878,8 +2986,8 @@ public class MainActivity extends Activity {
             }
             return true;
         });
-        clockPanel.setTranslationX(prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f));
-        clockPanel.setTranslationY(prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f));
+        clockPanel.setTranslationX(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)));
+        clockPanel.setTranslationY(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f)));
     }
 
     private final Runnable clockWidgetLongPress = () -> {
@@ -3193,7 +3301,7 @@ public class MainActivity extends Activity {
         });
         // Clock sizing is controlled directly by the widget's blue resize handle.
         addChoiceRow(content, "Clock position", getClockPosition(), new String[]{"Left", "Middle", "Right"}, value -> {
-            prefs.edit().putInt(KEY_CLOCK_POSITION, value).apply();
+            prefs.edit().putInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage), value).apply();
             applyClockPositionAndSize();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -3235,7 +3343,7 @@ public class MainActivity extends Activity {
         });
         addChoiceRow(content, "Clock style", prefs.getInt(KEY_CLOCK_STYLE, 0), new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "7-Segment Digital"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
-            applyClockStyle();
+            updateClock();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "12/24", "System clock format", DateFormat.is24HourFormat(this) ? "24-hour" : "12-hour", () -> {
@@ -3321,15 +3429,21 @@ public class MainActivity extends Activity {
     }
 
     private int getClockLength() {
-        return Math.max(80, Math.min(250, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_LENGTH, 100)));
+        return Math.max(80, Math.min(250, prefs == null ? 100
+                : prefs.getInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage),
+                        prefs.getInt(KEY_CLOCK_LENGTH, 100))));
     }
 
     private int getClockBreadth() {
-        return Math.max(80, Math.min(250, prefs == null ? 100 : prefs.getInt(KEY_CLOCK_BREADTH, 100)));
+        return Math.max(80, Math.min(250, prefs == null ? 100
+                : prefs.getInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage),
+                        prefs.getInt(KEY_CLOCK_BREADTH, 100))));
     }
 
     private int getClockPosition() {
-        return Math.max(0, Math.min(2, prefs == null ? 2 : prefs.getInt(KEY_CLOCK_POSITION, 2)));
+        return Math.max(0, Math.min(2, prefs == null ? 2
+                : prefs.getInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage),
+                        prefs.getInt(KEY_CLOCK_POSITION, 2))));
     }
 
     private float getEffectiveClockLengthScale() {
@@ -3421,8 +3535,10 @@ public class MainActivity extends Activity {
         // clock, AM/PM marker, and date grow together. Its measured row remains
         // fixed below, so this visual resize never pushes workspace items down.
         clockPanel.setScaleY(breadthScale);
-        LinearLayout.LayoutParams panelParams =
-                (LinearLayout.LayoutParams) clockPanel.getLayoutParams();
+        ViewGroup.LayoutParams rawPanelParams = clockPanel.getLayoutParams();
+        FrameLayout.LayoutParams panelParams = rawPanelParams instanceof FrameLayout.LayoutParams
+                ? (FrameLayout.LayoutParams) rawPanelParams
+                : new FrameLayout.LayoutParams(naturalPanelWidth, rowHeight, alignment | Gravity.TOP);
         panelParams.gravity = alignment | Gravity.TOP;
         panelParams.width = naturalPanelWidth;
         clockPanel.setLayoutParams(panelParams);
