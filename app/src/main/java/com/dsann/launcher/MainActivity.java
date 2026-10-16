@@ -402,13 +402,14 @@ public class MainActivity extends Activity {
                 cancel.recycle();
                 return true;
             }
-            // Home gestures must not steal vertical movement from icons, widgets, or
-            // contact shortcuts: those surfaces may be scrolling or being dragged.
-            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
-                    && !gestureStartedOnContactShortcut && !gestureStartedOnClock && !verticalSwipeClaimed
-                    && verticalSwipe) {
+            // A decisive vertical swipe on any home item opens the launcher surface
+            // instead of being swallowed by the app icon or widget's own touch handler.
+            // Clock gestures are excluded: once the down event hits the clock, its
+            // gesture remains reserved for clock movement/resizing until release.
+            if (!drawerOpen && !gestureStartedOnClock && !verticalSwipeClaimed && verticalSwipe) {
                 verticalSwipeClaimed = true;
                 handler.removeCallbacks(homeLongPress);
+                handler.removeCallbacks(clockWidgetLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
                 super.dispatchTouchEvent(cancel);
@@ -502,8 +503,7 @@ public class MainActivity extends Activity {
                 showHome();
                 return true;
             }
-            if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
-                    && !gestureStartedOnContactShortcut && !gestureStartedOnClock && (verticalSwipeClaimed
+            if (!drawerOpen && !gestureStartedOnClock && (verticalSwipeClaimed
                     || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                         && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
                 if (dy < 0f) showDrawer();
@@ -543,6 +543,25 @@ public class MainActivity extends Activity {
     }
 
     private boolean touchStartedOnClock(float rawX, float rawY) {
+        // The clock is visually scaled and can overlap icons/widgets. findViewAt()
+        // only checks untransformed layout bounds and ignores elevation, so it could
+        // misclassify a touch on the visible clock as a workspace gesture.
+        if (clockPanel != null && clockPanel.getVisibility() == View.VISIBLE
+                && clockPanel.getWidth() > 0 && clockPanel.getHeight() > 0) {
+            int[] location = new int[2];
+            clockPanel.getLocationOnScreen(location);
+            float visualWidth = clockPanel.getWidth() * Math.max(0.01f, clockPanel.getScaleX());
+            float visualHeight = clockPanel.getHeight() * Math.max(0.01f, clockPanel.getScaleY());
+            if (rawX >= location[0] && rawX < location[0] + visualWidth
+                    && rawY >= location[1] && rawY < location[1] + visualHeight) return true;
+        }
+        for (View grip : clockEdgeHandles) {
+            if (grip == null || grip.getVisibility() != View.VISIBLE) continue;
+            int[] location = new int[2];
+            grip.getLocationOnScreen(location);
+            if (rawX >= location[0] && rawX < location[0] + grip.getWidth()
+                    && rawY >= location[1] && rawY < location[1] + grip.getHeight()) return true;
+        }
         View target = findViewAt(root, (int) rawX, (int) rawY);
         while (target != null) {
             if (target == clockPanel || "launcher_clock_widget".equals(target.getTag())) return true;
@@ -3882,7 +3901,7 @@ public class MainActivity extends Activity {
         // This keeps the background, digits, AM/PM marker, and date in one resize
         // operation instead of shrinking only the clock glyphs inside a fixed panel.
         final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
-                + markerWidth + LauncherUiUtils.dp(this, 2);
+                + markerWidth + LauncherUiUtils.dp(this, 1);
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth)
                 + LauncherUiUtils.dp(this, 4);
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
@@ -3997,7 +4016,7 @@ public class MainActivity extends Activity {
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
                 // Reserve the marker's own slot after the visible digits. Keeping it
                 // outside the digit bounds prevents PM/AM from covering the last segment.
-                int gap = LauncherUiUtils.dp(this, 2);
+                int gap = LauncherUiUtils.dp(this, 1);
                 markerParams.leftMargin = Math.max(0, Math.min(
                         contentWidth - markerParams.width,
                         (int) Math.ceil(naturalClockWidth) + gap));
