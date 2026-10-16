@@ -319,7 +319,6 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(true, clockPanel);
                     return true;
                 }
-            }
             handler.removeCallbacks(homeLongPress);
             handler.removeCallbacks(clockWidgetLongPress);
             // Clock edit/resize gestures must never be interpreted as workspace gestures.
