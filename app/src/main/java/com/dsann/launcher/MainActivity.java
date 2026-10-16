@@ -4064,12 +4064,13 @@ public class MainActivity extends Activity {
                 markerParams.width = LauncherUiUtils.dp(this, 22);
                 markerParams.height = LauncherUiUtils.dp(this, 12);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
-                // Reserve the marker's own slot after the visible digits. Keeping it
-                // outside the digit bounds prevents PM/AM from covering the last segment.
-                int gap = LauncherUiUtils.dp(this, 1);
+                // Pin AM/PM to the clock's lower-right corner, slightly inset so it
+                // sits close to the final digit instead of in a separate slot far away.
+                // This intentional small overlap is needed for the compact corner-marker look.
+                int cornerInset = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0, Math.min(
                         contentWidth - markerParams.width,
-                        (int) Math.ceil(naturalClockWidth) + gap));
+                        (int) Math.ceil(naturalClockWidth) - markerParams.width - cornerInset));
                 // Anchor vertically to the scaled clock's lower edge, not the
                 // unscaled 114dp TextView height. Keep a gap before the date row.
                 int visibleClockHeight = Math.max(1,
