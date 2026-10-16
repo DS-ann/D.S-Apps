@@ -374,9 +374,16 @@ final class WidgetInteractionController {
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                 int previousWidth = current.width;
                 int previousHeight = current.height;
-                current.width = Math.max(LauncherUiUtils.dp(activity, 140), Math.min(Math.max(1, activePage.getWidth()) - current.leftMargin,
+                // Clamp the minimum size to the space actually available. On narrow
+                // Android 6 phones, forcing a 140dp/90dp minimum after the max clamp
+                // can push the widget outside the workspace.
+                int availableWidth = Math.max(1, activePage.getWidth() - current.leftMargin);
+                int availableHeight = Math.max(1, activePage.getHeight() - current.topMargin);
+                int minimumWidth = Math.min(LauncherUiUtils.dp(activity, 140), availableWidth);
+                int minimumHeight = Math.min(LauncherUiUtils.dp(activity, 90), availableHeight);
+                current.width = Math.max(minimumWidth, Math.min(availableWidth,
                         origin[2] + Math.round(event.getRawX() - down[0])));
-                current.height = Math.max(LauncherUiUtils.dp(activity, 90), Math.min(Math.max(1, activePage.getHeight()) - current.topMargin,
+                current.height = Math.max(minimumHeight, Math.min(availableHeight,
                         origin[3] + Math.round(event.getRawY() - down[1])));
                 // Resizing may not grow through another widget. Reject the proposed
                 // frame rather than allowing overlapping AppWidgetHostViews.
