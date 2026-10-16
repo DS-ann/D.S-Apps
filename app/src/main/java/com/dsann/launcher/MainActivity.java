@@ -4461,10 +4461,11 @@ public class MainActivity extends Activity {
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
         clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale * nonLedDigitScale);
-        // Nudge the seven-segment glyphs slightly left against the background.
-        // Compensate for panel scaling so the offset remains a small 3 dp shift.
+        // Shift the seven-segment digits 15 dp left relative to their background.
+        // Compensate for panel scaling so the visual offset remains exactly 15 dp
+        // at every clock length setting; the panel/background itself stays put.
         clockText.setTranslationX(sevenSegment
-                ? -LauncherUiUtils.dp(this, 3) / Math.max(0.01f, lengthScale) : 0f);
+                ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale) : 0f);
         // No vertical offset: non-seven-segment clock remains centered in its background.
         clockText.setTranslationY(0f);
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
@@ -4554,7 +4555,9 @@ public class MainActivity extends Activity {
         @Override
         public int getSize(Paint paint, CharSequence text, int start, int end,
                 Paint.FontMetricsInt fm) {
-            return Math.max(1, Math.round(paint.measureText(":")));
+            // Compact the colon's reserved advance so the neighboring hour/minute
+            // glyphs sit closer without changing their own typography or scale.
+            return Math.max(1, Math.round(paint.measureText(":") * 0.45f));
         }
 
         @Override
@@ -4562,8 +4565,12 @@ public class MainActivity extends Activity {
                 float x, int top, int y, int bottom, Paint paint) {
             Paint dots = new Paint(paint);
             dots.setStyle(Paint.Style.FILL);
+            float naturalWidth = paint.measureText(":");
             float radius = Math.max(1f, paint.getTextSize() * 0.045f);
-            float centerX = x + paint.measureText(":") / 2f;
+            // Keep the two dots centered in the original colon slot while the
+            // narrower advance pulls the next (minute) digit closer. A slight
+            // left bias also tightens the gap on the hour side.
+            float centerX = x + naturalWidth * 0.25f;
             // TextView is 114 dp tall and centered in the background. The parent
             // applies vertical resizing around this same center point.
             float centerY = (top + bottom) / 2f;
