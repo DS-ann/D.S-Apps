@@ -4336,6 +4336,16 @@ public class MainActivity extends Activity {
                                 baseClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
+            // For seven-segment only, shift the marker visually by exactly 1 dp
+            // right and 1 dp up, including at the maximum clock resize. The
+            // parent panel scales its children, so compensate for that scale here.
+            if (sevenSegment) {
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 1) / Math.max(0.01f, lengthScale));
+                amPmText.setTranslationY(-LauncherUiUtils.dp(this, 1) / Math.max(0.01f, breadthScale));
+            } else {
+                amPmText.setTranslationX(0f);
+                amPmText.setTranslationY(0f);
+            }
         }
         clockText.invalidate();
     }
