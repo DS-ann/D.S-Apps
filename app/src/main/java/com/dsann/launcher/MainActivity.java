@@ -4435,7 +4435,11 @@ public class MainActivity extends Activity {
         // Non-seven-segment glyphs are vertically centered in the clock row so
         // their visual center aligns with the shortened, vertically centered background.
         clockText.setGravity(Gravity.LEFT | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
-        clockText.setPivotX(0f);
+        // Use geometry derived from the current layout calculation, not getWidth()/getHeight()
+        // from the previous frame. Those dimensions can be stale while the user resizes the
+        // panel, causing scaled digits to jump or drift until the next layout pass.
+        clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
+        clockText.setPivotY(rowHeight / 2f);
         clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() / 2f : 0f);
         // Normalize non-seven-segment glyph height across typography presets.
         // Typeface choices have different cap-height metrics at the same 78sp,
@@ -4473,7 +4477,9 @@ public class MainActivity extends Activity {
         // The custom colon span remains vertically centered in the background.
         final float nonLedDigitScale = 1.12f;
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : nonLedDigitScale);
-        clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
+        // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
+        clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
+        clockText.setPivotY(rowHeight / 2f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
         // Make non-7-segment digits 20% taller without changing the clock background or 7-segment style.
         clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale * nonLedDigitScale * 1.20f);
