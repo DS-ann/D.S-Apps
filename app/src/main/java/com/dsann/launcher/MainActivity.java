@@ -4031,6 +4031,18 @@ public class MainActivity extends Activity {
             renderHomePages(false);
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
             renderDock();
+            // Rebuilding workspace pages reattaches the existing clock panels. Reapply
+            // each panel's inset background after the new layout pass so the old measured
+            // height cannot leave the translucent clock background clipped to half-height.
+            final int restorePage = Math.max(0, Math.min(1, currentPage));
+            for (int page = 0; page < clockPanelsByPage.length; page++) {
+                activateClockForPage(page);
+                LinearLayout panel = clockPanel;
+                if (panel != null) panel.post(() -> {
+                    if (panel.getParent() != null) applyClockPanelColor(false);
+                });
+            }
+            activateClockForPage(restorePage);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App icon shape", prefs.getInt("app_icon_shape", 0),
@@ -4440,7 +4452,6 @@ public class MainActivity extends Activity {
         // panel, causing scaled digits to jump or drift until the next layout pass.
         clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
         clockText.setPivotY(rowHeight / 2f);
-        clockText.setPivotY(clockText.getHeight() > 0 ? clockText.getHeight() / 2f : 0f);
         // Normalize non-seven-segment glyph height across typography presets.
         // Typeface choices have different cap-height metrics at the same 78sp,
         // which otherwise makes some styles look smaller/larger. Use the default
@@ -4488,11 +4499,11 @@ public class MainActivity extends Activity {
         // at every clock length setting; the panel/background itself stays put.
         clockText.setTranslationX(sevenSegment
                 ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale) : 0f);
-        // Move only non-seven-segment digits 15 dp upward relative to the background.
-        // Keep the seven-segment clock at its original vertical position.
-        // Counter-scale the offset so the visual displacement remains 15 dp while resizing.
+        // Position non-seven-segment digits 10 dp above their original background-relative
+        // center (5 dp lower than the previous 15 dp upward offset). Keep seven-segment
+        // positioning unchanged and counter-scale so the visual offset remains stable.
         clockText.setTranslationY(sevenSegment ? 0f
-                : -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, breadthScale));
+                : -LauncherUiUtils.dp(this, 10) / Math.max(0.01f, breadthScale));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
