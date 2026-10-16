@@ -83,6 +83,10 @@ public final class SevenSegmentClockTextView extends TextView {
             if (digit >= 0) {
                 display.append((char) ('0' + digit));
             } else if (ch == ':' || ch == '\uFF1A' || ch == '.' || ch == '\u2236') {
+                // Reserve the first hour digit cell when the hour is 1–9. Leave it
+                // visually blank (not a zero) so the time and AM/PM edge stay aligned
+                // with the two-digit 10–12 hour layout.
+                if (display.length() == 1) display.insert(0, ' ');
                 // Normalize common locale-specific time separators for LED rendering.
                 display.append(':');
             }
