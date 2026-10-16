@@ -180,7 +180,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         }
         int fontChoice = preferences == null ? 1 : preferences.getInt(fontSizeKey, 1);
         float targetTextSize = new float[]{9f, 10f, 12f, 14f}[Math.max(0, Math.min(3, fontChoice))];
-        if (label.getTextSize() != dp(targetTextSize)) {
+        if (Math.abs(label.getTextSize() - targetTextSize * activity.getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
             label.setTextSize(targetTextSize);
         }
         // Native ellipsizing avoids posting a measurement task for every recycled cell.
