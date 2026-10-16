@@ -3606,11 +3606,16 @@ public class MainActivity extends Activity {
                         Color.argb(Math.min(255, 22 * opacityScale / 100), 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
-        // Restore the full background width and make only its height 20% shorter,
-        // centered vertically. Clock glyphs and AM/PM retain their geometry.
+        // Keep the background full-width and centered vertically. Shorten it
+        // by 10% for seven-segment clocks and 30% for all other clock styles.
+        // The clock glyphs, date, and AM/PM retain their existing geometry.
+        boolean sevenSegmentBackground = clockText instanceof SevenSegmentClockTextView
+                && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         int backgroundHeight = hero.getHeight() > 0 ? hero.getHeight()
                 : LauncherUiUtils.dp(this, 140);
-        int verticalInset = Math.max(1, Math.round(backgroundHeight * 0.10f));
+        float totalHeightReduction = sevenSegmentBackground ? 0.10f : 0.30f;
+        int verticalInset = Math.max(1,
+                Math.round(backgroundHeight * totalHeightReduction / 2f));
         InsetDrawable centeredBackground = new InsetDrawable(next,
                 0, verticalInset, 0, verticalInset);
         if (animate) {
