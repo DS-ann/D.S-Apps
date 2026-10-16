@@ -43,7 +43,7 @@ final class HomePageModel {
         }
 
         SharedPreferences.Editor edit = prefs.edit();
-        int pageCapacity = Math.max(1, columns * rows);
+        int pageCapacity = Math.max(1, Math.min(capacity, columns * rows));
         int[] pageLoads = new int[PAGE_COUNT];
         // Keep each screen within its real visible grid. If old versions stored too
         // many apps on one page, migrate the overflow to the other page instead of
