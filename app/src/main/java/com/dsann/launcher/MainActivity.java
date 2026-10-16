@@ -293,16 +293,16 @@ public class MainActivity extends Activity {
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
-            gestureStartedOnClock = touchStartedOnClock(event.getRawX(), event.getRawY());
+            // Resize grips live in the root overlay and sit partly outside the
+            // clock's normal hit rectangle. Test them BEFORE outside-tap dismissal.
+            clockResizeEdge = clockWidgetEditing
+                    ? hitClockResizeEdge(event.getRawX(), event.getRawY()) : 0;
+            gestureStartedOnClock = touchStartedOnClock(event.getRawX(), event.getRawY())
+                    || clockResizeEdge != 0;
             if (clockWidgetEditing && !gestureStartedOnClock) {
-                // Edit mode is dismissed by a genuine outside tap, not by lifting
-                // the finger after a long-press that just revealed the resize grips.
                 exitClockWidgetEditMode();
             }
-            clockResizeEdge = 0;
-            if (gestureStartedOnClock && clockWidgetEditing) {
-                clockResizeEdge = hitClockResizeEdge(event.getRawX(), event.getRawY());
-                if (clockResizeEdge != 0) {
+            if (clockResizeEdge != 0 && clockWidgetEditing) {
                     clockWidgetDragging = true;
                     clockWidgetDownRawX = event.getRawX();
                     clockWidgetDownRawY = event.getRawY();
@@ -351,10 +351,16 @@ public class MainActivity extends Activity {
                     clockPanel.getLocationOnScreen(now);
                     float targetX = clockWidgetStartScreenX;
                     float targetY = clockWidgetStartScreenY;
-                    // Keep the opposite edge fixed while resizing; no workspace
-                    // collision checks are applied to the clock widget.
-                    if (resizingEdge == 1) targetX += clockWidgetStartPanelWidth - clockPanel.getWidth();
-                    if (resizingEdge == 3) targetY += clockWidgetStartPanelHeight - clockPanel.getHeight();
+                    // Preserve the opposite VISUAL edge. Vertical scaling changes
+                    // the panel's drawn height while its reserved layout height stays fixed.
+                    if (resizingEdge == 1) {
+                        targetX += clockWidgetStartPanelWidth - clockPanel.getWidth();
+                    } else if (resizingEdge == 3) {
+                        float startVisualHeight = clockWidgetStartPanelHeight
+                                * (clockWidgetStartBreadth / 100f);
+                        float currentVisualHeight = clockPanel.getHeight() * clockPanel.getScaleY();
+                        targetY += startVisualHeight - currentVisualHeight;
+                    }
                     clockPanel.setTranslationX(clockPanel.getTranslationX() + targetX - now[0]);
                     clockPanel.setTranslationY(clockPanel.getTranslationY() + targetY - now[1]);
                     prefs.edit().putFloat(KEY_CLOCK_WIDGET_X, clockPanel.getTranslationX())
