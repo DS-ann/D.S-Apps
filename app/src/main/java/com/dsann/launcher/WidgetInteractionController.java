@@ -372,10 +372,35 @@ final class WidgetInteractionController {
                 FrameLayout activePage = container.getParent() instanceof FrameLayout
                         ? (FrameLayout) container.getParent() : page;
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                int previousWidth = current.width;
+                int previousHeight = current.height;
                 current.width = Math.max(LauncherUiUtils.dp(activity, 140), Math.min(Math.max(1, activePage.getWidth()) - current.leftMargin,
                         origin[2] + Math.round(event.getRawX() - down[0])));
                 current.height = Math.max(LauncherUiUtils.dp(activity, 90), Math.min(Math.max(1, activePage.getHeight()) - current.topMargin,
                         origin[3] + Math.round(event.getRawY() - down[1])));
+                // Resizing may not grow through another widget. Reject the proposed
+                // frame rather than allowing overlapping AppWidgetHostViews.
+                boolean overlapsWidget = false;
+                int right = current.leftMargin + current.width;
+                int bottom = current.topMargin + current.height;
+                for (int i = 0; i < activePage.getChildCount(); i++) {
+                    View other = activePage.getChildAt(i);
+                    if (other == container || !(other.getTag() instanceof String)
+                            || !((String) other.getTag()).startsWith("launcher_widget:")) continue;
+                    FrameLayout.LayoutParams otherParams =
+                            (FrameLayout.LayoutParams) other.getLayoutParams();
+                    int otherRight = otherParams.leftMargin + other.getWidth();
+                    int otherBottom = otherParams.topMargin + other.getHeight();
+                    if (current.leftMargin < otherRight && right > otherParams.leftMargin
+                            && current.topMargin < otherBottom && bottom > otherParams.topMargin) {
+                        overlapsWidget = true;
+                        break;
+                    }
+                }
+                if (overlapsWidget) {
+                    current.width = previousWidth;
+                    current.height = previousHeight;
+                }
                 container.setLayoutParams(current);
                 listener.setWorkspaceGridVisible(true, container);
                 return true;
@@ -389,6 +414,9 @@ final class WidgetInteractionController {
                             container.getLayoutParams().width, container.getLayoutParams().height);
                 }
                 listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
+                if (container.getParent() instanceof FrameLayout) {
+                    listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
+                }
                 return true;
             }
             return true;
