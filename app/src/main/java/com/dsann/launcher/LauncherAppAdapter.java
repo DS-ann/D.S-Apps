@@ -31,6 +31,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
     private final List<ResolveInfo> allApps;
     private final List<ResolveInfo> drawerApps;
     private final List<String> fixedPackages;
+    private final List<ResolveInfo> homeItems = new ArrayList<>();
     private final boolean drawer;
     private final String iconSizeKey;
     private final String fontSizeKey;
@@ -49,6 +50,18 @@ public final class LauncherAppAdapter extends BaseAdapter {
         this.drawerApps = drawerApps;
         this.fixedPackages = fixedPackages;
         this.drawer = drawer;
+        if (!drawer && fixedPackages != null) {
+            Map<String, ResolveInfo> appsByPackage = new HashMap<>();
+            for (ResolveInfo app : allApps) {
+                if (app != null && app.activityInfo != null) {
+                    appsByPackage.put(app.activityInfo.packageName, app);
+                }
+            }
+            for (String packageName : fixedPackages) {
+                ResolveInfo app = appsByPackage.get(packageName);
+                if (app != null) homeItems.add(app);
+            }
+        }
         this.iconSizeKey = iconSizeKey;
         this.fontSizeKey = fontSizeKey;
         this.showLabelsKey = showLabelsKey;
@@ -56,20 +69,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
     }
 
     private List<ResolveInfo> items() {
-        if (drawer) return drawerApps;
-        List<ResolveInfo> out = new ArrayList<>();
-        if (fixedPackages != null) {
-            for (String packageName : fixedPackages) {
-                for (ResolveInfo app : allApps) {
-                    if (app != null && app.activityInfo != null
-                            && packageName.equals(app.activityInfo.packageName)) {
-                        out.add(app);
-                        break;
-                    }
-                }
-            }
-        }
-        return out;
+        return drawer ? drawerApps : homeItems;
     }
 
     private int dp(float value) {
@@ -127,6 +127,13 @@ public final class LauncherAppAdapter extends BaseAdapter {
     @Override public long getItemId(int position) { return position; }
 
     @Override public View getView(int position, View recycled, ViewGroup parent) {
+        List<ResolveInfo> currentItems = items();
+        if (position < 0 || position >= currentItems.size()) return recycled != null ? recycled : new LinearLayout(activity);
+        return getViewForApp(currentItems.get(position), recycled, parent);
+    }
+
+    View getViewForApp(ResolveInfo app, View recycled, ViewGroup parent) {
+        if (app == null || app.activityInfo == null) return recycled != null ? recycled : new LinearLayout(activity);
         LinearLayout cell;
         ImageView icon;
         TextView label;
@@ -148,9 +155,6 @@ public final class LauncherAppAdapter extends BaseAdapter {
             label = makeLabel();
             cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
         }
-        List<ResolveInfo> currentItems = items();
-        if (position < 0 || position >= currentItems.size()) return cell;
-        ResolveInfo app = currentItems.get(position);
         int iconSize = preferences == null ? 96 : preferences.getInt(iconSizeKey, 96);
         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
         if (iconParams != null && (iconParams.width != dp(iconSize) || iconParams.height != dp(iconSize))) {
