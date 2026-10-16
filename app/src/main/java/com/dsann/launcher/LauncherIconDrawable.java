@@ -73,20 +73,16 @@ final class LauncherIconDrawable extends Drawable {
             paint.setColor(contrastingShapeColor());
             canvas.drawPath(path, paint);
 
-            // Draw the original app artwork inset inside the silhouette, leaving
-            // a consistent contrasting rim visible around it.
-            RectF artworkRect = new RectF(rect);
-            float artworkInset = Math.min(rect.width(), rect.height()) * 0.16f;
-            artworkRect.inset(artworkInset, artworkInset);
-            if (artworkRect.width() > 0 && artworkRect.height() > 0) {
-                int save = canvas.save();
-                setShapePath(artworkRect);
-                canvas.clipPath(path);
-                source.setBounds(Math.round(artworkRect.left), Math.round(artworkRect.top),
-                        Math.round(artworkRect.right), Math.round(artworkRect.bottom));
-                source.draw(canvas);
-                canvas.restoreToCount(save);
-            }
+            // Draw the app artwork across the full silhouette. The contrasting
+            // fill remains visible only wherever the source artwork is transparent;
+            // do not inset the artwork or create a rim.
+            int save = canvas.save();
+            setShapePath(rect);
+            canvas.clipPath(path);
+            source.setBounds(Math.round(rect.left), Math.round(rect.top),
+                    Math.round(rect.right), Math.round(rect.bottom));
+            source.draw(canvas);
+            canvas.restoreToCount(save);
         } else {
             source.setBounds(Math.round(rect.left), Math.round(rect.top),
                     Math.round(rect.right), Math.round(rect.bottom));
