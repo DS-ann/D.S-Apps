@@ -4015,6 +4015,16 @@ public class MainActivity extends Activity {
         addChoiceRow(content, "Clock visual style", prefs.getInt(KEY_CLOCK_STYLE, 0),
                 new String[]{"Digital", "Cyber HUD", "Neon Circuit", "Tech Minimal", "Terminal Digital", "7-Segment Digital"}, value -> {
             prefs.edit().putInt(KEY_CLOCK_STYLE, value).apply();
+            // A style change must be applied to both independent clock views.
+            // updateClock() changes the displayed value, not the typography/renderer.
+            int restorePage = Math.max(0, Math.min(1, currentPage));
+            for (int page = 0; page < clockTextsByPage.length; page++) {
+                activateClockForPage(page);
+                applyClockStyle();
+                applyClockPositionAndSize();
+                applyClockPanelColor(false);
+            }
+            activateClockForPage(restorePage);
             updateClock();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -4377,7 +4387,10 @@ public class MainActivity extends Activity {
                 ? (naturalClockWidth + sevenSegmentExtraWidthDp) / Math.max(1f, naturalClockWidth)
                 : 1f;
         // Non-LED styles retain the same width treatment, now with consistent visual height.
-        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : 1.10f);
+        // Keep the text glyphs inside the width reserved by the background.
+        // A 1.10x non-LED scale enlarged the digits after panel width was measured,
+        // causing the background to look too narrow on initial layout.
+        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : 1f);
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
         clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale);
