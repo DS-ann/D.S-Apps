@@ -83,6 +83,11 @@ final class LauncherDrawerController {
                 new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 42));
         searchRowParams.topMargin = LauncherUiUtils.dp(activity, 2);
         screen.addView(searchRow, searchRowParams);
+        // Keep the active text field above the keyboard on Android 6, where the launcher
+        // draws edge-to-edge and adjustResize may not shrink the window. Move the row
+        // above the app grid so typing remains visible even when the keyboard covers the bottom.
+        screen.removeView(searchRow);
+        screen.addView(searchRow, 1, searchRowParams);
 
         // The search control lives in the drawer's bottom row. Tapping it expands
         // that same row into an inline field, so the keyboard pushes the row up
