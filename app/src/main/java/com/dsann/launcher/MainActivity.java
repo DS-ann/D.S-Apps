@@ -1571,15 +1571,21 @@ public class MainActivity extends Activity {
                 shortcutPopupShown[0] = false;
                 handler.removeCallbacks(shortcutArmRunnable[0]);
                 handler.removeCallbacks(shortcutPopupRunnable[0]);
-                shortcutArmRunnable[0] = () -> shortcutDragArmed[0] = true;
+                shortcutArmRunnable[0] = () -> {
+                    if (!shortcutDragging[0] && tile.isAttachedToWindow()) {
+                        shortcutDragArmed[0] = true;
+                        LauncherUiUtils.startMoveHint(tile, this);
+                    }
+                };
                 shortcutPopupRunnable[0] = () -> {
                     if (!shortcutDragging[0] && tile.isAttachedToWindow()) {
+                        LauncherUiUtils.stopMoveHint(tile);
                         shortcutPopupShown[0] = true;
                         tile.performLongClick();
                     }
                 };
-                handler.postDelayed(shortcutArmRunnable[0], 250L);
-                handler.postDelayed(shortcutPopupRunnable[0], 650L);
+                handler.postDelayed(shortcutArmRunnable[0], 1000L);
+                handler.postDelayed(shortcutPopupRunnable[0], 2000L);
                 return true;
             }
             if (action == MotionEvent.ACTION_MOVE) {
@@ -1590,6 +1596,7 @@ public class MainActivity extends Activity {
                 if (moved && shortcutDragArmed[0] && !shortcutPopupShown[0]) {
                     handler.removeCallbacks(shortcutPopupRunnable[0]);
                     if (!shortcutDragging[0]) {
+                        LauncherUiUtils.stopMoveHint(tile);
                         shortcutDragging[0] = true;
                         setWorkspaceGridVisible(true, tile);
                         tile.bringToFront();
@@ -1607,6 +1614,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                LauncherUiUtils.stopMoveHint(tile);
                 handler.removeCallbacks(shortcutArmRunnable[0]);
                 handler.removeCallbacks(shortcutPopupRunnable[0]);
                 if (shortcutDragging[0]) {
@@ -1854,7 +1862,10 @@ public class MainActivity extends Activity {
                 if (iconArmDrag != null) handler.removeCallbacks(iconArmDrag);
                 if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 iconArmDrag = () -> {
-                    if (activeDragView == view) iconDragArmed = true;
+                    if (activeDragView == view) {
+                        iconDragArmed = true;
+                        LauncherUiUtils.startMoveHint(view, this);
+                    }
                 };
                 iconShowOptions = () -> {
                     if (activeDragView == view && !iconDragging) {
@@ -1877,6 +1888,7 @@ public class MainActivity extends Activity {
                     if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                 }
                 if (!iconDragging && iconDragArmed && moved) {
+                    LauncherUiUtils.stopMoveHint(view);
                     iconDragging = true;
                     if (iconShowOptions != null) handler.removeCallbacks(iconShowOptions);
                     setWorkspaceGridVisible(true, view);
@@ -1911,6 +1923,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            LauncherUiUtils.stopMoveHint(view);
             // Finish resize gestures here before they can fall through to launcher
             // gesture handling. Without this reset, the resize flag stayed armed
             // after finger-up and later swipes could keep changing clock dimensions.
