@@ -16,6 +16,7 @@ public final class SevenSegmentClockTextView extends TextView {
     private final Paint segmentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean sevenSegmentMode;
     private int segmentColor = Color.rgb(196, 200, 209);
+    private final float[][] segmentRects = new float[7][4];
 
     public SevenSegmentClockTextView(Context context) {
         super(context);
@@ -49,10 +50,14 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     public void setSevenSegmentMode(boolean enabled) {
+        if (sevenSegmentMode == enabled) return;
         // Keep standard TextView measurement for every preset. A larger invisible
         // measurement font gives WRAP_CONTENT enough width for the custom LED
         // geometry; onDraw itself sizes the segments to the actual view bounds.
-        setTextSize(enabled ? 110f : 78f);
+        float targetSize = enabled ? 110f : 78f;
+        if (Math.abs(getTextSize() - targetSize * getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
+            setTextSize(targetSize);
+        }
         if (enabled) {
             int current = getCurrentTextColor();
             if (Color.alpha(current) != 0) segmentColor = current;
@@ -64,7 +69,9 @@ public final class SevenSegmentClockTextView extends TextView {
             sevenSegmentMode = false;
             super.setTextColor(segmentColor);
         }
-        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
+        if (getLayerType() != android.view.View.LAYER_TYPE_SOFTWARE) {
+            setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
+        }
         invalidate();
         requestLayout();
     }
@@ -157,19 +164,18 @@ public final class SevenSegmentClockTextView extends TextView {
             float t = y;
             float b = y + digitHeight;
             float m = mid;
-            float[][] segments = new float[][] {
-                    {l + half, t, r - half, t + thickness},                    // A top
-                    {r - thickness, t + half, r, m - half},                   // B upper right
-                    {r - thickness, m + half, r, b - half},                   // C lower right
-                    {l + half, b - thickness, r - half, b},                   // D bottom
-                    {l, m + half, l + thickness, b - half},                   // E lower left
-                    {l, t + half, l + thickness, m - half},                   // F upper left
-                    {l + half, m - half, r - half, m + half}                  // G middle
-            };
-            boolean[] lit = segments(ch);
+            float[][] segments = segmentRects;
+            setSegment(segments[0], l + half, t, r - half, t + thickness);
+            setSegment(segments[1], r - thickness, t + half, r, m - half);
+            setSegment(segments[2], r - thickness, m + half, r, b - half);
+            setSegment(segments[3], l + half, b - thickness, r - half, b);
+            setSegment(segments[4], l, m + half, l + thickness, b - half);
+            setSegment(segments[5], l, t + half, l + thickness, m - half);
+            setSegment(segments[6], l + half, m - half, r - half, m + half);
+            int litMask = segmentMask(ch);
             for (int j = 0; j < segments.length; j++) {
                 float[] seg = segments[j];
-                segmentPaint.setColor(lit[j] ? color : unlitColor);
+                segmentPaint.setColor((litMask & (1 << j)) != 0 ? color : unlitColor);
                 canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
                         thickness * 0.45f, thickness * 0.45f, segmentPaint);
             }
@@ -178,19 +184,28 @@ public final class SevenSegmentClockTextView extends TextView {
         canvas.restore();
     }
 
-    private boolean[] segments(char digit) {
+    private static void setSegment(float[] out, float left, float top, float right, float bottom) {
+        out[0] = left;
+        out[1] = top;
+        out[2] = right;
+        out[3] = bottom;
+    }
+
+    // Bit positions map to segments A through G; returning a mask avoids allocating
+    // a new boolean array for each digit during every redraw.
+    private int segmentMask(char digit) {
         switch (digit) {
-            case '0': return new boolean[]{true, true, true, true, true, true, false};
-            case '1': return new boolean[]{false, true, true, false, false, false, false};
-            case '2': return new boolean[]{true, true, false, true, true, false, true};
-            case '3': return new boolean[]{true, true, true, true, false, false, true};
-            case '4': return new boolean[]{false, true, true, false, false, true, true};
-            case '5': return new boolean[]{true, false, true, true, false, true, true};
-            case '6': return new boolean[]{true, false, true, true, true, true, true};
-            case '7': return new boolean[]{true, true, true, false, false, false, false};
-            case '8': return new boolean[]{true, true, true, true, true, true, true};
-            case '9': return new boolean[]{true, true, true, true, false, true, true};
-            default: return new boolean[7];
+            case '0': return 63;
+            case '1': return 6;
+            case '2': return 91;
+            case '3': return 79;
+            case '4': return 102;
+            case '5': return 109;
+            case '6': return 125;
+            case '7': return 7;
+            case '8': return 127;
+            case '9': return 111;
+            default: return 0;
         }
     }
 }
