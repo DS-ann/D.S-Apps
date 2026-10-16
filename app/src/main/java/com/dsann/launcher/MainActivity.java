@@ -437,7 +437,7 @@ public class MainActivity extends Activity {
             // controller. Do not let the launcher steal it for page navigation:
             // otherwise moving/resizing a widget can rotate pages underneath it.
             // Page changes remain available from the free workspace surface.
-            if (!drawerOpen && !gestureStartedOnWidget && !gestureStartedOnContactShortcut
+            if (!drawerOpen && !gestureStartedOnContactShortcut
                     && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
                     && !heldItemGesture && !gestureStartedOnClock
                     && pagesStrip != null && pagesStrip.getChildCount() > 1
@@ -1065,7 +1065,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, -2);
         // The clock is an overlay widget: resizing must not reflow the home grid.
         // Keep the date at a stable offset; the clock glyph may extend over items below.
-        dp.topMargin = LauncherUiUtils.dp(this, 3);
+        dp.topMargin = LauncherUiUtils.dp(this, 1);
         hero.addView(dateText, dp);
         // Detach before assigning FrameLayout.LayoutParams to this page overlay.
         homeScreen.removeView(hero);
@@ -1190,7 +1190,7 @@ public class MainActivity extends Activity {
                 Color.argb(220, 0, 0, 0));
         LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        dateParams.topMargin = LauncherUiUtils.dp(this, 3);
+        dateParams.topMargin = LauncherUiUtils.dp(this, 1);
         panel.addView(date, dateParams);
 
         clockPanelsByPage[1] = panel;
@@ -1310,8 +1310,10 @@ public class MainActivity extends Activity {
             savedWidthDp = 0;
             savedHeightDp = 0;
         }
-        int defaultShortcutWidth = LauncherUiUtils.dp(this, 52);
-        int defaultShortcutHeight = LauncherUiUtils.dp(this, 52);
+        // A direct-call shortcut is an app-like icon, not a miniature widget tile.
+        // Its default footprint is the same compact size as the app icon cell.
+        int defaultShortcutWidth = LauncherUiUtils.dp(this, 28);
+        int defaultShortcutHeight = LauncherUiUtils.dp(this, 28);
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
                         : Math.min(cellW, defaultShortcutWidth)));
@@ -1465,7 +1467,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 96), Math.min(desiredTileWidth, desiredTileHeight)));
+        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 28), Math.min(desiredTileWidth, desiredTileHeight)));
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         tileContent.setGravity(Gravity.CENTER);
         tileContent.setOrientation(LinearLayout.VERTICAL);
