@@ -939,8 +939,12 @@ public class MainActivity extends Activity {
         dateText.setLetterSpacing(0.04f);
         dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(220, 0, 0, 0));
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, -2);
-        dp.topMargin = LauncherUiUtils.dp(this, 3);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, -2);
+        // Keep the date visually attached to the clock even when the clock's
+        // vertical resize scale makes its reserved row taller.
+        int clockBaseHeight = LauncherUiUtils.dp(this, 114);
+        int clockRowHeight = Math.max(1, (int) Math.ceil(clockBaseHeight * getClockBreadth() / 100f));
+        dp.topMargin = LauncherUiUtils.dp(this, 3) - Math.max(0, clockRowHeight - clockBaseHeight);
         hero.addView(dateText, dp);
         applyClockPositionAndSize();
         applyClockPanelColor(false);
@@ -969,6 +973,11 @@ public class MainActivity extends Activity {
         dockContainer.setGravity(Gravity.CENTER_VERTICAL);
         dockContainer.setPadding(0, LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 2));
         dockContainer.setBackgroundColor(Color.TRANSPARENT);
+        // Dock icons sit at the bottom edge of the workspace; don't let the
+        // page viewport or the dock's own bounds clip their upper/lower pixels.
+        dockContainer.setClipChildren(false);
+        dockContainer.setClipToPadding(false);
+        dockContainer.setElevation(LauncherUiUtils.dp(this, 4));
         int initialDockIconSize = prefs.getInt(KEY_ICON_SIZE, 48);
         LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1,
                 LauncherUiUtils.dp(this, Math.max(56, initialDockIconSize + 8)));
@@ -1379,6 +1388,8 @@ public class MainActivity extends Activity {
 
             FrameLayout slotView = new FrameLayout(this);
             slotView.setBackgroundColor(Color.TRANSPARENT);
+            slotView.setClipChildren(false);
+            slotView.setClipToPadding(false);
             LinearLayout.LayoutParams slotParams = new LinearLayout.LayoutParams(0, -1, 1f);
             int packageIndex = slot == 0 ? 0 : 1;
             if (packageIndex < dockPackages.size()) {
