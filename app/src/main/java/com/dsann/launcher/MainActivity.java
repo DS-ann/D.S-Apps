@@ -3471,8 +3471,8 @@ public class MainActivity extends Activity {
             String clockValue = DateFormat.getTimeFormat(this).format(now);
             if (amPmText != null) {
                 if (use24Hour) {
-                    amPmText.setText("");
-                    amPmText.setVisibility(View.GONE);
+                    if (amPmText.length() != 0) amPmText.setText("");
+                    if (amPmText.getVisibility() != View.GONE) amPmText.setVisibility(View.GONE);
                 } else {
                     String marker = new SimpleDateFormat("a", Locale.getDefault()).format(now);
                     int markerAt = clockValue.toUpperCase(Locale.getDefault())
@@ -3481,8 +3481,8 @@ public class MainActivity extends Activity {
                         clockValue = (clockValue.substring(0, markerAt)
                                 + clockValue.substring(markerAt + marker.length())).trim();
                     }
-                    amPmText.setText(marker);
-                    amPmText.setVisibility(View.VISIBLE);
+                    if (!marker.contentEquals(amPmText.getText())) amPmText.setText(marker);
+                    if (amPmText.getVisibility() != View.VISIBLE) amPmText.setVisibility(View.VISIBLE);
                 }
             }
             clockValue = clockValue.trim();
@@ -3522,8 +3522,9 @@ public class MainActivity extends Activity {
                 }
             }
             clockText.setText(displayClock);
-            dateText.setVisibility(prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE);
-            dateText.setText(dateValue);
+            int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
+            if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
+            if (!dateValue.contentEquals(dateText.getText())) dateText.setText(dateValue);
             // Layout, typography and panel appearance are configuration-driven and
             // are applied when the clock is created or settings change, not every minute.
         }
