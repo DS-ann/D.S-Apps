@@ -4510,7 +4510,7 @@ public class MainActivity extends Activity {
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         clockText.setTranslationY(sevenSegment ? 0f
-                : -LauncherUiUtils.dp(this, 10) / Math.max(0.01f, breadthScale));
+                : LauncherUiUtils.dp(this, 5) / Math.max(0.01f, breadthScale));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
