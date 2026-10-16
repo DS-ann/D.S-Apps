@@ -605,7 +605,7 @@ public class MainActivity extends Activity {
                 drawerCloseSwipeClaimed = false;
                 // Cancel/release must always settle to a stable endpoint. Progress is
                 // the remaining-open fraction for a downward close gesture.
-                if (drawerSwipeProgress > 0.30f) {
+                if (drawerSwipeProgress > 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -617,7 +617,7 @@ public class MainActivity extends Activity {
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
                 // A cancelled upward opening settles to the nearest stable screen.
-                if (drawerSwipeProgress >= 0.30f) {
+                if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -653,7 +653,7 @@ public class MainActivity extends Activity {
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
                 // Complete toward whichever screen is nearest at finger release.
-                if (drawerSwipeProgress > 0.30f) {
+                if (drawerSwipeProgress > 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -668,7 +668,7 @@ public class MainActivity extends Activity {
                 // finger reverses or lifts mid-transition, settle to the nearest
                 // endpoint instead of starting control-center navigation or leaving
                 // the two surfaces in an intermediate pose.
-                if (drawerSwipeProgress >= 0.30f) {
+                if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -689,7 +689,7 @@ public class MainActivity extends Activity {
                 if (dy < 0f) {
                     // Finish from the current pose, but do not force a tiny partial
                     // swipe all the way open. Always settle to home or drawer.
-                    if (drawerSwipeProgress >= 0.30f) {
+                    if (drawerSwipeProgress >= 0.10f) {
                         LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                                 () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                     } else {
@@ -711,7 +711,7 @@ public class MainActivity extends Activity {
                 int destination = currentPage;
                 // Require more than 30% of the page width at release. Velocity does
                 // not override this threshold, so a quick short flick cannot change pages.
-                if (wheelSwipeProgress > 0.30f) {
+                if (wheelSwipeProgress > 0.10f) {
                     int candidate = currentPage + wheelSwipeDirection;
                     if (candidate >= 0 && candidate < pagesStrip.getChildCount()) {
                         destination = candidate;
@@ -4055,11 +4055,19 @@ public class MainActivity extends Activity {
             for (int page = 0; page < clockTextsByPage.length; page++) {
                 activateClockForPage(page);
                 applyClockStyle();
+                applyClockPanelColor(false);
+            }
+            // Update the displayed text before measuring either clock. Measuring
+            // with the previous style's text/font made the panel jump or clip when
+            // switching between LED and standard typography.
+            activateClockForPage(restorePage);
+            updateClock();
+            for (int page = 0; page < clockTextsByPage.length; page++) {
+                activateClockForPage(page);
                 applyClockPositionAndSize();
                 applyClockPanelColor(false);
             }
             activateClockForPage(restorePage);
-            updateClock();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
@@ -4438,10 +4446,10 @@ public class MainActivity extends Activity {
         clockText.setPivotX(clockText.getWidth() > 0 ? clockText.getWidth() / 2f : 0f);
         // Scale non-seven-segment glyphs symmetrically around the row's center.
         clockText.setScaleY(sevenSegment ? 1f : normalizedNonLedHeightScale);
-        // Nudge only the seven-segment digits slightly right against the
-        // background. Compensate for panel scaling so the offset stays 3 dp.
+        // Nudge the seven-segment glyphs slightly left against the background.
+        // Compensate for panel scaling so the offset remains a small 3 dp shift.
         clockText.setTranslationX(sevenSegment
-                ? LauncherUiUtils.dp(this, 3) / Math.max(0.01f, lengthScale) : 0f);
+                ? -LauncherUiUtils.dp(this, 3) / Math.max(0.01f, lengthScale) : 0f);
         // No vertical offset: non-seven-segment clock remains centered in its background.
         clockText.setTranslationY(0f);
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
