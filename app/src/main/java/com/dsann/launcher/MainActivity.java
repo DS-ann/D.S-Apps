@@ -169,6 +169,7 @@ public class MainActivity extends Activity {
     private final List<List<String>> pages = new ArrayList<>();
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
+    private float drawerSwipeProgress = 0f;
     private boolean gestureStartedOnAppCell = false;
     private boolean gestureStartedOnWidget = false;
     private boolean gestureStartedOnContactShortcut = false;
@@ -304,6 +305,7 @@ public class MainActivity extends Activity {
             pageSwipeChildCancelled = false;
             verticalSwipeClaimed = false;
             drawerCloseSwipeClaimed = false;
+            drawerSwipeProgress = 0f;
             gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
@@ -416,6 +418,9 @@ public class MainActivity extends Activity {
             if (!drawerOpen && !itemManipulation
                     && !verticalSwipeClaimed && verticalSwipe) {
                 verticalSwipeClaimed = true;
+                drawerSwipeProgress = Math.max(0f, Math.min(1f, Math.abs(dy)
+                        / (float) Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                                ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels)));
                 handler.removeCallbacks(homeLongPress);
                 handler.removeCallbacks(clockWidgetLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
@@ -522,7 +527,7 @@ public class MainActivity extends Activity {
                     && (verticalSwipeClaimed
                         || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                             && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
-                if (dy < 0f) showDrawer();
+                if (dy < 0f) showDrawer(drawerSwipeProgress);
                 else openControlCenter();
                 return true;
             }
@@ -2427,10 +2432,12 @@ public class MainActivity extends Activity {
                 getDrawerTransition());
     }
 
-    private void showDrawer() {
+    private void showDrawer() { showDrawer(0f); }
+
+    private void showDrawer(float swipeProgress) {
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
-        }, getDrawerTransition());
+        }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
     }
 
     private boolean addToHome(String packageName) { return addToHome(packageName, currentPage); }
