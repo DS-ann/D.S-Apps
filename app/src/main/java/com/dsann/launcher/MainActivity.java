@@ -2520,12 +2520,36 @@ public class MainActivity extends Activity {
      * unnecessarily detached AppWidgetHostViews and caused focus-related framework
      * crashes. Page membership is rebuilt only after a real content change.
      */
+    private void dismissShortcutEditMode() {
+        if (pagesStrip != null) {
+            for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+                View pageView = pagesStrip.getChildAt(pageIndex);
+                if (!(pageView instanceof ViewGroup)) continue;
+                ViewGroup page = (ViewGroup) pageView;
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    View child = page.getChildAt(i);
+                    if (!"launcher_contact_shortcut".equals(child.getTag())
+                            || !(child instanceof ViewGroup)) continue;
+                    ViewGroup shortcut = (ViewGroup) child;
+                    for (int j = 0; j < shortcut.getChildCount(); j++) {
+                        View handle = shortcut.getChildAt(j);
+                        if ("launcher_shortcut_resize_handle".equals(handle.getTag())) {
+                            handle.setVisibility(View.GONE);
+                        }
+                    }
+                }
+            }
+        }
+        setWorkspaceGridVisible(false, null);
+    }
+
     private void showPage(int requestedPage, boolean animate) {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
         int targetPage = Math.max(0, Math.min(lastPage, requestedPage));
-        if (clockWidgetEditing && targetPage != currentPage) {
-            exitClockWidgetEditMode();
+        if (targetPage != currentPage) {
+            if (clockWidgetEditing) exitClockWidgetEditMode();
+            dismissShortcutEditMode();
         }
         currentPage = targetPage;
         activateClockForPage(currentPage);
