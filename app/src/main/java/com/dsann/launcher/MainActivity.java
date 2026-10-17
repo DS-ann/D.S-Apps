@@ -1282,7 +1282,7 @@ public class MainActivity extends Activity {
         dockContainer.setElevation(LauncherUiUtils.dp(this, 4));
         int initialDockIconSize = prefs.getInt(KEY_ICON_SIZE, 48);
         LinearLayout.LayoutParams dockParams = new LinearLayout.LayoutParams(-1,
-                LauncherUiUtils.dp(this, Math.max(56, initialDockIconSize + 8)));
+                LauncherUiUtils.dp(this, Math.max(50, initialDockIconSize + 2)));
         dockParams.topMargin = LauncherUiUtils.dp(this, 2);
         dockParams.bottomMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(dockContainer, dockParams);
@@ -2030,7 +2030,7 @@ public class MainActivity extends Activity {
         dockContainer.removeAllViews();
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         ViewGroup.LayoutParams dockLayoutParams = dockContainer.getLayoutParams();
-        int desiredHeight = LauncherUiUtils.dp(this, Math.max(56, iconSize + 8));
+        int desiredHeight = LauncherUiUtils.dp(this, Math.max(50, iconSize + 2));
         if (dockLayoutParams != null && dockLayoutParams.height != desiredHeight) {
             dockLayoutParams.height = desiredHeight;
             dockContainer.setLayoutParams(dockLayoutParams);
