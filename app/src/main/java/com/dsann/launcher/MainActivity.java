@@ -532,6 +532,10 @@ public class MainActivity extends Activity {
                 // natural width caused their handles to jump, barely resize, or drift.
                 int lengthPercent = Math.round(clockWidgetStartLength
                         * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
+                // Typography clocks can hit the page-width cap at their saved
+                // percentage. Keep the resize based on the visible starting bounds
+                // so dragging either horizontal grip still changes the requested
+                // size predictably when shrinking back from that cap.
                 int breadthPercent;
                 boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
                         && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
@@ -2137,10 +2141,18 @@ public class MainActivity extends Activity {
                         float density = getResources().getDisplayMetrics().density;
                         int spanX = Math.max(1, (int) Math.ceil(finalLp.width / (float) cellW));
                         int spanY = Math.max(1, (int) Math.ceil(finalLp.height / (float) cellH));
+                        int savedPageWidth = Math.max(1, shortcutResizePage.getWidth());
+                        int savedPageHeight = Math.max(1, shortcutResizePage.getHeight());
                         prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), spanX)
                                 .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), spanY)
                                 .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), Math.max(1, Math.round(finalLp.width / density)))
                                 .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), Math.max(1, Math.round(finalLp.height / density)))
+                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
+                                        finalLp.leftMargin / (float) Math.max(1, savedPageWidth - finalLp.width))
+                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                                        finalLp.topMargin / (float) Math.max(1, savedPageHeight - finalLp.height))
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
+                                        pagesStrip == null ? 0 : pagesStrip.indexOfChild(shortcutResizePage))
                                 .apply();
                         if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                         setWorkspaceGridVisible(false, null);
@@ -5766,6 +5778,9 @@ public class MainActivity extends Activity {
         // Let the background reach the actual page edges. A display-width cap
         // leaves an unresizable strip when the workspace itself is narrower.
         final int availablePanelWidth = availablePageWidth;
+        // Extra room for the deliberately separated LED hour / colon / minute
+        // groups. Without reserving it, the max-width cap compresses the custom
+        // glyph layout and the left grip appears to stop widening the background.
         int measuredDateWidth = 0;
         final int configuredDateSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15)));
         final int configuredPmSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14)));
@@ -5800,8 +5815,9 @@ public class MainActivity extends Activity {
                 + markerWidth + LauncherUiUtils.dp(this, 1);
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth)
                 + LauncherUiUtils.dp(this, 4);
+        final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
-                contentWidth + LauncherUiUtils.dp(this, 8));
+                contentWidth + LauncherUiUtils.dp(this, 8) + ledGroupSpacing);
         // The clock's complete visual bounds must always fit inside this page.
         // Keep the requested size when it fits; if the user chooses an oversized
         // length, cap the rendered scale to the available page width.
