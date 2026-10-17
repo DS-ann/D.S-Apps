@@ -4068,15 +4068,33 @@ public class MainActivity extends Activity {
         if (view == null) return new int[]{0, 0, 0, 0};
         float sx = Math.max(0.01f, view.getScaleX());
         float sy = Math.max(0.01f, view.getScaleY());
-        // Use the actual on-screen View bounds, not requested LayoutParams sizes or
-        // margins. This is essential for mixed-size widgets and shortcuts: their
-        // collision footprint must match their rendered container, not a grid cell.
-        int x = Math.round(view.getLeft() + view.getTranslationX()
-                + view.getPivotX() * (1f - sx));
-        int y = Math.round(view.getTop() + view.getTranslationY()
-                + view.getPivotY() * (1f - sy));
-        return new int[]{x, y, Math.max(1, Math.round(view.getWidth() * sx)),
-                Math.max(1, Math.round(view.getHeight() * sy))};
+        int baseX = view.getLeft();
+        int baseY = view.getTop();
+        int baseWidth = view.getWidth();
+        int baseHeight = view.getHeight();
+
+        // setLayoutParams() does not update getLeft()/getTop() synchronously.
+        // During a drag, collision resolution can run before the next measure/layout
+        // pass; use the pending FrameLayout geometry in that case, or we may approve
+        // a drop using the item's previous position and create a real overlap.
+        ViewParent parent = view.getParent();
+        ViewGroup.LayoutParams raw = view.getLayoutParams();
+        if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            if (view.isLayoutRequested() || lp.leftMargin != view.getLeft()
+                    || lp.topMargin != view.getTop()) {
+                baseX = lp.leftMargin;
+                baseY = lp.topMargin;
+            }
+            if (lp.width > 0) baseWidth = lp.width;
+            if (lp.height > 0) baseHeight = lp.height;
+        }
+        // Include translations and scale/pivot so collision geometry matches the
+        // visible footprint, including the clock and temporary displacement animation.
+        int x = Math.round(baseX + view.getTranslationX() + view.getPivotX() * (1f - sx));
+        int y = Math.round(baseY + view.getTranslationY() + view.getPivotY() * (1f - sy));
+        return new int[]{x, y, Math.max(1, Math.round(Math.max(1, baseWidth) * sx)),
+                Math.max(1, Math.round(Math.max(1, baseHeight) * sy))};
     }
 
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
