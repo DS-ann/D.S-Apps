@@ -4005,12 +4005,6 @@ public class MainActivity extends Activity {
     }
 
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
-        if (gap == 0) {
-            // Treat touching edges as contact so displacement starts at the border,
-            // not only after one item has moved visibly over the other.
-            return a.left <= b.right && a.right >= b.left
-                    && a.top <= b.bottom && a.bottom >= b.top;
-        }
         android.graphics.Rect expanded = new android.graphics.Rect(
                 a.left - gap, a.top - gap, a.right + gap, a.bottom + gap);
         return android.graphics.Rect.intersects(expanded, b);
@@ -4025,8 +4019,7 @@ public class MainActivity extends Activity {
         if (moving[2] <= 0 || moving[3] <= 0) return;
         android.graphics.Rect movingRect = new android.graphics.Rect(
                 moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
-        // Displace only at actual border contact/overlap; no 5dp early trigger.
-        int gap = 0;
+        int gap = LauncherUiUtils.dp(this, 5);
 
         // First restore items whose saved slots are no longer covered by the drag.
         // Their original slots are reserved below so another displaced item cannot
@@ -4117,17 +4110,11 @@ public class MainActivity extends Activity {
                     int y = candidateY.intValue();
                     android.graphics.Rect candidateWithGap = new android.graphics.Rect(
                             x - gap, y - gap, x + g[2] + gap, y + g[3] + gap);
-                    // The moving item is a special obstacle: touching its border
-                    // must count as occupied, otherwise the current position can win
-                    // with distance zero and the item appears to move only a few dp
-                    // (or not at all) on some drag frames.
-                    boolean blocked = overlapsWithGap(candidateWithGap, movingRect, 0);
-                    if (!blocked) {
-                        for (android.graphics.Rect obstacle : obstacles) {
-                            if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
-                                blocked = true;
-                                break;
-                            }
+                    boolean blocked = false;
+                    for (android.graphics.Rect obstacle : obstacles) {
+                        if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
+                            blocked = true;
+                            break;
                         }
                     }
                     if (blocked) continue;
