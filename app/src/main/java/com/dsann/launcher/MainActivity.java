@@ -413,7 +413,33 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
         if (action == MotionEvent.ACTION_MOVE) {
-            if (clockWidgetMoving && clockPanel != null) {
+            // A touch that begins on the clock must still be allowed to become a
+            // normal launcher swipe. The clock's child listener consumes ACTION_DOWN,
+            // so explicitly cancel that child stream when movement crosses the swipe
+            // threshold, then let the activity-level drawer/page recognizers handle it.
+            boolean clockSwipeThreshold = Math.abs(dx) > LauncherUiUtils.dp(this, 12)
+                    || Math.abs(dy) > LauncherUiUtils.dp(this, 12);
+            if (gestureStartedOnClock && !clockWidgetEditing && clockResizeEdge == 0
+                    && clockSwipeThreshold) {
+                handler.removeCallbacks(clockWidgetLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
+                if (clockWidgetMoving) {
+                    showClockMoveBorder(false);
+                    clockWidgetMoving = false;
+                    setWorkspaceGridVisible(false, null);
+                }
+                gestureStartedOnClock = false;
+                if (!pageSwipeChildCancelled) {
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    super.dispatchTouchEvent(cancel);
+                    cancel.recycle();
+                    pageSwipeChildCancelled = true;
+                }
+            }
+            // Move-ready is only a border hint; actual clock movement is reserved for
+            // the 2-second edit mode, otherwise a held clock steals swipe gestures.
+            if (clockWidgetMoving && clockWidgetEditing && clockPanel != null) {
                 if (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5)) {
                     handler.removeCallbacks(clockWidgetEditLongPress);
