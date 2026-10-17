@@ -1929,246 +1929,143 @@ public class MainActivity extends Activity {
         tileParams.leftMargin = chosenLeft;
         tileParams.topMargin = chosenTop;
         chosenPage.addView(tile, tileParams);
-        // Resize handle mirrors widget editing: drag the blue lower-right grip to
-        // grow/shrink the contact tile in whole grid-cell increments.
-        View resizeGrip = new View(this);
-        GradientDrawable gripBackground = new GradientDrawable();
-        gripBackground.setColor(Color.rgb(115, 159, 255));
-        gripBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
-        resizeGrip.setBackground(gripBackground);
-        resizeGrip.setVisibility(View.GONE);
-        resizeGrip.setTag("launcher_shortcut_resize_handle");
-        FrameLayout.LayoutParams gripParams = new FrameLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 36), LauncherUiUtils.dp(this, 36), Gravity.RIGHT | Gravity.BOTTOM);
-        tile.addView(resizeGrip, gripParams);
-        resizeGrip.bringToFront();
+        // Four edge grips give shortcuts the same independent edge-resize behavior as widgets.
+        final View[] shortcutResizeHandles = new View[4];
         final boolean[] resizingShortcut = {false};
         final float[] resizeStart = {0f, 0f};
-        final int[] resizeBase = {shortcutSpanX, shortcutSpanY};
-        final int[] resizeBasePx = {tileWidth, tileHeight};
+        final int[] resizeOrigin = {chosenLeft, chosenTop, tileWidth, tileHeight};
         final FrameLayout shortcutResizePage = chosenPage;
-        resizeGrip.setOnTouchListener((view, event) -> {
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
+        for (int edge = 0; edge < shortcutResizeHandles.length; edge++) {
+            final int resizeEdge = edge; // 0 left, 1 right, 2 top, 3 bottom
+            View grip = new View(this);
+            GradientDrawable gripBackground = new GradientDrawable();
+            gripBackground.setColor(Color.rgb(115, 159, 255));
+            gripBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
+            grip.setBackground(gripBackground);
+            grip.setVisibility(View.GONE);
+            grip.setTag("launcher_shortcut_resize_handle");
+            int side = LauncherUiUtils.dp(this, 36);
+            int thick = LauncherUiUtils.dp(this, 18);
+            FrameLayout.LayoutParams gripParams = edge < 2
+                    ? new FrameLayout.LayoutParams(thick, side,
+                            edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
+                    : new FrameLayout.LayoutParams(side, thick,
+                            edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            tile.addView(grip, gripParams);
+            grip.bringToFront();
+            shortcutResizeHandles[edge] = grip;
+            grip.setOnTouchListener((view, event) -> {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
                     resizingShortcut[0] = true;
                     setWorkspaceGridVisible(true, tile);
                     resizeStart[0] = event.getRawX();
                     resizeStart[1] = event.getRawY();
-                    resizeBase[0] = Math.max(1, (int) Math.ceil((float) tile.getWidth() / cellW));
-                    resizeBase[1] = Math.max(1, (int) Math.ceil((float) tile.getHeight() / cellH));
-                    ViewGroup.LayoutParams startParams = tile.getLayoutParams();
-                    if (startParams instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams startLp = (FrameLayout.LayoutParams) startParams;
-                        resizeBasePx[0] = Math.max(cellW, startLp.width > 0 ? startLp.width : tile.getWidth());
-                        resizeBasePx[1] = Math.max(cellH, startLp.height > 0 ? startLp.height : tile.getHeight());
-                    } else {
-                        resizeBasePx[0] = Math.max(cellW, tile.getWidth());
-                        resizeBasePx[1] = Math.max(cellH, tile.getHeight());
-                    }
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                    resizeOrigin[0] = p.leftMargin;
+                    resizeOrigin[1] = p.topMargin;
+                    resizeOrigin[2] = p.width > 0 ? p.width : tile.getWidth();
+                    resizeOrigin[3] = p.height > 0 ? p.height : tile.getHeight();
                     tile.getParent().requestDisallowInterceptTouchEvent(true);
                     return true;
-                case MotionEvent.ACTION_MOVE:
-                    if (!resizingShortcut[0]) return true;
-                    ViewGroup.LayoutParams raw = tile.getLayoutParams();
-                    if (raw instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) raw;
-                        int previousWidth = p.width;
-                        int previousHeight = p.height;
-                        p.width = Math.max(cellW, Math.min(pageViewport.getWidth() - p.leftMargin,
-                                resizeBasePx[0] + Math.round(event.getRawX() - resizeStart[0])));
-                        p.height = Math.max(cellH, Math.min(pageViewport.getHeight() - p.topMargin,
-                                resizeBasePx[1] + Math.round(event.getRawY() - resizeStart[1])));
-                        // A shortcut may not be resized through an app, widget, or another
-                        // placed item. Reject that frame instead of creating a hidden overlap.
-                        boolean overlapsPlacedItem = false;
-                        int tileRight = p.leftMargin + p.width;
-                        int tileBottom = p.topMargin + p.height;
-                        for (int i = 0; i < shortcutResizePage.getChildCount(); i++) {
-                            View other = shortcutResizePage.getChildAt(i);
-                            if (other == tile || !(other.getTag() instanceof String)) continue;
-                            String otherTag = (String) other.getTag();
-                            if (!otherTag.startsWith("launcher_app:")
-                                    && !otherTag.startsWith("launcher_widget:")
-                                    && !"launcher_contact_shortcut".equals(otherTag)
-                                    && !"launcher_clock_widget".equals(otherTag)) continue;
-                            FrameLayout.LayoutParams otherParams =
-                                    (FrameLayout.LayoutParams) other.getLayoutParams();
-                            int otherWidth = other.getWidth() > 0 ? other.getWidth() : otherParams.width;
-                            int otherHeight = other.getHeight() > 0 ? other.getHeight() : otherParams.height;
-                            if (p.leftMargin < otherParams.leftMargin + otherWidth
-                                    && tileRight > otherParams.leftMargin
-                                    && p.topMargin < otherParams.topMargin + otherHeight
-                                    && tileBottom > otherParams.topMargin) {
-                                overlapsPlacedItem = true;
-                                break;
-                            }
+                }
+                if (action == MotionEvent.ACTION_MOVE && resizingShortcut[0]) {
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                    int dx = Math.round(event.getRawX() - resizeStart[0]);
+                    int dy = Math.round(event.getRawY() - resizeStart[1]);
+                    int minW = Math.min(cellW, Math.max(1, shortcutResizePage.getWidth()));
+                    int minH = Math.min(cellH, Math.max(1, shortcutResizePage.getHeight()));
+                    int left = resizeOrigin[0], top = resizeOrigin[1];
+                    int width = resizeOrigin[2], height = resizeOrigin[3];
+                    if (resizeEdge == 0) {
+                        left = Math.max(0, Math.min(resizeOrigin[0] + dx,
+                                resizeOrigin[0] + resizeOrigin[2] - minW));
+                        width = resizeOrigin[0] + resizeOrigin[2] - left;
+                    } else if (resizeEdge == 1) {
+                        width = Math.max(minW, resizeOrigin[2] + dx);
+                    } else if (resizeEdge == 2) {
+                        top = Math.max(0, Math.min(resizeOrigin[1] + dy,
+                                resizeOrigin[1] + resizeOrigin[3] - minH));
+                        height = resizeOrigin[1] + resizeOrigin[3] - top;
+                    } else {
+                        height = Math.max(minH, resizeOrigin[3] + dy);
+                    }
+                    width = Math.max(minW, Math.min(width, shortcutResizePage.getWidth() - left));
+                    height = Math.max(minH, Math.min(height, shortcutResizePage.getHeight() - top));
+                    android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + width, top + height);
+                    boolean overlap = false;
+                    for (int i = 0; i < shortcutResizePage.getChildCount(); i++) {
+                        View other = shortcutResizePage.getChildAt(i);
+                        if (other == tile || other.getVisibility() != View.VISIBLE
+                                || !(other.getTag() instanceof String)) continue;
+                        String tag = (String) other.getTag();
+                        if (!(tag.startsWith("launcher_app:") || tag.startsWith("launcher_widget:")
+                                || "launcher_contact_shortcut".equals(tag)
+                                || "launcher_clock_widget".equals(tag))) continue;
+                        FrameLayout.LayoutParams otherLp = other.getLayoutParams() instanceof FrameLayout.LayoutParams
+                                ? (FrameLayout.LayoutParams) other.getLayoutParams() : null;
+                        int ox = otherLp != null ? otherLp.leftMargin : other.getLeft();
+                        int oy = otherLp != null ? otherLp.topMargin : other.getTop();
+                        int ow = otherLp != null && otherLp.width > 0 ? otherLp.width : other.getWidth();
+                        int oh = otherLp != null && otherLp.height > 0 ? otherLp.height : other.getHeight();
+                        if (ow > 0 && oh > 0 && android.graphics.Rect.intersects(candidate,
+                                new android.graphics.Rect(ox, oy, ox + ow, oy + oh))) {
+                            overlap = true;
+                            break;
                         }
-                        if (overlapsPlacedItem) {
-                            p.width = previousWidth;
-                            p.height = previousHeight;
-                        }
+                    }
+                    if (!overlap) {
+                        p.leftMargin = left; p.topMargin = top; p.width = width; p.height = height;
                         tile.setLayoutParams(p);
-                        // Keep the label below the resized icon tile instead of letting it
-                        // remain at the original height and overlap the icon.
                         ViewGroup.LayoutParams rawLabel = label.getLayoutParams();
                         if (rawLabel instanceof FrameLayout.LayoutParams) {
                             FrameLayout.LayoutParams labelLp = (FrameLayout.LayoutParams) rawLabel;
-                            labelLp.topMargin = p.height + LauncherUiUtils.dp(this, 3);
+                            labelLp.topMargin = height + LauncherUiUtils.dp(this, 3);
                             label.setLayoutParams(labelLp);
                         }
-                        refreshWorkspaceGrid();
-                        // Grow the actual contact/app icon as the tile grows; changing only
-                        // the tile bounds leaves the icon visually stuck at its original size.
-                        // Keep the initial one-cell shortcut compact. Scale from the original
-                        // 28dp icon by the tile's grid-cell dimensions, so dragging smaller
-                        // restores the original icon instead of leaving it enlarged.
-                        float widthScale = (float) p.width / (float) cellW;
-                        float heightScale = (float) p.height / (float) cellH;
-                        float tileScale = Math.min(widthScale, heightScale);
+                        float scale = Math.min(width / (float) Math.max(1, cellW), height / (float) Math.max(1, cellH));
                         int configuredIconDp = Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48));
                         int iconSize = Math.max(LauncherUiUtils.dp(this, 24),
                                 Math.min(LauncherUiUtils.dp(this, 120),
-                                        Math.round(LauncherUiUtils.dp(this, configuredIconDp) * tileScale)));
-                        ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
-                        if (iconParams != null && (iconParams.width != iconSize || iconParams.height != iconSize)) {
-                            iconParams.width = iconSize;
-                            iconParams.height = iconSize;
-                            icon.setLayoutParams(iconParams);
+                                        Math.round(LauncherUiUtils.dp(this, configuredIconDp) * scale)));
+                        ViewGroup.LayoutParams iconLp = icon.getLayoutParams();
+                        if (iconLp != null) {
+                            iconLp.width = iconSize; iconLp.height = iconSize;
+                            icon.setLayoutParams(iconLp);
                         }
+                        refreshWorkspaceGrid();
                     }
                     return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
+                }
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     if (resizingShortcut[0]) {
                         resizingShortcut[0] = false;
+                        if (action == MotionEvent.ACTION_CANCEL) {
+                            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                            p.leftMargin = resizeOrigin[0]; p.topMargin = resizeOrigin[1];
+                            p.width = resizeOrigin[2]; p.height = resizeOrigin[3];
+                            tile.setLayoutParams(p);
+                        }
                         FrameLayout.LayoutParams finalLp = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                        // Layout may not have run yet for the final MOVE event. Persist the
-                        // authoritative requested dimensions, not stale measured getWidth().
-                        int finalWidth = Math.max(cellW, finalLp.width);
-                        int finalHeight = Math.max(cellH, finalLp.height);
-                        int finalX = Math.max(1, Math.min(columns, (int) Math.ceil((float) finalWidth / cellW)));
-                        int finalY = Math.max(1, Math.min(rows, (int) Math.ceil((float) finalHeight / cellH)));
                         float density = getResources().getDisplayMetrics().density;
-                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), finalX)
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), finalY)
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), Math.max(1, Math.round(finalWidth / density)))
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), Math.max(1, Math.round(finalHeight / density)))
+                        int spanX = Math.max(1, (int) Math.ceil(finalLp.width / (float) cellW));
+                        int spanY = Math.max(1, (int) Math.ceil(finalLp.height / (float) cellH));
+                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), spanX)
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), spanY)
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), Math.max(1, Math.round(finalLp.width / density)))
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), Math.max(1, Math.round(finalLp.height / density)))
                                 .apply();
                         if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                         setWorkspaceGridVisible(false, null);
-                        // Keep the resized tile in place; rebuilding it here can move it
-                        // to another free cell and makes the resize appear to snap back.
                     }
                     return true;
-            }
-            return true;
-        });
-        // Long-press arms dragging; a stationary long-press still opens the options menu.
-        // This custom touch handler prevents the system long-click from stealing a drag.
-        final float[] shortcutTouchStart = {0f, 0f};
-        final int[] shortcutPositionStart = {chosenLeft, chosenTop};
-        final boolean[] shortcutDragArmed = {false};
-        final boolean[] shortcutDragging = {false};
-        final boolean[] shortcutPopupShown = {false};
-        final Runnable[] shortcutArmRunnable = {null};
-        final Runnable[] shortcutPopupRunnable = {null};
-        tile.setOnTouchListener((view, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                shortcutTouchStart[0] = event.getRawX();
-                shortcutTouchStart[1] = event.getRawY();
-                shortcutPositionStart[0] = ((FrameLayout.LayoutParams) tile.getLayoutParams()).leftMargin;
-                shortcutPositionStart[1] = ((FrameLayout.LayoutParams) tile.getLayoutParams()).topMargin;
-                shortcutDragArmed[0] = false;
-                shortcutDragging[0] = false;
-                shortcutPopupShown[0] = false;
-                handler.removeCallbacks(shortcutArmRunnable[0]);
-                handler.removeCallbacks(shortcutPopupRunnable[0]);
-                shortcutArmRunnable[0] = () -> {
-                    if (!shortcutDragging[0] && tile.isAttachedToWindow()) {
-                        shortcutDragArmed[0] = true;
-                        LauncherUiUtils.startMoveHint(tile, this);
-                    }
-                };
-                shortcutPopupRunnable[0] = () -> {
-                    if (!shortcutDragging[0] && tile.isAttachedToWindow()) {
-                        LauncherUiUtils.stopMoveHint(tile);
-                        shortcutPopupShown[0] = true;
-                        tile.performLongClick();
-                    }
-                };
-                handler.postDelayed(shortcutArmRunnable[0], 1000L);
-                handler.postDelayed(shortcutPopupRunnable[0], 2000L);
-                return true;
-            }
-            if (action == MotionEvent.ACTION_MOVE) {
-                float dx = event.getRawX() - shortcutTouchStart[0];
-                float dy = event.getRawY() - shortcutTouchStart[1];
-                boolean moved = Math.abs(dx) > LauncherUiUtils.dp(this, 8)
-                        || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
-                if (moved && shortcutDragArmed[0] && !shortcutPopupShown[0]) {
-                    handler.removeCallbacks(shortcutPopupRunnable[0]);
-                    if (!shortcutDragging[0]) {
-                        LauncherUiUtils.stopMoveHint(tile);
-                        shortcutDragging[0] = true;
-                        setWorkspaceGridVisible(true, tile);
-                        tile.bringToFront();
-                    }
-                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                    int[] pageLocation = new int[2];
-                    shortcutResizePage.getLocationOnScreen(pageLocation);
-                    p.leftMargin = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
-                            Math.round(event.getRawX() - pageLocation[0] - tile.getWidth() / 2f)));
-                    p.topMargin = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
-                            Math.round(event.getRawY() - pageLocation[1] - tile.getHeight() / 2f)));
-                    tile.setLayoutParams(p);
-                    updateLiveDisplacements(shortcutResizePage, tile);
-                    refreshWorkspaceGrid();
                 }
                 return true;
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                LauncherUiUtils.stopMoveHint(tile);
-                handler.removeCallbacks(shortcutArmRunnable[0]);
-                handler.removeCallbacks(shortcutPopupRunnable[0]);
-                if (shortcutDragging[0]) {
-                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                    if (action == MotionEvent.ACTION_CANCEL) {
-                        finishLiveDisplacements(false, tile);
-                        p.leftMargin = shortcutPositionStart[0];
-                        p.topMargin = shortcutPositionStart[1];
-                        tile.setLayoutParams(p);
-                    } else {
-                        int dragColumns = getHomeColumns();
-                        int dragCellW = Math.max(1, pageViewport.getWidth() / dragColumns);
-                        int dragCellH = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-                        int proposedLeft = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
-                                Math.round((p.leftMargin + tile.getWidth() / 2f - dragCellW / 2f) / dragCellW) * dragCellW));
-                        int proposedTop = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
-                                Math.round((p.topMargin + tile.getHeight() / 2f - dragCellH / 2f) / dragCellH) * dragCellH));
-                        p.leftMargin = proposedLeft;
-                        p.topMargin = proposedTop;
-                        tile.setLayoutParams(p);
-                        updateLiveDisplacements(shortcutResizePage, tile);
-                        finishLiveDisplacements(true, tile);
-                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), pagesStrip.indexOfChild(shortcutResizePage))
-                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), proposedLeft / (float) Math.max(1,
-                                        pageViewport.getWidth() - tile.getWidth()))
-                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), proposedTop / (float) Math.max(1,
-                                        pageViewport.getHeight() - tile.getHeight())).apply();
-                    }
-                    setWorkspaceGridVisible(false, null);
-                    shortcutDragging[0] = false;
-                } else if (!shortcutPopupShown[0] && action == MotionEvent.ACTION_UP) {
-                    tile.performClick();
-                }
-                return true;
-            }
-            return true;
-        });
+            });
+        }
         tile.setOnClickListener(v -> {
-            if (resizeGrip.getVisibility() == View.VISIBLE) {
-                resizeGrip.setVisibility(View.GONE);
+            if (shortcutResizeHandles[0].getVisibility() == View.VISIBLE) {
+                for (View handle : shortcutResizeHandles) handle.setVisibility(View.GONE);
                 tile.setBackgroundColor(Color.TRANSPARENT);
                 return;
             }
@@ -2204,11 +2101,11 @@ public class MainActivity extends Activity {
                     renderHomePages(false);
                     showPage(targetPage, true);
                 } else if (which == 1) {
-                    resizeGrip.setVisibility(View.VISIBLE);
+                    for (View handle : shortcutResizeHandles) handle.setVisibility(View.VISIBLE);
                     tile.setBackground(LauncherUiUtils.roundRect(this,
                             new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
                             LauncherUiUtils.dp(this, 8)));
-                    Toast.makeText(this, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Drag any blue edge to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
                     removeSavedShortcut(shortcutId);
                     renderHomePages(false);
@@ -5348,12 +5245,6 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_CLOCK_DATE_SIZE, value).apply();
             refreshClockTypographyAndGeometry();
         });
-        addSliderRow(content, "AM/PM font size", 8, 24,
-                Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14))), " sp", value -> {
-            prefs.edit().putInt(KEY_CLOCK_PM_SIZE, value).apply();
-            refreshClockTypographyAndGeometry();
-        });
-
         addSection(content, "Page animations");
         addChoiceRow(content, "Page transition effect", getPageTransition(),
                 new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
