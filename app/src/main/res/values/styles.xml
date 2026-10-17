@@ -6,6 +6,11 @@
     <item name="android:windowAnimationStyle">@style/LauncherWindowAnimations</item>
 </style>
 <style name="LauncherWindowAnimations" parent="@android:style/Animation.Activity">
+    <!-- Keep Home/task-opening transitions visually consistent with the working Back close transition. -->
+    <item name="android:activityOpenEnterAnimation">@anim/launcher_task_close_enter</item>
+    <item name="android:activityOpenExitAnimation">@anim/launcher_task_close_exit</item>
+    <item name="android:taskOpenEnterAnimation">@anim/launcher_task_close_enter</item>
+    <item name="android:taskOpenExitAnimation">@anim/launcher_task_close_exit</item>
     <item name="android:activityCloseEnterAnimation">@anim/launcher_task_close_enter</item>
     <item name="android:activityCloseExitAnimation">@anim/launcher_task_close_exit</item>
     <item name="android:taskCloseEnterAnimation">@anim/launcher_task_close_enter</item>
