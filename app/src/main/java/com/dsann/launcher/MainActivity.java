@@ -136,6 +136,11 @@ public class MainActivity extends Activity {
     // Items temporarily displaced during a drag are restored as soon as the
     // moving item leaves their original occupied area.
     private final java.util.IdentityHashMap<View, int[]> liveDisplacedItems = new java.util.IdentityHashMap<>();
+    // Final visual destination for each item displaced during the current gesture.
+    // Kept separately from its original position so a quick drop can commit the
+    // intended destination even if the 120 ms push animation has not finished.
+    private final java.util.IdentityHashMap<View, int[]> liveDisplacementTargets =
+            new java.util.IdentityHashMap<>();
     private int workspaceGridCellWidth = 1;
     private int workspaceGridCellHeight = 1;
     private int workspaceGridWidgetWidth = 1;
@@ -4955,14 +4960,24 @@ public class MainActivity extends Activity {
 
             if (bestX >= 0) {
                 liveDisplacedItems.put(other, new int[]{g[0], g[1]});
+                liveDisplacementTargets.put(other, new int[]{bestX, bestY});
+
+                // Animate every newly displaced item, regardless of type. Animate
+                // its visual translation while preserving its layout origin; the
+                // final destination is committed to layout params on drop. This
+                // avoids the one-frame jump caused by changing margins immediately.
+                other.animate().cancel();
                 if (other == clockPanel) {
-                    setClampedClockTranslation(clockPanel.getTranslationX() + bestX - g[0],
-                            clockPanel.getTranslationY() + bestY - g[1], true);
+                    float targetX = clockPanel.getTranslationX() + bestX - g[0];
+                    float targetY = clockPanel.getTranslationY() + bestY - g[1];
+                    float[] bounded = clampClockTranslation(clockPanel, targetX, targetY);
+                    clockPanel.animate().translationX(bounded[0]).translationY(bounded[1])
+                            .setDuration(120L).start();
                 } else {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) other.getLayoutParams();
-                    lp.leftMargin = bestX;
-                    lp.topMargin = bestY;
-                    other.setLayoutParams(lp);
+                    float targetTranslationX = other.getTranslationX() + bestX - g[0];
+                    float targetTranslationY = other.getTranslationY() + bestY - g[1];
+                    other.animate().translationX(targetTranslationX)
+                            .translationY(targetTranslationY).setDuration(120L).start();
                 }
             }
         }
@@ -5187,71 +5202,87 @@ public class MainActivity extends Activity {
 
     /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
     private void finishLiveDisplacements(boolean commit, View movingView) {
-        // Finalize every displaced workspace item through the same decision path,
-        // regardless of whether it is a widget, shortcut, or clock. A clock must
-        // not be committed unconditionally: if the dragged item ended elsewhere,
-        // restoring the clock is necessary to avoid leaving an unexplained gap.
+        // Finalize the entire collision group together. A single dragged item may
+        // displace any number of neighbours, so each neighbour's original and
+        // destination rectangles must be handled independently and consistently.
         java.util.ArrayList<View> displacedViews =
                 new java.util.ArrayList<View>(liveDisplacedItems.keySet());
 
         for (View displaced : displacedViews) {
             int[] original = liveDisplacedItems.get(displaced);
-            if (original == null) continue;
-            if (!(displaced.getParent() instanceof FrameLayout)) continue;
+            if (original == null || !(displaced.getParent() instanceof FrameLayout)) continue;
 
             FrameLayout page = (FrameLayout) displaced.getParent();
             boolean keepDisplacement = commit && movingView != null
                     && movingView.getParent() == page;
-            int[] displacedGeometry = itemGeometry(displaced);
-            int displacedWidth = Math.max(1, displacedGeometry[2]);
-            int displacedHeight = Math.max(1, displacedGeometry[3]);
+            int[] target = liveDisplacementTargets.get(displaced);
+            if (keepDisplacement && target == null) keepDisplacement = false;
 
             if (keepDisplacement) {
                 int[] movingGeometry = itemGeometry(movingView);
+                int[] targetGeometry = target;
                 android.graphics.Rect movingRect = new android.graphics.Rect(
                         movingGeometry[0], movingGeometry[1],
                         movingGeometry[0] + movingGeometry[2],
                         movingGeometry[1] + movingGeometry[3]);
                 android.graphics.Rect originalRect = new android.graphics.Rect(
                         original[0], original[1],
-                        original[0] + displacedWidth, original[1] + displacedHeight);
-                // Keep a neighbour displaced only when the dropped item actually
-                // occupies its original footprint. This rule applies equally to
-                // widget↔widget, widget↔shortcut, shortcut↔clock, and every other
-                // combination of supported workspace item types.
+                        original[0] + Math.max(1, itemGeometry(displaced)[2]),
+                        original[1] + Math.max(1, itemGeometry(displaced)[3]));
+                // A displacement is committed only if the dropped item still
+                // covers this neighbour's former footprint.
                 keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
             }
 
-            if (!keepDisplacement) {
+            // Stop any in-flight animation before applying the final geometry;
+            // otherwise its last frame could overwrite the committed position.
+            displaced.animate().cancel();
+            if (keepDisplacement) {
+                int[] destination = liveDisplacementTargets.get(displaced);
+                if (displaced == clockPanel) {
+                    float tx = destination[0] - clockPanel.getLeft()
+                            - clockPanel.getPivotX() * (1f - clockPanel.getScaleX());
+                    float ty = destination[1] - clockPanel.getTop()
+                            - clockPanel.getPivotY() * (1f - clockPanel.getScaleY());
+                    setClampedClockTranslation(tx, ty, true);
+                } else if (displaced.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams lp =
+                            (FrameLayout.LayoutParams) displaced.getLayoutParams();
+                    lp.leftMargin = destination[0];
+                    lp.topMargin = destination[1];
+                    displaced.setTranslationX(0f);
+                    displaced.setTranslationY(0f);
+                    displaced.setLayoutParams(lp);
+                }
+                int[] finalGeometry = itemGeometry(displaced);
+                persistWorkspaceItemPosition(page, displaced,
+                        finalGeometry[0], finalGeometry[1],
+                        finalGeometry[2], finalGeometry[3]);
+            } else {
                 if (displaced == clockPanel) {
                     setClampedClockTranslation(
                             original[0] - clockPanel.getLeft()
                                     - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
                             original[1] - clockPanel.getTop()
                                     - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
-                } else {
-                    ViewGroup.LayoutParams raw = displaced.getLayoutParams();
-                    if (raw instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-                        lp.leftMargin = original[0];
-                        lp.topMargin = original[1];
-                        displaced.setLayoutParams(lp);
-                    }
+                } else if (displaced.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams lp =
+                            (FrameLayout.LayoutParams) displaced.getLayoutParams();
+                    lp.leftMargin = original[0];
+                    lp.topMargin = original[1];
+                    displaced.setTranslationX(0f);
+                    displaced.setTranslationY(0f);
+                    displaced.setLayoutParams(lp);
                 }
-            } else {
-                int[] finalGeometry = itemGeometry(displaced);
-                persistWorkspaceItemPosition(page, displaced,
-                        finalGeometry[0], finalGeometry[1],
-                        finalGeometry[2], finalGeometry[3]);
             }
         }
 
         liveDisplacedItems.clear();
+        liveDisplacementTargets.clear();
         if (movingView != null && movingView.getParent() instanceof FrameLayout) {
             FrameLayout page = (FrameLayout) movingView.getParent();
-            // Resolve the whole page after committing/restoring temporary positions,
-            // then persist all final positions. This catches residual overlaps caused
-            // by different item sizes or clock clamping at the page edges.
+            // The final pass is a second line of defence against mixed-size
+            // collisions and rounding at page boundaries.
             resolveAllWorkspaceOverlaps(page, movingView);
         }
         refreshWorkspaceGrid();
