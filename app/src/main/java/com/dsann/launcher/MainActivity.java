@@ -4065,24 +4065,18 @@ public class MainActivity extends Activity {
     }
 
     private int[] itemGeometry(View view) {
-        if (view == clockPanel && "launcher_clock_widget".equals(view.getTag())) {
-            float sx = Math.max(0.01f, view.getScaleX());
-            float sy = Math.max(0.01f, view.getScaleY());
-            int x = Math.round(view.getLeft() + view.getTranslationX()
-                    + view.getPivotX() * (1f - sx));
-            int y = Math.round(view.getTop() + view.getTranslationY()
-                    + view.getPivotY() * (1f - sy));
-            return new int[]{x, y, Math.max(1, Math.round(view.getWidth() * sx)),
-                    Math.max(1, Math.round(view.getHeight() * sy))};
-        }
-        ViewGroup.LayoutParams raw = view.getLayoutParams();
-        if (raw instanceof FrameLayout.LayoutParams) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-            return new int[]{lp.leftMargin, lp.topMargin,
-                    lp.width > 0 ? lp.width : view.getWidth(),
-                    lp.height > 0 ? lp.height : view.getHeight()};
-        }
-        return new int[]{view.getLeft(), view.getTop(), view.getWidth(), view.getHeight()};
+        if (view == null) return new int[]{0, 0, 0, 0};
+        float sx = Math.max(0.01f, view.getScaleX());
+        float sy = Math.max(0.01f, view.getScaleY());
+        // Use the actual on-screen View bounds, not requested LayoutParams sizes or
+        // margins. This is essential for mixed-size widgets and shortcuts: their
+        // collision footprint must match their rendered container, not a grid cell.
+        int x = Math.round(view.getLeft() + view.getTranslationX()
+                + view.getPivotX() * (1f - sx));
+        int y = Math.round(view.getTop() + view.getTranslationY()
+                + view.getPivotY() * (1f - sy));
+        return new int[]{x, y, Math.max(1, Math.round(view.getWidth() * sx)),
+                Math.max(1, Math.round(view.getHeight() * sy))};
     }
 
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
@@ -5052,7 +5046,15 @@ public class MainActivity extends Activity {
         clockPanel.setPivotX(alignment == Gravity.RIGHT ? panelParams.width
                 : (alignment == Gravity.CENTER_HORIZONTAL ? panelParams.width / 2f : 0f));
         clockPanel.setScaleX(lengthScale);
-        clockPanel.post(() -> updateClockResizeHandles());
+        clockPanel.post(() -> {
+            if (clockPanel == null) return;
+            // Re-clamp after measuring/layout so the final scaled visual rectangle,
+            // not the previous frame's dimensions, determines both screen edges.
+            float[] bounded = clampClockTranslation(clockPanel,
+                    clockPanel.getTranslationX(), clockPanel.getTranslationY());
+            setClampedClockTranslation(bounded[0], bounded[1], true);
+            updateClockResizeHandles();
+        });
         clockPanel.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2));
         clockPanel.setClipChildren(false);
