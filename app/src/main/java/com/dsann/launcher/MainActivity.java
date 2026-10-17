@@ -5036,6 +5036,17 @@ public class MainActivity extends Activity {
         java.util.ArrayList<android.graphics.Rect> accepted = new java.util.ArrayList<android.graphics.Rect>();
         java.util.ArrayList<View> acceptedViews = new java.util.ArrayList<View>();
         for (View item : items) {
+            if (item.getTag() instanceof String && prefs != null) {
+                String tag = (String) item.getTag();
+                String baseXKey = "workspace_base_scale_x_" + tag;
+                String baseYKey = "workspace_base_scale_y_" + tag;
+                if (prefs.contains(baseXKey) || prefs.contains(baseYKey)) {
+                    item.setScaleX(prefs.getFloat(baseXKey, 1f));
+                    item.setScaleY(prefs.getFloat(baseYKey, 1f));
+                    prefs.edit().remove("workspace_scale_x_" + tag)
+                            .remove("workspace_scale_y_" + tag).apply();
+                }
+            }
             int[] g = itemGeometry(item);
             int w = Math.max(1, g[2]), h = Math.max(1, g[3]);
             int maxX = Math.max(0, page.getWidth() - w);
