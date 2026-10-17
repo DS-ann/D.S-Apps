@@ -1047,11 +1047,12 @@ public class MainActivity extends Activity {
                     && Intent.ACTION_MAIN.equals(intent.getAction())
                     && intent.hasCategory(Intent.CATEGORY_HOME);
             if (homeIntent) {
-                // The system HOME button should reveal the cached workspace immediately.
-                // Running the drawer transition and a page transition back-to-back made
-                // returning from every app feel like a second launch animation.
+                // Normalize the cached workspace first, then animate its entrance.
+                // This animates only the launcher surface (not the outgoing app window),
+                // keeping the HOME path compatible with Android 6 and avoiding a relaunch.
                 showHomeImmediately();
                 if (currentPage != 0) showPage(0, false);
+                animateHomeReturnFromApp();
             } else if (drawerOpen) {
                 showHome();
             }
@@ -2872,6 +2873,39 @@ public class MainActivity extends Activity {
     private void showHome() {
         LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen, () -> drawerOpen = false,
                 getDrawerTransition());
+    }
+
+    /**
+     * Lightweight entrance effect when Android brings this singleTask launcher forward
+     * after the system HOME button is pressed in another app. Uses ViewPropertyAnimator,
+     * supported on Android 6, and never starts another Activity or rebuilds the workspace.
+     */
+    private void animateHomeReturnFromApp() {
+        if (homeScreen == null || !homeScreen.isAttachedToWindow()) return;
+        homeScreen.animate().cancel();
+        final float density = getResources().getDisplayMetrics().density;
+        homeScreen.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        homeScreen.setVisibility(View.VISIBLE);
+        homeScreen.setAlpha(0.72f);
+        homeScreen.setScaleX(0.965f);
+        homeScreen.setScaleY(0.965f);
+        homeScreen.setTranslationY(LauncherUiUtils.dp(this, 10));
+        homeScreen.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .setDuration(LauncherMotion.duration(this, 220L))
+                .withEndAction(() -> {
+                    if (homeScreen != null) {
+                        homeScreen.setAlpha(1f);
+                        homeScreen.setScaleX(1f);
+                        homeScreen.setScaleY(1f);
+                        homeScreen.setTranslationY(0f);
+                        homeScreen.setLayerType(View.LAYER_TYPE_NONE, null);
+                    }
+                })
+                .start();
     }
 
     /** Fast path for the system HOME intent: no overlapping screen/page animations. */
