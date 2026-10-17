@@ -292,15 +292,18 @@ final class WidgetInteractionController {
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
                     } else {
-                        int[] viewportLocation = new int[2];
-                        View viewport = strip == null ? null : (View) strip.getParent();
-                        if (viewport != null) viewport.getLocationOnScreen(viewportLocation);
+                        // Raw touch coordinates must be converted using the destination
+                        // page itself. The viewport origin is not the page origin: on the
+                        // second screen its horizontal offset differs, and using it causes
+                        // drops near the top/edges to resolve against the wrong coordinates.
+                        int[] targetPageLocation = new int[2];
+                        targetPage.getLocationOnScreen(targetPageLocation);
                         int maxX = Math.max(0, targetPage.getWidth() - container.getWidth());
                         int maxY = Math.max(0, targetPage.getHeight() - container.getHeight());
                         int requestedX = Math.max(0, Math.min(maxX,
-                                Math.round(event.getRawX() - viewportLocation[0] - container.getWidth() / 2f)));
+                                Math.round(event.getRawX() - targetPageLocation[0] - container.getWidth() / 2f)));
                         int requestedY = Math.max(0, Math.min(maxY,
-                                Math.round(event.getRawY() - viewportLocation[1] - container.getHeight() / 2f)));
+                                Math.round(event.getRawY() - targetPageLocation[1] - container.getHeight() / 2f)));
                         // Widgets use free positioning, not app-icon grid snapping.
                         // Keep the requested point when clear; otherwise find the nearest
                         // clear point in small increments so widgets never overlap items.
