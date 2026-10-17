@@ -4790,22 +4790,16 @@ public class MainActivity extends Activity {
                 markerParams.width = LauncherUiUtils.dp(this, 22);
                 markerParams.height = LauncherUiUtils.dp(this, 12);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
-                // Pin AM/PM to the clock's lower-right corner, slightly inset so it
-                // sits close to the final digit instead of in a separate slot far away.
-                // This intentional small overlap is needed for the compact corner-marker look.
+                // Anchor AM/PM to the final clock digit using the same rule for every
+                // clock style. Compensate for the panel's horizontal scale so the marker
+                // stays a fixed physical distance from the digit as the panel is resized.
                 int cornerInset = LauncherUiUtils.dp(this, 2);
-                // Counter-scaling keeps the marker's text and physical dimensions fixed.
-                // Compensate its local position for the parent's scale so its lower-right
-                // anchor follows the clock's visual lower-right corner at every size.
-                markerParams.leftMargin = Math.max(0, Math.min(
-                        contentWidth - markerParams.width,
-                        (int) Math.ceil(naturalClockWidth)
-                                - (int) Math.ceil(markerParams.width / Math.max(0.01f, lengthScale))
-                                - cornerInset - LauncherUiUtils.dp(this, 3)));
+                markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
+                        - (int) Math.ceil(markerParams.width / Math.max(0.01f, lengthScale))
+                        - cornerInset);
                 markerParams.topMargin = Math.max(0, Math.min(
                         rowHeight - markerParams.height,
-                        rowHeight - (int) Math.ceil(markerParams.height / Math.max(0.01f, breadthScale))
-                                - LauncherUiUtils.dp(this, 1)));
+                        rowHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
@@ -4817,13 +4811,10 @@ public class MainActivity extends Activity {
             amPmText.setScaleY(1f);
             amPmText.setPivotX(0f);
             amPmText.setPivotY(0f);
-            if (sevenSegment) {
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 7) / Math.max(0.01f, lengthScale));
-                amPmText.setTranslationY(-LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
-            } else {
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 24) / Math.max(0.01f, lengthScale));
-                amPmText.setTranslationY(LauncherUiUtils.dp(this, 3) / Math.max(0.01f, breadthScale));
-            }
+            // The layout margins above are the single source of truth for placement;
+            // style-specific translations made AM/PM drift away from the final digit.
+            amPmText.setTranslationX(0f);
+            amPmText.setTranslationY(0f);
         }
         clockText.invalidate();
     }
