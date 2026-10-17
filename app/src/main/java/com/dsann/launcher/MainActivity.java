@@ -2276,10 +2276,15 @@ public class MainActivity extends Activity {
                     int slotHeight = LauncherUiUtils.dp(this,
                             homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                     int gridRows = Math.max(1, page.getHeight() / slotHeight);
+                    int maxTopForGrid = Math.max(0, page.getHeight() - view.getHeight());
                     int requestedTop = Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f);
-                    int snappedRow = Math.max(0, Math.min(gridRows - 1, requestedTop / slotHeight));
-                    lp.topMargin = Math.min(Math.max(0, page.getHeight() - view.getHeight()),
-                            snappedRow * slotHeight);
+                    int snappedRow = gridRows <= 1 || maxTopForGrid <= 0 ? 0
+                            : Math.max(0, Math.min(gridRows - 1,
+                                    Math.round(requestedTop * (gridRows - 1) / (float) maxTopForGrid)));
+                    // Use the same evenly distributed row anchors as HomePageController,
+                    // so the dragged icon stays exactly where it will render after release.
+                    lp.topMargin = gridRows <= 1 ? 0
+                            : Math.round(snappedRow * (maxTopForGrid / (float) (gridRows - 1)));
                     view.setLayoutParams(lp);
                     refreshWorkspaceGrid();
                 }
@@ -2389,7 +2394,10 @@ public class MainActivity extends Activity {
                                 || !((String) candidate.getTag()).startsWith("launcher_app:")) continue;
                         FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
                         int cc = Math.max(0, Math.min(columns - 1, Math.round((float) cp.leftMargin / cellWidth)));
-                        int cr = Math.max(0, Math.min(rows - 1, Math.round((float) cp.topMargin / cellHeight)));
+                        int candidateMaxTop = Math.max(0, targetHeight - candidate.getHeight());
+                        int cr = rows <= 1 || candidateMaxTop <= 0 ? 0
+                                : Math.max(0, Math.min(rows - 1, Math.round(
+                                        cp.topMargin * (rows - 1) / (float) candidateMaxTop)));
                         occupied[cr][cc] = true;
                         if (cc == targetCol && cr == targetRow) {
                             occupant = candidate;
