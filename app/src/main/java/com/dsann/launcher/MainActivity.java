@@ -464,8 +464,8 @@ public class MainActivity extends Activity {
                 // limits, the opposite edge stays fixed, and overlapping candidates are rejected.
                 if (!(clockPanel.getParent() instanceof FrameLayout)) return true;
                 FrameLayout activePage = (FrameLayout) clockPanel.getParent();
-                float dx = event.getRawX() - clockWidgetDownRawX;
-                float dy = event.getRawY() - clockWidgetDownRawY;
+                float resizeDeltaX = event.getRawX() - clockWidgetDownRawX;
+                float resizeDeltaY = event.getRawY() - clockWidgetDownRawY;
                 int pageWidth = activePage.getWidth();
                 int pageHeight = activePage.getHeight();
                 if (pageWidth <= 0 || pageHeight <= 0) return true;
@@ -477,16 +477,16 @@ public class MainActivity extends Activity {
                 int minW = Math.min(LauncherUiUtils.dp(this, 140), pageWidth);
                 int minH = Math.min(LauncherUiUtils.dp(this, 90), pageHeight);
                 if (clockResizeEdge == 1) {
-                    left = Math.round(clockWidgetStartVisualX + dx);
+                    left = Math.round(clockWidgetStartVisualX + resizeDeltaX);
                     left = Math.max(0, Math.min(left, right - minW));
                 } else if (clockResizeEdge == 2) {
-                    right = Math.round(clockWidgetStartVisualX + clockWidgetStartVisualWidth + dx);
+                    right = Math.round(clockWidgetStartVisualX + clockWidgetStartVisualWidth + resizeDeltaX);
                     right = Math.max(left + minW, Math.min(right, pageWidth));
                 } else if (clockResizeEdge == 3) {
-                    top = Math.round(clockWidgetStartVisualY + dy);
+                    top = Math.round(clockWidgetStartVisualY + resizeDeltaY);
                     top = Math.max(0, Math.min(top, bottom - minH));
                 } else if (clockResizeEdge == 4) {
-                    bottom = Math.round(clockWidgetStartVisualY + clockWidgetStartVisualHeight + dy);
+                    bottom = Math.round(clockWidgetStartVisualY + clockWidgetStartVisualHeight + resizeDeltaY);
                     bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
                 }
                 left = Math.max(0, Math.min(left, pageWidth - minW));
