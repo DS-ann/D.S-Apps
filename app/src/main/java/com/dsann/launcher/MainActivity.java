@@ -130,6 +130,9 @@ public class MainActivity extends Activity {
     private TextView brandText;
     private LinearLayout pagesStrip;
     private final View[] workspaceGridOverlays = new View[2];
+    // Items temporarily displaced during a drag are restored as soon as the
+    // moving item leaves their original occupied area.
+    private final java.util.IdentityHashMap<View, int[]> liveDisplacedItems = new java.util.IdentityHashMap<>();
     private int workspaceGridCellWidth = 1;
     private int workspaceGridCellHeight = 1;
     private int workspaceGridWidgetWidth = 1;
@@ -294,6 +297,12 @@ public class MainActivity extends Activity {
                     @Override public LinearLayout getPagesStrip() { return pagesStrip; }
                     @Override public void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer) {
                         MainActivity.this.resolveWidgetIconCollisions(page, widgetContainer);
+                    }
+                    @Override public void updateLiveDisplacements(FrameLayout page, View movingView) {
+                        MainActivity.this.updateLiveDisplacements(page, movingView);
+                    }
+                    @Override public void finishLiveDisplacements(boolean commit, View movingView) {
+                        MainActivity.this.finishLiveDisplacements(commit, movingView);
                     }
                     @Override public void setWorkspaceGridVisible(boolean visible, View movingView) {
                         MainActivity.this.setWorkspaceGridVisible(visible, movingView);
@@ -3972,6 +3981,163 @@ public class MainActivity extends Activity {
         } else {
             hero.setBackground(centeredBackground);
         }
+    }
+
+
+    private boolean isWorkspaceItem(View view) {
+        if (view == null || !(view.getTag() instanceof String)) return false;
+        String tag = (String) view.getTag();
+        return tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
+                || "launcher_contact_shortcut".equals(tag) || "launcher_clock_widget".equals(tag);
+    }
+
+    private int[] itemGeometry(View view) {
+        ViewGroup.LayoutParams raw = view.getLayoutParams();
+        if (raw instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            return new int[]{lp.leftMargin, lp.topMargin,
+                    lp.width > 0 ? lp.width : view.getWidth(),
+                    lp.height > 0 ? lp.height : view.getHeight()};
+        }
+        return new int[]{view.getLeft(), view.getTop(), view.getWidth(), view.getHeight()};
+    }
+
+    private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
+        android.graphics.Rect expanded = new android.graphics.Rect(
+                a.left - gap, a.top - gap, a.right + gap, a.bottom + gap);
+        return android.graphics.Rect.intersects(expanded, b);
+    }
+
+    /** Live push-aside behavior for workspace items while a widget or shortcut is dragged. */
+    private void updateLiveDisplacements(FrameLayout page, View movingView) {
+        if (page == null || movingView == null || movingView.getParent() != page) return;
+        int[] moving = itemGeometry(movingView);
+        if (moving[2] <= 0 || moving[3] <= 0) return;
+        android.graphics.Rect movingRect = new android.graphics.Rect(
+                moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
+        int gap = LauncherUiUtils.dp(this, 5);
+
+        // Restore displaced items when the moving item no longer covers their
+        // original location. This happens during MOVE, without lifting the finger.
+        java.util.Iterator<java.util.Map.Entry<View, int[]>> iterator =
+                liveDisplacedItems.entrySet().iterator();
+        while (iterator.hasNext()) {
+            java.util.Map.Entry<View, int[]> entry = iterator.next();
+            View displaced = entry.getKey();
+            int[] original = entry.getValue();
+            if (displaced.getParent() != page) {
+                iterator.remove();
+                continue;
+            }
+            int[] g = itemGeometry(displaced);
+            android.graphics.Rect currentRect = new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
+            if (!overlapsWithGap(movingRect, currentRect, gap)) {
+                ViewGroup.LayoutParams raw = displaced.getLayoutParams();
+                if (raw instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                    lp.leftMargin = original[0];
+                    lp.topMargin = original[1];
+                    displaced.setLayoutParams(lp);
+                }
+                iterator.remove();
+            }
+        }
+
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingView || !isWorkspaceItem(other) || liveDisplacedItems.containsKey(other)) continue;
+            int[] g = itemGeometry(other);
+            if (g[2] <= 0 || g[3] <= 0) continue;
+            android.graphics.Rect otherRect = new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
+            if (!overlapsWithGap(movingRect, otherRect, gap)) continue;
+
+            int maxX = Math.max(0, page.getWidth() - g[2]);
+            int maxY = Math.max(0, page.getHeight() - g[3]);
+            int step = Math.max(1, LauncherUiUtils.dp(this, 4));
+            int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
+            for (int y = 0; y <= maxY; y += step) {
+                for (int x = 0; x <= maxX; x += step) {
+                    android.graphics.Rect candidate = new android.graphics.Rect(x, y, x + g[2], y + g[3]);
+                    android.graphics.Rect candidateWithGap = new android.graphics.Rect(
+                            candidate.left - gap, candidate.top - gap,
+                            candidate.right + gap, candidate.bottom + gap);
+                    boolean blocked = false;
+                    for (int j = 0; j < page.getChildCount(); j++) {
+                        View blocker = page.getChildAt(j);
+                        if (blocker == other || blocker == movingView || !isWorkspaceItem(blocker)) continue;
+                        int[] bg = itemGeometry(blocker);
+                        if (bg[2] <= 0 || bg[3] <= 0) continue;
+                        android.graphics.Rect blockerRect = new android.graphics.Rect(
+                                bg[0], bg[1], bg[0] + bg[2], bg[1] + bg[3]);
+                        if (android.graphics.Rect.intersects(candidateWithGap, blockerRect)) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                    if (blocked) continue;
+                    int distance = Math.abs(x - g[0]) + Math.abs(y - g[1]);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestX = x;
+                        bestY = y;
+                    }
+                }
+            }
+            if (bestX >= 0) {
+                liveDisplacedItems.put(other, new int[]{g[0], g[1]});
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) other.getLayoutParams();
+                lp.leftMargin = bestX;
+                lp.topMargin = bestY;
+                other.setLayoutParams(lp);
+            }
+        }
+    }
+
+    /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
+    private void finishLiveDisplacements(boolean commit, View movingView) {
+        if (liveDisplacedItems.isEmpty()) return;
+        int columns = getHomeColumns();
+        int cellWidth = Math.max(1, pageViewport == null ? 1 : pageViewport.getWidth() / columns);
+        int cellHeight = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        java.util.ArrayList<View> displacedViews = new java.util.ArrayList<>(liveDisplacedItems.keySet());
+        for (View view : displacedViews) {
+            int[] original = liveDisplacedItems.get(view);
+            if (view.getParent() instanceof FrameLayout) {
+                FrameLayout page = (FrameLayout) view.getParent();
+                if (!commit) {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+                    lp.leftMargin = original[0];
+                    lp.topMargin = original[1];
+                    view.setLayoutParams(lp);
+                } else {
+                    int[] g = itemGeometry(view);
+                    Object rawTag = view.getTag();
+                    if (rawTag instanceof String) {
+                        String tag = (String) rawTag;
+                        int pageIndex = pagesStrip == null ? 0 : Math.max(0, pagesStrip.indexOfChild(page));
+                        if (tag.startsWith("launcher_widget:")) {
+                            try { saveWidgetGeometry(Integer.parseInt(tag.substring("launcher_widget:".length())), pageIndex, (FrameLayout) view); }
+                            catch (NumberFormatException ignored) {}
+                        } else if (tag.startsWith("launcher_app:")) {
+                            String pkg = tag.substring("launcher_app:".length());
+                            int col = Math.max(0, Math.min(columns - 1, Math.round((float) g[0] / cellWidth)));
+                            int row = Math.max(0, Math.round((float) g[1] / cellHeight));
+                            saveIconSlot(pkg, col, row, columns);
+                            prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
+                        } else if ("launcher_contact_shortcut".equals(tag)) {
+                            prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex)
+                                    .putFloat(KEY_SHORTCUT_X, g[0] / (float) Math.max(1, page.getWidth() - g[2]))
+                                    .putFloat(KEY_SHORTCUT_Y, g[1] / (float) Math.max(1, page.getHeight() - g[3])).apply();
+                        } else if ("launcher_clock_widget".equals(tag)) {
+                            prefs.edit().putInt(KEY_CLOCK_WIDGET_X, g[0])
+                                    .putInt(KEY_CLOCK_WIDGET_Y, g[1]).apply();
+                        }
+                    }
+                }
+            }
+        }
+        liveDisplacedItems.clear();
+        refreshWorkspaceGrid();
     }
 
     private void resolveWidgetIconCollisions(FrameLayout page, FrameLayout widgetContainer) {
