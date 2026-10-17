@@ -3433,16 +3433,36 @@ public class MainActivity extends Activity {
                 : Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
         int pageHeight = page.getHeight() > 0 ? page.getHeight()
                 : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
-        int maxLeft = Math.max(0, pageWidth - widgetWidth);
-        int maxTop = Math.max(0, pageHeight - widgetHeight);
-        // Widgets are free-positioned rectangles, not app-icon grid items.
-        // Search the workspace in small pixel increments and reject only real
-        // intersections with another placed workspace item.
-        int step = Math.max(1, LauncherUiUtils.dp(this, 8));
-        for (int top = 0; top <= maxTop; top += step) {
-            for (int left = 0; left <= maxLeft; left += step) {
+        int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
+        // Keep the full widget inside the workspace with a minimum 5dp inset.
+        int minLeft = gap;
+        int minTop = gap;
+        int maxLeft = pageWidth - widgetWidth - gap;
+        int maxTop = pageHeight - widgetHeight - gap;
+
+        // The dock is a separate view on some layouts. Treat its top edge as a
+        // hard workspace boundary and retain the same 5dp clearance above it.
+        if (dockContainer != null && dockContainer.getVisibility() == View.VISIBLE
+                && dockContainer.getHeight() > 0 && page.getWidth() > 0 && page.getHeight() > 0) {
+            int[] pageLocation = new int[2];
+            int[] dockLocation = new int[2];
+            page.getLocationOnScreen(pageLocation);
+            dockContainer.getLocationOnScreen(dockLocation);
+            int dockTopInPage = dockLocation[1] - pageLocation[1];
+            if (dockTopInPage >= 0 && dockTopInPage <= pageHeight + gap) {
+                maxTop = Math.min(maxTop, dockTopInPage - widgetHeight - gap);
+            }
+        }
+        if (maxLeft < minLeft || maxTop < minTop) return null;
+
+        // Widgets use continuous free positioning, not app-icon grid cells.
+        // Search in small increments and require at least 5dp clearance from
+        // the screen/workspace edges and every existing workspace item.
+        int step = Math.max(1, LauncherUiUtils.dp(this, 4));
+        for (int top = minTop; top <= maxTop; top += step) {
+            for (int left = minLeft; left <= maxLeft; left += step) {
                 android.graphics.Rect candidate = new android.graphics.Rect(
-                        left, top, left + widgetWidth, top + widgetHeight);
+                        left - gap, top - gap, left + widgetWidth + gap, top + widgetHeight + gap);
                 boolean blocked = false;
                 for (int i = 0; i < page.getChildCount(); i++) {
                     View child = page.getChildAt(i);
