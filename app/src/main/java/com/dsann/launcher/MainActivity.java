@@ -1598,11 +1598,67 @@ public class MainActivity extends Activity {
         attachClockPanelsToPages();
     }
 
+    private static final String KEY_SHORTCUT_IDS = "contact_shortcut_ids";
+
+    private String shortcutPrefKey(String base, String id) {
+        return base + "_" + id;
+    }
+
+    private java.util.ArrayList<String> getSavedShortcutIds() {
+        java.util.ArrayList<String> ids = new java.util.ArrayList<>();
+        String stored = prefs.getString(KEY_SHORTCUT_IDS, "");
+        if (stored != null && !stored.trim().isEmpty()) {
+            for (String id : stored.split(",")) {
+                if (!id.trim().isEmpty() && !ids.contains(id.trim())) ids.add(id.trim());
+            }
+        }
+        // Migrate the previous single-shortcut format once, preserving its settings.
+        if (ids.isEmpty()) {
+            String legacyUri = prefs.getString(KEY_SHORTCUT_INTENT, null);
+            if (legacyUri != null && !legacyUri.isEmpty()) {
+                String id = "legacy";
+                String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
+                        KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
+                        KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
+                android.content.SharedPreferences.Editor edit = prefs.edit();
+                for (String key : keys) {
+                    if (!prefs.contains(key)) continue;
+                    Object value = prefs.getAll().get(key);
+                    String scoped = shortcutPrefKey(key, id);
+                    if (value instanceof String) edit.putString(scoped, (String) value);
+                    else if (value instanceof Integer) edit.putInt(scoped, (Integer) value);
+                    else if (value instanceof Float) edit.putFloat(scoped, (Float) value);
+                }
+                edit.putString(KEY_SHORTCUT_IDS, id).apply();
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
+    private void saveShortcutIds(java.util.List<String> ids) {
+        prefs.edit().putString(KEY_SHORTCUT_IDS, android.text.TextUtils.join(",", ids)).apply();
+    }
+
+    private void removeSavedShortcut(String id) {
+        String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
+                KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
+                KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
+        android.content.SharedPreferences.Editor edit = prefs.edit();
+        for (String key : keys) edit.remove(shortcutPrefKey(key, id));
+        java.util.ArrayList<String> ids = getSavedShortcutIds();
+        ids.remove(id);
+        saveShortcutIds(ids);
+        edit.apply();
+        String iconFile = "contact_shortcut_icon_" + id + ".png";
+        try { deleteFile(iconFile); } catch (Exception ignored) {}
+    }
+
     private void renderSavedContactShortcut() {
         if (pagesStrip == null || prefs == null) return;
         if (pageViewport == null) return;
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
-            pageViewport.post(() -> renderSavedContactShortcut());
+            pageViewport.post(this::renderSavedContactShortcut);
             return;
         }
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
@@ -1614,10 +1670,20 @@ public class MainActivity extends Activity {
                 if ("launcher_contact_shortcut".equals(child.getTag())) page.removeViewAt(j);
             }
         }
-        String savedUri = prefs.getString(KEY_SHORTCUT_INTENT, null);
+        for (String id : getSavedShortcutIds()) renderSavedContactShortcut(id);
+    }
+
+    private void renderSavedContactShortcut(String shortcutId) {
+        if (pagesStrip == null || prefs == null) return;
+        if (pageViewport == null) return;
+        if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
+            pageViewport.post(() -> renderSavedContactShortcut());
+            return;
+        }
+        String savedUri = prefs.getString(shortcutPrefKey(KEY_SHORTCUT_INTENT, shortcutId), null);
         if (savedUri == null || savedUri.isEmpty() || pagesStrip.getChildCount() == 0) return;
         int desiredPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1,
-                prefs.getInt(KEY_SHORTCUT_PAGE, 0)));
+                prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), 0)));
         int columns = Math.max(1, getHomeColumns());
         int rows = getHomeGridRows();
         int cellW = Math.max(1, pageViewport.getWidth() / columns);
@@ -1627,14 +1693,14 @@ public class MainActivity extends Activity {
 
         FrameLayout chosenPage = null;
         int chosenLeft = 0, chosenTop = 0;
-        int savedWidthDp = prefs.getInt(KEY_SHORTCUT_WIDTH_DP, 0);
-        int savedHeightDp = prefs.getInt(KEY_SHORTCUT_HEIGHT_DP, 0);
+        int savedWidthDp = prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), 0);
+        int savedHeightDp = prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), 0);
         // Old span-only values could have been written by the broken resize logic.
         // Start compact unless a real pixel-size resize has been saved by this version.
         int shortcutSpanX = savedWidthDp > 0
-                ? Math.max(1, Math.min(columns, prefs.getInt(KEY_SHORTCUT_SPAN_X, 1))) : 1;
+                ? Math.max(1, Math.min(columns, prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), 1))) : 1;
         int shortcutSpanY = savedHeightDp > 0
-                ? Math.max(1, Math.min(rows, prefs.getInt(KEY_SHORTCUT_SPAN_Y, 1))) : 1;
+                ? Math.max(1, Math.min(rows, prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), 1))) : 1;
         // Check the complete resized shortcut footprint, not only its first grid cell.
         // Default contact shortcuts use a compact visual footprint, not a full
         // invisible grid cell. Explicitly resized shortcuts retain their saved size.
@@ -1642,8 +1708,8 @@ public class MainActivity extends Activity {
         // Old builds could persist an oversized footprint even before the user
         // deliberately resized it. Normalize those legacy values on restore.
         if (savedWidthDp > 96 || savedHeightDp > 96) {
-            prefs.edit().remove(KEY_SHORTCUT_WIDTH_DP).remove(KEY_SHORTCUT_HEIGHT_DP)
-                    .putInt(KEY_SHORTCUT_SPAN_X, 1).putInt(KEY_SHORTCUT_SPAN_Y, 1).apply();
+            prefs.edit().remove(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId)).remove(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId))
+                    .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), 1).putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), 1).apply();
             savedWidthDp = 0;
             savedHeightDp = 0;
         }
@@ -1659,8 +1725,8 @@ public class MainActivity extends Activity {
                 savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp)
                         : Math.min(cellH, defaultShortcutHeight)));
         // Restore a user-dragged position first, provided it is still visible and collision-free.
-        float savedX = prefs.getFloat(KEY_SHORTCUT_X, -1f);
-        float savedY = prefs.getFloat(KEY_SHORTCUT_Y, -1f);
+        float savedX = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
+        float savedY = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
         if (savedX >= 0f && savedY >= 0f && desiredPage < pagesStrip.getChildCount()) {
             View savedPageView = pagesStrip.getChildAt(desiredPage);
             if (savedPageView instanceof FrameLayout) {
@@ -1787,8 +1853,8 @@ public class MainActivity extends Activity {
         }
         float normalizedX = chosenLeft / (float) Math.max(1, pageViewport.getWidth() - desiredTileWidth);
         float normalizedY = chosenTop / (float) Math.max(1, pageViewport.getHeight() - desiredTileHeight);
-        prefs.edit().putInt(KEY_SHORTCUT_PAGE, desiredPage)
-                .putFloat(KEY_SHORTCUT_X, normalizedX).putFloat(KEY_SHORTCUT_Y, normalizedY).apply();
+        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), desiredPage)
+                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), normalizedX).putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), normalizedY).apply();
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
         tile.setClipChildren(false);
@@ -1801,7 +1867,7 @@ public class MainActivity extends Activity {
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         boolean iconLoaded = false;
-        String iconFile = prefs.getString(KEY_SHORTCUT_ICON, null);
+        String iconFile = prefs.getString(shortcutPrefKey(KEY_SHORTCUT_ICON, shortcutId), null);
         if (iconFile != null) {
             try {
                 java.io.File file = new java.io.File(getFilesDir(), iconFile);
@@ -1826,7 +1892,7 @@ public class MainActivity extends Activity {
         tileContent.setGravity(Gravity.CENTER);
         tileContent.setOrientation(LinearLayout.VERTICAL);
         TextView label = LauncherUiUtils.text(this,
-                prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"), 12, Color.WHITE, true);
+                prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"), 12, Color.WHITE, true);
         label.setGravity(Gravity.CENTER);
         label.setMaxLines(2);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1965,10 +2031,10 @@ public class MainActivity extends Activity {
                         int finalX = Math.max(1, Math.min(columns, (int) Math.ceil((float) finalWidth / cellW)));
                         int finalY = Math.max(1, Math.min(rows, (int) Math.ceil((float) finalHeight / cellH)));
                         float density = getResources().getDisplayMetrics().density;
-                        prefs.edit().putInt(KEY_SHORTCUT_SPAN_X, finalX)
-                                .putInt(KEY_SHORTCUT_SPAN_Y, finalY)
-                                .putInt(KEY_SHORTCUT_WIDTH_DP, Math.max(1, Math.round(finalWidth / density)))
-                                .putInt(KEY_SHORTCUT_HEIGHT_DP, Math.max(1, Math.round(finalHeight / density)))
+                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), finalX)
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), finalY)
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), Math.max(1, Math.round(finalWidth / density)))
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), Math.max(1, Math.round(finalHeight / density)))
                                 .apply();
                         if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                         setWorkspaceGridVisible(false, null);
@@ -2067,10 +2133,10 @@ public class MainActivity extends Activity {
                         tile.setLayoutParams(p);
                         updateLiveDisplacements(shortcutResizePage, tile);
                         finishLiveDisplacements(true, tile);
-                        prefs.edit().putInt(KEY_SHORTCUT_PAGE, pagesStrip.indexOfChild(shortcutResizePage))
-                                .putFloat(KEY_SHORTCUT_X, proposedLeft / (float) Math.max(1,
+                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), pagesStrip.indexOfChild(shortcutResizePage))
+                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), proposedLeft / (float) Math.max(1,
                                         pageViewport.getWidth() - tile.getWidth()))
-                                .putFloat(KEY_SHORTCUT_Y, proposedTop / (float) Math.max(1,
+                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), proposedTop / (float) Math.max(1,
                                         pageViewport.getHeight() - tile.getHeight())).apply();
                     }
                     setWorkspaceGridVisible(false, null);
@@ -2089,7 +2155,7 @@ public class MainActivity extends Activity {
                 return;
             }
             try {
-                Intent target = Intent.parseUri(prefs.getString(KEY_SHORTCUT_INTENT, ""),
+                Intent target = Intent.parseUri(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_INTENT, shortcutId), ""),
                         Intent.URI_INTENT_SCHEME);
                 if (Intent.ACTION_CALL.equals(target.getAction())
                         && android.os.Build.VERSION.SDK_INT >= 23
@@ -2108,14 +2174,14 @@ public class MainActivity extends Activity {
         // Contact shortcuts are launcher-owned tiles, not AppWidgetHostViews, so
         // provide the same long-press options explicitly.
         tile.setOnLongClickListener(v -> {
-            showActionDialog(prefs.getString(KEY_SHORTCUT_LABEL, "Contact shortcut"),
+            showActionDialog(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
                     new String[]{"↔", "−", "×", "↻"},
                     new String[]{"Move to other page", "Resize shortcut", "Remove shortcut", "Recreate contact shortcut"},
                     (dialog, which) -> {
                 if (which == 0) {
                     int pageCount = pagesStrip == null ? 1 : Math.max(1, pagesStrip.getChildCount());
-                    int targetPage = (prefs.getInt(KEY_SHORTCUT_PAGE, 0) == 0 && pageCount > 1) ? 1 : 0;
-                    prefs.edit().putInt(KEY_SHORTCUT_PAGE, targetPage).apply();
+                    int targetPage = (prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), 0) == 0 && pageCount > 1) ? 1 : 0;
+                    prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), targetPage).apply();
                     currentPage = targetPage;
                     renderHomePages(false);
                     showPage(targetPage, true);
@@ -2126,16 +2192,10 @@ public class MainActivity extends Activity {
                             LauncherUiUtils.dp(this, 8)));
                     Toast.makeText(this, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 } else if (which == 2) {
-                    prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
-                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
-                            .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y)
-                            .remove(KEY_SHORTCUT_WIDTH_DP).remove(KEY_SHORTCUT_HEIGHT_DP)
-                            .remove(KEY_SHORTCUT_X).remove(KEY_SHORTCUT_Y).apply();
+                    removeSavedShortcut(shortcutId);
                     renderHomePages(false);
                 } else if (which == 3) {
-                    prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
-                            .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
-                            .remove(KEY_SHORTCUT_SPAN_X).remove(KEY_SHORTCUT_SPAN_Y).apply();
+                    removeSavedShortcut(shortcutId);
                     beginWidgetPicker(currentPage);
                 }
             });
@@ -3351,10 +3411,15 @@ public class MainActivity extends Activity {
                 }
                 String shortcutLabel = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME);
                 if (shortcutLabel == null || shortcutLabel.trim().isEmpty()) shortcutLabel = "Contact shortcut";
+                String shortcutId = Long.toHexString(System.currentTimeMillis()) + "_" +
+                        Integer.toHexString((int) (Math.random() * Integer.MAX_VALUE));
+                java.util.ArrayList<String> shortcutIds = getSavedShortcutIds();
+                shortcutIds.add(shortcutId);
+                saveShortcutIds(shortcutIds);
                 prefs.edit()
-                        .putString(KEY_SHORTCUT_INTENT, shortcutIntent.toUri(Intent.URI_INTENT_SCHEME))
-                        .putString(KEY_SHORTCUT_LABEL, shortcutLabel)
-                        .putInt(KEY_SHORTCUT_PAGE, pendingWidgetTargetPage)
+                        .putString(shortcutPrefKey(KEY_SHORTCUT_INTENT, shortcutId), shortcutIntent.toUri(Intent.URI_INTENT_SCHEME))
+                        .putString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), shortcutLabel)
+                        .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), pendingWidgetTargetPage)
                         .apply();
                 Bitmap shortcutBitmap = null;
                 Object iconExtra = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON);
@@ -3379,19 +3444,17 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {}
                 }
                 if (shortcutBitmap != null) {
-                    try (java.io.FileOutputStream output = openFileOutput("contact_shortcut_icon.png", MODE_PRIVATE)) {
+                    try (java.io.FileOutputStream output = openFileOutput("contact_shortcut_icon_" + shortcutId + ".png", MODE_PRIVATE)) {
                         shortcutBitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
-                        prefs.edit().putString(KEY_SHORTCUT_ICON, "contact_shortcut_icon.png").apply();
+                        prefs.edit().putString(shortcutPrefKey(KEY_SHORTCUT_ICON, shortcutId), "contact_shortcut_icon_" + shortcutId + ".png").apply();
                     } catch (Exception ignored) {}
                 } else {
-                    prefs.edit().remove(KEY_SHORTCUT_ICON).apply();
+                    prefs.edit().remove(shortcutPrefKey(KEY_SHORTCUT_ICON, shortcutId)).apply();
                 }
                 handler.post(() -> {
                     renderSavedContactShortcut();
                     if (!hasRenderedContactShortcut()) {
-                        prefs.edit().remove(KEY_SHORTCUT_INTENT).remove(KEY_SHORTCUT_LABEL)
-                                .remove(KEY_SHORTCUT_PAGE).remove(KEY_SHORTCUT_ICON)
-                                .remove(KEY_SHORTCUT_X).remove(KEY_SHORTCUT_Y).apply();
+                        removeSavedShortcut(shortcutId);
                         Toast.makeText(this, "No free space for the shortcut. Move or remove an item first.",
                                 Toast.LENGTH_LONG).show();
                     } else {
