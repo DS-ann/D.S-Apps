@@ -215,7 +215,7 @@ final class WidgetInteractionController {
                 handler.removeCallbacks(movePress[0]);
                 handler.removeCallbacks(menuPress[0]);
                 widget.dispatchTouchEvent(event);
-                handler.postDelayed(movePress[0], 1000L);
+                handler.postDelayed(movePress[0], 550L);
                 handler.postDelayed(menuPress[0], 2000L);
                 return true;
             }
