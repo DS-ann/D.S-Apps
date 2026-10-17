@@ -4077,7 +4077,7 @@ public class MainActivity extends Activity {
         // During a drag, collision resolution can run before the next measure/layout
         // pass; use the pending FrameLayout geometry in that case, or we may approve
         // a drop using the item's previous position and create a real overlap.
-        ViewParent parent = view.getParent();
+        android.view.ViewParent parent = view.getParent();
         ViewGroup.LayoutParams raw = view.getLayoutParams();
         if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
