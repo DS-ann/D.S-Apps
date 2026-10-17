@@ -4140,9 +4140,18 @@ public class MainActivity extends Activity {
 
     private final Runnable clockWidgetEditLongPress = () -> {
         if (clockPanel == null || drawerOpen || clockWidgetEditing) return;
-        // Keep the configured length scale intact when entering edit mode.
+        // Entering edit mode ends move-ready mode immediately. Commit any movement
+        // already made during the one-second move window, then disable dragging.
         showClockMoveBorder(false);
         clockWidgetMoving = false;
+        if (clockWidgetDragging && clockPanel.getParent() instanceof FrameLayout) {
+            finishLiveDisplacements(true, clockPanel);
+            prefs.edit()
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
+                    .apply();
+        }
+        clockWidgetDragging = false;
         clockWidgetLongPressActivated = true;
         clockWidgetEditing = true;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
