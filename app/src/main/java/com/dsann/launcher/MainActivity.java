@@ -4660,24 +4660,59 @@ public class MainActivity extends Activity {
         int baseWidth = view.getWidth();
         int baseHeight = view.getHeight();
 
-        // setLayoutParams() does not update getLeft()/getTop() synchronously.
-        // During a drag, collision resolution can run before the next measure/layout
-        // pass; use the pending FrameLayout geometry in that case, or we may approve
-        // a drop using the item's previous position and create a real overlap.
+        // Pending layout params must be resolved using the child's gravity.
+        // A centered/right-aligned clock can legitimately have leftMargin != getLeft();
+        // treating that margin as its actual X coordinate shifts the resize handles
+        // and makes left/right edge anchoring drift during live resizing.
         android.view.ViewParent parent = view.getParent();
         ViewGroup.LayoutParams raw = view.getLayoutParams();
-        if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams) {
+        if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams
+                && view.isLayoutRequested()) {
+            FrameLayout page = (FrameLayout) parent;
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-            if (view.isLayoutRequested() || lp.leftMargin != view.getLeft()
-                    || lp.topMargin != view.getTop()) {
-                baseX = lp.leftMargin;
-                baseY = lp.topMargin;
-            }
             if (lp.width > 0) baseWidth = lp.width;
             if (lp.height > 0) baseHeight = lp.height;
+
+            int horizontalGravity = Gravity.getAbsoluteGravity(
+                    lp.gravity, view.getLayoutDirection()) & Gravity.HORIZONTAL_GRAVITY_MASK;
+            int verticalGravity = lp.gravity & Gravity.VERTICAL_GRAVITY_MASK;
+            int contentWidth = Math.max(0, page.getWidth()
+                    - page.getPaddingLeft() - page.getPaddingRight());
+            int contentHeight = Math.max(0, page.getHeight()
+                    - page.getPaddingTop() - page.getPaddingBottom());
+
+            if (page.getWidth() > 0) {
+                if (horizontalGravity == Gravity.RIGHT) {
+                    baseX = page.getWidth() - page.getPaddingRight()
+                            - lp.rightMargin - baseWidth;
+                } else if (horizontalGravity == Gravity.CENTER_HORIZONTAL) {
+                    baseX = page.getPaddingLeft() + (contentWidth - baseWidth) / 2
+                            + lp.leftMargin - lp.rightMargin;
+                } else {
+                    baseX = page.getPaddingLeft() + lp.leftMargin;
+                }
+            } else {
+                baseX = lp.leftMargin;
+            }
+
+            if (page.getHeight() > 0) {
+                if (verticalGravity == Gravity.BOTTOM) {
+                    baseY = page.getHeight() - page.getPaddingBottom()
+                            - lp.bottomMargin - baseHeight;
+                } else if (verticalGravity == Gravity.CENTER_VERTICAL) {
+                    baseY = page.getPaddingTop() + (contentHeight - baseHeight) / 2
+                            + lp.topMargin - lp.bottomMargin;
+                } else {
+                    baseY = page.getPaddingTop() + lp.topMargin;
+                }
+            } else {
+                baseY = lp.topMargin;
+            }
         }
-        // Include translations and scale/pivot so collision geometry matches the
-        // visible footprint, including the clock and temporary displacement animation.
+
+        // Include translation and pivot-based scaling so the reported rectangle
+        // matches the transformed visual bounds used by resize handles and collision
+        // checks. Once layout has settled, use the actual laid-out left/top values.
         int x = Math.round(baseX + view.getTranslationX() + view.getPivotX() * (1f - sx));
         int y = Math.round(baseY + view.getTranslationY() + view.getPivotY() * (1f - sy));
         return new int[]{x, y, Math.max(1, Math.round(Math.max(1, baseWidth) * sx)),
