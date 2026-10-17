@@ -820,6 +820,17 @@ public class MainActivity extends Activity {
                     .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
                     .apply();
         }
+        // Re-clamp after the final breadth/length layout has been measured. During
+        // resizing the panel's measured dimensions can lag one frame behind the
+        // new layout params, so the live-drag clamp alone is not sufficient.
+        final int finalGeometryGeneration = clockResizeGeneration;
+        setClampedClockTranslation(clockPanel.getTranslationX(), clockPanel.getTranslationY(), true);
+        clockPanel.post(() -> {
+            if (clockPanel == null || clockResizeGeneration != finalGeometryGeneration
+                    || clockResizeEdge != 0) return;
+            setClampedClockTranslation(clockPanel.getTranslationX(), clockPanel.getTranslationY(), true);
+            updateClockResizeHandles();
+        });
         setWorkspaceGridVisible(false, null);
         updateClockResizeHandles();
     }
@@ -4110,7 +4121,9 @@ public class MainActivity extends Activity {
                 moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
         // Start moving neighbours while the dragged item approaches from any side,
         // not only after their visible bounds already touch.
-        int gap = LauncherUiUtils.dp(this, 16);
+        // Push a neighbour only once the dragged item actually reaches its bounds.
+        // A large approach gap makes nearby items jump before the drop is real.
+        int gap = 0;
 
         // First restore items whose saved slots are no longer covered by the drag.
         // Their original slots are reserved below so another displaced item cannot
@@ -4239,7 +4252,26 @@ public class MainActivity extends Activity {
             int[] original = liveDisplacedItems.get(view);
             if (view.getParent() instanceof FrameLayout) {
                 FrameLayout page = (FrameLayout) view.getParent();
-                if (!commit) {
+                boolean keepDisplacement = commit;
+                if (keepDisplacement && movingView != null
+                        && movingView.getParent() == page) {
+                    // Commit a neighbour's new slot only if the dragged item still
+                    // occupies the neighbour's original slot after drop resolution.
+                    // If collision handling sends the dragged widget elsewhere,
+                    // put the neighbour back instead of leaving a pointless gap.
+                    int[] movingGeometry = itemGeometry(movingView);
+                    int[] neighbourGeometry = itemGeometry(view);
+                    android.graphics.Rect movingRect = new android.graphics.Rect(
+                            movingGeometry[0], movingGeometry[1],
+                            movingGeometry[0] + movingGeometry[2],
+                            movingGeometry[1] + movingGeometry[3]);
+                    android.graphics.Rect originalRect = new android.graphics.Rect(
+                            original[0], original[1],
+                            original[0] + neighbourGeometry[2],
+                            original[1] + neighbourGeometry[3]);
+                    keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
+                }
+                if (!keepDisplacement) {
                     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                     lp.leftMargin = original[0];
                     lp.topMargin = original[1];
@@ -4972,6 +5004,14 @@ public class MainActivity extends Activity {
         }
 
         if (clockGroup != null) {
+            if (amPmText != null) {
+                FrameLayout.LayoutParams markerParams =
+                        (FrameLayout.LayoutParams) amPmText.getLayoutParams();
+                // Shift AM/PM 5dp right of the background edge for typography
+                // clocks only; keep the seven-segment placement exactly as before.
+                markerParams.rightMargin = sevenSegment ? 0 : -LauncherUiUtils.dp(this, 5);
+                amPmText.setLayoutParams(markerParams);
+            }
             FrameLayout.LayoutParams groupParams =
                     (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.TOP;
