@@ -5484,18 +5484,17 @@ public class MainActivity extends Activity {
         if (amPmText != null) {
             amPmText.setTextColor(clockText.getCurrentTextColor());
             amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-            // The panel itself scales horizontally and vertically, so keep the
-            // marker's base size constant to avoid applying the resize twice.
-            amPmText.setTextSize(9f);
+            // Keep the marker's font size independent of workspace resizing.
+            // 13.5sp is 50% taller than the previous 9sp setting.
+            amPmText.setTextSize(13.5f);
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
-                markerParams.width = LauncherUiUtils.dp(this, 22);
-                markerParams.height = LauncherUiUtils.dp(this, 12);
+                markerParams.width = LauncherUiUtils.dp(this, 24);
+                markerParams.height = LauncherUiUtils.dp(this, 18);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
-                // Anchor AM/PM to the final clock digit using the same rule for every
-                // clock style. Compensate for the panel's horizontal scale so the marker
-                // stays a fixed physical distance from the digit as the panel is resized.
+                // Keep the marker's horizontal anchor tied to the digits in every style;
+                // its vertical anchor is centered between the colon's upper and lower dots.
                 int cornerInset = LauncherUiUtils.dp(this, 2);
                 int nonLedExtraRight = LauncherUiUtils.dp(this, 22);
                 if (sevenSegment) {
@@ -5511,18 +5510,11 @@ public class MainActivity extends Activity {
                     markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
                             - markerParams.width - cornerInset + nonLedExtraRight);
                 }
-                // Follow the rendered digit bottom, not the fixed row bottom.
-                // At short clock heights the non-LED glyph is vertically scaled around
-                // its pivot, so a fixed row-based anchor makes AM/PM float away.
-                float digitPivotY = clockText.getPivotY();
-                float digitScaleY = clockText.getScaleY();
-                float digitBottom = digitPivotY
-                        + (rowHeight - digitPivotY) * digitScaleY
-                        + clockText.getTranslationY();
-                markerParams.topMargin = Math.max(0, Math.min(
-                        Math.max(0, rowHeight - markerParams.height),
-                        Math.round(digitBottom - markerParams.height
-                                - LauncherUiUtils.dp(this, 1))));
+                // The colon's two dots straddle the vertical midpoint of the
+                // clock glyph row. Recompute this from the current row height on every
+                // resize so AM/PM remains centered for all clock styles and sizes.
+                markerParams.topMargin = Math.max(0,
+                        Math.round((rowHeight - markerParams.height) / 2f));
                 amPmText.setLayoutParams(markerParams);
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
