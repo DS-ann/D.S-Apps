@@ -2179,9 +2179,98 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "Unable to open this contact shortcut", Toast.LENGTH_LONG).show();
             }
         });
+        // Shortcuts must enter drag mode when the finger moves; a stationary
+        // long press still opens the options popup. Keep the drag stream on the tile
+        // so workspace swipes and click handling cannot steal it.
+        final float[] shortcutTouchStart = new float[2];
+        final int[] shortcutOrigin = new int[2];
+        final boolean[] shortcutDragging = new boolean[1];
+        final boolean[] shortcutMoved = new boolean[1];
+        tile.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                shortcutTouchStart[0] = event.getRawX();
+                shortcutTouchStart[1] = event.getRawY();
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                shortcutOrigin[0] = lp.leftMargin;
+                shortcutOrigin[1] = lp.topMargin;
+                shortcutDragging[0] = false;
+                shortcutMoved[0] = false;
+                return false;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                float dx = event.getRawX() - shortcutTouchStart[0];
+                float dy = event.getRawY() - shortcutTouchStart[1];
+                boolean pastSlop = Math.abs(dx) > LauncherUiUtils.dp(this, 8)
+                        || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
+                if (pastSlop) {
+                    shortcutMoved[0] = true;
+                    shortcutDragging[0] = true;
+                    tile.setPressed(false);
+                    tile.getParent().requestDisallowInterceptTouchEvent(true);
+                    setWorkspaceGridVisible(true, tile);
+                    FrameLayout page = tile.getParent() instanceof FrameLayout
+                            ? (FrameLayout) tile.getParent() : null;
+                    if (page != null) {
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                        int left = Math.max(0, Math.min(shortcutOrigin[0] + Math.round(dx),
+                                page.getWidth() - tile.getWidth()));
+                        int top = Math.max(0, Math.min(shortcutOrigin[1] + Math.round(dy),
+                                page.getHeight() - tile.getHeight()));
+                        android.graphics.Rect candidate = new android.graphics.Rect(left, top,
+                                left + tile.getWidth(), top + tile.getHeight());
+                        boolean blocked = false;
+                        for (int n = 0; n < page.getChildCount(); n++) {
+                            View other = page.getChildAt(n);
+                            if (other == tile || other.getVisibility() != View.VISIBLE
+                                    || !isWorkspaceItem(other)) continue;
+                            int[] g = itemGeometry(other);
+                            if (g[2] > 0 && g[3] > 0 && android.graphics.Rect.intersects(candidate,
+                                    new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]))) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                        if (!blocked) {
+                            lp.leftMargin = left;
+                            lp.topMargin = top;
+                            tile.setLayoutParams(lp);
+                        }
+                    }
+                    return true;
+                }
+                return false;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                if (shortcutDragging[0]) {
+                    shortcutDragging[0] = false;
+                    if (tile.getParent() instanceof FrameLayout) {
+                        FrameLayout page = (FrameLayout) tile.getParent();
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                        int left = Math.max(0, Math.min(lp.leftMargin, page.getWidth() - tile.getWidth()));
+                        int top = Math.max(0, Math.min(lp.topMargin, page.getHeight() - tile.getHeight()));
+                        lp.leftMargin = left;
+                        lp.topMargin = top;
+                        tile.setLayoutParams(lp);
+                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), currentPage)
+                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
+                                        left / (float) Math.max(1, page.getWidth() - tile.getWidth()))
+                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                                        top / (float) Math.max(1, page.getHeight() - tile.getHeight())).apply();
+                    }
+                    if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
+                    setWorkspaceGridVisible(false, null);
+                    refreshWorkspaceGrid();
+                    return true;
+                }
+                if (shortcutMoved[0]) return true;
+            }
+            return false;
+        });
         // Contact shortcuts are launcher-owned tiles, not AppWidgetHostViews, so
         // provide the same long-press options explicitly.
         tile.setOnLongClickListener(v -> {
+            if (shortcutMoved[0]) return true;
             showActionDialog(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
                     new String[]{"↔", "−", "×", "↻"},
                     new String[]{"Move to other page", "Resize shortcut", "Remove shortcut", "Recreate contact shortcut"},
