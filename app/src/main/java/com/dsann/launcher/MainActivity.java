@@ -364,7 +364,7 @@ public class MainActivity extends Activity {
                 clockWidgetStartY = clockPanel.getTranslationY();
                 setWorkspaceGridVisible(true, clockPanel);
                 handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
                 return true;
             }
             if (clockResizeEdge != 0 && clockWidgetEditing) {
@@ -513,7 +513,7 @@ public class MainActivity extends Activity {
                 }
                 handler.removeCallbacks(homeLongPress);
                 handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
                 super.dispatchTouchEvent(cancel);
@@ -817,7 +817,7 @@ public class MainActivity extends Activity {
         clockResizeEdge = 0;
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+        handler.removeCallbacks(clockWidgetEditLongPress);
 
         if (cancelled) {
             prefs.edit()
@@ -1006,7 +1006,7 @@ public class MainActivity extends Activity {
         if (clockWidgetEditing) exitClockWidgetEditMode();
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+        handler.removeCallbacks(clockWidgetEditLongPress);
         clockUpdatesActive = false;
         handler.removeCallbacks(clockUpdater);
         try { widgetHost.stopListening(); } catch (Exception ignored) {}
@@ -2323,7 +2323,7 @@ public class MainActivity extends Activity {
             // after finger-up and later swipes could keep changing clock dimensions.
             if (clockResizeEdge != 0) {
                 handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
                 clockResizeEdge = 0;
                 clockWidgetDragging = false;
                 setWorkspaceGridVisible(false, null);
@@ -3932,7 +3932,6 @@ public class MainActivity extends Activity {
                 clockWidgetStartX = clockPanel.getTranslationX();
                 clockWidgetStartY = clockPanel.getTranslationY();
                 handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
                 handler.removeCallbacks(clockWidgetEditLongPress);
                 handler.postDelayed(clockWidgetLongPress, 1000L);
                 handler.postDelayed(clockWidgetEditLongPress, 2000L);
@@ -3960,7 +3959,7 @@ public class MainActivity extends Activity {
                 } else if (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 8)) {
                     handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+                    handler.removeCallbacks(clockWidgetEditLongPress);
                     // Outside edit mode the clock must not swallow workspace swipes.
                     // Let the parent pager / global swipe detector take over.
                     if (view.getParent() != null) {
@@ -3973,7 +3972,7 @@ public class MainActivity extends Activity {
             if (event.getActionMasked() == MotionEvent.ACTION_UP
                     || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(clockWidgetLongPress);
-            handler.removeCallbacks(clockWidgetEditLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
                 if (clockWidgetDragging) {
                     finishLiveDisplacements(event.getActionMasked() == MotionEvent.ACTION_UP, clockPanel);
                     clockWidgetDragging = false;
