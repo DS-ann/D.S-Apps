@@ -4238,9 +4238,9 @@ public class MainActivity extends Activity {
             boolean quoted = false;
             for (int i = 0; i < pattern.length(); i++) {
                 char ch = pattern.charAt(i);
-                if (ch == '\\'') {
+                if (ch == '\'') {
                     digitsPattern.append(ch);
-                    if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '\\'') {
+                    if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '\'') {
                         digitsPattern.append(pattern.charAt(++i));
                     } else {
                         quoted = !quoted;
