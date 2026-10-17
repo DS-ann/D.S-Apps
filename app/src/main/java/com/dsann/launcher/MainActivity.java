@@ -5641,7 +5641,7 @@ public class MainActivity extends Activity {
                         .format(new Date());
             }
             if (!DateFormat.is24HourFormat(this)
-                    && !measuredDate.matches("(?i)^(AM|PM)\\s+.*")) {
+                    && !measuredDate.matches("(?i)^(AM|PM)(?:,|\\s).*")) {
                 measuredDate = new SimpleDateFormat("a", Locale.getDefault()).format(new Date())
                         + "  " + measuredDate;
             }
@@ -5840,7 +5840,9 @@ public class MainActivity extends Activity {
             // Only counter-scale horizontally for the panel's width transform.
             // The panel no longer scales vertically, so leave Y at 1 to preserve
             // the date's glyph proportions as clock breadth changes.
-            dateText.setScaleX(1f / Math.max(0.01f, lengthScale));
+            // Let the date scale with its panel. Counter-scaling here could let
+            // long dates escape the background when the clock panel is width-capped.
+            dateText.setScaleX(1f);
             dateText.setScaleY(1f);
             dateText.setTranslationX(0f);
         }
