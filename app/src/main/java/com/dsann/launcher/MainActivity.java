@@ -4249,10 +4249,15 @@ public class MainActivity extends Activity {
 
             if (bestX >= 0) {
                 liveDisplacedItems.put(other, new int[]{g[0], g[1]});
-                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) other.getLayoutParams();
-                lp.leftMargin = bestX;
-                lp.topMargin = bestY;
-                other.setLayoutParams(lp);
+                if (other == clockPanel) {
+                    setClampedClockTranslation(clockPanel.getTranslationX() + bestX - g[0],
+                            clockPanel.getTranslationY() + bestY - g[1], true);
+                } else {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) other.getLayoutParams();
+                    lp.leftMargin = bestX;
+                    lp.topMargin = bestY;
+                    other.setLayoutParams(lp);
+                }
             }
         }
     }
@@ -4269,6 +4274,21 @@ public class MainActivity extends Activity {
             if (view.getParent() instanceof FrameLayout) {
                 FrameLayout page = (FrameLayout) view.getParent();
                 boolean keepDisplacement = commit;
+                if (view == clockPanel) {
+                    if (!keepDisplacement) {
+                        setClampedClockTranslation(original[0] - clockPanel.getLeft()
+                                        - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
+                                original[1] - clockPanel.getTop()
+                                        - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
+                    } else {
+                        int pageIndex = pagesStrip == null ? 0 : Math.max(0, pagesStrip.indexOfChild(page));
+                        prefs.edit()
+                                .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), clockPanel.getTranslationX())
+                                .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex), clockPanel.getTranslationY())
+                                .apply();
+                    }
+                    continue;
+                }
                 if (keepDisplacement && movingView != null
                         && movingView.getParent() == page) {
                     // Commit a neighbour's new slot only if the dragged item still
