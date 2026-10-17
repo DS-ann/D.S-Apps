@@ -529,28 +529,13 @@ public class MainActivity extends Activity {
                 }
                 if (overlapsWorkspaceItem) return true;
 
-                // Convert the accepted visual rectangle back to the clock's
-                // persisted scale using its unscaled natural dimensions. Using the
-                // current visual width here fails when the old size was already capped
-                // by the page width, making an oversized clock impossible to shrink.
-                // Resize relative to the starting VISUAL rectangle and saved size,
-                // not the panel's unscaled layout width. Non-7-segment styles use a
-                // typography/date-dependent natural width, and width-capping can make
-                // that layout width differ from the visible width. Dividing by the
-                // natural width caused their handles to jump, barely resize, or drift.
-                // Convert the candidate visual width directly back to the
-                // panel's unscaled natural width. Multiplying the saved preference
-                // by a visual-width ratio fails when the old width was capped to the
-                // page: the saved percentage then no longer represents the rendered
-                // width, especially for typography clocks with date/AM-PM extras.
-                // Match ordinary widget resizing: the finger controls the visible
-                // rectangle, and the saved size is derived from the rectangle at gesture
-                // start. Use the same visual-width ratio for every clock style. In
-                // particular, never divide by the unscaled panel width: when a clock is
-                // capped by the page width, that value no longer describes what the user
-                // sees, so the resize handle can appear stuck or jump.
-                int lengthPercent = Math.round(clockWidgetStartLength
-                        * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
+                // The panel's measured width is its unscaled natural width; scaleX
+                // is the saved length percentage. Convert the requested visible width
+                // directly to that scale. Do not multiply the old preference by a ratio
+                // of visible widths: when the old clock is capped at the page edge, its
+                // visible width no longer represents the saved scale and shrinking stalls.
+                int lengthPercent = Math.round((right - left) * 100f
+                        / (float) Math.max(1, clockWidgetStartPanelWidth));
                 boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
                         && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
                 int breadthPercent;
