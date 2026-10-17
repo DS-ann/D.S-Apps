@@ -508,10 +508,26 @@ public class MainActivity extends Activity {
                 }
                 android.graphics.Rect candidate = new android.graphics.Rect(left, top, right, bottom);
 
-                // Resizing uses the same push-aside behavior as clock dragging.
-                // Do not stop at the first widget/icon in the way; apply the
-                // candidate rectangle and displace any colliding workspace items
-                // after the new visual bounds have been laid out.
+                // Match the ordinary widget resizer: reject a resize frame if its
+                // proposed rectangle intersects another workspace item. Do not apply
+                // preferences for a rectangle that the widget system would reject.
+                boolean overlapsWorkspaceItem = false;
+                for (int i = 0; i < activePage.getChildCount(); i++) {
+                    View other = activePage.getChildAt(i);
+                    if (other == clockPanel || !(other.getTag() instanceof String)) continue;
+                    String tag = (String) other.getTag();
+                    if (!(tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
+                            || "launcher_contact_shortcut".equals(tag)
+                            || "launcher_clock_widget".equals(tag))) continue;
+                    if (android.graphics.Rect.intersects(candidate, new android.graphics.Rect(
+                            itemGeometry(other)[0], itemGeometry(other)[1],
+                            itemGeometry(other)[0] + itemGeometry(other)[2],
+                            itemGeometry(other)[1] + itemGeometry(other)[3]))) {
+                        overlapsWorkspaceItem = true;
+                        break;
+                    }
+                }
+                if (overlapsWorkspaceItem) return true;
 
                 // Convert the accepted visual rectangle back to the clock's
                 // persisted scale using its unscaled natural dimensions. Using the
@@ -535,6 +551,8 @@ public class MainActivity extends Activity {
                 // sees, so the resize handle can appear stuck or jump.
                 int lengthPercent = Math.round(clockWidgetStartLength
                         * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
+                boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
+                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
                 int breadthPercent;
                 if (!resizingSevenSegment) {
                     // Typography clocks include a date area that does not scale with
