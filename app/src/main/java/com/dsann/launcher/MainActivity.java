@@ -4005,6 +4005,12 @@ public class MainActivity extends Activity {
     }
 
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
+        if (gap == 0) {
+            // Treat touching edges as contact so displacement starts at the border,
+            // not only after one item has moved visibly over the other.
+            return a.left <= b.right && a.right >= b.left
+                    && a.top <= b.bottom && a.bottom >= b.top;
+        }
         android.graphics.Rect expanded = new android.graphics.Rect(
                 a.left - gap, a.top - gap, a.right + gap, a.bottom + gap);
         return android.graphics.Rect.intersects(expanded, b);
