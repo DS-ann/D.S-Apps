@@ -49,14 +49,14 @@ final class LauncherUiUtils {
         view.setScaleY(baseScaleY * 1.2f);
         ObjectAnimator rotation = ObjectAnimator.ofFloat(view, View.ROTATION,
                 baseRotation - 2f, baseRotation + 2f, baseRotation - 2f);
-        rotation.setDuration(420L);
+        rotation.setDuration(LauncherMotion.duration(context, 420L));
         rotation.setRepeatCount(android.animation.ValueAnimator.INFINITE);
         if (verticalBob) {
             ObjectAnimator bob = ObjectAnimator.ofFloat(view, View.TRANSLATION_Y,
                     baseTranslationY - dp(context, 1.5f),
                     baseTranslationY + dp(context, 1.5f),
                     baseTranslationY - dp(context, 1.5f));
-            bob.setDuration(420L);
+            bob.setDuration(LauncherMotion.duration(context, 420L));
             bob.setRepeatCount(android.animation.ValueAnimator.INFINITE);
             MOVE_HINTS.put(view, new ObjectAnimator[]{rotation, bob});
             bob.start();
