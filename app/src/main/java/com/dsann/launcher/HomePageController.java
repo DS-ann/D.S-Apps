@@ -87,7 +87,9 @@ final class HomePageController {
         int requiredPages = HomePageModel.PAGE_COUNT;
         while (strip.getChildCount() < requiredPages) {
             FrameLayout newPage = new FrameLayout(activity);
-            newPage.setClipChildren(false);
+            // Keep every page's drawing confined to its own width.
+            newPage.setClipChildren(true);
+            newPage.setClipToPadding(true);
             strip.addView(newPage, new LinearLayout.LayoutParams(pageWidth, -1));
         }
         // Keep the strip and both page containers at the exact measured viewport width.
@@ -154,7 +156,8 @@ final class HomePageController {
         int columns = host.getHomeColumns();
         for (int pageIndex = 0; pageIndex < requiredPages; pageIndex++) {
             FrameLayout page = (FrameLayout) strip.getChildAt(pageIndex);
-            page.setClipChildren(false);
+            page.setClipChildren(true);
+            page.setClipToPadding(true);
             List<String> pagePackages = host.getPages().get(pageIndex);
             int fallbackHeight = Math.max(LauncherUiUtils.dp(activity, 360),
                     activity.getResources().getDisplayMetrics().heightPixels
