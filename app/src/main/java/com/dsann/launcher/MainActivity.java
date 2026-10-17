@@ -1016,18 +1016,22 @@ public class MainActivity extends Activity {
     private void updateClockResizeHandles() {
         if (clockPanel == null || root == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
         if (!(clockPanel.getParent() instanceof View)) return;
+        // Use the exact same visual-rectangle calculation as widget collision,
+        // clamping, and resize transactions. Mixing getLocationOnScreen() with
+        // itemGeometry() caused the handles and the resize math to disagree when
+        // a panel had pending layout params, a non-central pivot, or translation.
+        View pageView = clockPanel.getParent() instanceof View
+                ? (View) clockPanel.getParent() : null;
+        if (pageView == null) return;
+        int[] geometry = itemGeometry(clockPanel);
         int[] rootOnScreen = new int[2];
-        int[] clockOnScreen = new int[2];
+        int[] pageOnScreen = new int[2];
         root.getLocationOnScreen(rootOnScreen);
-        clockPanel.getLocationOnScreen(clockOnScreen);
-        // Anchor grips to the clock View's real on-screen origin, then use its
-        // rendered (scaled) dimensions. Do not rebuild the origin from layout
-        // margins/itemGeometry: during live resize those can be pending/stale,
-        // which makes the grips drift away from the visible background edges.
-        int visualLeft = clockOnScreen[0] - rootOnScreen[0];
-        int visualTop = clockOnScreen[1] - rootOnScreen[1];
-        int w = Math.max(1, Math.round(clockPanel.getWidth() * clockPanel.getScaleX()));
-        int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
+        pageView.getLocationOnScreen(pageOnScreen);
+        int visualLeft = pageOnScreen[0] - rootOnScreen[0] + geometry[0];
+        int visualTop = pageOnScreen[1] - rootOnScreen[1] + geometry[1];
+        int w = Math.max(1, geometry[2]);
+        int h = Math.max(1, geometry[3]);
         // Match the widget resizer: 18dp-thick grips, 40dp long.
         int side = LauncherUiUtils.dp(this, 40);
         int thin = LauncherUiUtils.dp(this, 18);
@@ -1323,6 +1327,17 @@ public class MainActivity extends Activity {
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
         showHome();
+        // The first clock text/layout pass must happen after the page viewport has
+        // real dimensions. Otherwise a fresh install/update can leave the first
+        // page's clock empty or measured at zero until Home Studio rebuilds it.
+        root.post(() -> {
+            if (isFinishing() || root == null || clockPanelsByPage[0] == null) return;
+            updateClock();
+            activateClockForPage(Math.max(0, Math.min(1, currentPage)));
+            applyClockPositionAndSize();
+            attachClockPanelsToPages();
+            updateClockResizeHandles();
+        });
     }
 
     private void setWorkspaceGridVisible(boolean visible, View movingView) {
