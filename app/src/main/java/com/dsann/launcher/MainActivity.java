@@ -1293,8 +1293,9 @@ public class MainActivity extends Activity {
 
         pageViewport = new FrameLayout(this);
         // Permit the rotating faces to extend slightly beyond the viewport while turning.
-        pageViewport.setClipChildren(false);
-        pageViewport.setClipToPadding(false);
+        // The viewport clips all workspace content to the visible screen.
+        pageViewport.setClipChildren(true);
+        pageViewport.setClipToPadding(true);
         pageViewport.setCameraDistance(12000f * getResources().getDisplayMetrics().density);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, 0, 1f);
         pp.topMargin = LauncherUiUtils.dp(this, 2);
@@ -1303,7 +1304,8 @@ public class MainActivity extends Activity {
         // The viewport stays fixed while the page strip moves inside it.
         pagesStrip = new LinearLayout(this);
         pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
-        pagesStrip.setClipChildren(false);
+        pagesStrip.setClipChildren(true);
+        pagesStrip.setClipToPadding(true);
         pageViewport.addView(pagesStrip, new FrameLayout.LayoutParams(-2, -1, Gravity.TOP | Gravity.LEFT));
 
         pageIndicator = LauncherUiUtils.text(this, "", 11, Color.rgb(210, 220, 255), false);
@@ -2342,11 +2344,12 @@ public class MainActivity extends Activity {
                     int columns = getHomeColumns();
                     int slotHeight = LauncherUiUtils.dp(this,
                             homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-                    // Fixed-size slots are shared by both screens. The usable page
-                    // ends above the page indicator/dock, so a complete slot must fit.
-                    int rows = Math.max(1,
-                            (pageViewport.getHeight() > 0 ? pageViewport.getHeight() : slotHeight)
-                                    / slotHeight);
+                    // Match HomePageController's exact row count and vertical anchors.
+                    // The old drag path used fixed slotHeight increments while rendering
+                    // spread rows over maxTop, so the icon jumped on release/rebuild.
+                    int targetHeightForGrid = Math.max(1, targetPage.getHeight() > 0
+                            ? targetPage.getHeight() : pageViewport.getHeight());
+                    int rows = Math.max(1, targetHeightForGrid / slotHeight);
                     // The dragged cell stays attached to its source page until ACTION_UP.
                     // Its layout margins therefore are not reliable destination coordinates.
                     // Map the release point to the visible viewport, where the destination
@@ -2360,14 +2363,23 @@ public class MainActivity extends Activity {
                     int cellWidth = Math.max(1, targetWidth / columns);
                     int cellHeight = slotHeight;
                     rows = Math.max(1, Math.min(rows, targetHeight / cellHeight));
+                    int maxTop = Math.max(0, targetHeight - cellHeight);
+                    float desiredLeft = event.getRawX() - viewportLocation[0] - cellWidth / 2f;
                     int targetCol = Math.max(0, Math.min(columns - 1,
-                            (int) ((event.getRawX() - viewportLocation[0]) / cellWidth)));
-                    int targetRow = Math.max(0, Math.min(rows - 1,
-                            (int) ((event.getRawY() - viewportLocation[1]) / cellHeight)));
+                            Math.round(desiredLeft / cellWidth)));
+                    float desiredTop = event.getRawY() - viewportLocation[1] - cellHeight / 2f;
+                    int targetRow = rows <= 1 || maxTop <= 0 ? 0
+                            : Math.max(0, Math.min(rows - 1,
+                                    Math.round(desiredTop * (rows - 1) / (float) maxTop)));
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = slotHeight;
-                    int sourceCol = Math.max(0, Math.min(columns - 1, iconOriginalLeft / sourceCellWidth));
-                    int sourceRow = Math.max(0, Math.min(rows - 1, iconOriginalTop / sourceCellHeight));
+                    int sourceRows = Math.max(1, sourceView.getHeight() / sourceCellHeight);
+                    int sourceMaxTop = Math.max(0, sourceView.getHeight() - view.getHeight());
+                    int sourceCol = Math.max(0, Math.min(columns - 1,
+                            Math.round(iconOriginalLeft / (float) sourceCellWidth)));
+                    int sourceRow = sourceRows <= 1 || sourceMaxTop <= 0 ? 0
+                            : Math.max(0, Math.min(sourceRows - 1,
+                                    Math.round(iconOriginalTop * (sourceRows - 1) / (float) sourceMaxTop)));
                     boolean[][] occupied = new boolean[rows][columns];
                     View occupant = null;
                     String otherPackage = null;
@@ -2466,8 +2478,8 @@ public class MainActivity extends Activity {
         if (pagesStrip != null) {
             while (pagesStrip.getChildCount() < HomePageModel.PAGE_COUNT) {
                 FrameLayout page = new FrameLayout(this);
-                // Each page is a hard drawing boundary: clocks must never bleed
-                // across the seam into the adjacent home screen.
+                // Each home page is an independent drawing surface. A clock or icon
+                // may be oversized internally but cannot render across the page seam.
                 page.setClipChildren(true);
                 page.setClipToPadding(true);
                 pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
