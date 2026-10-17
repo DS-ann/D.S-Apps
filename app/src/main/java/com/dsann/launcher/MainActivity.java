@@ -4864,7 +4864,11 @@ public class MainActivity extends Activity {
         // from the previous frame. Those dimensions can be stale while the user resizes the
         // panel, causing scaled digits to jump or drift until the next layout pass.
         clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
-        clockText.setPivotY(rowHeight / 2f);
+        // The LED renderer sizes its segments from its measured view height.
+        // Keep that view at the natural 114dp height and scale the rendered digits
+        // by breadthScale explicitly; otherwise layout/background breadth changes
+        // while the LED glyph view can retain stale measured bounds during a drag.
+        clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
         // Normalize non-seven-segment glyph height across typography presets.
         // Typeface choices have different cap-height metrics at the same 78sp,
         // which otherwise makes some styles look smaller/larger. Use the default
@@ -4908,7 +4912,7 @@ public class MainActivity extends Activity {
         // their upper edge anchored to its existing position against the background.
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
         // compensates for the centered pivot so the extra height goes downward.
-        clockText.setScaleY(sevenSegment ? 1f
+        clockText.setScaleY(sevenSegment ? breadthScale
                 : normalizedNonLedHeightScale * nonLedDigitScale
                         * (1.20f + 20f / 114f) * breadthScale);
         // Shift the seven-segment digits 15 dp left relative to their background.
@@ -4930,7 +4934,10 @@ public class MainActivity extends Activity {
             textParams.width = sevenSegment
                     ? ViewGroup.LayoutParams.MATCH_PARENT
                     : ViewGroup.LayoutParams.WRAP_CONTENT;
-            textParams.height = rowHeight;
+            // Keep the seven-segment renderer at its natural measured height
+            // and scale the glyphs separately from the background. Non-LED clocks
+            // continue to use the actual resized row height.
+            textParams.height = sevenSegment ? naturalRowHeight : rowHeight;
             textParams.gravity = Gravity.LEFT | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
