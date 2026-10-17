@@ -337,11 +337,13 @@ final class WidgetInteractionController {
                             int startX = pass == 0 ? Math.max(0, requestedX - container.getWidth()) : 0;
                             int endX = pass == 0 ? Math.min(maxX, requestedX + container.getWidth()) : maxX;
                             for (int gy = startY; gy <= endY; gy += step) {
-                                int y = Math.min(maxY, gy);
+                                int candidateY = Math.min(maxY, gy);
                                 for (int gx = startX; gx <= endX; gx += step) {
-                                    int x = Math.min(maxX, gx);
+                                    int candidateX = Math.min(maxX, gx);
                                     android.graphics.Rect candidate = new android.graphics.Rect(
-                                            x, y, x + container.getWidth(), y + container.getHeight());
+                                            candidateX, candidateY,
+                                            candidateX + container.getWidth(),
+                                            candidateY + container.getHeight());
                                     boolean blocked = false;
                                     for (android.graphics.Rect obstacle : occupied) {
                                         if (android.graphics.Rect.intersects(candidate, obstacle)) {
@@ -350,14 +352,15 @@ final class WidgetInteractionController {
                                         }
                                     }
                                     if (blocked) continue;
-                                    int distance = Math.abs(x - requestedX) + Math.abs(y - requestedY);
+                                    int distance = Math.abs(candidateX - requestedX)
+                                            + Math.abs(candidateY - requestedY);
                                     if (distance < bestDistance) {
                                         bestDistance = distance;
-                                        bestX = x;
-                                        bestY = y;
+                                        bestX = candidateX;
+                                        bestY = candidateY;
                                     }
                                 }
-                                if (y == maxY) break;
+                                if (candidateY == maxY) break;
                             }
                         }
                         if (bestDistance != Integer.MAX_VALUE) {
