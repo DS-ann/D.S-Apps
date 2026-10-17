@@ -527,11 +527,19 @@ public class MainActivity extends Activity {
                 // by a visual-width ratio fails when the old width was capped to the
                 // page: the saved percentage then no longer represents the rendered
                 // width, especially for typography clocks with date/AM-PM extras.
-                int lengthPercent = Math.round((right - left) * 100f
-                        / Math.max(1, clockWidgetStartPanelWidth));
-                int breadthPercent;
                 boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
                         && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+                // Typography clocks can have a rendered width different from their
+                // unscaled layout width because the panel is page-capped. Resize from
+                // the actual visible starting width and the saved preference instead;
+                // dividing by the unscaled width caused non-LED clocks to stop growing
+                // early even when the rest of the page was empty. Leave LED math intact.
+                int lengthPercent = resizingSevenSegment
+                        ? Math.round((right - left) * 100f
+                                / Math.max(1, clockWidgetStartPanelWidth))
+                        : Math.round(clockWidgetStartLength * (right - left) / (float)
+                                Math.max(1, clockWidgetStartVisualWidth));
+                int breadthPercent;
                 if (!resizingSevenSegment) {
                     // Typography clocks include a date area that does not scale with
                     // breadth. Subtract that fixed area before converting the target
@@ -5848,8 +5856,13 @@ public class MainActivity extends Activity {
         // The clock's complete visual bounds must always fit inside this page.
         // Keep the requested size when it fits; if the user chooses an oversized
         // length, cap the rendered scale to the available page width.
-        final float lengthScale = Math.min(requestedLengthScale,
-                Math.max(0.01f, availablePanelWidth / (float) naturalPanelWidth));
+        // Preserve the existing seven-segment scale behavior. Typography clocks
+        // use their full requested scale and are constrained by the actual visual
+        // page bounds during resize, rather than being silently width-capped here.
+        final float lengthScale = sevenSegment
+                ? Math.min(requestedLengthScale,
+                        Math.max(0.01f, availablePanelWidth / (float) naturalPanelWidth))
+                : requestedLengthScale;
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
