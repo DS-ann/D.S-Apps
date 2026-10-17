@@ -186,7 +186,7 @@ final class LauncherDrawerController {
                         && !drawerApps.isEmpty()) {
                     ResolveInfo match = drawerApps.get(0);
                     closeSearch.run();
-                    actions.launchApp(match);
+                    actions.launchApp(match, null);
                     return true;
                 }
                 return false;
