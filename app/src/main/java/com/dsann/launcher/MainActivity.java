@@ -1498,7 +1498,7 @@ public class MainActivity extends Activity {
         // A direct-call shortcut is an app-like icon, not a miniature widget tile.
         // Its default footprint is the same compact size as the app icon cell.
         int defaultShortcutWidth = LauncherUiUtils.dp(this, 48);
-        int defaultShortcutHeight = LauncherUiUtils.dp(this, 48);
+        int defaultShortcutHeight = LauncherUiUtils.dp(this, 68);
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
                         : Math.min(cellW, defaultShortcutWidth)));
