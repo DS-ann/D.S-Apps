@@ -1115,9 +1115,9 @@ public class MainActivity extends Activity {
         WorkspaceGridOverlay(FrameLayout page) {
             super(MainActivity.this);
             this.page = page;
-            gridPaint.setStyle(Paint.Style.STROKE);
-            gridPaint.setStrokeWidth(LauncherUiUtils.dp(MainActivity.this, 1));
-            gridPaint.setColor(Color.argb(150, 120, 165, 255));
+            // Use a quiet filled placement marker, not a full grid of heavy lines.
+            gridPaint.setStyle(Paint.Style.FILL);
+            gridPaint.setColor(Color.argb(34, 120, 165, 255));
         }
         void configure(int cw, int ch) {
             cellW = Math.max(1, cw);
@@ -1157,7 +1157,9 @@ public class MainActivity extends Activity {
                     bottom = item.getBottom();
                 }
                 if (right > left && bottom > top) {
-                    canvas.drawRect(left + 1, top + 1, right - 1, bottom - 1, gridPaint);
+                    canvas.drawRoundRect(left + 2, top + 2, right - 2, bottom - 2,
+                            LauncherUiUtils.dp(MainActivity.this, 6),
+                            LauncherUiUtils.dp(MainActivity.this, 6), gridPaint);
                 }
             }
         }
@@ -3347,8 +3349,21 @@ public class MainActivity extends Activity {
         int cellWidth = Math.max(1, pageWidth / getHomeColumns());
         int cellHeight = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
         int maxLeft = Math.max(0, pageWidth - widgetWidth), maxTop = Math.max(0, pageHeight - widgetHeight);
-        for (int top = 0; top <= maxTop; top += cellHeight) {
-            for (int left = 0; left <= maxLeft; left += cellWidth) {
+        int occupiedItemCount = 0;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            Object tag = page.getChildAt(i).getTag();
+            if (tag instanceof String && (((String) tag).startsWith("launcher_widget:")
+                    || ((String) tag).startsWith("launcher_app:")
+                    || "launcher_contact_shortcut".equals(tag))) occupiedItemCount++;
+        }
+        int columns = Math.max(1, (maxLeft / cellWidth) + 1);
+        int rows = Math.max(1, (maxTop / cellHeight) + 1);
+        int start = (occupiedItemCount * 3) % (columns * rows);
+        for (int step = 0; step < columns * rows; step++) {
+            int slot = (start + step) % (columns * rows);
+            int top = (slot / columns) * cellHeight;
+            int left = (slot % columns) * cellWidth;
+            if (top > maxTop || left > maxLeft) continue;
                 android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + widgetWidth, top + widgetHeight);
                 boolean blocked = false;
                 for (int i = 0; i < page.getChildCount(); i++) {
@@ -3370,7 +3385,6 @@ public class MainActivity extends Activity {
                     if (w > 0 && h > 0 && android.graphics.Rect.intersects(candidate, new android.graphics.Rect(x, y, x + w, y + h))) { blocked = true; break; }
                 }
                 if (!blocked) return new int[]{left, top};
-            }
         }
         return null;
     }
@@ -4494,12 +4508,14 @@ public class MainActivity extends Activity {
                 contentWidth + LauncherUiUtils.dp(this, 8));
         // Respect the requested scale unless the entire panel would leave the
         // available screen width. Do not apply a second scale to the clock text.
-        final float lengthScale = Math.min(requestedLengthScale,
-                availablePanelWidth / (float) Math.max(1, naturalPanelWidth));
-        // Keep the clock's reserved layout footprint fixed at its original height.
-        // Resizing is visual only: the glyph/background may overlap home items below,
-        // but must never push icons, shortcuts, widgets, or the dock down the page.
-        final int rowHeight = LauncherUiUtils.dp(this, 114);
+        // Do not cap the chosen clock width to the screen: the user controls its
+        // length. The panel keeps its natural width and grows from its alignment anchor.
+        final float lengthScale = requestedLengthScale;
+        // Let the real clock panel height grow with the breadth setting. Scaling only
+        // the drawing left its background short and caused the clock to look detached.
+        final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
+        final int rowHeight = Math.max(naturalRowHeight,
+                Math.round(naturalRowHeight * breadthScale));
 
         clockPanel.setGravity(alignment);
         clockPanel.setPivotY(0f);
@@ -4507,10 +4523,9 @@ public class MainActivity extends Activity {
         // Its actual hit bounds stay at the fixed layout size, so overlapping
         // visuals do not steal touches from the shortcut underneath.
         clockPanel.setElevation(LauncherUiUtils.dp(this, 8));
-        // Scale the entire clock panel visually so the translucent background,
-        // clock, AM/PM marker, and date grow together. Its measured row remains
-        // fixed below, so this visual resize never pushes workspace items down.
-        clockPanel.setScaleY(breadthScale);
+        // Resize the actual panel downward with the clock instead of scaling a
+        // fixed-height background. The top edge stays anchored in place.
+        clockPanel.setScaleY(1f);
         ViewGroup.LayoutParams rawPanelParams = clockPanel.getLayoutParams();
         FrameLayout.LayoutParams panelParams = rawPanelParams instanceof FrameLayout.LayoutParams
                 ? (FrameLayout.LayoutParams) rawPanelParams
