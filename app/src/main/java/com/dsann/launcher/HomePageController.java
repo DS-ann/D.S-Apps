@@ -30,7 +30,7 @@ final class HomePageController {
         void installHomeIconTouch(View cell, String packageName);
         void restoreWidgetsOnPages();
         void syncWidgetViewsToPages();
-        void launchApp(ResolveInfo app);
+        void launchApp(ResolveInfo app, View sourceView);
         void showAppOptions(ResolveInfo app, boolean onHome);
     }
 
@@ -172,7 +172,7 @@ final class HomePageController {
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
                     false, iconSizeKey, fontSizeKey, showLabelsKey,
                     new LauncherAppAdapter.Actions() {
-                        @Override public void onAppClick(ResolveInfo app) { host.launchApp(app); }
+                        @Override public void onAppClick(ResolveInfo app, View sourceView) { host.launchApp(app, sourceView); }
                         @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
                             host.showAppOptions(app, onHome);
                         }
