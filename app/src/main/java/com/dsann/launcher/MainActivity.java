@@ -1068,7 +1068,7 @@ public class MainActivity extends Activity {
                     @Override public void installHomeIconTouch(View cell, String packageName) { MainActivity.this.installHomeIconTouch(cell, packageName); }
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
                     @Override public void syncWidgetViewsToPages() { MainActivity.this.syncWidgetViewsToPages(); }
-                    @Override public void launchApp(ResolveInfo app) { MainActivity.this.launchApp(app); }
+                    @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome) { MainActivity.this.showAppOptions(app, onHome); }
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
@@ -3548,9 +3548,31 @@ public class MainActivity extends Activity {
     }
 
     private void launchApp(ResolveInfo app) {
+        launchApp(app, null);
+    }
+
+    private void launchApp(ResolveInfo app, View sourceView) {
         Intent intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
         if (intent != null) {
-            try { startActivity(intent); } catch (Exception e) { Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show(); }
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 16 && sourceView != null
+                        && sourceView.getWidth() > 0 && sourceView.getHeight() > 0) {
+                    // Scale the launched app from the tapped icon, matching the native
+                    // launcher-to-app transition available on Android 6 and newer.
+                    android.app.ActivityOptions options =
+                            android.app.ActivityOptions.makeScaleUpAnimation(sourceView,
+                                    0, 0, sourceView.getWidth(), sourceView.getHeight());
+                    startActivity(intent, options.toBundle());
+                } else {
+                    startActivity(intent);
+                }
+            } catch (Exception e) {
+                try {
+                    startActivity(intent);
+                } catch (Exception ignored) {
+                    Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show();
+                }
+            }
         }
     }
 
