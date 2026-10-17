@@ -3296,8 +3296,7 @@ public class MainActivity extends Activity {
             widget.setPadding(0, 0, 0, 0);
             int[] freeWidgetPosition = findFreeWidgetPosition(page, width, height);
             if (freeWidgetPosition == null && pagesStrip != null) {
-                // A free rectangle may exist on the other workspace page. Try it before
-                // reporting that the widget cannot fit.
+                // Check the other home screen at the original size before shrinking.
                 int otherPageIndex = targetPage == 0 ? 1 : 0;
                 if (otherPageIndex < pagesStrip.getChildCount()
                         && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
@@ -3310,9 +3309,34 @@ public class MainActivity extends Activity {
                     }
                 }
             }
+            // If the requested footprint cannot fit on either page, retry at 50%
+            // size. Keep the widget's aspect ratio and its original size whenever possible.
+            if (freeWidgetPosition == null) {
+                int smallerWidth = Math.max(LauncherUiUtils.dp(this, 48), Math.round(width * 0.5f));
+                int smallerHeight = Math.max(LauncherUiUtils.dp(this, 48), Math.round(height * 0.5f));
+                freeWidgetPosition = findFreeWidgetPosition(page, smallerWidth, smallerHeight);
+                if (freeWidgetPosition == null && pagesStrip != null) {
+                    int otherPageIndex = targetPage == 0 ? 1 : 0;
+                    if (otherPageIndex < pagesStrip.getChildCount()
+                            && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
+                        FrameLayout otherPage = (FrameLayout) pagesStrip.getChildAt(otherPageIndex);
+                        int[] otherPosition = findFreeWidgetPosition(otherPage, smallerWidth, smallerHeight);
+                        if (otherPosition != null) {
+                            page = otherPage;
+                            resolvedPage = otherPageIndex;
+                            freeWidgetPosition = otherPosition;
+                        }
+                    }
+                }
+                if (freeWidgetPosition != null) {
+                    width = smallerWidth;
+                    height = smallerHeight;
+                    Toast.makeText(this, "Widget added at 50% size to fit the available space", Toast.LENGTH_SHORT).show();
+                }
+            }
             if (freeWidgetPosition == null) {
                 try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
-                Toast.makeText(this, "No free space large enough for this widget on either screen", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "No free space for this widget, even at 50% size", Toast.LENGTH_LONG).show();
                 return;
             }
             addWidgetContainer(page, widget, widgetId, resolvedPage, freeWidgetPosition[0], freeWidgetPosition[1], width, height);
