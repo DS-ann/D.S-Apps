@@ -513,10 +513,15 @@ public class MainActivity extends Activity {
                 // persisted scale using its unscaled natural dimensions. Using the
                 // current visual width here fails when the old size was already capped
                 // by the page width, making an oversized clock impossible to shrink.
-                int lengthPercent = Math.round((right - left) * 100f
-                        / Math.max(1, clockWidgetStartPanelWidth));
-                int breadthPercent = Math.round((bottom - top) * 100f
-                        / Math.max(1, LauncherUiUtils.dp(this, 114)));
+                // Resize relative to the starting VISUAL rectangle and saved size,
+                // not the panel's unscaled layout width. Non-7-segment styles use a
+                // typography/date-dependent natural width, and width-capping can make
+                // that layout width differ from the visible width. Dividing by the
+                // natural width caused their handles to jump, barely resize, or drift.
+                int lengthPercent = Math.round(clockWidgetStartLength
+                        * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
+                int breadthPercent = Math.round(clockWidgetStartBreadth
+                        * (bottom - top) / (float) Math.max(1, clockWidgetStartVisualHeight));
                 lengthPercent = Math.max(80, Math.min(250, lengthPercent));
                 breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
@@ -4512,7 +4517,11 @@ public class MainActivity extends Activity {
             int[] g = itemGeometry(displaced);
             android.graphics.Rect originalRect = new android.graphics.Rect(
                     original[0], original[1], original[0] + g[2], original[1] + g[3]);
-            if (!overlapsWithGap(movingRect, originalRect, gap)) {
+            // Add a small release margin before restoring a neighbour. Without
+            // hysteresis, tiny finger jitter at a touching edge alternates between
+            // restore and displace on successive MOVE frames ("dancing" widgets).
+            int restoreHysteresis = LauncherUiUtils.dp(this, 8);
+            if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)) {
                 if (displaced == clockPanel) {
                     // Clock geometry is translation/scale based; writing its visual
                     // coordinates into layout margins corrupts its saved position.
