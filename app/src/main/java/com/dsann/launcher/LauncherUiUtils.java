@@ -14,25 +14,43 @@ import java.util.WeakHashMap;
 /** Shared view and density helpers used across launcher screens. */
 final class LauncherUiUtils {
     private static final Map<View, ObjectAnimator[]> MOVE_HINTS = new WeakHashMap<>();
+    private static final Map<View, float[]> MOVE_HINT_BASES = new WeakHashMap<>();
 
     private LauncherUiUtils() {}
 
-    /** Subtle move-ready feedback: 20% scale-up with a low-amplitude dance. */
+    /** Subtle move-ready feedback: scale-up with a low-amplitude dance. */
     static void startMoveHint(View view, Context context) {
+        startMoveHint(view, context, true);
+    }
+
+    /** Allows position-sensitive widgets (such as the clock) to dance without bobbing. */
+    static void startMoveHint(View view, Context context, boolean verticalBob) {
         if (view == null) return;
         stopMoveHint(view);
-        view.setScaleX(1.2f);
-        view.setScaleY(1.2f);
-        ObjectAnimator rotation = ObjectAnimator.ofFloat(view, View.ROTATION, -2f, 2f, -2f);
+        float baseRotation = view.getRotation();
+        float baseTranslationY = view.getTranslationY();
+        float baseScaleX = view.getScaleX();
+        float baseScaleY = view.getScaleY();
+        MOVE_HINT_BASES.put(view, new float[]{baseRotation, baseTranslationY, baseScaleX, baseScaleY});
+        view.setScaleX(baseScaleX * 1.2f);
+        view.setScaleY(baseScaleY * 1.2f);
+        ObjectAnimator rotation = ObjectAnimator.ofFloat(view, View.ROTATION,
+                baseRotation - 2f, baseRotation + 2f, baseRotation - 2f);
         rotation.setDuration(420L);
         rotation.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        ObjectAnimator bob = ObjectAnimator.ofFloat(view, View.TRANSLATION_Y,
-                -dp(context, 1.5f), dp(context, 1.5f), -dp(context, 1.5f));
-        bob.setDuration(420L);
-        bob.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        MOVE_HINTS.put(view, new ObjectAnimator[]{rotation, bob});
+        if (verticalBob) {
+            ObjectAnimator bob = ObjectAnimator.ofFloat(view, View.TRANSLATION_Y,
+                    baseTranslationY - dp(context, 1.5f),
+                    baseTranslationY + dp(context, 1.5f),
+                    baseTranslationY - dp(context, 1.5f));
+            bob.setDuration(420L);
+            bob.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+            MOVE_HINTS.put(view, new ObjectAnimator[]{rotation, bob});
+            bob.start();
+        } else {
+            MOVE_HINTS.put(view, new ObjectAnimator[]{rotation});
+        }
         rotation.start();
-        bob.start();
     }
 
     static void stopMoveHint(View view) {
@@ -43,10 +61,18 @@ final class LauncherUiUtils {
                 if (animator != null) animator.cancel();
             }
         }
-        view.setRotation(0f);
-        view.setTranslationY(0f);
-        view.setScaleX(1f);
-        view.setScaleY(1f);
+        float[] base = MOVE_HINT_BASES.remove(view);
+        if (base != null) {
+            view.setRotation(base[0]);
+            view.setTranslationY(base[1]);
+            view.setScaleX(base[2]);
+            view.setScaleY(base[3]);
+        } else {
+            view.setRotation(0f);
+            view.setTranslationY(0f);
+            view.setScaleX(1f);
+            view.setScaleY(1f);
+        }
     }
 
     static int dp(Context context, float value) {
