@@ -5166,6 +5166,13 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Prefer moving the item itself to the other home page before shrinking
+            // it. Shrink-to-fit is reserved for cases where neither page has room.
+            if (bestX < 0 && item != clockPanel
+                    && tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
+                continue;
+            }
+
             // Last-resort protection: if both pages are crowded, reduce this item's
             // visual scale in small steps until its actual visible bounds fit a free
             // rectangle. This is preferable to leaving two things visibly overlapping.
