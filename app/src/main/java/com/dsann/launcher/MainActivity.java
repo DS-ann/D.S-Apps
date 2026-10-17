@@ -3429,47 +3429,54 @@ public class MainActivity extends Activity {
 
     private int[] findFreeWidgetPosition(FrameLayout page, int widgetWidth, int widgetHeight) {
         if (page == null) return null;
-        int pageWidth = page.getWidth() > 0 ? page.getWidth() : Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
-        int pageHeight = page.getHeight() > 0 ? page.getHeight() : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
-        int cellWidth = Math.max(1, pageWidth / getHomeColumns());
-        int cellHeight = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
-        int maxLeft = Math.max(0, pageWidth - widgetWidth), maxTop = Math.max(0, pageHeight - widgetHeight);
-        int occupiedItemCount = 0;
-        for (int i = 0; i < page.getChildCount(); i++) {
-            Object tag = page.getChildAt(i).getTag();
-            if (tag instanceof String && (((String) tag).startsWith("launcher_widget:")
-                    || ((String) tag).startsWith("launcher_app:")
-                    || "launcher_contact_shortcut".equals(tag))) occupiedItemCount++;
-        }
-        int columns = Math.max(1, (maxLeft / cellWidth) + 1);
-        int rows = Math.max(1, (maxTop / cellHeight) + 1);
-        int start = (occupiedItemCount * 3) % (columns * rows);
-        for (int step = 0; step < columns * rows; step++) {
-            int slot = (start + step) % (columns * rows);
-            int top = (slot / columns) * cellHeight;
-            int left = (slot % columns) * cellWidth;
-            if (top > maxTop || left > maxLeft) continue;
-                android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + widgetWidth, top + widgetHeight);
+        int pageWidth = page.getWidth() > 0 ? page.getWidth()
+                : Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
+        int pageHeight = page.getHeight() > 0 ? page.getHeight()
+                : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
+        int maxLeft = Math.max(0, pageWidth - widgetWidth);
+        int maxTop = Math.max(0, pageHeight - widgetHeight);
+        // Widgets are free-positioned rectangles, not app-icon grid items.
+        // Search the workspace in small pixel increments and reject only real
+        // intersections with another placed workspace item.
+        int step = Math.max(1, LauncherUiUtils.dp(this, 8));
+        for (int top = 0; top <= maxTop; top += step) {
+            for (int left = 0; left <= maxLeft; left += step) {
+                android.graphics.Rect candidate = new android.graphics.Rect(
+                        left, top, left + widgetWidth, top + widgetHeight);
                 boolean blocked = false;
                 for (int i = 0; i < page.getChildCount(); i++) {
                     View child = page.getChildAt(i);
                     Object rawTag = child.getTag();
                     if (!(rawTag instanceof String)) continue;
                     String tag = (String) rawTag;
-                    if ("launcher_clock_widget".equals(tag)) continue;
+                    if (!(tag.startsWith("launcher_widget:")
+                            || tag.startsWith("launcher_app:")
+                            || "launcher_contact_shortcut".equals(tag)
+                            || "launcher_clock_widget".equals(tag))) continue;
                     ViewGroup.LayoutParams raw = child.getLayoutParams();
-                    int x = child.getLeft(), y = child.getTop(), w = child.getWidth(), h = child.getHeight();
+                    int x = child.getLeft(), y = child.getTop();
+                    int w = child.getWidth(), h = child.getHeight();
                     if (raw instanceof FrameLayout.LayoutParams) {
                         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-                        x = lp.leftMargin; y = lp.topMargin;
+                        x = lp.leftMargin;
+                        y = lp.topMargin;
                         if (lp.width > 0) w = lp.width;
                         if (lp.height > 0) h = lp.height;
                     }
-                    if (tag.startsWith("launcher_app:")) { w = cellWidth; h = cellHeight; }
-                    else if (!tag.startsWith("launcher_widget:") && !"launcher_contact_shortcut".equals(tag)) continue;
-                    if (w > 0 && h > 0 && android.graphics.Rect.intersects(candidate, new android.graphics.Rect(x, y, x + w, y + h))) { blocked = true; break; }
+                    if (tag.startsWith("launcher_app:")) {
+                        int columns = getHomeColumns();
+                        w = Math.max(1, pageWidth / Math.max(1, columns));
+                        h = LauncherUiUtils.dp(this,
+                                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                    }
+                    if (w > 0 && h > 0 && android.graphics.Rect.intersects(
+                            candidate, new android.graphics.Rect(x, y, x + w, y + h))) {
+                        blocked = true;
+                        break;
+                    }
                 }
                 if (!blocked) return new int[]{left, top};
+            }
         }
         return null;
     }
