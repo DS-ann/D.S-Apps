@@ -4114,23 +4114,21 @@ public class MainActivity extends Activity {
                 + panel.getPivotX() * (1f - scaleX);
         float visualTop = panel.getTop() + translationY
                 + panel.getPivotY() * (1f - scaleY);
-        if (visualWidth <= parentWidth) {
-            if (visualLeft < 0f) translationX -= visualLeft;
-            else if (visualLeft + visualWidth > parentWidth) {
-                translationX -= visualLeft + visualWidth - parentWidth;
-            }
-        } else {
-            // If a user-selected clock size is wider than the screen, keep its
-            // left edge visible; no translation can fit the entire oversized clock.
+        // Keep both edges bounded. applyClockPositionAndSize caps width/scale
+        // for normal sizing; these clamps also protect transient resize frames.
+        if (visualWidth > parentWidth) {
             translationX -= visualLeft;
+        } else if (visualLeft < 0f) {
+            translationX -= visualLeft;
+        } else if (visualLeft + visualWidth > parentWidth) {
+            translationX -= visualLeft + visualWidth - parentWidth;
         }
-        if (visualHeight <= parentHeight) {
-            if (visualTop < 0f) translationY -= visualTop;
-            else if (visualTop + visualHeight > parentHeight) {
-                translationY -= visualTop + visualHeight - parentHeight;
-            }
-        } else {
+        if (visualHeight > parentHeight) {
             translationY -= visualTop;
+        } else if (visualTop < 0f) {
+            translationY -= visualTop;
+        } else if (visualTop + visualHeight > parentHeight) {
+            translationY -= visualTop + visualHeight - parentHeight;
         }
         return new float[]{translationX, translationY};
     }
@@ -5023,11 +5021,11 @@ public class MainActivity extends Activity {
                 + LauncherUiUtils.dp(this, 4);
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
                 contentWidth + LauncherUiUtils.dp(this, 8));
-        // Respect the requested scale unless the entire panel would leave the
-        // available screen width. Do not apply a second scale to the clock text.
-        // Do not cap the chosen clock width to the screen: the user controls its
-        // length. The panel keeps its natural width and grows from its alignment anchor.
-        final float lengthScale = requestedLengthScale;
+        // The clock's complete visual bounds must always fit inside this page.
+        // Keep the requested size when it fits; if the user chooses an oversized
+        // length, cap the rendered scale to the available page width.
+        final float lengthScale = Math.min(requestedLengthScale,
+                Math.max(0.01f, availablePanelWidth / (float) naturalPanelWidth));
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
