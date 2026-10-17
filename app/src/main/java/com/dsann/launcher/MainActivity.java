@@ -1218,6 +1218,18 @@ public class MainActivity extends Activity {
 
     private void setWorkspaceGridVisible(boolean visible, View movingView) {
         if (pagesStrip == null) return;
+        // Do not leave full-page invisible overlays attached between edit gestures.
+        // They are visual guides only, never workspace items or collision surfaces.
+        if (!visible) {
+            for (int i = 0; i < workspaceGridOverlays.length; i++) {
+                View overlay = workspaceGridOverlays[i];
+                if (overlay != null && overlay.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) overlay.getParent()).removeView(overlay);
+                }
+                workspaceGridOverlays[i] = null;
+            }
+            return;
+        }
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth() / Math.max(1, getHomeColumns())
