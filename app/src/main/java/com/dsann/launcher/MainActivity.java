@@ -947,7 +947,13 @@ public class MainActivity extends Activity {
         // Android sends the HOME intent back to this singleTask launcher. Always
         // return to the first home page and dismiss the drawer on that action.
         if (root != null) {
-            if (drawerOpen) showHome();
+            // A HOME intent is sent when the user presses the system Home button
+            // from any foreground app. Always normalize the launcher to its home
+            // surface rather than preserving a half-open drawer/transition state.
+            boolean homeIntent = intent != null
+                    && Intent.ACTION_MAIN.equals(intent.getAction())
+                    && intent.hasCategory(Intent.CATEGORY_HOME);
+            if (homeIntent || drawerOpen) showHome();
             if (currentPage != 0) showPage(0, true);
         }
     }
@@ -4737,8 +4743,11 @@ public class MainActivity extends Activity {
             // Use the same date size for every clock style. Counter-scale it so
             // panel resizing does not change the date's visual size.
             dateText.setTextSize(15f);
+            // Only counter-scale horizontally for the panel's width transform.
+            // The panel no longer scales vertically, so leave Y at 1 to preserve
+            // the date's glyph proportions as clock breadth changes.
             dateText.setScaleX(1f / Math.max(0.01f, lengthScale));
-            dateText.setScaleY(1f / Math.max(0.01f, breadthScale));
+            dateText.setScaleY(1f);
             dateText.setTranslationX(0f);
         }
 
@@ -4774,8 +4783,11 @@ public class MainActivity extends Activity {
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
             // when the clock panel is resized. Keep offsets constant in screen pixels.
+            // Counter-scale only the panel's horizontal transform. Its vertical
+            // scale remains neutral so the AM/PM font shape never distorts; its
+            // position is still recalculated above as the clock is resized.
             amPmText.setScaleX(1f / Math.max(0.01f, lengthScale));
-            amPmText.setScaleY(1f / Math.max(0.01f, breadthScale));
+            amPmText.setScaleY(1f);
             amPmText.setPivotX(0f);
             amPmText.setPivotY(0f);
             if (sevenSegment) {
