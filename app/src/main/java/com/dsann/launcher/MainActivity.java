@@ -541,8 +541,12 @@ public class MainActivity extends Activity {
                 // clock style. Avoid style-specific proportional math: it drifted
                 // after relayout and made top/bottom resizing behave differently.
                 int naturalRowHeight = LauncherUiUtils.dp(this, 114);
-                breadthPercent = Math.round((bottom - top) * 100f
-                        / Math.max(1, naturalRowHeight));
+                // A left/right grip is strictly a width operation. Preserve the
+                // saved height percentage rather than recalculating it from the
+                // visible rectangle, which can be shorter than the 80% floor and
+                // would otherwise jump taller when a width drag reaches its limit.
+                breadthPercent = horizontalResize ? clockWidgetStartBreadth
+                        : Math.round((bottom - top) * 100f / Math.max(1, naturalRowHeight));
                 // Match widget-resizer minimums in workspace pixels rather than
                 // imposing an unrelated 80% natural-width floor on the clock.
                 // The latter made left/right handles appear stuck on wide clocks.
@@ -4297,11 +4301,13 @@ public class MainActivity extends Activity {
             String period = new SimpleDateFormat("a", Locale.getDefault()).format(now);
             // Separate AM/PM from the date with a comma and style only the marker.
             dateLine.insert(0, period + ", ");
-            dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, period.length(),
+            // AM/PM follows the date-size slider exactly and uses a silver,
+            // bold-italic treatment without a separate size override.
+            dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0, period.length(),
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            float dateSize = Math.max(8f, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15));
-            float pmSize = Math.max(8f, prefs.getInt(KEY_CLOCK_PM_SIZE, 14));
-            dateLine.setSpan(new android.text.style.RelativeSizeSpan(pmSize / dateSize), 0, period.length(),
+            dateLine.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(192, 192, 198)),
+                    0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            dateLine.setSpan(new android.text.style.RelativeSizeSpan(1f), 0, period.length(),
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         int restorePage = Math.max(0, Math.min(1, currentPage));
