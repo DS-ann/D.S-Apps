@@ -1448,12 +1448,12 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                         Gravity.TOP | Gravity.LEFT));
             }
+            float fallbackX = pageIndex == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_X, 0f) : 0f;
+            float fallbackY = pageIndex == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_Y, 0f) : 0f;
             panel.setTranslationX(getFloatPreferenceCompat(
-                    clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex),
-                    getFloatPreferenceCompat(KEY_CLOCK_WIDGET_X, 0f)));
+                    clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), fallbackX));
             panel.setTranslationY(getFloatPreferenceCompat(
-                    clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex),
-                    getFloatPreferenceCompat(KEY_CLOCK_WIDGET_Y, 0f)));
+                    clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex), fallbackY));
             // Keep the clock above icons/widgets even after the page content is rebuilt.
             panel.bringToFront();
         }
@@ -3921,8 +3921,10 @@ public class MainActivity extends Activity {
             }
             return true;
         });
-        clockPanel.setTranslationX(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)));
-        clockPanel.setTranslationY(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f)));
+        float fallbackX = activeClockPage == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_X, 0f) : 0f;
+        float fallbackY = activeClockPage == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_Y, 0f) : 0f;
+        clockPanel.setTranslationX(getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), fallbackX));
+        clockPanel.setTranslationY(getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), fallbackY));
     }
 
     private final Runnable clockWidgetLongPress = () -> {
@@ -4005,8 +4007,10 @@ public class MainActivity extends Activity {
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
+        // The clock is a fixed-position overlay, not a collision-displacement item.
+        // Moving widgets/shortcuts must never push it or persist its position.
         return tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
-                || "launcher_contact_shortcut".equals(tag) || "launcher_clock_widget".equals(tag);
+                || "launcher_contact_shortcut".equals(tag);
     }
 
     private int[] itemGeometry(View view) {
@@ -4188,10 +4192,7 @@ public class MainActivity extends Activity {
                             prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex)
                                     .putFloat(KEY_SHORTCUT_X, g[0] / (float) Math.max(1, page.getWidth() - g[2]))
                                     .putFloat(KEY_SHORTCUT_Y, g[1] / (float) Math.max(1, page.getHeight() - g[3])).apply();
-                        } else if ("launcher_clock_widget".equals(tag)) {
-                            prefs.edit().putInt(KEY_CLOCK_WIDGET_X, g[0])
-                                    .putInt(KEY_CLOCK_WIDGET_Y, g[1]).apply();
-                        }
+
                     }
                 }
             }
