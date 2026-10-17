@@ -5789,16 +5789,12 @@ public class MainActivity extends Activity {
         final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
                 contentWidth + LauncherUiUtils.dp(this, 8) + ledGroupSpacing);
-        // The clock's complete visual bounds must always fit inside this page.
-        // Keep the requested size when it fits; if the user chooses an oversized
-        // length, cap the rendered scale to the available page width.
-        // Preserve the existing seven-segment scale behavior. Typography clocks
-        // use their full requested scale and are constrained by the actual visual
-        // page bounds during resize, rather than being silently width-capped here.
-        final float lengthScale = sevenSegment
-                ? Math.min(requestedLengthScale,
-                        Math.max(0.01f, availablePanelWidth / (float) naturalPanelWidth))
-                : requestedLengthScale;
+        // Treat the clock as a workspace widget: its visual rectangle may grow
+        // across the full page, but never beyond the page's horizontal bounds.
+        // The cap is based on the actual page width (not half-width/grid columns),
+        // so normal typography clocks can expand all the way to either screen edge.
+        final float lengthScale = Math.min(requestedLengthScale,
+                Math.max(0.01f, availablePanelWidth / (float) naturalPanelWidth));
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
