@@ -168,7 +168,7 @@ final class HomePageController {
             int configuredIconSize = prefs.getInt(iconSizeKey, 96);
             boolean labelsVisible = prefs.getBoolean(showLabelsKey, true);
             int cellHeight = LauncherUiUtils.dp(activity,
-                    Math.max(56, configuredIconSize + (labelsVisible ? 46 : 28)));
+                    Math.max(56, configuredIconSize + (labelsVisible ? 54 : 28)));
             // Each app owns one fixed-height grid slot. Compute the number of rows
             // from the usable workspace height so no slot extends into the dock.
             final int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
@@ -233,7 +233,7 @@ final class HomePageController {
                 int actualCellWidth = Math.max(1, page.getWidth() / columns);
                 boolean actualLabelsVisible = prefs.getBoolean(showLabelsKey, true);
                 int actualCellHeight = LauncherUiUtils.dp(activity,
-                        Math.max(56, configuredIconSize + (actualLabelsVisible ? 46 : 28)));
+                        Math.max(56, configuredIconSize + (actualLabelsVisible ? 54 : 28)));
                 int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
