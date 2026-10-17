@@ -4180,12 +4180,22 @@ public class MainActivity extends Activity {
             android.graphics.Rect originalRect = new android.graphics.Rect(
                     original[0], original[1], original[0] + g[2], original[1] + g[3]);
             if (!overlapsWithGap(movingRect, originalRect, gap)) {
-                ViewGroup.LayoutParams raw = displaced.getLayoutParams();
-                if (raw instanceof FrameLayout.LayoutParams) {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-                    lp.leftMargin = original[0];
-                    lp.topMargin = original[1];
-                    displaced.setLayoutParams(lp);
+                if (displaced == clockPanel) {
+                    // Clock geometry is translation/scale based; writing its visual
+                    // coordinates into layout margins corrupts its saved position.
+                    setClampedClockTranslation(
+                            original[0] - clockPanel.getLeft()
+                                    - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
+                            original[1] - clockPanel.getTop()
+                                    - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
+                } else {
+                    ViewGroup.LayoutParams raw = displaced.getLayoutParams();
+                    if (raw instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                        lp.leftMargin = original[0];
+                        lp.topMargin = original[1];
+                        displaced.setLayoutParams(lp);
+                    }
                 }
                 iterator.remove();
             }
