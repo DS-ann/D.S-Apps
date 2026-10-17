@@ -4814,6 +4814,7 @@ public class MainActivity extends Activity {
             View displaced = entry.getKey();
             int[] original = entry.getValue();
             if (displaced.getParent() != page) {
+                liveDisplacementTargets.remove(displaced);
                 iterator.remove();
                 continue;
             }
@@ -4827,6 +4828,7 @@ public class MainActivity extends Activity {
             // cannot repeatedly restore and re-displace the same widget while dragging.
             int restoreHysteresis = LauncherUiUtils.dp(this, 16);
             if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)) {
+                displaced.animate().cancel();
                 if (displaced == clockPanel) {
                     // Clock geometry is translation/scale based; writing its visual
                     // coordinates into layout margins corrupts its saved position.
@@ -4841,9 +4843,12 @@ public class MainActivity extends Activity {
                         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
                         lp.leftMargin = original[0];
                         lp.topMargin = original[1];
+                        displaced.setTranslationX(0f);
+                        displaced.setTranslationY(0f);
                         displaced.setLayoutParams(lp);
                     }
                 }
+                liveDisplacementTargets.remove(displaced);
                 iterator.remove();
             }
         }
