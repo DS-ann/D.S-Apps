@@ -393,7 +393,7 @@ final class WidgetInteractionController {
                                 }
                             }
                         }
-                        if (bestDistance != Integer.MAX_VALUE) {
+                        if (bestX >= 0 && bestY >= 0) {
                             current.leftMargin = bestX;
                             current.topMargin = bestY;
                         } else {
