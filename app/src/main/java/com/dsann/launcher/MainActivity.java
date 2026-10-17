@@ -4117,11 +4117,17 @@ public class MainActivity extends Activity {
                     int y = candidateY.intValue();
                     android.graphics.Rect candidateWithGap = new android.graphics.Rect(
                             x - gap, y - gap, x + g[2] + gap, y + g[3] + gap);
-                    boolean blocked = false;
-                    for (android.graphics.Rect obstacle : obstacles) {
-                        if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
-                            blocked = true;
-                            break;
+                    // The moving item is a special obstacle: touching its border
+                    // must count as occupied, otherwise the current position can win
+                    // with distance zero and the item appears to move only a few dp
+                    // (or not at all) on some drag frames.
+                    boolean blocked = overlapsWithGap(candidateWithGap, movingRect, 0);
+                    if (!blocked) {
+                        for (android.graphics.Rect obstacle : obstacles) {
+                            if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
+                                blocked = true;
+                                break;
+                            }
                         }
                     }
                     if (blocked) continue;
