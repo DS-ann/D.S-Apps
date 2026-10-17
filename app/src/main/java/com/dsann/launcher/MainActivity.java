@@ -436,9 +436,10 @@ public class MainActivity extends Activity {
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5)) {
                     clockWidgetDragging = true;
                     handler.removeCallbacks(clockWidgetEditLongPress);
-                    float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
-                    float moveX = (event.getRawX() - clockWidgetDownRawX) / density;
-                    float moveY = (event.getRawY() - clockWidgetDownRawY) / density;
+                    // Android translation values and raw touch coordinates are both pixels.
+                    // Dividing the touch delta by density made the clock lag behind the finger.
+                    float moveX = event.getRawX() - clockWidgetDownRawX;
+                    float moveY = event.getRawY() - clockWidgetDownRawY;
                     setClampedClockTranslation(clockWidgetStartX + moveX,
                             clockWidgetStartY + moveY, true);
                     updateClockResizeHandles();
@@ -451,8 +452,10 @@ public class MainActivity extends Activity {
             }
             if (clockResizeEdge != 0 && clockWidgetDragging) {
                 float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
-                int resizeDx = Math.round((event.getRawX() - clockWidgetDownRawX) / density);
-                int resizeDy = Math.round((event.getRawY() - clockWidgetDownRawY) / density);
+                // Resize values are stored in dp-like preference units. Use a gentler
+                // half-rate mapping so the handle follows the finger without racing ahead.
+                int resizeDx = Math.round((event.getRawX() - clockWidgetDownRawX) / density * 0.5f);
+                int resizeDy = Math.round((event.getRawY() - clockWidgetDownRawY) / density * 0.5f);
                 int lengthDelta = clockResizeEdge == 1 ? -resizeDx : (clockResizeEdge == 2 ? resizeDx : 0);
                 int breadthDelta = clockResizeEdge == 3 ? -resizeDy : (clockResizeEdge == 4 ? resizeDy : 0);
                 prefs.edit()
@@ -4321,32 +4324,20 @@ public class MainActivity extends Activity {
         }
         float scaleX = Math.max(0.01f, panel.getScaleX());
         float scaleY = Math.max(0.01f, panel.getScaleY());
-        // A translation cannot fit an oversized clock. Reduce only the rendered
-        // scale enough to fit the page, so neither edge can ever remain off-screen.
-        if (panel.getWidth() > 0 && panel.getWidth() * scaleX > parentWidth) {
-            scaleX = Math.max(0.01f, parentWidth / (float) panel.getWidth());
-            panel.setScaleX(scaleX);
-        }
-        if (panel.getHeight() > 0 && panel.getHeight() * scaleY > parentHeight) {
-            scaleY = Math.max(0.01f, parentHeight / (float) panel.getHeight());
-            panel.setScaleY(scaleY);
-        }
+        // Never mutate scale during boundary clamping. Changing scale while the
+        // finger crosses an edge causes a visible flicker and makes resize feedback unstable.
         float visualWidth = panel.getWidth() * scaleX;
         float visualHeight = panel.getHeight() * scaleY;
         float visualLeft = panel.getLeft() + translationX
                 + panel.getPivotX() * (1f - scaleX);
         float visualTop = panel.getTop() + translationY
                 + panel.getPivotY() * (1f - scaleY);
-        if (visualLeft < 0f) {
-            translationX -= visualLeft;
-        } else if (visualLeft + visualWidth > parentWidth) {
-            translationX -= visualLeft + visualWidth - parentWidth;
-        }
-        if (visualTop < 0f) {
-            translationY -= visualTop;
-        } else if (visualTop + visualHeight > parentHeight) {
-            translationY -= visualTop + visualHeight - parentHeight;
-        }
+        float maxVisualLeft = Math.max(0f, parentWidth - visualWidth);
+        float maxVisualTop = Math.max(0f, parentHeight - visualHeight);
+        float boundedLeft = Math.max(0f, Math.min(maxVisualLeft, visualLeft));
+        float boundedTop = Math.max(0f, Math.min(maxVisualTop, visualTop));
+        translationX += boundedLeft - visualLeft;
+        translationY += boundedTop - visualTop;
         return new float[]{translationX, translationY};
     }
 
