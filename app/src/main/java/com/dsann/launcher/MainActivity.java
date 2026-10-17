@@ -64,6 +64,8 @@ public class MainActivity extends Activity {
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
     private static final String KEY_DRAWER_FONT_SIZE = "drawer_font_size";
     private static final String KEY_CLOCK_STYLE = "clock_style";
+    private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
+    private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
     private static final String KEY_CUBE_ROTATION = "cube_rotation_degrees";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
@@ -3990,6 +3992,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void refreshClockTypographyAndGeometry() {
+        int restorePage = Math.max(0, Math.min(1, currentPage));
+        updateClock();
+        for (int page = 0; page < clockPanelsByPage.length; page++) {
+            activateClockForPage(page);
+            applyClockPositionAndSize();
+            applyClockPanelColor(false);
+        }
+        activateClockForPage(restorePage);
+    }
+
     private void applyClockStyle() {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         if (clockText == null) return;
@@ -4034,7 +4047,9 @@ public class MainActivity extends Activity {
             dateLine.insert(0, period + ", ");
             dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, period.length(),
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            dateLine.setSpan(new android.text.style.RelativeSizeSpan(1.05f), 0, period.length(),
+            float dateSize = Math.max(8f, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15));
+            float pmSize = Math.max(8f, prefs.getInt(KEY_CLOCK_PM_SIZE, 14));
+            dateLine.setSpan(new android.text.style.RelativeSizeSpan(pmSize / dateSize), 0, period.length(),
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         int restorePage = Math.max(0, Math.min(1, currentPage));
@@ -4089,6 +4104,26 @@ public class MainActivity extends Activity {
                 // view/background instead of using the font's naturally raised colon.
                 int colonAt = displayClock.toString().indexOf(':');
                 if (colonAt >= 0) {
+                    // Tighten the minute pair by reducing the first digit's advance,
+                    // leaving that digit anchored. Move the first hour digit toward
+                    // the second digit while keeping the second digit anchored.
+                    int minuteFirst = colonAt + 1;
+                    if (minuteFirst + 1 < displayClock.length()
+                            && Character.digit(displayClock.charAt(minuteFirst), 10) >= 0
+                            && Character.digit(displayClock.charAt(minuteFirst + 1), 10) >= 0) {
+                        displayClock.setSpan(new TightDigitSpan(false, clockText.getTextSize()
+                                        * Math.max(0f, clockText.getLetterSpacing()) * 0.5f),
+                                minuteFirst, minuteFirst + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    int hourEnd = colonAt - 1;
+                    int hourStart = hourEnd;
+                    while (hourStart >= 0 && Character.digit(displayClock.charAt(hourStart), 10) >= 0) hourStart--;
+                    hourStart++;
+                    if (hourEnd - hourStart + 1 >= 2) {
+                        displayClock.setSpan(new TightDigitSpan(true, clockText.getTextSize()
+                                        * Math.max(0f, clockText.getLetterSpacing()) * 0.5f),
+                                hourStart, hourStart + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
                     displayClock.setSpan(new CenteredColonSpan(LauncherUiUtils.dp(this, 114) / 2f),
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
@@ -5308,6 +5343,17 @@ public class MainActivity extends Activity {
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
+        addSliderRow(content, "Date font size", 8, 24,
+                Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15))), " sp", value -> {
+            prefs.edit().putInt(KEY_CLOCK_DATE_SIZE, value).apply();
+            refreshClockTypographyAndGeometry();
+        });
+        addSliderRow(content, "AM/PM font size", 8, 24,
+                Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14))), " sp", value -> {
+            prefs.edit().putInt(KEY_CLOCK_PM_SIZE, value).apply();
+            refreshClockTypographyAndGeometry();
+        });
+
         addSection(content, "Page animations");
         addChoiceRow(content, "Page transition effect", getPageTransition(),
                 new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
@@ -5582,7 +5628,10 @@ public class MainActivity extends Activity {
         final int availablePanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
                 screenWidth - LauncherUiUtils.dp(this, 24));
         int measuredDateWidth = 0;
+        final int configuredDateSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15)));
+        final int configuredPmSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14)));
         if (dateText != null) {
+            dateText.setTextSize(configuredDateSize);
             String measuredDate = dateText.getText().toString();
             // The AM/PM prefix is part of the date line in 12-hour mode. Measure
             // a complete representative line even during first layout, when the
@@ -5597,6 +5646,12 @@ public class MainActivity extends Activity {
                         + "  " + measuredDate;
             }
             measuredDateWidth = (int) Math.ceil(dateText.getPaint().measureText(measuredDate));
+            if (!DateFormat.is24HourFormat(this)) {
+                String period = new SimpleDateFormat("a", Locale.getDefault()).format(new Date());
+                float extraPmWidth = dateText.getPaint().measureText(period)
+                        * (configuredPmSize / (float) configuredDateSize - 1f);
+                measuredDateWidth = Math.max(1, (int) Math.ceil(measuredDateWidth + extraPmWidth));
+            }
         }
         final int dateWidth = measuredDateWidth;
         // Measure the panel at its natural width, then scale the complete panel.
@@ -5743,11 +5798,11 @@ public class MainActivity extends Activity {
         clockText.setScaleY(sevenSegment ? breadthScale
                 : normalizedNonLedHeightScale * nonLedDigitScale
                         * (1.20f + 20f / 114f) * breadthScale);
-        // Shift the seven-segment digits 15 dp left relative to their background.
-        // Compensate for panel scaling so the visual offset remains exactly 15 dp
-        // at every clock length setting; the panel/background itself stays put.
+        // Shift the digits and colon slightly left relative to the background.
+        // Compensate for panel scaling so the offset remains stable at every length.
         clockText.setTranslationX(sevenSegment
-                ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale) : 0f);
+                ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale)
+                : -LauncherUiUtils.dp(this, 5) / Math.max(0.01f, lengthScale));
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         // The panel itself no longer uses scaleY, so this offset must remain a
@@ -5781,7 +5836,7 @@ public class MainActivity extends Activity {
             }
             // Use the same date size for every clock style. Counter-scale it so
             // panel resizing does not change the date's visual size.
-            dateText.setTextSize(15f);
+            dateText.setTextSize(Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15))));
             // Only counter-scale horizontally for the panel's width transform.
             // The panel no longer scales vertically, so leave Y at 1 to preserve
             // the date's glyph proportions as clock breadth changes.
@@ -5876,6 +5931,30 @@ public class MainActivity extends Activity {
         @Override public boolean getPadding(android.graphics.Rect padding) {
             padding.set(0, 0, 0, 0);
             return false;
+        }
+    }
+
+    private static final class TightDigitSpan extends android.text.style.ReplacementSpan {
+        private final boolean moveDigitRight;
+        private final float gap;
+
+        TightDigitSpan(boolean moveDigitRight, float gap) {
+            this.moveDigitRight = moveDigitRight;
+            this.gap = Math.max(0f, gap);
+        }
+
+        @Override public int getSize(Paint paint, CharSequence text, int start, int end,
+                Paint.FontMetricsInt fm) {
+            return Math.max(1, Math.round(paint.measureText(text, start, end)
+                    - (moveDigitRight ? 0f : gap)));
+        }
+
+        @Override public void draw(Canvas canvas, CharSequence text, int start, int end,
+                float x, int top, int y, int bottom, Paint paint) {
+            // For minutes, the first digit stays put and its reduced advance pulls
+            // the second digit left. For hours, shift the first digit right while
+            // preserving the second digit's original position.
+            canvas.drawText(text, start, end, x + (moveDigitRight ? gap : 0f), y, paint);
         }
     }
 
