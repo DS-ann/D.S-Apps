@@ -361,9 +361,12 @@ final class WidgetInteractionController {
                         reparenting[0] = false;
                     }
                     widgetPage[0] = destinationPage;
-                    if (action == MotionEvent.ACTION_UP) listener.finishLiveDisplacements(true, container);
                     listener.saveWidgetGeometry(widgetId, destinationPage, container);
+                    // Resolve the final widget position first. If collision handling
+                    // relocates it, the displacement transaction can then restore
+                    // neighbours instead of permanently leaving them in temporary slots.
                     listener.resolveWidgetCollisions(targetPage, container);
+                    if (action == MotionEvent.ACTION_UP) listener.finishLiveDisplacements(true, container);
                     if (action == MotionEvent.ACTION_UP) listener.renderHomePages(false);
                 } else if (!childCanceled[0]) {
                     widget.dispatchTouchEvent(event);
