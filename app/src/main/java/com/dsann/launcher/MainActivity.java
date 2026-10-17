@@ -4275,6 +4275,38 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Edge-derived candidates are fast, but can miss a valid pocket when
+            // obstacles form irregular shapes. Only when that search fails, scan the
+            // page at a modest interval and choose the nearest collision-free position.
+            // This makes displacement work consistently near the top as well as below.
+            if (bestX < 0) {
+                int step = Math.max(1, LauncherUiUtils.dp(this, 12));
+                for (int y = 0; y <= maxY + step; y += step) {
+                    int candidateY = Math.min(maxY, y);
+                    for (int x = 0; x <= maxX + step; x += step) {
+                        int candidateX = Math.min(maxX, x);
+                        android.graphics.Rect candidate = new android.graphics.Rect(
+                                candidateX, candidateY,
+                                candidateX + g[2], candidateY + g[3]);
+                        boolean blocked = false;
+                        for (android.graphics.Rect obstacle : obstacles) {
+                            if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                        if (blocked) continue;
+                        int distance = Math.abs(candidateX - g[0]) + Math.abs(candidateY - g[1]);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestX = candidateX;
+                            bestY = candidateY;
+                        }
+                    }
+                    if (candidateY == maxY) break;
+                }
+            }
+
             if (bestX >= 0) {
                 liveDisplacedItems.put(other, new int[]{g[0], g[1]});
                 if (other == clockPanel) {
