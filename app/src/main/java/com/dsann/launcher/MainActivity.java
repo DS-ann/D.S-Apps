@@ -986,8 +986,15 @@ public class MainActivity extends Activity {
             boolean homeIntent = intent != null
                     && Intent.ACTION_MAIN.equals(intent.getAction())
                     && intent.hasCategory(Intent.CATEGORY_HOME);
-            if (homeIntent || drawerOpen) showHome();
-            if (currentPage != 0) showPage(0, true);
+            if (homeIntent) {
+                // The system HOME button should reveal the cached workspace immediately.
+                // Running the drawer transition and a page transition back-to-back made
+                // returning from every app feel like a second launch animation.
+                showHomeImmediately();
+                if (currentPage != 0) showPage(0, false);
+            } else if (drawerOpen) {
+                showHome();
+            }
         }
     }
 
@@ -2823,6 +2830,39 @@ public class MainActivity extends Activity {
     private void showHome() {
         LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen, () -> drawerOpen = false,
                 getDrawerTransition());
+    }
+
+    /** Fast path for the system HOME intent: no overlapping screen/page animations. */
+    private void showHomeImmediately() {
+        drawerOpen = false;
+        if (homeScreen != null) {
+            homeScreen.animate().cancel();
+            homeScreen.setVisibility(View.VISIBLE);
+            homeScreen.setAlpha(1f);
+            homeScreen.setScaleX(1f);
+            homeScreen.setScaleY(1f);
+            homeScreen.setRotationX(0f);
+            homeScreen.setRotationY(0f);
+            homeScreen.setTranslationX(0f);
+            homeScreen.setTranslationY(0f);
+            homeScreen.setTranslationZ(0f);
+            homeScreen.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
+        if (drawerScreen != null) {
+            drawerScreen.animate().cancel();
+            drawerScreen.setVisibility(View.GONE);
+            drawerScreen.setAlpha(1f);
+            drawerScreen.setScaleX(1f);
+            drawerScreen.setScaleY(1f);
+            drawerScreen.setRotationX(0f);
+            drawerScreen.setRotationY(0f);
+            drawerScreen.setTranslationX(0f);
+            drawerScreen.setTranslationY(0f);
+            drawerScreen.setTranslationZ(0f);
+            drawerScreen.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
+        if (clockWidgetEditing) exitClockWidgetEditMode();
+        dismissShortcutEditMode();
     }
 
     private void showDrawer() { showDrawer(0f); }
