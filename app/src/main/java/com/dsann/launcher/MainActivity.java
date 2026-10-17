@@ -577,13 +577,14 @@ public class MainActivity extends Activity {
                     boolean typographyClock = !(clockText instanceof SevenSegmentClockTextView)
                             || prefs.getInt(KEY_CLOCK_STYLE, 0) != 5;
                     if (resizingEdge == 1) {
-                        // For non-LED clocks, explicitly anchor the right edge from
-                        // the requested rectangle after relayout. The old edge-based
-                        // correction could be neutralized by right/center gravity and
-                        // clamping, making the left grip appear inert until the right
-                        // grip was dragged past the page edge.
+                        // Typography clock's left grip must track the requested left
+                        // edge directly after relayout. Its scaled width can change
+                        // while layout params still report the natural width, so
+                        // correcting from the computed right edge can leave the left
+                        // handle visually stuck. The width ratio above preserves the
+                        // opposite edge when the rendered width matches the target.
                         adjustX = typographyClock
-                                ? targetRight - (actual[0] + actual[2])
+                                ? targetLeft - actual[0]
                                 : targetRight - (actual[0] + actual[2]);
                     } else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
                     if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
