@@ -1424,7 +1424,7 @@ public class MainActivity extends Activity {
                 this, root, prefs, packageManager, allApps, drawerApps, drawerBackground(),
                 prefs.getInt(KEY_DRAWER_SPACING, 8), KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE,
                 KEY_SHOW_DRAWER_LABELS, new LauncherDrawerController.Actions() {
-                    @Override public void launchApp(ResolveInfo app) { MainActivity.this.launchApp(app); }
+                    @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome) {
                         MainActivity.this.showAppOptions(app, onHome);
                     }
