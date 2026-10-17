@@ -216,7 +216,11 @@ final class HomePageController {
                 }
                 occupiedSlots[row][col] = true;
                 lp.leftMargin = col * cellWidth;
-                lp.topMargin = row * cellHeight;
+                // Spread rows across the measured workspace so the bottom row reaches
+                // the bottom of the usable page instead of leaving a large unused gap.
+                int maxTop = Math.max(0, pageHeight - cellHeight);
+                lp.topMargin = rows <= 1 ? 0
+                        : Math.round(row * (maxTop / (float) (rows - 1)));
                 page.addView(cell, lp);
                 host.installHomeIconTouch(cell, packageName);
             }
@@ -248,8 +252,9 @@ final class HomePageController {
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
                     actual.leftMargin = col * actualCellWidth;
-                    actual.topMargin = Math.min(Math.max(0, page.getHeight() - actualCellHeight),
-                            row * actualCellHeight);
+                    int maxActualTop = Math.max(0, page.getHeight() - actualCellHeight);
+                    actual.topMargin = actualRows <= 1 ? 0
+                            : Math.round(row * (maxActualTop / (float) (actualRows - 1)));
                     child.setLayoutParams(actual);
                 }
             });
