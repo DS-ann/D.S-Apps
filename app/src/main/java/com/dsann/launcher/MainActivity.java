@@ -509,10 +509,10 @@ public class MainActivity extends Activity {
                 }
                 if (overlaps) return true;
 
-                int lengthPercent = Math.round((right - left) * 100f
-                        / Math.max(1f, clockWidgetStartPanelWidth * clockWidgetStartPanelScaleX));
-                int breadthPercent = Math.round((bottom - top) * 100f
-                        / Math.max(1f, LauncherUiUtils.dp(this, 114)));
+                int lengthPercent = Math.round(clockWidgetStartLength * (right - left)
+                        / (float) Math.max(1, clockWidgetStartVisualWidth));
+                int breadthPercent = Math.round(clockWidgetStartBreadth * (bottom - top)
+                        / (float) Math.max(1, clockWidgetStartVisualHeight));
                 lengthPercent = Math.max(80, Math.min(250, lengthPercent));
                 breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
