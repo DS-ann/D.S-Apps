@@ -3908,6 +3908,11 @@ public class MainActivity extends Activity {
                 clockWidgetStartY = clockPanel.getTranslationY();
                 handler.removeCallbacks(clockWidgetLongPress);
                 handler.postDelayed(clockWidgetLongPress, 650L);
+                // Do not block a parent horizontal/vertical swipe until a long-press
+                // actually puts the clock into widget-edit mode.
+                if (view.getParent() != null) {
+                    view.getParent().requestDisallowInterceptTouchEvent(false);
+                }
                 return true;
             }
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
@@ -3923,9 +3928,16 @@ public class MainActivity extends Activity {
                     setClampedClockTranslation(targetX, targetY, true);
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
+                    updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
                 } else if (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 8)) {
                     handler.removeCallbacks(clockWidgetLongPress);
+                    // Outside edit mode the clock must not swallow workspace swipes.
+                    // Let the parent pager / global swipe detector take over.
+                    if (view.getParent() != null) {
+                        view.getParent().requestDisallowInterceptTouchEvent(false);
+                    }
+                    return false;
                 }
                 return true;
             }
@@ -3933,6 +3945,7 @@ public class MainActivity extends Activity {
                     || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(clockWidgetLongPress);
                 if (clockWidgetDragging) {
+                    finishLiveDisplacements(event.getActionMasked() == MotionEvent.ACTION_UP, clockPanel);
                     clockWidgetDragging = false;
                     setWorkspaceGridVisible(false, null);
                     updateClockResizeHandles();
