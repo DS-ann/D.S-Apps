@@ -4344,9 +4344,14 @@ public class MainActivity extends Activity {
                     setClampedClockTranslation(bounded[0], bounded[1], true);
                     int[] now = itemGeometry(item);
                     accepted.add(new android.graphics.Rect(now[0], now[1], now[0] + now[2], now[1] + now[3]));
+                } else if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
+                    // No free rectangle on this page: move the item to the other
+                    // workspace page instead of accepting an overlapping placement.
+                    continue;
                 } else {
-                    // Do not knowingly move an item on top of another item when no
-                    // fitting rectangle exists on this page.
+                    // The page is physically full for this item's dimensions. Keep
+                    // the item visible rather than silently deleting it; normal
+                    // placement paths must reject new drops when no free slot exists.
                     accepted.add(new android.graphics.Rect(g[0], g[1], g[0] + w, g[1] + h));
                 }
                 continue;
@@ -4363,6 +4368,59 @@ public class MainActivity extends Activity {
             accepted.add(new android.graphics.Rect(bestX, bestY, bestX + w, bestY + h));
             persistWorkspaceItemPosition(page, item, bestX, bestY, w, h);
         }
+    }
+
+    private boolean tryMoveWorkspaceItemToOtherPage(FrameLayout sourcePage, View item, int width, int height) {
+        if (pagesStrip == null || item == null || item == clockPanel) return false;
+        for (int p = 0; p < pagesStrip.getChildCount(); p++) {
+            View candidatePage = pagesStrip.getChildAt(p);
+            if (!(candidatePage instanceof FrameLayout) || candidatePage == sourcePage) continue;
+            FrameLayout target = (FrameLayout) candidatePage;
+            if (target.getWidth() <= 0 || target.getHeight() <= 0
+                    || width > target.getWidth() || height > target.getHeight()) continue;
+            java.util.ArrayList<android.graphics.Rect> obstacles = new java.util.ArrayList<android.graphics.Rect>();
+            for (int i = 0; i < target.getChildCount(); i++) {
+                View other = target.getChildAt(i);
+                if (!isWorkspaceItem(other)) continue;
+                int[] og = itemGeometry(other);
+                obstacles.add(new android.graphics.Rect(og[0], og[1], og[0] + og[2], og[1] + og[3]));
+            }
+            java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
+            java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
+            xs.add(0); ys.add(0);
+            xs.add(Math.max(0, target.getWidth() - width));
+            ys.add(Math.max(0, target.getHeight() - height));
+            for (android.graphics.Rect obstacle : obstacles) {
+                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.left - width)));
+                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.right)));
+                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.top - height)));
+                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.bottom)));
+            }
+            int bestX = -1, bestY = -1;
+            outer: for (Integer y : ys) for (Integer x : xs) {
+                android.graphics.Rect rect = new android.graphics.Rect(x, y, x + width, y + height);
+                for (android.graphics.Rect obstacle : obstacles) {
+                    if (android.graphics.Rect.intersects(rect, obstacle)) continue outer;
+                }
+                bestX = x; bestY = y; break outer;
+            }
+            if (bestX < 0) continue;
+            ViewGroup oldParent = (ViewGroup) item.getParent();
+            ViewGroup.LayoutParams raw = item.getLayoutParams();
+            FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
+                    ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) raw)
+                    : new FrameLayout.LayoutParams(width, height);
+            lp.leftMargin = bestX;
+            lp.topMargin = bestY;
+            item.setTranslationX(0f);
+            item.setTranslationY(0f);
+            oldParent.removeView(item);
+            target.addView(item, lp);
+            int[] placed = itemGeometry(item);
+            persistWorkspaceItemPosition(target, item, placed[0], placed[1], placed[2], placed[3]);
+            return true;
+        }
+        return false;
     }
 
     private void persistWorkspaceItemPosition(FrameLayout page, View item, int x, int y, int width, int height) {
