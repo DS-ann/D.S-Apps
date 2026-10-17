@@ -173,6 +173,9 @@ public class MainActivity extends Activity {
     // Invalidates stale layout callbacks when a newer resize frame or gesture starts.
     private int clockResizeGeneration = 0;
     private boolean gestureStartedOnClock = false;
+    // Locks the whole touch sequence against launcher swipes if it began while
+    // clock move/edit mode was already active.
+    private boolean clockGestureLockedAtDown = false;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
@@ -328,6 +331,7 @@ public class MainActivity extends Activity {
             if (widgetInteractionController != null) {
                 widgetInteractionController.clearEditChromeOutsideTouch(event.getRawX(), event.getRawY());
             }
+            clockGestureLockedAtDown = clockWidgetMoving || clockWidgetEditing;
             gestureDownX = event.getX();
             gestureDownY = event.getY();
             longPressDownX = event.getX();
@@ -491,6 +495,12 @@ public class MainActivity extends Activity {
                 });
                 return true;
             }
+            // Do not allow page/drawer/control-center gestures during clock move/edit
+            // sessions. Move-ready dragging and edge resizing were handled above.
+            // Keep the lock for this entire touch sequence even if an outside touch
+            // has just dismissed edit mode.
+            if (clockWidgetEditing || clockGestureLockedAtDown) return true;
+
             // In the drawer, only a downward pull starting at the very top closes it.
             // All other vertical gestures are left to the app grid for normal scrolling.
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
@@ -646,6 +656,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_CANCEL) {
             handler.removeCallbacks(clockWidgetLongPress);
             handler.removeCallbacks(clockWidgetEditLongPress);
+            clockGestureLockedAtDown = false;
             if (clockWidgetMoving && !clockWidgetEditing) {
                 if (clockWidgetDragging && clockPanel != null
                         && clockPanel.getParent() instanceof FrameLayout) {
@@ -705,6 +716,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(clockWidgetLongPress);
             handler.removeCallbacks(clockWidgetEditLongPress);
+            clockGestureLockedAtDown = false;
             if (clockWidgetMoving && !clockWidgetEditing) {
                 if (clockWidgetDragging && clockPanel != null
                         && clockPanel.getParent() instanceof FrameLayout) {
