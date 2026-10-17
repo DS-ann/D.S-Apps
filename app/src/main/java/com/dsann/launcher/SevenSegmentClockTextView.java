@@ -133,7 +133,10 @@ public final class SevenSegmentClockTextView extends TextView {
         float advance = unit * 0.72f;
         float totalWidth = digits * advance + colons * unit * 0.34f;
         int colonIndex = value.indexOf(':');
-        float dotX = leftBound + availableWidth * 0.5f;
+        // Intentionally let the left half of the first hour digit sit beyond
+        // the clock background's left edge, matching the requested clipped LED look.
+        // The colon and minute digits move together with the hour digits.
+        float dotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
         // Position the hour and minute as two groups around the fixed colon.
         // This keeps the dots between the two groups instead of moving only the dots
         // over an otherwise left-aligned string. A blank leading hour cell still
