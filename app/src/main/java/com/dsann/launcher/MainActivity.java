@@ -988,6 +988,11 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        // Leaving the launcher (opening an app or locking the screen) must never
+        // leave clock widget edit grips/grid active when the launcher returns.
+        if (clockWidgetEditing) exitClockWidgetEditMode();
+        clockWidgetDragging = false;
+        handler.removeCallbacks(clockWidgetLongPress);
         clockUpdatesActive = false;
         handler.removeCallbacks(clockUpdater);
         try { widgetHost.stopListening(); } catch (Exception ignored) {}
@@ -2503,7 +2508,11 @@ public class MainActivity extends Activity {
     private void showPage(int requestedPage, boolean animate) {
         if (pages.isEmpty()) rebuildPages();
         int lastPage = Math.max(0, pages.size() - 1);
-        currentPage = Math.max(0, Math.min(lastPage, requestedPage));
+        int targetPage = Math.max(0, Math.min(lastPage, requestedPage));
+        if (clockWidgetEditing && targetPage != currentPage) {
+            exitClockWidgetEditMode();
+        }
+        currentPage = targetPage;
         activateClockForPage(currentPage);
         if (pagesStrip == null) return;
         int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
