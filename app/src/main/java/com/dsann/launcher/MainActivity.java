@@ -5173,9 +5173,19 @@ public class MainActivity extends Activity {
                 continue;
             }
 
-            // Last-resort protection: if both pages are crowded, reduce this item's
-            // visual scale in small steps until its actual visible bounds fit a free
-            // rectangle. This is preferable to leaving two things visibly overlapping.
+            // App icons must retain their configured icon size. The emergency
+            // shrink fallback made icons jump to unexpectedly tiny sizes when a page
+            // became crowded. Keep the icon at its original scale and try the other
+            // page instead; if neither page has room, leave it unchanged for this pass.
+            if (bestX < 0 && isWorkspaceAppIcon(item)) {
+                if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
+                    continue;
+                }
+                continue;
+            }
+
+            // Last-resort protection for non-icon workspace items only: if both pages
+            // are crowded, reduce visual scale in small steps to find a legal position.
             if (bestX < 0) {
                 float originalScaleX = item.getScaleX();
                 float originalScaleY = item.getScaleY();
