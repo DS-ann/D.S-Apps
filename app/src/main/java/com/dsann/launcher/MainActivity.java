@@ -2276,15 +2276,11 @@ public class MainActivity extends Activity {
                     int slotHeight = LauncherUiUtils.dp(this,
                             homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                     int gridRows = Math.max(1, page.getHeight() / slotHeight);
-                    int maxTopForGrid = Math.max(0, page.getHeight() - view.getHeight());
                     int requestedTop = Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f);
-                    int snappedRow = gridRows <= 1 || maxTopForGrid <= 0 ? 0
-                            : Math.max(0, Math.min(gridRows - 1,
-                                    Math.round(requestedTop * (gridRows - 1) / (float) maxTopForGrid)));
-                    // Use the same evenly distributed row anchors as HomePageController,
-                    // so the dragged icon stays exactly where it will render after release.
-                    lp.topMargin = gridRows <= 1 ? 0
-                            : Math.round(snappedRow * (maxTopForGrid / (float) (gridRows - 1)));
+                    int snappedRow = Math.max(0, Math.min(gridRows - 1,
+                            Math.round(requestedTop / (float) Math.max(1, slotHeight))));
+                    // Keep drag snapping identical to the fixed row positions used by the renderer.
+                    lp.topMargin = snappedRow * slotHeight;
                     view.setLayoutParams(lp);
                     refreshWorkspaceGrid();
                 }
@@ -2349,9 +2345,8 @@ public class MainActivity extends Activity {
                     int columns = getHomeColumns();
                     int slotHeight = LauncherUiUtils.dp(this,
                             homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-                    // Match HomePageController's exact row count and vertical anchors.
-                    // The old drag path used fixed slotHeight increments while rendering
-                    // spread rows over maxTop, so the icon jumped on release/rebuild.
+                    // Match HomePageController's fixed row spacing so the icon does not
+                    // jump vertically when the drag is committed and the page is rebuilt.
                     int targetHeightForGrid = Math.max(1, targetPage.getHeight() > 0
                             ? targetPage.getHeight() : pageViewport.getHeight());
                     int rows = Math.max(1, targetHeightForGrid / slotHeight);
@@ -2368,23 +2363,19 @@ public class MainActivity extends Activity {
                     int cellWidth = Math.max(1, targetWidth / columns);
                     int cellHeight = slotHeight;
                     rows = Math.max(1, Math.min(rows, targetHeight / cellHeight));
-                    int maxTop = Math.max(0, targetHeight - cellHeight);
                     float desiredLeft = event.getRawX() - viewportLocation[0] - cellWidth / 2f;
                     int targetCol = Math.max(0, Math.min(columns - 1,
                             Math.round(desiredLeft / cellWidth)));
                     float desiredTop = event.getRawY() - viewportLocation[1] - cellHeight / 2f;
-                    int targetRow = rows <= 1 || maxTop <= 0 ? 0
-                            : Math.max(0, Math.min(rows - 1,
-                                    Math.round(desiredTop * (rows - 1) / (float) maxTop)));
+                    int targetRow = Math.max(0, Math.min(rows - 1,
+                            Math.round(desiredTop / (float) Math.max(1, cellHeight))));
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = slotHeight;
                     int sourceRows = Math.max(1, sourceView.getHeight() / sourceCellHeight);
-                    int sourceMaxTop = Math.max(0, sourceView.getHeight() - view.getHeight());
                     int sourceCol = Math.max(0, Math.min(columns - 1,
                             Math.round(iconOriginalLeft / (float) sourceCellWidth)));
-                    int sourceRow = sourceRows <= 1 || sourceMaxTop <= 0 ? 0
-                            : Math.max(0, Math.min(sourceRows - 1,
-                                    Math.round(iconOriginalTop * (sourceRows - 1) / (float) sourceMaxTop)));
+                    int sourceRow = Math.max(0, Math.min(sourceRows - 1,
+                            Math.round(iconOriginalTop / (float) Math.max(1, sourceCellHeight))));
                     boolean[][] occupied = new boolean[rows][columns];
                     View occupant = null;
                     String otherPackage = null;
@@ -2394,10 +2385,8 @@ public class MainActivity extends Activity {
                                 || !((String) candidate.getTag()).startsWith("launcher_app:")) continue;
                         FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
                         int cc = Math.max(0, Math.min(columns - 1, Math.round((float) cp.leftMargin / cellWidth)));
-                        int candidateMaxTop = Math.max(0, targetHeight - candidate.getHeight());
-                        int cr = rows <= 1 || candidateMaxTop <= 0 ? 0
-                                : Math.max(0, Math.min(rows - 1, Math.round(
-                                        cp.topMargin * (rows - 1) / (float) candidateMaxTop)));
+                        int cr = Math.max(0, Math.min(rows - 1,
+                                Math.round(cp.topMargin / (float) Math.max(1, cellHeight))));
                         occupied[cr][cc] = true;
                         if (cc == targetCol && cr == targetRow) {
                             occupant = candidate;
