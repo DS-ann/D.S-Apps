@@ -4908,6 +4908,63 @@ public class MainActivity extends Activity {
                 long distance = Math.abs((long) x - g[0]) + Math.abs((long) y - g[1]);
                 if (distance < bestDistance) { bestDistance = distance; bestX = x; bestY = y; }
             }
+            // Edge-derived candidates can miss narrow free pockets around mixed-size
+            // items. Before declaring the page full, perform an exact pixel scan at a
+            // coarse step, including the final right/bottom edge. The nearest legal
+            // rectangle wins; this is the same rectangle geometry used by drag/resize.
+            if (bestX < 0) {
+                int step = Math.max(1, LauncherUiUtils.dp(this, 8));
+                outerScan:
+                for (int y = 0; y <= maxY; y += step) {
+                    int candidateY = Math.min(maxY, y);
+                    for (int x = 0; x <= maxX; x += step) {
+                        int candidateX = Math.min(maxX, x);
+                        android.graphics.Rect candidate = new android.graphics.Rect(
+                                candidateX, candidateY, candidateX + w, candidateY + h);
+                        boolean blocked = false;
+                        for (android.graphics.Rect a : accepted) {
+                            if (android.graphics.Rect.intersects(candidate, a)) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                        if (!blocked) {
+                            long distance = Math.abs((long) candidateX - g[0])
+                                    + Math.abs((long) candidateY - g[1]);
+                            if (distance < bestDistance) {
+                                bestDistance = distance;
+                                bestX = candidateX;
+                                bestY = candidateY;
+                            }
+                        }
+                    }
+                    if (candidateY == maxY) break outerScan;
+                }
+                // Explicitly test the far edges; stepping can otherwise skip them.
+                int[][] edgeCandidates = new int[][]{
+                        {maxX, startY}, {startX, maxY}, {maxX, maxY}
+                };
+                for (int[] edge : edgeCandidates) {
+                    android.graphics.Rect candidate = new android.graphics.Rect(
+                            edge[0], edge[1], edge[0] + w, edge[1] + h);
+                    boolean blocked = false;
+                    for (android.graphics.Rect a : accepted) {
+                        if (android.graphics.Rect.intersects(candidate, a)) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                    if (!blocked) {
+                        long distance = Math.abs((long) edge[0] - g[0])
+                                + Math.abs((long) edge[1] - g[1]);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestX = edge[0];
+                            bestY = edge[1];
+                        }
+                    }
+                }
+            }
             // Keep an oversized non-clock widget inside the page as far as possible.
             // A clock is scaled down by the clock clamp if it exceeds the viewport.
             if (bestX < 0) {
@@ -5110,144 +5167,15 @@ public class MainActivity extends Activity {
         refreshWorkspaceGrid();
     }
 
+    /**
+     * All workspace item types use the same rectangle-based collision resolver.
+     * Keeping a widget-only resolver here caused it to disagree with live drag,
+     * shortcut placement and clock displacement, which could re-overlap items
+     * immediately after another resolver had moved them.
+     */
     private void resolveWidgetIconCollisions(FrameLayout page, FrameLayout widgetContainer) {
-        if (page == null || widgetContainer == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
-        int columns = getHomeColumns();
-        int cellWidth = Math.max(1, page.getWidth() / columns);
-        int cellHeight = LauncherUiUtils.dp(this,
-                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-        int rows = Math.max(1, page.getHeight() / cellHeight);
-        FrameLayout.LayoutParams widgetLp = (FrameLayout.LayoutParams) widgetContainer.getLayoutParams();
-        int wx1 = widgetLp.leftMargin, wy1 = widgetLp.topMargin;
-        // Layout params update before getWidth()/getHeight() do. Use the requested
-        // geometry so resize-release collision checks see the new widget bounds.
-        int widgetWidth = widgetLp.width > 0 ? widgetLp.width : widgetContainer.getWidth();
-        int widgetHeight = widgetLp.height > 0 ? widgetLp.height : widgetContainer.getHeight();
-        int wx2 = wx1 + widgetWidth, wy2 = wy1 + widgetHeight;
-        boolean[][] occupied = new boolean[rows][columns];
-        for (int i = 0; i < page.getChildCount(); i++) {
-            View child = page.getChildAt(i);
-            if (child == widgetContainer || !(child.getTag() instanceof String)
-                    || !((String) child.getTag()).startsWith("launcher_app:")) continue;
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
-            int col = Math.max(0, Math.min(columns - 1, Math.round((float) lp.leftMargin / cellWidth)));
-            int row = Math.max(0, Math.min(rows - 1, Math.round((float) lp.topMargin / cellHeight)));
-            occupied[row][col] = true;
-        }
-        for (int i = 0; i < page.getChildCount(); i++) {
-            View child = page.getChildAt(i);
-            if (child == widgetContainer || !(child.getTag() instanceof String)
-                    || !((String) child.getTag()).startsWith("launcher_app:")) continue;
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
-            int cx1 = lp.leftMargin, cy1 = lp.topMargin;
-            int cx2 = cx1 + cellWidth, cy2 = cy1 + cellHeight;
-            boolean overlaps = cx1 < wx2 && cx2 > wx1 && cy1 < wy2 && cy2 > wy1;
-            if (!overlaps) continue;
-            String pkg = ((String) child.getTag()).substring("launcher_app:".length());
-            int fromCol = Math.max(0, Math.min(columns - 1, Math.round((float) lp.leftMargin / cellWidth)));
-            int fromRow = Math.max(0, Math.min(rows - 1, Math.round((float) lp.topMargin / cellHeight)));
-            occupied[fromRow][fromCol] = false;
-            int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
-            for (int row = 0; row < rows; row++) {
-                for (int col = 0; col < columns; col++) {
-                    if (occupied[row][col]) continue;
-                    int x1 = col * cellWidth, y1 = row * cellHeight;
-                    if (x1 < wx2 && x1 + cellWidth > wx1 && y1 < wy2 && y1 + cellHeight > wy1) continue;
-                    int distance = Math.abs(col - fromCol) + Math.abs(row - fromRow);
-                    if (distance < bestDistance) { bestDistance = distance; bestCol = col; bestRow = row; }
-                }
-            }
-            if (bestCol >= 0) {
-                lp.leftMargin = bestCol * cellWidth;
-                lp.topMargin = bestRow * cellHeight;
-                child.setLayoutParams(lp);
-                child.setTranslationX(LauncherUiUtils.dp(this, 5));
-                child.setTranslationY(LauncherUiUtils.dp(this, 3));
-                child.animate().translationX(0f).translationY(0f).setDuration(animationDuration(150L)).start();
-                occupied[bestRow][bestCol] = true;
-                saveIconSlot(pkg, bestCol, bestRow, columns);
-            }
-        }
-        // Resolve collisions against every saved shortcut, not just the first one.
-        android.graphics.Rect widgetBounds = new android.graphics.Rect(wx1, wy1, wx2, wy2);
-        for (int i = 0; i < page.getChildCount(); i++) {
-            View shortcut = page.getChildAt(i);
-            if (!"launcher_contact_shortcut".equals(shortcut.getTag())) continue;
-            ViewGroup.LayoutParams rawShortcutLp = shortcut.getLayoutParams();
-            if (!(rawShortcutLp instanceof FrameLayout.LayoutParams)) continue;
-            FrameLayout.LayoutParams shortcutLp = (FrameLayout.LayoutParams) rawShortcutLp;
-            int shortcutWidth = shortcutLp.width > 0 ? shortcutLp.width : shortcut.getWidth();
-            int shortcutHeight = shortcutLp.height > 0 ? shortcutLp.height : shortcut.getHeight();
-            android.graphics.Rect shortcutBounds = new android.graphics.Rect(shortcutLp.leftMargin,
-                    shortcutLp.topMargin, shortcutLp.leftMargin + shortcutWidth,
-                    shortcutLp.topMargin + shortcutHeight);
-            if (!android.graphics.Rect.intersects(widgetBounds, shortcutBounds)) continue;
-
-            boolean placed = false;
-            for (int row = 0; row < rows && !placed; row++) {
-                for (int col = 0; col < columns && !placed; col++) {
-                    int candidateLeft = col * cellWidth;
-                    int candidateTop = row * cellHeight;
-                    if (candidateLeft + shortcutWidth > page.getWidth()
-                            || candidateTop + shortcutHeight > page.getHeight()) continue;
-                    if (isContactShortcutPositionFree(page, shortcut, candidateLeft, candidateTop,
-                            shortcutWidth, shortcutHeight)) {
-                        shortcutLp.leftMargin = candidateLeft;
-                        shortcutLp.topMargin = candidateTop;
-                        shortcut.setLayoutParams(shortcutLp);
-                        Object description = shortcut.getContentDescription();
-                        String id = description == null ? null : description.toString()
-                                .replace("launcher_shortcut_id:", "");
-                        if (id != null && !id.isEmpty() && !id.equals(description.toString())) {
-                            prefs.edit()
-                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, id),
-                                            candidateLeft / (float) Math.max(1, page.getWidth() - shortcutWidth))
-                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, id),
-                                            candidateTop / (float) Math.max(1, page.getHeight() - shortcutHeight))
-                                    .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, id),
-                                            pagesStrip == null ? 0 : pagesStrip.indexOfChild(page))
-                                    .apply();
-                        }
-                        placed = true;
-                    }
-                }
-            }
-            if (!placed && pagesStrip != null && pagesStrip.getChildCount() > 1) {
-                int currentIndex = pagesStrip.indexOfChild(page);
-                int otherIndex = currentIndex == 0 ? 1 : 0;
-                View otherView = pagesStrip.getChildAt(otherIndex);
-                if (otherView instanceof FrameLayout) {
-                    FrameLayout otherPage = (FrameLayout) otherView;
-                    for (int row = 0; row < rows && !placed; row++) {
-                        for (int col = 0; col < columns && !placed; col++) {
-                            int candidateLeft = col * cellWidth;
-                            int candidateTop = row * cellHeight;
-                            if (candidateLeft + shortcutWidth > otherPage.getWidth()
-                                    || candidateTop + shortcutHeight > otherPage.getHeight()) continue;
-                            if (!isContactShortcutPositionFree(otherPage, null, candidateLeft, candidateTop,
-                                    shortcutWidth, shortcutHeight)) continue;
-                            android.view.ViewParent parent = shortcut.getParent();
-                            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(shortcut);
-                            shortcutLp.leftMargin = candidateLeft;
-                            shortcutLp.topMargin = candidateTop;
-                            otherPage.addView(shortcut, shortcutLp);
-                            Object description = shortcut.getContentDescription();
-                            String id = description == null ? null : description.toString()
-                                    .replace("launcher_shortcut_id:", "");
-                            if (id != null && !id.isEmpty() && !id.equals(description.toString())) {
-                                prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, id), otherIndex)
-                                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, id),
-                                                candidateLeft / (float) Math.max(1, otherPage.getWidth() - shortcutWidth))
-                                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, id),
-                                                candidateTop / (float) Math.max(1, otherPage.getHeight() - shortcutHeight))
-                                        .apply();
-                            }
-                            placed = true;
-                        }
-                    }
-                }
-            }
-        }
+        if (page == null || widgetContainer == null || widgetContainer.getParent() != page) return;
+        resolveAllWorkspaceOverlaps(page, widgetContainer);
     }
 
     private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
