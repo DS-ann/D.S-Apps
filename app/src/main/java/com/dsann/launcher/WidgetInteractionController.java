@@ -140,7 +140,7 @@ final class WidgetInteractionController {
             handleBg.setCornerRadius(LauncherUiUtils.dp(activity, 4));
             handle.setBackground(handleBg);
             handle.setVisibility(View.GONE);
-            int side = LauncherUiUtils.dp(activity, 28), thin = LauncherUiUtils.dp(activity, 8);
+            int side = LauncherUiUtils.dp(activity, 40), thin = LauncherUiUtils.dp(activity, 18);
             FrameLayout.LayoutParams handleLp = edge < 2
                     ? new FrameLayout.LayoutParams(thin, side, edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
                     : new FrameLayout.LayoutParams(side, thin, edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
@@ -205,7 +205,7 @@ final class WidgetInteractionController {
         gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
         FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, -1, Gravity.TOP | Gravity.LEFT);
         container.addView(gestureGrip, gripLp);
-        for (View handle : resizeHandles) handle.bringToFront();
+        for (View handle : resizeHandles) { handle.bringToFront(); handle.setClickable(true); }
 
         final int[] editMode = {0}; // 0 idle, 1 moving
         final float[] down = {0f, 0f};
@@ -511,14 +511,25 @@ final class WidgetInteractionController {
                     int minW = Math.min(LauncherUiUtils.dp(activity, 140), Math.max(1, activePage.getWidth()));
                     int minH = Math.min(LauncherUiUtils.dp(activity, 90), Math.max(1, activePage.getHeight()));
                     int left = origin[0], top = origin[1], resizeWidth = origin[2], resizeHeight = origin[3];
-                    if (resizeEdge == 0) { resizeWidth = Math.max(minW, origin[2] - dx); left = origin[0] + origin[2] - resizeWidth; }
-                    else if (resizeEdge == 1) resizeWidth = Math.max(minW, origin[2] + dx);
-                    else if (resizeEdge == 2) { resizeHeight = Math.max(minH, origin[3] - dy); top = origin[1] + origin[3] - resizeHeight; }
-                    else resizeHeight = Math.max(minH, origin[3] + dy);
-                    left = Math.max(0, Math.min(left, Math.max(0, activePage.getWidth() - minW)));
-                    top = Math.max(0, Math.min(top, Math.max(0, activePage.getHeight() - minH)));
-                    resizeWidth = Math.max(minW, Math.min(resizeWidth, Math.max(minW, activePage.getWidth() - left)));
-                    resizeHeight = Math.max(minH, Math.min(resizeHeight, Math.max(minH, activePage.getHeight() - top)));
+                    // Keep the opposite edge fixed while dragging left/top handles.
+                    // Clamp the moving edge itself, then derive size from the fixed edge.
+                    if (resizeEdge == 0) {
+                        int fixedRight = origin[0] + origin[2];
+                        left = Math.max(0, Math.min(origin[0] + dx, fixedRight - minW));
+                        resizeWidth = fixedRight - left;
+                    } else if (resizeEdge == 1) {
+                        resizeWidth = Math.max(minW, Math.min(origin[2] + dx, activePage.getWidth() - origin[0]));
+                    } else if (resizeEdge == 2) {
+                        int fixedBottom = origin[1] + origin[3];
+                        top = Math.max(0, Math.min(origin[1] + dy, fixedBottom - minH));
+                        resizeHeight = fixedBottom - top;
+                    } else {
+                        resizeHeight = Math.max(minH, Math.min(origin[3] + dy, activePage.getHeight() - origin[1]));
+                    }
+                    left = Math.max(0, Math.min(left, activePage.getWidth() - minW));
+                    top = Math.max(0, Math.min(top, activePage.getHeight() - minH));
+                    resizeWidth = Math.max(minW, Math.min(resizeWidth, activePage.getWidth() - left));
+                    resizeHeight = Math.max(minH, Math.min(resizeHeight, activePage.getHeight() - top));
                     android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + resizeWidth, top + resizeHeight);
                     boolean overlap = false;
                     for (int i = 0; i < activePage.getChildCount(); i++) {
