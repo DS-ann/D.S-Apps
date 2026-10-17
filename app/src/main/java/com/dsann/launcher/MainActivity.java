@@ -219,10 +219,21 @@ public class MainActivity extends Activity {
     private boolean packageReceiverRegistered = false;
     private final BroadcastReceiver packageChangesReceiver = new BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, Intent intent) {
-            // Package broadcasts can arrive before PackageManager's launcher query is refreshed.
-            // Debounce briefly, then refresh the existing list objects used by the drawer adapter.
+            if (intent == null) return;
+            String action = intent.getAction();
+            if (!Intent.ACTION_PACKAGE_ADDED.equals(action)
+                    && !Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                return;
+            }
+            // Ignore the remove/add broadcasts generated while an app is being updated.
+            // The drawer list is refreshed only for a genuine install or uninstall.
+            if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return;
+
+            // PackageManager can briefly return a stale launcher-activity query immediately
+            // after the broadcast. Debounce the refresh so the installed/uninstalled package
+            // is reflected by the single drawer refresh.
             handler.removeCallbacks(refreshAppsAfterPackageChange);
-            handler.postDelayed(refreshAppsAfterPackageChange, 300L);
+            handler.postDelayed(refreshAppsAfterPackageChange, 800L);
         }
     };
     private final Runnable refreshAppsAfterPackageChange = new Runnable() {
@@ -255,7 +266,6 @@ public class MainActivity extends Activity {
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
-        packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
         packageFilter.addDataScheme("package");
         registerReceiver(packageChangesReceiver, packageFilter);
         packageReceiverRegistered = true;
