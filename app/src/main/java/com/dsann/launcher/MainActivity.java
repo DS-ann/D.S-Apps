@@ -526,10 +526,9 @@ public class MainActivity extends Activity {
                     if (!(tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
                             || "launcher_contact_shortcut".equals(tag)
                             || "launcher_clock_widget".equals(tag))) continue;
-                    if (android.graphics.Rect.intersects(candidate, new android.graphics.Rect(
-                            itemGeometry(other)[0], itemGeometry(other)[1],
-                            itemGeometry(other)[0] + itemGeometry(other)[2],
-                            itemGeometry(other)[1] + itemGeometry(other)[3]))) {
+                    int[] otherGeometry = itemGeometry(other);
+                    if (android.graphics.Rect.intersects(candidate,
+                            collisionRect(other, otherGeometry))) {
                         overlapsWorkspaceItem = true;
                         break;
                     }
@@ -4655,15 +4654,27 @@ public class MainActivity extends Activity {
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
-        // Restore any emergency visual scale used to preserve non-overlap on a
-        // physically crowded page. This is only applied once per View instance.
+        // App cells are placement slots, not scalable widgets. Older versions
+        // persisted emergency scale values for them; clear those legacy values
+        // and keep the cell transform at 1 so its configured icon size is stable.
         if (!workspaceScaleRestored.containsKey(view)) {
             workspaceScaleRestored.put(view, Boolean.TRUE);
-            float sx = prefs == null ? 1f : prefs.getFloat("workspace_scale_x_" + tag, 1f);
-            float sy = prefs == null ? 1f : prefs.getFloat("workspace_scale_y_" + tag, 1f);
-            if (sx > 0f && sy > 0f && (sx < 0.999f || sy < 0.999f)) {
-                view.setScaleX(sx);
-                view.setScaleY(sy);
+            if (tag.startsWith("launcher_app:")) {
+                view.setScaleX(1f);
+                view.setScaleY(1f);
+                if (prefs != null) {
+                    prefs.edit().remove("workspace_scale_x_" + tag)
+                            .remove("workspace_scale_y_" + tag)
+                            .remove("workspace_base_scale_x_" + tag)
+                            .remove("workspace_base_scale_y_" + tag).apply();
+                }
+            } else {
+                float sx = prefs == null ? 1f : prefs.getFloat("workspace_scale_x_" + tag, 1f);
+                float sy = prefs == null ? 1f : prefs.getFloat("workspace_scale_y_" + tag, 1f);
+                if (sx > 0f && sy > 0f && (sx < 0.999f || sy < 0.999f)) {
+                    view.setScaleX(sx);
+                    view.setScaleY(sy);
+                }
             }
         }
         // Include the clock in workspace displacement so widgets and shortcuts
@@ -4746,6 +4757,122 @@ public class MainActivity extends Activity {
                 && ((String) view.getTag()).startsWith("launcher_app:");
     }
 
+    /**
+     * Visual collision bounds for a home app cell. The cell fills its grid slot,
+     * but only the icon artwork and (when enabled) the rendered label are visible
+     * collision surfaces. Using the full cell made a large clock push icons away
+     * even when the clock touched only empty cell padding.
+     */
+    private android.graphics.Rect appIconVisualRectAt(
+            View view, int cellX, int cellY, int cellWidth, int cellHeight) {
+        android.graphics.Rect cellBounds = new android.graphics.Rect(
+                cellX, cellY, cellX + Math.max(1, cellWidth), cellY + Math.max(1, cellHeight));
+        if (!(view instanceof ViewGroup)) return cellBounds;
+        ViewGroup cell = (ViewGroup) view;
+        if (cell.getChildCount() == 0) return cellBounds;
+
+        float parentScaleX = Math.max(0.01f, view.getScaleX());
+        float parentScaleY = Math.max(0.01f, view.getScaleY());
+        android.graphics.Rect visual = null;
+        int childCount = Math.min(2, cell.getChildCount());
+        for (int i = 0; i < childCount; i++) {
+            View child = cell.getChildAt(i);
+            if (child == null || child.getVisibility() != View.VISIBLE
+                    || child.getWidth() <= 0 || child.getHeight() <= 0) continue;
+
+            float localLeft = child.getLeft() + child.getTranslationX()
+                    + child.getPivotX() * (1f - child.getScaleX());
+            float localTop = child.getTop() + child.getTranslationY()
+                    + child.getPivotY() * (1f - child.getScaleY());
+            float localWidth = child.getWidth() * Math.max(0.01f, child.getScaleX());
+            float localHeight = child.getHeight() * Math.max(0.01f, child.getScaleY());
+
+            // The label TextView fills the cell width, while the painted text is
+            // centered inside it. Measure the text rather than treating blank
+            // label space as visible content.
+            if (i == 1 && child instanceof android.widget.TextView) {
+                android.widget.TextView label = (android.widget.TextView) child;
+                CharSequence text = label.getText();
+                if (text == null || text.length() == 0) continue;
+                android.graphics.Paint paint = label.getPaint();
+                android.graphics.Paint.FontMetrics metrics = paint.getFontMetrics();
+                float paintedWidth = Math.min(
+                        Math.max(0, label.getWidth() - label.getCompoundPaddingLeft()
+                                - label.getCompoundPaddingRight()),
+                        paint.measureText(text.toString()));
+                float paintedHeight = Math.max(1f, metrics.descent - metrics.ascent);
+                localLeft += label.getCompoundPaddingLeft()
+                        + Math.max(0f, (label.getWidth()
+                                - label.getCompoundPaddingLeft()
+                                - label.getCompoundPaddingRight() - paintedWidth) / 2f);
+                localTop += label.getCompoundPaddingTop()
+                        + Math.max(0f, (label.getHeight()
+                                - label.getCompoundPaddingTop()
+                                - label.getCompoundPaddingBottom() - paintedHeight) / 2f);
+                localWidth = paintedWidth;
+                localHeight = paintedHeight;
+            }
+
+            int left = cellX + Math.round(localLeft * parentScaleX);
+            int top = cellY + Math.round(localTop * parentScaleY);
+            int right = left + Math.max(1, Math.round(localWidth * parentScaleX));
+            int bottom = top + Math.max(1, Math.round(localHeight * parentScaleY));
+            android.graphics.Rect childBounds = new android.graphics.Rect(left, top, right, bottom);
+            if (cell.getClipChildren()) childBounds.intersect(cellBounds);
+            if (childBounds.isEmpty()) continue;
+            if (visual == null) visual = childBounds;
+            else visual.union(childBounds);
+        }
+        return visual == null ? cellBounds : visual;
+    }
+
+    /**
+     * Find an empty home-grid slot for an app cell using its visible content
+     * bounds. Returned coordinates and dimensions match HomePageController's grid.
+     */
+    private int[] findFreeHomeAppSlot(FrameLayout page, View appItem,
+            java.util.List<android.graphics.Rect> obstacles, int preferredX, int preferredY) {
+        if (page == null || appItem == null || page.getWidth() <= 0 || page.getHeight() <= 0) {
+            return null;
+        }
+        int columns = getHomeColumns();
+        int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+        int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+        int bestX = -1;
+        int bestY = -1;
+        long bestDistance = Long.MAX_VALUE;
+        for (int row = 0; row < rows; row++) {
+            int y = row * cellHeight;
+            if (y + cellHeight > page.getHeight()) continue;
+            for (int col = 0; col < columns; col++) {
+                int x = col * cellWidth;
+                if (x + cellWidth > page.getWidth()) continue;
+                android.graphics.Rect candidate = collisionRectAt(
+                        appItem, x, y, cellWidth, cellHeight);
+                boolean blocked = false;
+                if (obstacles != null) {
+                    for (android.graphics.Rect obstacle : obstacles) {
+                        if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                }
+                if (blocked) continue;
+                long distance = Math.abs((long) x - preferredX)
+                        + Math.abs((long) y - preferredY);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestX = x;
+                    bestY = y;
+                }
+            }
+        }
+        return bestX < 0 ? null : new int[]{bestX, bestY, cellWidth, cellHeight};
+    }
+
     private int workspaceCollisionMargin(View view) {
         // Home app views occupy the full width of one grid cell. Expanding that
         // cell by an invisible margin makes adjacent cells overlap geometrically,
@@ -4756,16 +4883,23 @@ public class MainActivity extends Activity {
 
     private android.graphics.Rect collisionRect(View view, int[] geometry) {
         int margin = workspaceCollisionMargin(view);
-        return new android.graphics.Rect(
-                geometry[0] - margin, geometry[1] - margin,
-                geometry[0] + geometry[2] + margin,
-                geometry[1] + geometry[3] + margin);
+        android.graphics.Rect bounds = isWorkspaceAppIcon(view)
+                ? appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3])
+                : new android.graphics.Rect(geometry[0], geometry[1],
+                        geometry[0] + geometry[2], geometry[1] + geometry[3]);
+        if (margin == 0) return bounds;
+        bounds.inset(-margin, -margin);
+        return bounds;
     }
 
     private android.graphics.Rect collisionRectAt(View view, int x, int y, int width, int height) {
         int margin = workspaceCollisionMargin(view);
-        return new android.graphics.Rect(x - margin, y - margin,
-                x + width + margin, y + height + margin);
+        android.graphics.Rect bounds = isWorkspaceAppIcon(view)
+                ? appIconVisualRectAt(view, x, y, width, height)
+                : new android.graphics.Rect(x, y, x + width, y + height);
+        if (margin == 0) return bounds;
+        bounds.inset(-margin, -margin);
+        return bounds;
     }
 
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
@@ -4943,6 +5077,24 @@ public class MainActivity extends Activity {
             }
 
             int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
+            if (isWorkspaceAppIcon(other)) {
+                // App cells must remain snapped to the home grid during displacement.
+                int columns = getHomeColumns();
+                int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+                int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+                int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+                xCandidates.clear();
+                yCandidates.clear();
+                for (int col = 0; col < columns; col++) {
+                    int x = col * cellWidth;
+                    if (x + cellWidth <= page.getWidth()) xCandidates.add(x);
+                }
+                for (int row = 0; row < rows; row++) {
+                    int y = row * cellHeight;
+                    if (y + cellHeight <= page.getHeight()) yCandidates.add(y);
+                }
+            }
             for (Integer candidateY : yCandidates) {
                 for (Integer candidateX : xCandidates) {
                     int x = candidateX.intValue();
@@ -4969,7 +5121,7 @@ public class MainActivity extends Activity {
             // obstacles form irregular shapes. Only when that search fails, scan the
             // page at a modest interval and choose the nearest collision-free position.
             // This makes displacement work consistently near the top as well as below.
-            if (bestX < 0) {
+            if (bestX < 0 && !isWorkspaceAppIcon(other)) {
                 int step = Math.max(1, LauncherUiUtils.dp(this, 12));
                 for (int y = 0; y <= maxY + step; y += step) {
                     int candidateY = Math.min(maxY, y);
@@ -5068,6 +5220,30 @@ public class MainActivity extends Activity {
                 ys.add(Math.max(0, Math.min(maxY, a.top - h - margin)));
                 ys.add(Math.max(0, Math.min(maxY, a.bottom + margin)));
             }
+            if (isWorkspaceAppIcon(item)) {
+                // App cells may be collision-tested by their visible content, but
+                // their origins can only be chosen from legal grid slots.
+                xs.clear();
+                ys.clear();
+                int columns = getHomeColumns();
+                int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+                int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+                int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+                w = cellWidth;
+                h = cellHeight;
+                maxX = Math.max(0, page.getWidth() - w);
+                maxY = Math.max(0, page.getHeight() - h);
+                for (int col = 0; col < columns; col++) {
+                    int x = col * cellWidth;
+                    if (x <= maxX) xs.add(x);
+                }
+                for (int row = 0; row < rows; row++) {
+                    int y = row * cellHeight;
+                    if (y <= maxY) ys.add(y);
+                }
+            }
+
             int bestX = -1, bestY = -1;
             long bestDistance = Long.MAX_VALUE;
             for (Integer cy : ys) for (Integer cx : xs) {
@@ -5085,7 +5261,7 @@ public class MainActivity extends Activity {
             // items. Before declaring the page full, perform an exact pixel scan at a
             // coarse step, including the final right/bottom edge. The nearest legal
             // rectangle wins; this is the same rectangle geometry used by drag/resize.
-            if (bestX < 0) {
+            if (bestX < 0 && !isWorkspaceAppIcon(item)) {
                 int step = Math.max(1, LauncherUiUtils.dp(this, 1));
                 outerScan:
                 for (int y = 0; y <= maxY; y += step) {
@@ -5141,7 +5317,7 @@ public class MainActivity extends Activity {
             // If this item cannot fit around the already accepted items, move a
             // lower-priority neighbour to the other page and retry. This is important
             // for a clock or large widget colliding with several smaller items.
-            if (bestX < 0 && !acceptedViews.isEmpty()) {
+            if (bestX < 0 && !isWorkspaceAppIcon(item) && !acceptedViews.isEmpty()) {
                 for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
                     View movable = acceptedViews.get(j);
                     if (movable == priorityView || movable == clockPanel) continue;
@@ -5172,7 +5348,7 @@ public class MainActivity extends Activity {
 
             // Prefer moving the item itself to the other home page before shrinking
             // it. Shrink-to-fit is reserved for cases where neither page has room.
-            if (bestX < 0 && item != clockPanel
+            if (bestX < 0 && item != clockPanel && !isWorkspaceAppIcon(item)
                     && tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
                 continue;
             }
@@ -5182,9 +5358,12 @@ public class MainActivity extends Activity {
             // became crowded. Keep the icon at its original scale and try the other
             // page instead; if neither page has room, leave it unchanged for this pass.
             if (bestX < 0 && isWorkspaceAppIcon(item)) {
-                if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
-                    continue;
-                }
+                if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) continue;
+                // No free slot exists on either page. Keep the configured icon size
+                // and reserve its visible bounds so subsequent items cannot cover it.
+                int[] retainedGeometry = itemGeometry(item);
+                accepted.add(collisionRect(item, retainedGeometry));
+                acceptedViews.add(item);
                 continue;
             }
 
@@ -5296,6 +5475,30 @@ public class MainActivity extends Activity {
                 if (!isWorkspaceItem(other)) continue;
                 int[] og = itemGeometry(other);
                 obstacles.add(collisionRect(other, og));
+            }
+            if (isWorkspaceAppIcon(item)) {
+                int[] current = itemGeometry(item);
+                int[] slot = findFreeHomeAppSlot(target, item, obstacles, current[0], current[1]);
+                if (slot == null) continue;
+                ViewGroup oldParent = (ViewGroup) item.getParent();
+                ViewGroup.LayoutParams raw = item.getLayoutParams();
+                FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
+                        ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) raw)
+                        : new FrameLayout.LayoutParams(slot[2], slot[3]);
+                lp.width = slot[2];
+                lp.height = slot[3];
+                lp.gravity = Gravity.TOP | Gravity.LEFT;
+                lp.leftMargin = slot[0];
+                lp.topMargin = slot[1];
+                item.animate().cancel();
+                item.setScaleX(1f);
+                item.setScaleY(1f);
+                item.setTranslationX(0f);
+                item.setTranslationY(0f);
+                oldParent.removeView(item);
+                target.addView(item, lp);
+                persistWorkspaceItemPosition(target, item, slot[0], slot[1], slot[2], slot[3]);
+                return true;
             }
             java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
             java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
