@@ -1168,9 +1168,7 @@ public class MainActivity extends Activity {
                     && Intent.ACTION_MAIN.equals(intent.getAction())
                     && intent.hasCategory(Intent.CATEGORY_HOME);
             if (homeIntent) {
-                // Normalize the cached workspace first, then animate its entrance.
-                // This animates only the launcher surface (not the outgoing app window),
-                // keeping the HOME path compatible with Android 6 and avoiding a relaunch.
+                // Normalize the cached workspace without running an entrance animation.
                 showHomeImmediately();
                 if (currentPage != 0) showPage(0, false);
                 // HOME returns directly to the cached workspace without a launcher entrance animation.
