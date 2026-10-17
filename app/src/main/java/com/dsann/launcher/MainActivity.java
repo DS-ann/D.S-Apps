@@ -1310,7 +1310,7 @@ public class MainActivity extends Activity {
         amPmText.setTextColor(clockText.getCurrentTextColor());
         amPmText.setTextSize(8);
         amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
+        amPmText.setGravity(Gravity.CENTER);
         amPmText.setIncludeFontPadding(false);
         amPmText.setPadding(0, 0, 0, 0);
         // AM/PM sits inside the clock, centered in the vertical gap between
