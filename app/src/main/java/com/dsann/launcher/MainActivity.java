@@ -4747,7 +4747,11 @@ public class MainActivity extends Activity {
     }
 
     private int workspaceCollisionMargin(View view) {
-        return isWorkspaceAppIcon(view) ? LauncherUiUtils.dp(this, 8) : 0;
+        // Home app views occupy the full width of one grid cell. Expanding that
+        // cell by an invisible margin makes adjacent cells overlap geometrically,
+        // so five- and six-column layouts get incorrectly rearranged by the
+        // collision resolver. Collision checks must use the actual layout bounds.
+        return 0;
     }
 
     private android.graphics.Rect collisionRect(View view, int[] geometry) {
