@@ -262,6 +262,7 @@ final class WidgetInteractionController {
                     current.topMargin = Math.max(0, Math.min(maxY,
                             Math.round(event.getRawY() - pageLocation[1] - container.getHeight() / 2f)));
                     container.setLayoutParams(current);
+                    listener.updateLiveDisplacements(activePage, container);
                     return true;
                 }
                 if (!childCanceled[0]) widget.dispatchTouchEvent(event);
@@ -285,6 +286,7 @@ final class WidgetInteractionController {
                             ? (FrameLayout) strip.getChildAt(destinationPage) : sourcePage;
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                     if (action == MotionEvent.ACTION_CANCEL) {
+                        listener.finishLiveDisplacements(false, container);
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
                     } else {
@@ -357,6 +359,7 @@ final class WidgetInteractionController {
                         reparenting[0] = false;
                     }
                     widgetPage[0] = destinationPage;
+                    if (action == MotionEvent.ACTION_UP) listener.finishLiveDisplacements(true, container);
                     listener.saveWidgetGeometry(widgetId, destinationPage, container);
                     listener.resolveWidgetCollisions(targetPage, container);
                     if (action == MotionEvent.ACTION_UP) listener.renderHomePages(false);
