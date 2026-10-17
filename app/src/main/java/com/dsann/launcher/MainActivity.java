@@ -5781,10 +5781,26 @@ public class MainActivity extends Activity {
                 : normalizedNonLedHeightScale * nonLedDigitScale
                         * (1.20f + 20f / 114f) * breadthScale);
         // Shift the digits and colon slightly left relative to the background.
+        // For non-7-segment clocks with a one-digit hour (1–9), add a small
+        // extra left shift to visually balance the reserved invisible leading cell.
         // Compensate for panel scaling so the offset remains stable at every length.
+        boolean singleDigitHour = false;
+        if (!sevenSegment && clockText.getText() != null) {
+            String currentClock = clockText.getText().toString();
+            int colon = currentClock.indexOf(':');
+            if (colon > 0) {
+                int hourDigits = 0;
+                for (int i = 0; i < colon; i++) {
+                    if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
+                }
+                singleDigitHour = hourDigits == 1;
+            }
+        }
+        int horizontalOffset = LauncherUiUtils.dp(this, 5)
+                + (singleDigitHour ? LauncherUiUtils.dp(this, 4) : 0);
         clockText.setTranslationX(sevenSegment
                 ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale)
-                : -LauncherUiUtils.dp(this, 5) / Math.max(0.01f, lengthScale));
+                : -horizontalOffset / Math.max(0.01f, lengthScale));
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         // The panel itself no longer uses scaleY, so this offset must remain a
