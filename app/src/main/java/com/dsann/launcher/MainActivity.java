@@ -4963,8 +4963,7 @@ public class MainActivity extends Activity {
                 // stays a fixed physical distance from the digit as the panel is resized.
                 int cornerInset = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
-                        - (int) Math.ceil(markerParams.width / Math.max(0.01f, lengthScale))
-                        - cornerInset);
+                        - (int) Math.ceil((markerParams.width + cornerInset) / Math.max(0.01f, lengthScale)));
                 markerParams.topMargin = Math.max(0, Math.min(
                         rowHeight - markerParams.height,
                         rowHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
