@@ -5015,7 +5015,7 @@ public class MainActivity extends Activity {
                 // clock style. Compensate for the panel's horizontal scale so the marker
                 // stays a fixed physical distance from the digit as the panel is resized.
                 int cornerInset = LauncherUiUtils.dp(this, 2);
-                int nonLedExtraRight = sevenSegment ? 0 : LauncherUiUtils.dp(this, 12);
+                int nonLedExtraRight = sevenSegment ? LauncherUiUtils.dp(this, 10) : LauncherUiUtils.dp(this, 22);
                 markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
                         - (int) Math.ceil((markerParams.width + cornerInset) / Math.max(0.01f, lengthScale))
                         + (int) Math.ceil(nonLedExtraRight / Math.max(0.01f, lengthScale)));
