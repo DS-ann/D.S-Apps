@@ -4051,8 +4051,11 @@ public class MainActivity extends Activity {
                 clockWidgetStartY = clockPanel.getTranslationY();
                 handler.removeCallbacks(clockWidgetLongPress);
                 handler.removeCallbacks(clockWidgetEditLongPress);
-                handler.postDelayed(clockWidgetLongPress, 1000L);
-                handler.postDelayed(clockWidgetEditLongPress, 2000L);
+                // Edit mode is resize/customization only: never arm move mode from it.
+                if (!clockWidgetEditing) {
+                    handler.postDelayed(clockWidgetLongPress, 1000L);
+                    handler.postDelayed(clockWidgetEditLongPress, 2000L);
+                }
                 // Do not block a parent horizontal/vertical swipe until a long-press
                 // actually puts the clock into widget-edit mode.
                 if (view.getParent() != null) {
@@ -4127,7 +4130,7 @@ public class MainActivity extends Activity {
     }
 
     private final Runnable clockWidgetLongPress = () -> {
-        if (clockPanel == null || drawerOpen) return;
+        if (clockPanel == null || drawerOpen || clockWidgetEditing) return;
         clockWidgetMoving = true;
         clockWidgetLongPressActivated = true;
         // Show a subtle move-ready outline without changing clock size or position.
@@ -4136,7 +4139,7 @@ public class MainActivity extends Activity {
     };
 
     private final Runnable clockWidgetEditLongPress = () -> {
-        if (clockPanel == null || drawerOpen) return;
+        if (clockPanel == null || drawerOpen || clockWidgetEditing) return;
         // Keep the configured length scale intact when entering edit mode.
         showClockMoveBorder(false);
         clockWidgetMoving = false;
