@@ -5375,8 +5375,24 @@ public class MainActivity extends Activity {
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
         final int availablePanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
                 screenWidth - LauncherUiUtils.dp(this, 24));
-        final int dateWidth = dateText == null ? 0
-                : (int) Math.ceil(dateText.getPaint().measureText(dateText.getText().toString()));
+        int measuredDateWidth = 0;
+        if (dateText != null) {
+            String measuredDate = dateText.getText().toString();
+            // The AM/PM prefix is part of the date line in 12-hour mode. Measure
+            // a complete representative line even during first layout, when the
+            // TextView may still be empty, so the clock background cannot clip it.
+            if (measuredDate.isEmpty()) {
+                measuredDate = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
+                        .format(new Date());
+            }
+            if (!DateFormat.is24HourFormat(this)
+                    && !measuredDate.matches("(?i)^(AM|PM)\\s+.*")) {
+                measuredDate = new SimpleDateFormat("a", Locale.getDefault()).format(new Date())
+                        + "  " + measuredDate;
+            }
+            measuredDateWidth = (int) Math.ceil(dateText.getPaint().measureText(measuredDate));
+        }
+        final int dateWidth = measuredDateWidth;
         // Measure the panel at its natural width, then scale the complete panel.
         // This keeps the background, digits, AM/PM marker, and date in one resize
         // operation instead of shrinking only the clock glyphs inside a fixed panel.
