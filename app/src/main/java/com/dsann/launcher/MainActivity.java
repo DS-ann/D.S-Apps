@@ -2582,9 +2582,10 @@ public class MainActivity extends Activity {
             page.setTranslationZ(0f);
             page.setLayerType(View.LAYER_TYPE_NONE, null);
         }
-        // Pre-create GPU layers for the two faces most likely to move next.
-        // Doing this while the page is idle avoids a hitch on the first swipe frame.
-        preparePageLayersForSwipe(currentPage);
+        // Pre-create GPU layers only when a transition will actually use them.
+        // HOME-intent recovery and other instant page changes should not allocate
+        // hardware layers just to release them again in the same frame.
+        if (animate) preparePageLayersForSwipe(currentPage);
         if (animate) {
             pagesStrip.animate().translationX(targetX)
                     .setDuration(animationDuration(240L))
