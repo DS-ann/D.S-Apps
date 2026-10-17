@@ -530,12 +530,13 @@ public class MainActivity extends Activity {
                 // typography/date-dependent natural width, and width-capping can make
                 // that layout width differ from the visible width. Dividing by the
                 // natural width caused their handles to jump, barely resize, or drift.
-                int lengthPercent = Math.round(clockWidgetStartLength
-                        * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
-                // Typography clocks can hit the page-width cap at their saved
-                // percentage. Keep the resize based on the visible starting bounds
-                // so dragging either horizontal grip still changes the requested
-                // size predictably when shrinking back from that cap.
+                // Convert the candidate visual width directly back to the
+                // panel's unscaled natural width. Multiplying the saved preference
+                // by a visual-width ratio fails when the old width was capped to the
+                // page: the saved percentage then no longer represents the rendered
+                // width, especially for typography clocks with date/AM-PM extras.
+                int lengthPercent = Math.round((right - left) * 100f
+                        / Math.max(1, clockWidgetStartPanelWidth));
                 int breadthPercent;
                 boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
                         && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
