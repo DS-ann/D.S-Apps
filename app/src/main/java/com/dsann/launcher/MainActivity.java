@@ -476,6 +476,10 @@ public class MainActivity extends Activity {
                 int bottom = top + clockWidgetStartVisualHeight;
                 int minW = Math.min(LauncherUiUtils.dp(this, 140), pageWidth);
                 int minH = Math.min(LauncherUiUtils.dp(this, 90), pageHeight);
+                // Horizontal grips must change width only. Do not force the height
+                // back up to the vertical minimum when the user deliberately makes
+                // a seven-segment clock very short.
+                boolean horizontalResize = clockResizeEdge == 1 || clockResizeEdge == 2;
                 if (clockResizeEdge == 1) {
                     left = Math.round(clockWidgetStartVisualX + resizeDeltaX);
                     left = Math.max(0, Math.min(left, right - minW));
@@ -490,9 +494,15 @@ public class MainActivity extends Activity {
                     bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
                 }
                 left = Math.max(0, Math.min(left, pageWidth - minW));
-                top = Math.max(0, Math.min(top, pageHeight - minH));
                 right = Math.max(left + minW, Math.min(right, pageWidth));
-                bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                if (horizontalResize) {
+                    // Preserve the exact vertical bounds for left/right resizing.
+                    top = clockWidgetStartVisualY;
+                    bottom = clockWidgetStartVisualY + clockWidgetStartVisualHeight;
+                } else {
+                    top = Math.max(0, Math.min(top, pageHeight - minH));
+                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                }
                 android.graphics.Rect candidate = new android.graphics.Rect(left, top, right, bottom);
 
                 boolean overlaps = false;
