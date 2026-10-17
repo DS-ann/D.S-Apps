@@ -4995,10 +4995,9 @@ public class MainActivity extends Activity {
         }
 
         if (dateText != null) {
-            // Keep the date at the quarter points for left/right modes: halfway
-            // between the screen center and the corresponding screen edge.
-            dateText.setGravity(alignment == Gravity.LEFT ? Gravity.LEFT
-                    : (alignment == Gravity.RIGHT ? Gravity.RIGHT : Gravity.CENTER));
+            // Center the date inside the clock panel regardless of the clock's
+            // screen alignment; changing clock position must not push the date off-center.
+            dateText.setGravity(Gravity.CENTER);
             ViewGroup.LayoutParams dateParams = dateText.getLayoutParams();
             if (dateParams != null) {
                 dateParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
