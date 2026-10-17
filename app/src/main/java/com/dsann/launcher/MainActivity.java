@@ -5797,7 +5797,7 @@ public class MainActivity extends Activity {
             }
         }
         int horizontalOffset = LauncherUiUtils.dp(this, 5)
-                + (singleDigitHour ? LauncherUiUtils.dp(this, 4) : 0);
+                + (singleDigitHour ? LauncherUiUtils.dp(this, 20) : 0);
         clockText.setTranslationX(sevenSegment
                 ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale)
                 : -horizontalOffset / Math.max(0.01f, lengthScale));
