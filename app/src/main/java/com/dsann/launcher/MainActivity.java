@@ -1914,6 +1914,7 @@ public class MainActivity extends Activity {
                     p.topMargin = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
                             Math.round(event.getRawY() - pageLocation[1] - tile.getHeight() / 2f)));
                     tile.setLayoutParams(p);
+                    updateLiveDisplacements(shortcutResizePage, tile);
                     refreshWorkspaceGrid();
                 }
                 return true;
@@ -1924,23 +1925,24 @@ public class MainActivity extends Activity {
                 handler.removeCallbacks(shortcutPopupRunnable[0]);
                 if (shortcutDragging[0]) {
                     FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                    int dragColumns = getHomeColumns();
-                    int dragCellW = Math.max(1, pageViewport.getWidth() / dragColumns);
-                    int dragCellH = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
-                    int proposedLeft = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
-                            Math.round((p.leftMargin + tile.getWidth() / 2f - dragCellW / 2f) / dragCellW) * dragCellW));
-                    int proposedTop = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
-                            Math.round((p.topMargin + tile.getHeight() / 2f - dragCellH / 2f) / dragCellH) * dragCellH));
-                    if (!isContactShortcutPositionFree(shortcutResizePage, tile, proposedLeft, proposedTop,
-                            tile.getWidth(), tile.getHeight())) {
+                    if (action == MotionEvent.ACTION_CANCEL) {
+                        finishLiveDisplacements(false, tile);
                         p.leftMargin = shortcutPositionStart[0];
                         p.topMargin = shortcutPositionStart[1];
                         tile.setLayoutParams(p);
-                        Toast.makeText(this, "That spot is occupied", Toast.LENGTH_SHORT).show();
                     } else {
+                        int dragColumns = getHomeColumns();
+                        int dragCellW = Math.max(1, pageViewport.getWidth() / dragColumns);
+                        int dragCellH = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                        int proposedLeft = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
+                                Math.round((p.leftMargin + tile.getWidth() / 2f - dragCellW / 2f) / dragCellW) * dragCellW));
+                        int proposedTop = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
+                                Math.round((p.topMargin + tile.getHeight() / 2f - dragCellH / 2f) / dragCellH) * dragCellH));
                         p.leftMargin = proposedLeft;
                         p.topMargin = proposedTop;
                         tile.setLayoutParams(p);
+                        updateLiveDisplacements(shortcutResizePage, tile);
+                        finishLiveDisplacements(true, tile);
                         prefs.edit().putInt(KEY_SHORTCUT_PAGE, pagesStrip.indexOfChild(shortcutResizePage))
                                 .putFloat(KEY_SHORTCUT_X, proposedLeft / (float) Math.max(1,
                                         pageViewport.getWidth() - tile.getWidth()))
