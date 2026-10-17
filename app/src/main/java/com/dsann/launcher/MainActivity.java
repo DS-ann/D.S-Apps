@@ -536,8 +536,6 @@ public class MainActivity extends Activity {
                 // visible width no longer represents the saved scale and shrinking stalls.
                 int lengthPercent = Math.round((right - left) * 100f
                         / (float) Math.max(1, clockWidgetStartPanelWidth));
-                boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
-                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
                 int breadthPercent;
                 // The visible panel height is the actual row height for every
                 // clock style. Avoid style-specific proportional math: it drifted
@@ -555,7 +553,9 @@ public class MainActivity extends Activity {
                 // All clock styles use the same real panel row height. Map its
                 // target height directly to the natural 114dp row, just as a
                 // widget resize maps its rectangle to layout width/height.
-                breadthPercent = Math.max(80, Math.min(250, breadthPercent));
+                int maxBreadthPercent = Math.max(80, Math.min(600, (int) Math.ceil(
+                        pageHeight * 100f / Math.max(1, naturalRowHeight))));
+                breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
                 prefs.edit()
                         .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), lengthPercent)
                         .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), breadthPercent)
@@ -1032,10 +1032,10 @@ public class MainActivity extends Activity {
         int side = LauncherUiUtils.dp(this, 40);
         int thin = LauncherUiUtils.dp(this, 18);
         int[][] positions = new int[][] {
-                {visualLeft - thin / 2, visualTop + h / 2 - side / 2},
-                {visualLeft + w - thin / 2, visualTop + h / 2 - side / 2},
-                {visualLeft + w / 2 - side / 2, visualTop - thin / 2},
-                {visualLeft + w / 2 - side / 2, visualTop + h - thin / 2}
+                {visualLeft, visualTop + h / 2 - side / 2},
+                {visualLeft + w - thin, visualTop + h / 2 - side / 2},
+                {visualLeft + w / 2 - side / 2, visualTop},
+                {visualLeft + w / 2 - side / 2, visualTop + h - thin}
         };
         for (int i = 0; i < clockEdgeHandles.length; i++) {
             View grip = clockEdgeHandles[i];
@@ -5682,7 +5682,7 @@ public class MainActivity extends Activity {
     private int getClockBreadth() {
         int fallback = activeClockPage == 0 && prefs != null
                 ? prefs.getInt(KEY_CLOCK_BREADTH, 100) : 100;
-        return Math.max(80, Math.min(250, prefs == null ? 100
+        return Math.max(80, Math.min(600, prefs == null ? 100
                 : prefs.getInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), fallback)));
     }
 
