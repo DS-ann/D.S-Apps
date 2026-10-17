@@ -5023,6 +5023,7 @@ public class MainActivity extends Activity {
             if (child != priorityView && isWorkspaceItem(child)) items.add(child);
         }
         java.util.ArrayList<android.graphics.Rect> accepted = new java.util.ArrayList<android.graphics.Rect>();
+        java.util.ArrayList<View> acceptedViews = new java.util.ArrayList<View>();
         for (View item : items) {
             int[] g = itemGeometry(item);
             int w = Math.max(1, g[2]), h = Math.max(1, g[3]);
@@ -5110,15 +5111,48 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            // Keep an oversized non-clock widget inside the page as far as possible.
-            // A clock is scaled down by the clock clamp if it exceeds the viewport.
+            // If this item cannot fit around the already accepted items, move a
+            // lower-priority neighbour to the other page and retry. This is important
+            // for a clock or large widget colliding with several smaller items.
+            if (bestX < 0 && !acceptedViews.isEmpty()) {
+                for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
+                    View movable = acceptedViews.get(j);
+                    if (movable == priorityView || movable == clockPanel) continue;
+                    int[] mg = itemGeometry(movable);
+                    if (!tryMoveWorkspaceItemToOtherPage(page, movable, mg[2], mg[3])) continue;
+                    acceptedViews.remove(j);
+                    accepted.remove(j);
+                    outerRetry:
+                    for (int y = 0; y <= maxY; y++) {
+                        for (int x = 0; x <= maxX; x++) {
+                            android.graphics.Rect candidate = collisionRectAt(item, x, y, w, h);
+                            boolean blocked = false;
+                            for (android.graphics.Rect obstacle : accepted) {
+                                if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                    blocked = true;
+                                    break;
+                                }
+                            }
+                            if (!blocked) {
+                                bestX = x;
+                                bestY = y;
+                                break outerRetry;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Keep the item visible, but never deliberately register an overlapping
+            // rectangle as accepted. The resolver has already tried exact placement
+            // and moving a neighbour to the other page before reaching this branch.
             if (bestX < 0) {
                 if (item == clockPanel) {
                     float[] bounded = clampClockTranslation(clockPanel,
                             clockPanel.getTranslationX(), clockPanel.getTranslationY());
                     setClampedClockTranslation(bounded[0], bounded[1], true);
-                    int[] now = itemGeometry(item);
-                    accepted.add(collisionRect(item, now));
+                    // Do not accept the clock's rectangle here: if it still overlaps,
+                    // the next layout pass must continue resolving rather than masking it.
                 } else if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
                     // No free rectangle on this page: move the item to the other
                     // workspace page instead of accepting an overlapping placement.
@@ -5144,6 +5178,7 @@ public class MainActivity extends Activity {
             }
             int[] placedGeometry = itemGeometry(item);
             accepted.add(collisionRect(item, placedGeometry));
+            acceptedViews.add(item);
             persistWorkspaceItemPosition(page, item, bestX, bestY, w, h);
         }
     }
@@ -5161,7 +5196,7 @@ public class MainActivity extends Activity {
                 View other = target.getChildAt(i);
                 if (!isWorkspaceItem(other)) continue;
                 int[] og = itemGeometry(other);
-                obstacles.add(new android.graphics.Rect(og[0], og[1], og[0] + og[2], og[1] + og[3]));
+                obstacles.add(collisionRect(other, og));
             }
             java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
             java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
@@ -5169,18 +5204,31 @@ public class MainActivity extends Activity {
             xs.add(Math.max(0, target.getWidth() - width));
             ys.add(Math.max(0, target.getHeight() - height));
             for (android.graphics.Rect obstacle : obstacles) {
-                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.left - width)));
-                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.right)));
-                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.top - height)));
-                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.bottom)));
+                int margin = workspaceCollisionMargin(item);
+                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.left - width - margin)));
+                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.right + margin)));
+                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.top - height - margin)));
+                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.bottom + margin)));
             }
             int bestX = -1, bestY = -1;
             outer: for (Integer y : ys) for (Integer x : xs) {
-                android.graphics.Rect rect = new android.graphics.Rect(x, y, x + width, y + height);
+                android.graphics.Rect rect = collisionRectAt(item, x, y, width, height);
                 for (android.graphics.Rect obstacle : obstacles) {
                     if (android.graphics.Rect.intersects(rect, obstacle)) continue outer;
                 }
                 bestX = x; bestY = y; break outer;
+            }
+            if (bestX < 0) {
+                int maxX = Math.max(0, target.getWidth() - width);
+                int maxY = Math.max(0, target.getHeight() - height);
+                outerScan: for (int y = 0; y <= maxY; y++) for (int x = 0; x <= maxX; x++) {
+                    android.graphics.Rect candidate = collisionRectAt(item, x, y, width, height);
+                    boolean blocked = false;
+                    for (android.graphics.Rect obstacle : obstacles) {
+                        if (android.graphics.Rect.intersects(candidate, obstacle)) { blocked = true; break; }
+                    }
+                    if (!blocked) { bestX = x; bestY = y; break outerScan; }
+                }
             }
             if (bestX < 0) continue;
             ViewGroup oldParent = (ViewGroup) item.getParent();
@@ -5249,14 +5297,11 @@ public class MainActivity extends Activity {
             if (keepDisplacement) {
                 int[] movingGeometry = itemGeometry(movingView);
                 int[] targetGeometry = target;
-                android.graphics.Rect movingRect = new android.graphics.Rect(
-                        movingGeometry[0], movingGeometry[1],
-                        movingGeometry[0] + movingGeometry[2],
-                        movingGeometry[1] + movingGeometry[3]);
-                android.graphics.Rect originalRect = new android.graphics.Rect(
+                android.graphics.Rect movingRect = collisionRect(movingView, movingGeometry);
+                int[] oldGeometry = itemGeometry(displaced);
+                android.graphics.Rect originalRect = collisionRectAt(displaced,
                         original[0], original[1],
-                        original[0] + Math.max(1, itemGeometry(displaced)[2]),
-                        original[1] + Math.max(1, itemGeometry(displaced)[3]));
+                        Math.max(1, oldGeometry[2]), Math.max(1, oldGeometry[3]));
                 // A displacement is committed only if the dropped item still
                 // covers this neighbour's former footprint.
                 keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
