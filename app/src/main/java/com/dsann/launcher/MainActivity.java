@@ -5199,12 +5199,16 @@ public class MainActivity extends Activity {
     private void resolveAllWorkspaceOverlaps(FrameLayout page, View priorityView) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
         java.util.ArrayList<View> items = new java.util.ArrayList<View>();
-        if (priorityView != null && priorityView.getParent() == page && isWorkspaceItem(priorityView)) {
-            items.add(priorityView);
-        }
+        // Preserve already-placed workspace items first. The moving item is placed
+        // last, after the resolver knows which visible regions are actually free.
+        // updateLiveDisplacements() already previews the intended push-aside layout;
+        // this final pass must not accept a mover and leave its neighbors overlapping.
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
             if (child != priorityView && isWorkspaceItem(child)) items.add(child);
+        }
+        if (priorityView != null && priorityView.getParent() == page && isWorkspaceItem(priorityView)) {
+            items.add(priorityView);
         }
         java.util.ArrayList<android.graphics.Rect> accepted = new java.util.ArrayList<android.graphics.Rect>();
         java.util.ArrayList<View> acceptedViews = new java.util.ArrayList<View>();
@@ -5373,18 +5377,52 @@ public class MainActivity extends Activity {
                 continue;
             }
 
-            // App icons must retain their configured icon size. The emergency
-            // shrink fallback made icons jump to unexpectedly tiny sizes when a page
-            // became crowded. Keep the icon at its original scale and try the other
-            // page instead; if neither page has room, leave it unchanged for this pass.
+            // App icons must retain their configured size and grid alignment. If no
+            // free slot exists, first try moving a colliding widget/shortcut to the
+            // other page; only retain the icon in place after all legal alternatives fail.
             if (bestX < 0 && isWorkspaceAppIcon(item)) {
-                if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) continue;
-                // No free slot exists on either page. Keep the configured icon size
-                // and reserve its visible bounds so subsequent items cannot cover it.
-                int[] retainedGeometry = itemGeometry(item);
-                accepted.add(collisionRect(item, retainedGeometry));
-                acceptedViews.add(item);
-                continue;
+                if (!acceptedViews.isEmpty()) {
+                    for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
+                        View movable = acceptedViews.get(j);
+                        if (movable == priorityView || movable == clockPanel
+                                || isWorkspaceAppIcon(movable)) continue;
+                        Object movableTag = movable.getTag();
+                        if ("launcher_clock_widget".equals(movableTag)) continue;
+                        int[] mg = itemGeometry(movable);
+                        if (!tryMoveWorkspaceItemToOtherPage(page, movable, mg[2], mg[3])) continue;
+                        acceptedViews.remove(j);
+                        accepted.remove(j);
+                        outerAppRetry:
+                        for (Integer cy : ys) {
+                            for (Integer cx : xs) {
+                                android.graphics.Rect candidate = collisionRectAt(
+                                        item, cx.intValue(), cy.intValue(), w, h);
+                                boolean blocked = false;
+                                for (android.graphics.Rect obstacle : accepted) {
+                                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                        blocked = true;
+                                        break;
+                                    }
+                                }
+                                if (!blocked) {
+                                    bestX = cx.intValue();
+                                    bestY = cy.intValue();
+                                    break outerAppRetry;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (bestX < 0 && tryMoveWorkspaceItemToOtherPage(page, item, w, h)) continue;
+                if (bestX < 0) {
+                    // No legal grid slot exists on either page. Do not pretend an
+                    // overlapping rectangle has been resolved; retain this icon's
+                    // real visible bounds for the remaining safety pass.
+                    int[] retainedGeometry = itemGeometry(item);
+                    accepted.add(collisionRect(item, retainedGeometry));
+                    acceptedViews.add(item);
+                    continue;
+                }
             }
 
             // Last-resort protection for non-icon workspace items only: if both pages
