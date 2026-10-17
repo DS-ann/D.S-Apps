@@ -2069,7 +2069,7 @@ public class MainActivity extends Activity {
                             LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
                     slotView.addView(icon, iconParams);
                     slotView.setContentDescription(String.valueOf(app.loadLabel(packageManager)));
-                    slotView.setOnClickListener(v -> launchApp(app));
+                    slotView.setOnClickListener(v -> launchApp(app, slotView));
                     slotView.setOnLongClickListener(v -> {
                         showActionDialog("Dock app", new String[]{"−", "↗"},
                                 new String[]{"Remove from dock", "Move to home screen"}, (dialog, which) -> {
@@ -2107,7 +2107,7 @@ public class MainActivity extends Activity {
     private void installHomeIconTouch(View cell, String packageName) {
         cell.setOnClickListener(v -> {
             ResolveInfo app = findApp(packageName);
-            if (!iconDragging && !longPressTriggered && app != null) launchApp(app);
+            if (!iconDragging && !longPressTriggered && app != null) launchApp(app, cell);
         });
         cell.setOnLongClickListener(null);
         cell.setOnTouchListener((view, event) -> {
@@ -2350,7 +2350,7 @@ public class MainActivity extends Activity {
                 }
                 if (action == MotionEvent.ACTION_UP && !iconMovedTooEarly) {
                     ResolveInfo app = findApp(packageName);
-                    if (app != null) launchApp(app);
+                    if (app != null) launchApp(app, view);
                 }
                 iconDragArmed = false;
                 activeDragView = null;
