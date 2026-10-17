@@ -1574,10 +1574,10 @@ public class MainActivity extends Activity {
         restoreDockApps();
     }
 
-    /** Home cell geometry must include the label's measured height when labels are enabled. */
+    /** One shared row metric for rendering, capacity, snapping, and collision placement. */
     private int homeCellHeightDp(int iconSize) {
-        boolean labelsVisible = prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
-        return Math.max(56, iconSize + (labelsVisible ? 46 : 28));
+        boolean labelsVisible = prefs == null || prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
+        return Math.max(56, iconSize + (labelsVisible ? 54 : 28));
     }
 
     private String clockPrefKey(String key, int page) {
@@ -5682,8 +5682,8 @@ public class MainActivity extends Activity {
                 ? pageViewport.getHeight()
                 : Math.max(LauncherUiUtils.dp(this, 360),
                         getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
-        int cellHeight = LauncherUiUtils.dp(this,
-                Math.max(56, prefs == null ? 48 + 28 : prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         return Math.max(1, pageHeight / Math.max(1, cellHeight));
     }
 
