@@ -1792,8 +1792,7 @@ public class MainActivity extends Activity {
                         // home items. Counting their bounds made first-time shortcut
                         // placement think the whole workspace was full.
                         if (child.getVisibility() != View.VISIBLE
-                                || child == workspaceGridOverlays[0] || child == workspaceGridOverlays[1]
-                                || "launcher_clock_widget".equals(child.getTag())) continue;
+                                || child == workspaceGridOverlays[0] || child == workspaceGridOverlays[1]) continue;
                         android.graphics.Rect bounds;
                         ViewGroup.LayoutParams rawParams = child.getLayoutParams();
                         if (rawParams instanceof FrameLayout.LayoutParams) {
@@ -2238,8 +2237,8 @@ public class MainActivity extends Activity {
         if (candidate.right > pageViewport.getWidth() || candidate.bottom > pageViewport.getHeight()) return false;
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
-            if (child == ignore || "launcher_clock_widget".equals(child.getTag())
-                    || child == workspaceGridOverlays[0] || child == workspaceGridOverlays[1]) continue;
+            if (child == ignore || child == workspaceGridOverlays[0]
+                    || child == workspaceGridOverlays[1] || child.getVisibility() != View.VISIBLE) continue;
             Object rawTag = child.getTag();
             String tag = rawTag instanceof String ? (String) rawTag : "";
             if (tag.startsWith("launcher_app:")) {
