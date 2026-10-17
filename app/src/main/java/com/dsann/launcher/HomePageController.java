@@ -165,7 +165,7 @@ final class HomePageController {
             int pageHeight = host.getPageViewport() != null
                     && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
                     ? host.getPageViewport().getHeight() : fallbackHeight;
-            int configuredIconSize = prefs.getInt(iconSizeKey, 96);
+            int configuredIconSize = prefs.getInt(iconSizeKey, 48);
             boolean labelsVisible = prefs.getBoolean(showLabelsKey, true);
             int cellHeight = LauncherUiUtils.dp(activity,
                     Math.max(56, configuredIconSize + (labelsVisible ? 54 : 28)));
