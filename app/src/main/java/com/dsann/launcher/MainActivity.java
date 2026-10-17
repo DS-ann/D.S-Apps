@@ -204,6 +204,8 @@ public class MainActivity extends Activity {
     private boolean gestureStartedOnWidget = false;
     private boolean gestureStartedOnContactShortcut = false;
     private boolean gestureStartedOnResizeHandle = false;
+    // A first pull at the drawer's top arms closing; the next downward pull closes.
+    private boolean drawerDownSwipeAtTopSeen = false;
     private boolean pageSwipeActive = false;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
@@ -283,6 +285,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        normalizeAppIconSettings();
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
@@ -359,6 +362,7 @@ public class MainActivity extends Activity {
             drawerSwipeVisualActive = false;
             gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
+            if (drawerOpen && !drawerAtTopOnGestureDown) drawerDownSwipeAtTopSeen = false;
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
@@ -626,7 +630,8 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (drawerOpen && gestureStartedOnDrawerGrid && drawerAtTopOnGestureDown
-                    && dy > 0 && verticalSwipe) {
+                    && drawerDownSwipeAtTopSeen && dy > 0 && verticalSwipe) {
+                drawerDownSwipeAtTopSeen = false;
                 drawerCloseSwipeClaimed = true;
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                         ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
@@ -644,9 +649,10 @@ public class MainActivity extends Activity {
             }
             // A held item gesture belongs to its move/resize controller, not workspace navigation.
             // Fast vertical swipes can still start on home items; explicit resize handles are reserved.
-            boolean heldItemGesture = (gestureStartedOnAppCell || gestureStartedOnWidget
-                    || gestureStartedOnContactShortcut)
-                    && event.getEventTime() - event.getDownTime() > 450L;
+            long gestureDuration = event.getEventTime() - event.getDownTime();
+            boolean heldItemGesture = ((gestureStartedOnAppCell || gestureStartedOnWidget)
+                    && gestureDuration > 450L)
+                    || (gestureStartedOnContactShortcut && gestureDuration >= 1000L);
             boolean itemManipulation = gestureStartedOnClock || gestureStartedOnResizeHandle || iconDragArmed || iconDragging
                     || heldItemGesture;
             if (!drawerOpen && !itemManipulation
@@ -698,7 +704,7 @@ public class MainActivity extends Activity {
             if (!drawerOpen && pagesStrip != null && pagesStrip.getChildCount() > 1
                     // Once a page swipe has claimed the touch stream, item long-press/drag
                     // classification must not pause its progress midway through the gesture.
-                    && (pageSwipeActive || (!gestureStartedOnClock && !gestureStartedOnContactShortcut
+                    && (pageSwipeActive || (!gestureStartedOnClock
                         && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
                         && !heldItemGesture
                         && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
@@ -852,6 +858,19 @@ public class MainActivity extends Activity {
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
+            // The first downward pull at the drawer top stays with GridView. Arm
+            // closing on release; clear the latch if the list has scrolled away.
+            if (drawerOpen && gestureStartedOnDrawerGrid && !drawerCloseSwipeClaimed) {
+                boolean releaseVertical = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
+                        && Math.abs(dy) > Math.abs(dx) * 1.15f;
+                if (!isDrawerAtTop()) {
+                    drawerDownSwipeAtTopSeen = false;
+                } else if (drawerAtTopOnGestureDown && dy > 0 && releaseVertical) {
+                    drawerDownSwipeAtTopSeen = true;
+                } else if (dy < 0 && releaseVertical) {
+                    drawerDownSwipeAtTopSeen = false;
+                }
+            }
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
@@ -881,11 +900,12 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
+            long releaseGestureDuration = event.getEventTime() - event.getDownTime();
             boolean itemManipulationOnRelease = gestureStartedOnClock || gestureStartedOnResizeHandle
                     || iconDragArmed || iconDragging
-                    || ((gestureStartedOnAppCell || gestureStartedOnWidget
-                        || gestureStartedOnContactShortcut)
-                        && event.getEventTime() - event.getDownTime() > 450L);
+                    || ((gestureStartedOnAppCell || gestureStartedOnWidget)
+                        && releaseGestureDuration > 450L)
+                    || (gestureStartedOnContactShortcut && releaseGestureDuration >= 1000L);
             if (!drawerOpen && !itemManipulationOnRelease
                     && (verticalSwipeClaimed
                         || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
@@ -2154,9 +2174,7 @@ public class MainActivity extends Activity {
                         int[] otherGeometry = itemGeometry(other);
                         if (otherGeometry[2] > 0 && otherGeometry[3] > 0
                                 && android.graphics.Rect.intersects(candidate,
-                                new android.graphics.Rect(otherGeometry[0], otherGeometry[1],
-                                        otherGeometry[0] + otherGeometry[2],
-                                        otherGeometry[1] + otherGeometry[3]))) {
+                                        collisionRect(other, otherGeometry))) {
                             overlap = true;
                             break;
                         }
@@ -3133,10 +3151,9 @@ public class MainActivity extends Activity {
     }
 
     private boolean isDrawerAtTop() {
-        if (drawerGrid == null || drawerGrid.getChildCount() == 0) return true;
-        if (drawerGrid.getFirstVisiblePosition() > 0) return false;
-        View first = drawerGrid.getChildAt(0);
-        return first == null || first.getTop() >= drawerGrid.getPaddingTop();
+        if (drawerGrid == null || drawerAdapter == null || drawerAdapter.getCount() == 0) return true;
+        // GridView child bounds can be empty/stale during rebinding.
+        return !drawerGrid.canScrollVertically(-1);
     }
 
     private void openControlCenter() {
@@ -3227,6 +3244,7 @@ public class MainActivity extends Activity {
     private void showDrawer(float swipeProgress) {
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
+            drawerDownSwipeAtTopSeen = false;
         }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
     }
 
@@ -5261,7 +5279,7 @@ public class MainActivity extends Activity {
             // coarse step, including the final right/bottom edge. The nearest legal
             // rectangle wins; this is the same rectangle geometry used by drag/resize.
             if (bestX < 0 && !isWorkspaceAppIcon(item)) {
-                int step = Math.max(1, LauncherUiUtils.dp(this, 1));
+                int step = Math.max(1, LauncherUiUtils.dp(this, 6));
                 outerScan:
                 for (int y = 0; y <= maxY; y += step) {
                     int candidateY = Math.min(maxY, y);
@@ -5324,10 +5342,13 @@ public class MainActivity extends Activity {
                     if (!tryMoveWorkspaceItemToOtherPage(page, movable, mg[2], mg[3])) continue;
                     acceptedViews.remove(j);
                     accepted.remove(j);
+                    int retryStep = Math.max(1, LauncherUiUtils.dp(this, 6));
                     outerRetry:
-                    for (int y = 0; y <= maxY; y++) {
-                        for (int x = 0; x <= maxX; x++) {
-                            android.graphics.Rect candidate = collisionRectAt(item, x, y, w, h);
+                    for (int y = 0; y <= maxY + retryStep; y += retryStep) {
+                        int candidateY = Math.min(maxY, y);
+                        for (int x = 0; x <= maxX + retryStep; x += retryStep) {
+                            int candidateX = Math.min(maxX, x);
+                            android.graphics.Rect candidate = collisionRectAt(item, candidateX, candidateY, w, h);
                             boolean blocked = false;
                             for (android.graphics.Rect obstacle : accepted) {
                                 if (android.graphics.Rect.intersects(candidate, obstacle)) {
@@ -5336,8 +5357,8 @@ public class MainActivity extends Activity {
                                 }
                             }
                             if (!blocked) {
-                                bestX = x;
-                                bestY = y;
+                                bestX = candidateX;
+                                bestY = candidateY;
                                 break outerRetry;
                             }
                         }
@@ -5386,9 +5407,13 @@ public class MainActivity extends Activity {
                     h = Math.max(1, g[3]);
                     maxX = Math.max(0, page.getWidth() - w);
                     maxY = Math.max(0, page.getHeight() - h);
-                    for (int y = 0; y <= maxY && bestX < 0; y++) {
-                        for (int x = 0; x <= maxX; x++) {
-                            android.graphics.Rect candidate = collisionRectAt(item, x, y, w, h);
+                    int shrinkStep = Math.max(1, Math.min(LauncherUiUtils.dp(this, 6),
+                            Math.max(1, Math.min(w, h) / 2)));
+                    for (int y = 0; y <= maxY + shrinkStep && bestX < 0; y += shrinkStep) {
+                        int candidateY = Math.min(maxY, y);
+                        for (int x = 0; x <= maxX + shrinkStep; x += shrinkStep) {
+                            int candidateX = Math.min(maxX, x);
+                            android.graphics.Rect candidate = collisionRectAt(item, candidateX, candidateY, w, h);
                             boolean blocked = false;
                             for (android.graphics.Rect obstacle : accepted) {
                                 if (android.graphics.Rect.intersects(candidate, obstacle)) {
@@ -5397,8 +5422,8 @@ public class MainActivity extends Activity {
                                 }
                             }
                             if (!blocked) {
-                                bestX = x;
-                                bestY = y;
+                                bestX = candidateX;
+                                bestY = candidateY;
                                 break;
                             }
                         }
@@ -5522,13 +5547,19 @@ public class MainActivity extends Activity {
             if (bestX < 0) {
                 int maxX = Math.max(0, target.getWidth() - width);
                 int maxY = Math.max(0, target.getHeight() - height);
-                outerScan: for (int y = 0; y <= maxY; y++) for (int x = 0; x <= maxX; x++) {
-                    android.graphics.Rect candidate = collisionRectAt(item, x, y, width, height);
+                int scanStep = Math.max(1, LauncherUiUtils.dp(this, 6));
+                outerScan: for (int y = 0; y <= maxY + scanStep; y += scanStep) {
+                    int candidateY = Math.min(maxY, y);
+                    for (int x = 0; x <= maxX + scanStep; x += scanStep) {
+                    int candidateX = Math.min(maxX, x);
+                    android.graphics.Rect candidate = collisionRectAt(item, candidateX, candidateY, width, height);
                     boolean blocked = false;
                     for (android.graphics.Rect obstacle : obstacles) {
                         if (android.graphics.Rect.intersects(candidate, obstacle)) { blocked = true; break; }
                     }
-                    if (!blocked) { bestX = x; bestY = y; break outerScan; }
+                    if (!blocked) { bestX = candidateX; bestY = candidateY; break outerScan; }
+                    }
+                }
                 }
             }
             if (bestX < 0) continue;
@@ -5673,8 +5704,48 @@ public class MainActivity extends Activity {
         resolveAllWorkspaceOverlaps(page, widgetContainer);
     }
 
-    private int getHomeColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS))); }
-    private int getDrawerColumns() { return Math.max(3, Math.min(6, prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS))); }
+    private void normalizeAppIconSettings() {
+        if (prefs == null) return;
+        int homeSize = prefs.getInt(KEY_ICON_SIZE, 48);
+        int drawerSize = prefs.getInt(KEY_DRAWER_ICON_SIZE, 48);
+        int homeColumns = Math.max(3, Math.min(6, prefs.getInt(KEY_COLUMNS, COLUMNS)));
+        int drawerColumns = Math.max(3, Math.min(6, prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS)));
+        SharedPreferences.Editor edit = prefs.edit();
+        // Retire the old XL icon-size preset; migrate existing installs to Large.
+        if (homeSize > 74 || homeSize < 24) {
+            homeSize = homeSize > 74 ? 74 : 48;
+            edit.putInt(KEY_ICON_SIZE, homeSize);
+        }
+        if (drawerSize > 74 || drawerSize < 24) {
+            drawerSize = drawerSize > 74 ? 74 : 48;
+            edit.putInt(KEY_DRAWER_ICON_SIZE, drawerSize);
+        }
+        // Six icons per row are available only for Small and Medium icon sizes.
+        if (homeSize > 64 && homeColumns > 5) {
+            homeColumns = 5;
+            edit.putInt(KEY_COLUMNS, homeColumns);
+            clearIconPositions();
+        }
+        if (drawerSize > 64 && drawerColumns > 5) {
+            drawerColumns = 5;
+            edit.putInt(KEY_DRAWER_COLUMNS, drawerColumns);
+        }
+        edit.apply();
+    }
+
+    private int getHomeColumns() {
+        int columns = Math.max(3, Math.min(6,
+                prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS)));
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        return iconSize > 64 ? Math.min(5, columns) : columns;
+    }
+
+    private int getDrawerColumns() {
+        int columns = Math.max(3, Math.min(6,
+                prefs == null ? COLUMNS : prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS)));
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_DRAWER_ICON_SIZE, 48);
+        return iconSize > 64 ? Math.min(5, columns) : columns;
+    }
 
     private int getHomeGridRows() {
         int pageHeight = pageViewport != null && pageViewport.getHeight() > LauncherUiUtils.dp(this, 100)
@@ -5853,14 +5924,22 @@ public class MainActivity extends Activity {
         }
 
         addSection(content, "Home layout & icons");
-        addChoiceRow(content, "Home columns", getHomeColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
+        String[] homeColumnChoices = prefs.getInt(KEY_ICON_SIZE, 48) <= 64
+                ? new String[]{"3", "4", "5", "6"} : new String[]{"3", "4", "5"};
+        addChoiceRow(content, "Home columns", getHomeColumns() - 3, homeColumnChoices, value -> {
             prefs.edit().putInt(KEY_COLUMNS, value + 3).apply();
             clearIconPositions();
             currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
-            prefs.edit().putInt(KEY_ICON_SIZE, new int[]{54, 64, 74, 84}[value]).apply();
+        addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large"}, value -> {
+            int newSize = new int[]{54, 64, 74}[value];
+            boolean reduceColumns = newSize > 64 && prefs.getInt(KEY_COLUMNS, COLUMNS) > 5;
+            SharedPreferences.Editor edit = prefs.edit().putInt(KEY_ICON_SIZE, newSize);
+            if (reduceColumns) edit.putInt(KEY_COLUMNS, 5);
+            edit.apply();
+            if (reduceColumns) clearIconPositions();
+            currentPage = Math.min(currentPage, Math.max(0, (homePackages.size() - 1) / pageCapacity()));
             renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "▣", "Rounded-square icon background",
@@ -5994,14 +6073,27 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_DRAWER_OPACITY, value).apply();
             if (drawerScreen != null) drawerScreen.setBackground(drawerBackground());
         });
-        addChoiceRow(content, "Drawer columns", getDrawerColumns() - 3, new String[]{"3", "4", "5", "6"}, value -> {
+        String[] drawerColumnChoices = prefs.getInt(KEY_DRAWER_ICON_SIZE, 48) <= 64
+                ? new String[]{"3", "4", "5", "6"} : new String[]{"3", "4", "5"};
+        addChoiceRow(content, "Drawer columns", getDrawerColumns() - 3, drawerColumnChoices, value -> {
             prefs.edit().putInt(KEY_DRAWER_COLUMNS, value + 3).apply();
-            drawerGrid.setNumColumns(getDrawerColumns()); drawerAdapter.notifyDataSetChanged();
+            drawerGrid.setNumColumns(getDrawerColumns());
+            drawerAdapter.notifyDataSetChanged();
+            drawerGrid.setSelection(0);
+            drawerGrid.requestLayout();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
-            prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, new int[]{54, 64, 74, 84}[value]).apply();
-            drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large"}, value -> {
+            int newSize = new int[]{54, 64, 74}[value];
+            boolean reduceColumns = newSize > 64 && prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS) > 5;
+            SharedPreferences.Editor edit = prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, newSize);
+            if (reduceColumns) edit.putInt(KEY_DRAWER_COLUMNS, 5);
+            edit.apply();
+            drawerGrid.setNumColumns(getDrawerColumns());
+            drawerAdapter.notifyDataSetChanged();
+            drawerGrid.setSelection(0);
+            drawerGrid.requestLayout();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App drawer font size", Math.min(3, prefs.getInt(KEY_DRAWER_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_FONT_SIZE, value).apply();
@@ -6720,7 +6812,7 @@ public class MainActivity extends Activity {
         // Match the nearest actual preset. Threshold-based legacy mapping caused
         // Large (64 dp) to be highlighted as XL and treated the default 96 dp
         // fallback as XL even when no size had ever been selected.
-        int[] sizes = {54, 64, 74, 84};
+        int[] sizes = {54, 64, 74};
         int bestIndex = 0;
         int bestDistance = Math.abs(size - sizes[0]);
         for (int i = 1; i < sizes.length; i++) {
