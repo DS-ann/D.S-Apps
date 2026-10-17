@@ -444,6 +444,11 @@ public class MainActivity extends Activity {
                     setClampedClockTranslation(
                             clockPanel.getTranslationX() + targetX - now[0],
                             clockPanel.getTranslationY() + targetY - now[1], true);
+                    // Clamp the actual scaled panel after layout; translation-only
+                    // movement already had a boundary, but breadth/length resize did not.
+                    float[] bounded = clampClockTranslation(clockPanel,
+                            clockPanel.getTranslationX(), clockPanel.getTranslationY());
+                    setClampedClockTranslation(bounded[0], bounded[1], true);
                     updateClockResizeHandles();
                 });
                 return true;
@@ -4030,13 +4035,24 @@ public class MainActivity extends Activity {
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
-        // The clock is a fixed-position overlay, not a collision-displacement item.
-        // Moving widgets/shortcuts must never push it or persist its position.
+        // Include the clock in workspace displacement so widgets and shortcuts
+        // cannot be dropped over it without the same push-aside behavior.
         return tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
-                || "launcher_contact_shortcut".equals(tag);
+                || "launcher_contact_shortcut".equals(tag)
+                || "launcher_clock_widget".equals(tag);
     }
 
     private int[] itemGeometry(View view) {
+        if (view == clockPanel && "launcher_clock_widget".equals(view.getTag())) {
+            float sx = Math.max(0.01f, view.getScaleX());
+            float sy = Math.max(0.01f, view.getScaleY());
+            int x = Math.round(view.getLeft() + view.getTranslationX()
+                    + view.getPivotX() * (1f - sx));
+            int y = Math.round(view.getTop() + view.getTranslationY()
+                    + view.getPivotY() * (1f - sy));
+            return new int[]{x, y, Math.max(1, Math.round(view.getWidth() * sx)),
+                    Math.max(1, Math.round(view.getHeight() * sy))};
+        }
         ViewGroup.LayoutParams raw = view.getLayoutParams();
         if (raw instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
