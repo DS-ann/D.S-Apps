@@ -4520,7 +4520,7 @@ public class MainActivity extends Activity {
             // The LED renderer reserves an invisible leading cell for 1–9 hour
             // values. Include that cell in the measured panel width too.
             if (firstHourDigits == 1 && separators > 0) digits++;
-            float clockHeight = rowHeight
+            float clockHeight = LauncherUiUtils.dp(this, 114) * breadthScale
                     - clockText.getPaddingTop() - clockText.getPaddingBottom();
             naturalClockWidth = Math.max(1f,
                     (digits * 0.72f + separators * 0.34f) * clockHeight * 0.91f
