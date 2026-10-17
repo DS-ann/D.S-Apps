@@ -1019,7 +1019,7 @@ public class MainActivity extends Activity {
         handler.postDelayed(() -> {
             if (!clockUpdatesActive || widgetHost == null) return;
             try { widgetHost.startListening(); } catch (Exception ignored) {}
-        }, 120L);
+        }, 500L);
         // The app list is loaded at startup and refreshed only by package add/remove broadcasts.
     }
 
@@ -1313,9 +1313,11 @@ public class MainActivity extends Activity {
         amPmText.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
         amPmText.setIncludeFontPadding(false);
         amPmText.setPadding(0, 0, 0, 0);
+        // AM/PM sits inside the clock, centered in the vertical gap between
+        // the colon dots rather than outside the digits at the right edge.
         FrameLayout.LayoutParams markerParams = new FrameLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12),
-                Gravity.RIGHT | Gravity.BOTTOM);
+                LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 20),
+                Gravity.CENTER);
         clockGroup.addView(amPmText, markerParams);
         FrameLayout.LayoutParams groupParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
@@ -1360,6 +1362,11 @@ public class MainActivity extends Activity {
         // The viewport stays fixed while the page strip moves inside it.
         pagesStrip = new LinearLayout(this);
         pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
+        // Keep the complete workspace strip in a hardware layer so page changes
+        // transform cached pixels instead of rebuilding every icon/widget frame.
+        // Android still redraws individual contents when a live widget invalidates.
+        pagesStrip.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        pageViewport.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         pagesStrip.setClipChildren(true);
         pagesStrip.setClipToPadding(true);
         pageViewport.addView(pagesStrip, new FrameLayout.LayoutParams(-2, -1, Gravity.TOP | Gravity.LEFT));
@@ -1445,12 +1452,13 @@ public class MainActivity extends Activity {
         marker.setTextColor(digits.getCurrentTextColor());
         marker.setTextSize(8);
         marker.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        marker.setGravity(Gravity.RIGHT | Gravity.BOTTOM);
+        marker.setGravity(Gravity.CENTER);
         marker.setIncludeFontPadding(false);
         marker.setPadding(0, 0, 0, 0);
+        // Keep AM/PM inside the clock and centered between the colon dots.
         group.addView(marker, new FrameLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 12),
-                Gravity.RIGHT | Gravity.BOTTOM));
+                LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 20),
+                Gravity.CENTER));
         row.addView(group, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
                 Gravity.RIGHT | Gravity.CENTER_VERTICAL));
@@ -4090,7 +4098,7 @@ public class MainActivity extends Activity {
         clockWidgetLongPressActivated = true;
         // Match app/widget/shortcut move-ready feedback without bobbing the clock's
         // translationY, which is also its persisted workspace position.
-        LauncherUiUtils.startMoveHint(clockPanel, this, false);
+        LauncherUiUtils.startScaleHint(clockPanel, 1.10f);
         setWorkspaceGridVisible(true, clockPanel);
     };
 
@@ -5559,36 +5567,14 @@ public class MainActivity extends Activity {
                 // its 13.5sp type remains 50% taller than the original 9sp marker.
                 markerParams.width = LauncherUiUtils.dp(this, 32);
                 markerParams.height = LauncherUiUtils.dp(this, 20);
-                markerParams.gravity = Gravity.LEFT | Gravity.TOP;
-                // Keep the marker's horizontal anchor tied to the digits in every style;
-                // its vertical anchor is centered between the colon's upper and lower dots.
-                int cornerInset = LauncherUiUtils.dp(this, 2);
-                int nonLedExtraRight = LauncherUiUtils.dp(this, 22);
-                if (sevenSegment) {
-                    // Preserve the existing LED marker position exactly.
-                    markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
-                            - (int) Math.ceil((markerParams.width + cornerInset)
-                                    / Math.max(0.01f, lengthScale)));
-                } else {
-                    // Keep the non-LED marker tied to the digit's layout position.
-                    // Do not divide this anchor by the panel scale: inverse-scaled
-                    // margins magnify small-slider changes and make AM/PM appear to
-                    // race sideways as the clock gets smaller.
-                    markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
-                            - markerParams.width - cornerInset + nonLedExtraRight);
-                }
-                // The colon's two dots straddle the vertical midpoint of the
-                // clock glyph row. Recompute this from the current row height on every
-                // resize so AM/PM remains centered for all clock styles and sizes.
-                float colonCenterY = rowHeight / 2f;
-                if (!sevenSegment) {
-                    // Typography clocks translate their glyph canvas down by 5dp;
-                    // follow that offset so AM/PM stays centered between the two
-                    // custom colon dots even after the clock breadth is resized.
-                    colonCenterY += LauncherUiUtils.dp(this, 5);
-                }
-                markerParams.topMargin = Math.max(0,
-                        Math.round(colonCenterY - markerParams.height / 2f));
+                // Center the marker horizontally and vertically in the clock
+                // group's colon gap. Reapplying this during every resize keeps it
+                // inside the clock at every configured size and style.
+                markerParams.gravity = Gravity.CENTER;
+                markerParams.leftMargin = 0;
+                markerParams.rightMargin = 0;
+                markerParams.topMargin = 0;
+                markerParams.bottomMargin = 0;
                 amPmText.setLayoutParams(markerParams);
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
