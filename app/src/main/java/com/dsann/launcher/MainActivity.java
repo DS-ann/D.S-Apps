@@ -539,22 +539,22 @@ public class MainActivity extends Activity {
                 boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
                         && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
                 int breadthPercent;
-                if (!resizingSevenSegment) {
-                    // Typography clocks include a date area that does not scale with
-                    // breadth. Subtract that fixed area before converting the target
-                    // panel rectangle into the 114dp clock-row breadth percentage.
-                    int startRowHeight = clockRow != null && clockRow.getHeight() > 0
-                            ? clockRow.getHeight() : LauncherUiUtils.dp(this, 114);
-                    int fixedPanelExtras = Math.max(0, clockWidgetStartPanelHeight - startRowHeight);
-                    int targetRowHeight = Math.max(1, (bottom - top) - fixedPanelExtras);
-                    breadthPercent = Math.round(targetRowHeight * 100f
-                            / Math.max(1, LauncherUiUtils.dp(this, 114)));
-                } else {
-                    // Keep the existing seven-segment resize behavior unchanged.
-                    breadthPercent = Math.round(clockWidgetStartBreadth
-                            * (bottom - top) / (float) Math.max(1, clockWidgetStartVisualHeight));
-                }
-                lengthPercent = Math.max(80, Math.min(600, lengthPercent));
+                // The visible panel height is the actual row height for every
+                // clock style. Avoid style-specific proportional math: it drifted
+                // after relayout and made top/bottom resizing behave differently.
+                int naturalRowHeight = LauncherUiUtils.dp(this, 114);
+                breadthPercent = Math.round((bottom - top) * 100f
+                        / Math.max(1, naturalRowHeight));
+                // Match widget-resizer minimums in workspace pixels rather than
+                // imposing an unrelated 80% natural-width floor on the clock.
+                // The latter made left/right handles appear stuck on wide clocks.
+                int minLengthPercent = Math.max(20, (int) Math.ceil(
+                        LauncherUiUtils.dp(this, 140) * 100f
+                                / Math.max(1, clockWidgetStartPanelWidth)));
+                lengthPercent = Math.max(minLengthPercent, Math.min(600, lengthPercent));
+                // All clock styles use the same real panel row height. Map its
+                // target height directly to the natural 114dp row, just as a
+                // widget resize maps its rectangle to layout width/height.
                 breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
                         .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), lengthPercent)
@@ -1015,22 +1015,27 @@ public class MainActivity extends Activity {
 
     private void updateClockResizeHandles() {
         if (clockPanel == null || root == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
-        int[] panel = new int[2];
-        int[] rootLoc = new int[2];
-        clockPanel.getLocationOnScreen(panel);
-        root.getLocationOnScreen(rootLoc);
-        // Resize grips follow the transformed visual rectangle, not the
-        // fixed layout footprint reserved to keep home items from reflowing.
-        int w = Math.max(1, Math.round(clockPanel.getWidth() * clockPanel.getScaleX()));
-        int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
+        if (!(clockPanel.getParent() instanceof View)) return;
+        int[] pageOnScreen = new int[2];
+        int[] rootOnScreen = new int[2];
+        ((View) clockPanel.getParent()).getLocationOnScreen(pageOnScreen);
+        root.getLocationOnScreen(rootOnScreen);
+        // Use the exact same transformed visual rectangle as collision checks and
+        // resize math. getLocationOnScreen() on the scaled child is transform/pivot
+        // sensitive, so mixing it with an independently scaled width shifts grips.
+        int[] geometry = itemGeometry(clockPanel);
+        int visualLeft = pageOnScreen[0] - rootOnScreen[0] + geometry[0];
+        int visualTop = pageOnScreen[1] - rootOnScreen[1] + geometry[1];
+        int w = Math.max(1, geometry[2]);
+        int h = Math.max(1, geometry[3]);
         // Match the widget resizer: 18dp-thick grips, 40dp long.
         int side = LauncherUiUtils.dp(this, 40);
         int thin = LauncherUiUtils.dp(this, 18);
         int[][] positions = new int[][] {
-                {panel[0] - rootLoc[0], panel[1] - rootLoc[1] + h / 2 - side / 2},
-                {panel[0] - rootLoc[0] + w - thin, panel[1] - rootLoc[1] + h / 2 - side / 2},
-                {panel[0] - rootLoc[0] + w / 2 - side / 2, panel[1] - rootLoc[1]},
-                {panel[0] - rootLoc[0] + w / 2 - side / 2, panel[1] - rootLoc[1] + h - thin}
+                {visualLeft - thin / 2, visualTop + h / 2 - side / 2},
+                {visualLeft + w - thin / 2, visualTop + h / 2 - side / 2},
+                {visualLeft + w / 2 - side / 2, visualTop - thin / 2},
+                {visualLeft + w / 2 - side / 2, visualTop + h - thin / 2}
         };
         for (int i = 0; i < clockEdgeHandles.length; i++) {
             View grip = clockEdgeHandles[i];
@@ -5667,7 +5672,10 @@ public class MainActivity extends Activity {
     private int getClockLength() {
         int fallback = activeClockPage == 0 && prefs != null
                 ? prefs.getInt(KEY_CLOCK_LENGTH, 100) : 100;
-        return Math.max(80, Math.min(600, prefs == null ? 100
+        // The widget-style resize grip has a 140dp minimum width. That can be
+        // substantially less than 80% of a typography clock's natural width, so
+        // the stored resize scale must be allowed below the Home Studio default.
+        return Math.max(20, Math.min(600, prefs == null ? 100
                 : prefs.getInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), fallback)));
     }
 
