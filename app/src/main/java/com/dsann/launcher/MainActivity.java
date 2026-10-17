@@ -176,6 +176,8 @@ public class MainActivity extends Activity {
     private int clockResizeEdge = 0;
     // Invalidates stale layout callbacks when a newer resize frame or gesture starts.
     private int clockResizeGeneration = 0;
+    // Invalidates stale post-layout clamps queued by earlier live resize frames.
+    private int clockLayoutGeneration = 0;
     private boolean gestureStartedOnClock = false;
     // Locks the whole touch sequence against launcher swipes if it began while
     // clock move/edit mode was already active.
@@ -530,8 +532,24 @@ public class MainActivity extends Activity {
                 // natural width caused their handles to jump, barely resize, or drift.
                 int lengthPercent = Math.round(clockWidgetStartLength
                         * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
-                int breadthPercent = Math.round(clockWidgetStartBreadth
-                        * (bottom - top) / (float) Math.max(1, clockWidgetStartVisualHeight));
+                int breadthPercent;
+                boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
+                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+                if (!resizingSevenSegment) {
+                    // Typography clocks include a date area that does not scale with
+                    // breadth. Subtract that fixed area before converting the target
+                    // panel rectangle into the 114dp clock-row breadth percentage.
+                    int startRowHeight = clockRow != null && clockRow.getHeight() > 0
+                            ? clockRow.getHeight() : LauncherUiUtils.dp(this, 114);
+                    int fixedPanelExtras = Math.max(0, clockWidgetStartPanelHeight - startRowHeight);
+                    int targetRowHeight = Math.max(1, (bottom - top) - fixedPanelExtras);
+                    breadthPercent = Math.round(targetRowHeight * 100f
+                            / Math.max(1, LauncherUiUtils.dp(this, 114)));
+                } else {
+                    // Keep the existing seven-segment resize behavior unchanged.
+                    breadthPercent = Math.round(clockWidgetStartBreadth
+                            * (bottom - top) / (float) Math.max(1, clockWidgetStartVisualHeight));
+                }
                 lengthPercent = Math.max(80, Math.min(250, lengthPercent));
                 breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
@@ -4530,7 +4548,9 @@ public class MainActivity extends Activity {
             // Add a small release margin before restoring a neighbour. Without
             // hysteresis, tiny finger jitter at a touching edge alternates between
             // restore and displace on successive MOVE frames ("dancing" widgets).
-            int restoreHysteresis = LauncherUiUtils.dp(this, 8);
+            // Keep a wider dead zone around the original slot so tiny finger jitter
+            // cannot repeatedly restore and re-displace the same widget while dragging.
+            int restoreHysteresis = LauncherUiUtils.dp(this, 16);
             if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)) {
                 if (displaced == clockPanel) {
                     // Clock geometry is translation/scale based; writing its visual
@@ -5547,6 +5567,7 @@ public class MainActivity extends Activity {
 
     private void applyClockPositionAndSize() {
         if (clockPanel == null || clockText == null) return;
+        final int geometryGeneration = ++clockLayoutGeneration;
 
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
@@ -5696,7 +5717,15 @@ public class MainActivity extends Activity {
                 : (alignment == Gravity.CENTER_HORIZONTAL ? panelParams.width / 2f : 0f));
         clockPanel.setScaleX(lengthScale);
         clockPanel.post(() -> {
-            if (clockPanel == null) return;
+            if (geometryGeneration != clockLayoutGeneration || clockPanel == null
+                    || clockPanel.getParent() == null) return;
+            // While an edge is being resized, the resize transaction itself owns
+            // the position and anchors the opposite edge after layout. A stale
+            // generic clamp here could race the edge calculation on typography clocks.
+            if (clockWidgetEditing && clockWidgetDragging && clockResizeEdge != 0) {
+                updateClockResizeHandles();
+                return;
+            }
             // Re-clamp after measuring/layout so the final scaled visual rectangle,
             // not the previous frame's dimensions, determines both screen edges.
             float[] bounded = clampClockTranslation(clockPanel,
