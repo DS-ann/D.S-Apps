@@ -1016,18 +1016,18 @@ public class MainActivity extends Activity {
     private void updateClockResizeHandles() {
         if (clockPanel == null || root == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
         if (!(clockPanel.getParent() instanceof View)) return;
-        int[] pageOnScreen = new int[2];
         int[] rootOnScreen = new int[2];
-        ((View) clockPanel.getParent()).getLocationOnScreen(pageOnScreen);
+        int[] clockOnScreen = new int[2];
         root.getLocationOnScreen(rootOnScreen);
-        // Use the exact same transformed visual rectangle as collision checks and
-        // resize math. getLocationOnScreen() on the scaled child is transform/pivot
-        // sensitive, so mixing it with an independently scaled width shifts grips.
-        int[] geometry = itemGeometry(clockPanel);
-        int visualLeft = pageOnScreen[0] - rootOnScreen[0] + geometry[0];
-        int visualTop = pageOnScreen[1] - rootOnScreen[1] + geometry[1];
-        int w = Math.max(1, geometry[2]);
-        int h = Math.max(1, geometry[3]);
+        clockPanel.getLocationOnScreen(clockOnScreen);
+        // Anchor grips to the clock View's real on-screen origin, then use its
+        // rendered (scaled) dimensions. Do not rebuild the origin from layout
+        // margins/itemGeometry: during live resize those can be pending/stale,
+        // which makes the grips drift away from the visible background edges.
+        int visualLeft = clockOnScreen[0] - rootOnScreen[0];
+        int visualTop = clockOnScreen[1] - rootOnScreen[1];
+        int w = Math.max(1, Math.round(clockPanel.getWidth() * clockPanel.getScaleX()));
+        int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
         // Match the widget resizer: 18dp-thick grips, 40dp long.
         int side = LauncherUiUtils.dp(this, 40);
         int thin = LauncherUiUtils.dp(this, 18);
