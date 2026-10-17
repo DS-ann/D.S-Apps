@@ -4907,7 +4907,7 @@ public class MainActivity extends Activity {
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : nonLedDigitScale);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
-        clockText.setPivotY(rowHeight / 2f);
+        clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
