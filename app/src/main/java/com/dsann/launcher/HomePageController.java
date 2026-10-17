@@ -221,11 +221,10 @@ final class HomePageController {
                 }
                 occupiedSlots[row][col] = true;
                 lp.leftMargin = col * cellWidth;
-                // Spread rows across the measured workspace so the bottom row reaches
-                // the bottom of the usable page instead of leaving a large unused gap.
-                int maxTop = Math.max(0, pageHeight - cellHeight);
-                lp.topMargin = rows <= 1 ? 0
-                        : Math.round(row * (maxTop / (float) (rows - 1)));
+                // Keep rows at their original fixed grid positions. In particular,
+                // the lowest row stays one cell above the workspace edge instead of
+                // being stretched down toward the dock.
+                lp.topMargin = row * cellHeight;
                 page.addView(cell, lp);
                 host.installHomeIconTouch(cell, packageName);
             }
@@ -258,9 +257,7 @@ final class HomePageController {
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
                     actual.leftMargin = col * actualCellWidth;
-                    int maxActualTop = Math.max(0, page.getHeight() - actualCellHeight);
-                    actual.topMargin = actualRows <= 1 ? 0
-                            : Math.round(row * (maxActualTop / (float) (actualRows - 1)));
+                    actual.topMargin = row * actualCellHeight;
                     child.setLayoutParams(actual);
                 }
             });
