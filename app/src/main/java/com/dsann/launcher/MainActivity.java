@@ -1171,7 +1171,7 @@ public class MainActivity extends Activity {
                 // keeping the HOME path compatible with Android 6 and avoiding a relaunch.
                 showHomeImmediately();
                 if (currentPage != 0) showPage(0, false);
-                animateHomeReturnFromApp();
+                // HOME returns directly to the cached workspace without a launcher entrance animation.
             } else if (drawerOpen) {
                 showHome();
             }
@@ -4730,6 +4730,29 @@ public class MainActivity extends Activity {
                 Math.max(1, Math.round(Math.max(1, baseHeight) * sy))};
     }
 
+    private boolean isWorkspaceAppIcon(View view) {
+        return view != null && view.getTag() instanceof String
+                && ((String) view.getTag()).startsWith("launcher_app:");
+    }
+
+    private int workspaceCollisionMargin(View view) {
+        return isWorkspaceAppIcon(view) ? LauncherUiUtils.dp(this, 8) : 0;
+    }
+
+    private android.graphics.Rect collisionRect(View view, int[] geometry) {
+        int margin = workspaceCollisionMargin(view);
+        return new android.graphics.Rect(
+                geometry[0] - margin, geometry[1] - margin,
+                geometry[0] + geometry[2] + margin,
+                geometry[1] + geometry[3] + margin);
+    }
+
+    private android.graphics.Rect collisionRectAt(View view, int x, int y, int width, int height) {
+        int margin = workspaceCollisionMargin(view);
+        return new android.graphics.Rect(x - margin, y - margin,
+                x + width + margin, y + height + margin);
+    }
+
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
         android.graphics.Rect expanded = new android.graphics.Rect(
                 a.left - gap, a.top - gap, a.right + gap, a.bottom + gap);
@@ -4796,8 +4819,7 @@ public class MainActivity extends Activity {
 
         int[] moving = itemGeometry(movingView);
         if (moving[2] <= 0 || moving[3] <= 0) return;
-        android.graphics.Rect movingRect = new android.graphics.Rect(
-                moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
+        android.graphics.Rect movingRect = collisionRect(movingView, moving);
         // Start moving neighbours while the dragged item approaches from any side,
         // not only after their visible bounds already touch.
         // Push a neighbour only once the dragged item actually reaches its bounds.
@@ -4819,14 +4841,15 @@ public class MainActivity extends Activity {
                 continue;
             }
             int[] g = itemGeometry(displaced);
-            android.graphics.Rect originalRect = new android.graphics.Rect(
-                    original[0], original[1], original[0] + g[2], original[1] + g[3]);
+            android.graphics.Rect originalRect = collisionRectAt(displaced,
+                    original[0], original[1], g[2], g[3]);
             // Add a small release margin before restoring a neighbour. Without
             // hysteresis, tiny finger jitter at a touching edge alternates between
             // restore and displace on successive MOVE frames ("dancing" widgets).
             // Keep a wider dead zone around the original slot so tiny finger jitter
             // cannot repeatedly restore and re-displace the same widget while dragging.
-            int restoreHysteresis = LauncherUiUtils.dp(this, 16);
+            int restoreHysteresis = (isWorkspaceAppIcon(movingView) || isWorkspaceAppIcon(displaced))
+                    ? LauncherUiUtils.dp(this, 8) : 0;
             if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)) {
                 displaced.animate().cancel();
                 if (displaced == clockPanel) {
@@ -4860,8 +4883,7 @@ public class MainActivity extends Activity {
 
             int[] g = itemGeometry(other);
             if (g[2] <= 0 || g[3] <= 0) continue;
-            android.graphics.Rect otherRect = new android.graphics.Rect(
-                    g[0], g[1], g[0] + g[2], g[1] + g[3]);
+            android.graphics.Rect otherRect = collisionRect(other, g);
             if (!overlapsWithGap(movingRect, otherRect, gap)) continue;
 
             int maxX = page.getWidth() - g[2] - gap;
@@ -4880,16 +4902,14 @@ public class MainActivity extends Activity {
                 if (blocker == other || !isWorkspaceItem(blocker)) continue;
                 int[] bg = itemGeometry(blocker);
                 if (bg[2] <= 0 || bg[3] <= 0) continue;
-                obstacles.add(new android.graphics.Rect(
-                        bg[0], bg[1], bg[0] + bg[2], bg[1] + bg[3]));
+                obstacles.add(collisionRect(blocker, bg));
             }
             for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
                 View reserved = entry.getKey();
                 if (reserved == other || reserved.getParent() != page) continue;
                 int[] original = entry.getValue();
                 int[] rg = itemGeometry(reserved);
-                obstacles.add(new android.graphics.Rect(
-                        original[0], original[1], original[0] + rg[2], original[1] + rg[3]));
+                obstacles.add(collisionRectAt(reserved, original[0], original[1], rg[2], rg[3]));
             }
 
             java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
@@ -4912,8 +4932,7 @@ public class MainActivity extends Activity {
                 for (Integer candidateX : xCandidates) {
                     int x = candidateX.intValue();
                     int y = candidateY.intValue();
-                    android.graphics.Rect candidateWithGap = new android.graphics.Rect(
-                            x - gap, y - gap, x + g[2] + gap, y + g[3] + gap);
+                    android.graphics.Rect candidateWithGap = collisionRectAt(other, x, y, g[2], g[3]);
                     boolean blocked = false;
                     for (android.graphics.Rect obstacle : obstacles) {
                         if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
@@ -4977,12 +4996,12 @@ public class MainActivity extends Activity {
                     float targetY = clockPanel.getTranslationY() + bestY - g[1];
                     float[] bounded = clampClockTranslation(clockPanel, targetX, targetY);
                     clockPanel.animate().translationX(bounded[0]).translationY(bounded[1])
-                            .setDuration(120L).start();
+                            .setDuration(animationDuration(120L)).start();
                 } else {
                     float targetTranslationX = other.getTranslationX() + bestX - g[0];
                     float targetTranslationY = other.getTranslationY() + bestY - g[1];
                     other.animate().translationX(targetTranslationX)
-                            .translationY(targetTranslationY).setDuration(120L).start();
+                            .translationY(targetTranslationY).setDuration(animationDuration(120L)).start();
                 }
             }
         }
@@ -5014,17 +5033,18 @@ public class MainActivity extends Activity {
             java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
             java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
             xs.add(startX); ys.add(startY); xs.add(0); ys.add(0); xs.add(maxX); ys.add(maxY);
+            int margin = workspaceCollisionMargin(item);
             for (android.graphics.Rect a : accepted) {
-                xs.add(Math.max(0, Math.min(maxX, a.left - w)));
-                xs.add(Math.max(0, Math.min(maxX, a.right)));
-                ys.add(Math.max(0, Math.min(maxY, a.top - h)));
-                ys.add(Math.max(0, Math.min(maxY, a.bottom)));
+                xs.add(Math.max(0, Math.min(maxX, a.left - w - margin)));
+                xs.add(Math.max(0, Math.min(maxX, a.right + margin)));
+                ys.add(Math.max(0, Math.min(maxY, a.top - h - margin)));
+                ys.add(Math.max(0, Math.min(maxY, a.bottom + margin)));
             }
             int bestX = -1, bestY = -1;
             long bestDistance = Long.MAX_VALUE;
             for (Integer cy : ys) for (Integer cx : xs) {
                 int x = cx.intValue(), y = cy.intValue();
-                android.graphics.Rect candidate = new android.graphics.Rect(x, y, x + w, y + h);
+                android.graphics.Rect candidate = collisionRectAt(item, x, y, w, h);
                 boolean blocked = false;
                 for (android.graphics.Rect a : accepted) {
                     if (android.graphics.Rect.intersects(candidate, a)) { blocked = true; break; }
@@ -5038,14 +5058,14 @@ public class MainActivity extends Activity {
             // coarse step, including the final right/bottom edge. The nearest legal
             // rectangle wins; this is the same rectangle geometry used by drag/resize.
             if (bestX < 0) {
-                int step = Math.max(1, LauncherUiUtils.dp(this, 8));
+                int step = 1;
                 outerScan:
                 for (int y = 0; y <= maxY; y += step) {
                     int candidateY = Math.min(maxY, y);
                     for (int x = 0; x <= maxX; x += step) {
                         int candidateX = Math.min(maxX, x);
-                        android.graphics.Rect candidate = new android.graphics.Rect(
-                                candidateX, candidateY, candidateX + w, candidateY + h);
+                        android.graphics.Rect candidate = collisionRectAt(
+                                item, candidateX, candidateY, w, h);
                         boolean blocked = false;
                         for (android.graphics.Rect a : accepted) {
                             if (android.graphics.Rect.intersects(candidate, a)) {
@@ -5070,8 +5090,8 @@ public class MainActivity extends Activity {
                         {maxX, startY}, {startX, maxY}, {maxX, maxY}
                 };
                 for (int[] edge : edgeCandidates) {
-                    android.graphics.Rect candidate = new android.graphics.Rect(
-                            edge[0], edge[1], edge[0] + w, edge[1] + h);
+                    android.graphics.Rect candidate = collisionRectAt(
+                            item, edge[0], edge[1], w, h);
                     boolean blocked = false;
                     for (android.graphics.Rect a : accepted) {
                         if (android.graphics.Rect.intersects(candidate, a)) {
@@ -5098,7 +5118,7 @@ public class MainActivity extends Activity {
                             clockPanel.getTranslationX(), clockPanel.getTranslationY());
                     setClampedClockTranslation(bounded[0], bounded[1], true);
                     int[] now = itemGeometry(item);
-                    accepted.add(new android.graphics.Rect(now[0], now[1], now[0] + now[2], now[1] + now[3]));
+                    accepted.add(collisionRect(item, now));
                 } else if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
                     // No free rectangle on this page: move the item to the other
                     // workspace page instead of accepting an overlapping placement.
@@ -5107,7 +5127,9 @@ public class MainActivity extends Activity {
                     // The page is physically full for this item's dimensions. Keep
                     // the item visible rather than silently deleting it; normal
                     // placement paths must reject new drops when no free slot exists.
-                    accepted.add(new android.graphics.Rect(g[0], g[1], g[0] + w, g[1] + h));
+                    // No legal rectangle exists on either page. Do not treat the
+                    // overlapping location as accepted; the next pass must retry it.
+                    continue;
                 }
                 continue;
             }
@@ -5120,7 +5142,8 @@ public class MainActivity extends Activity {
                 lp.topMargin += bestY - g[1];
                 item.setLayoutParams(lp);
             }
-            accepted.add(new android.graphics.Rect(bestX, bestY, bestX + w, bestY + h));
+            int[] placedGeometry = itemGeometry(item);
+            accepted.add(collisionRect(item, placedGeometry));
             persistWorkspaceItemPosition(page, item, bestX, bestY, w, h);
         }
     }
