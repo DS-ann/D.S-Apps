@@ -3935,9 +3935,16 @@ public class MainActivity extends Activity {
         Date now = new Date();
         boolean use24Hour = DateFormat.is24HourFormat(this);
         String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
+        android.text.SpannableStringBuilder dateLine =
+                new android.text.SpannableStringBuilder(dateValue);
         if (!use24Hour) {
             String period = new SimpleDateFormat("a", Locale.getDefault()).format(now);
-            dateValue = period + "  " + dateValue;
+            // Separate AM/PM from the date with a comma and style only the marker.
+            dateLine.insert(0, period + ", ");
+            dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, period.length(),
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            dateLine.setSpan(new android.text.style.RelativeSizeSpan(1.05f), 0, period.length(),
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         int restorePage = Math.max(0, Math.min(1, currentPage));
         for (int page = 0; page < clockPanelsByPage.length; page++) {
@@ -4009,7 +4016,7 @@ public class MainActivity extends Activity {
             }
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
-            if (!dateValue.contentEquals(dateText.getText())) dateText.setText(dateValue);
+            if (!dateLine.toString().contentEquals(dateText.getText())) dateText.setText(dateLine);
             // Layout, typography and panel appearance are configuration-driven and
             // are applied when the clock is created or settings change, not every minute.
         }
