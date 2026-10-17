@@ -4982,7 +4982,7 @@ public class MainActivity extends Activity {
                                     || candidateTop + shortcutHeight > otherPage.getHeight()) continue;
                             if (!isContactShortcutPositionFree(otherPage, null, candidateLeft, candidateTop,
                                     shortcutWidth, shortcutHeight)) continue;
-                            ViewParent parent = shortcut.getParent();
+                            android.view.ViewParent parent = shortcut.getParent();
                             if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(shortcut);
                             shortcutLp.leftMargin = candidateLeft;
                             shortcutLp.topMargin = candidateTop;
