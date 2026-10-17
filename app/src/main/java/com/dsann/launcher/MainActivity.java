@@ -1806,14 +1806,8 @@ public class MainActivity extends Activity {
         // Default contact shortcuts use a compact visual footprint, not a full
         // invisible grid cell. Explicitly resized shortcuts retain their saved size.
         int compactShortcutSize = LauncherUiUtils.dp(this, 48);
-        // Old builds could persist an oversized footprint even before the user
-        // deliberately resized it. Normalize those legacy values on restore.
-        if (savedWidthDp > 96 || savedHeightDp > 96) {
-            prefs.edit().remove(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId)).remove(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId))
-                    .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), 1).putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), 1).apply();
-            savedWidthDp = 0;
-            savedHeightDp = 0;
-        }
+        // Preserve user-resized dimensions across page changes and workspace re-renders.
+        // Dimensions are bounded to the current page below, not reset at an arbitrary 96dp.
         // A direct-call shortcut is an app-like icon, not a miniature widget tile.
         // Its default footprint is the same compact size as the app icon cell.
         // Match the shortcut's default footprint to one normal home-app grid cell.
@@ -2186,6 +2180,16 @@ public class MainActivity extends Activity {
         final int[] shortcutOrigin = new int[2];
         final boolean[] shortcutDragging = new boolean[1];
         final boolean[] shortcutMoved = new boolean[1];
+        final boolean[] shortcutMoveArmed = new boolean[1];
+        final boolean[] shortcutPopupShown = new boolean[1];
+        final android.os.Handler shortcutTouchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable armShortcutMove = () -> shortcutMoveArmed[0] = true;
+        final Runnable showShortcutPopup = () -> {
+            if (!shortcutMoved[0] && !shortcutDragging[0]) {
+                shortcutPopupShown[0] = true;
+                tile.performLongClick();
+            }
+        };
         tile.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
@@ -2196,18 +2200,25 @@ public class MainActivity extends Activity {
                 shortcutOrigin[1] = lp.topMargin;
                 shortcutDragging[0] = false;
                 shortcutMoved[0] = false;
-                return false;
+                shortcutMoveArmed[0] = false;
+                shortcutPopupShown[0] = false;
+                shortcutTouchHandler.removeCallbacks(armShortcutMove);
+                shortcutTouchHandler.removeCallbacks(showShortcutPopup);
+                shortcutTouchHandler.postDelayed(armShortcutMove, 1000L);
+                shortcutTouchHandler.postDelayed(showShortcutPopup, 2000L);
+                return true;
             }
             if (action == MotionEvent.ACTION_MOVE) {
                 float dx = event.getRawX() - shortcutTouchStart[0];
                 float dy = event.getRawY() - shortcutTouchStart[1];
                 boolean pastSlop = Math.abs(dx) > LauncherUiUtils.dp(this, 8)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
-                if (pastSlop) {
+                if (pastSlop && shortcutMoveArmed[0] && !shortcutPopupShown[0]) {
                     shortcutMoved[0] = true;
                     shortcutDragging[0] = true;
+                    shortcutTouchHandler.removeCallbacks(showShortcutPopup);
                     tile.setPressed(false);
-                    tile.getParent().requestDisallowInterceptTouchEvent(true);
+                    if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(true);
                     setWorkspaceGridVisible(true, tile);
                     FrameLayout page = tile.getParent() instanceof FrameLayout
                             ? (FrameLayout) tile.getParent() : null;
@@ -2239,9 +2250,13 @@ public class MainActivity extends Activity {
                     }
                     return true;
                 }
-                return false;
+                // Keep consuming the gesture while waiting for the one-second
+                // hold threshold so a workspace swipe cannot steal the touch.
+                return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                shortcutTouchHandler.removeCallbacks(armShortcutMove);
+                shortcutTouchHandler.removeCallbacks(showShortcutPopup);
                 if (shortcutDragging[0]) {
                     shortcutDragging[0] = false;
                     if (tile.getParent() instanceof FrameLayout) {
@@ -2263,9 +2278,12 @@ public class MainActivity extends Activity {
                     refreshWorkspaceGrid();
                     return true;
                 }
-                if (shortcutMoved[0]) return true;
+                if (!shortcutPopupShown[0] && !shortcutMoved[0] && action == MotionEvent.ACTION_UP) {
+                    tile.performClick();
+                }
+                return true;
             }
-            return false;
+            return true;
         });
         // Contact shortcuts are launcher-owned tiles, not AppWidgetHostViews, so
         // provide the same long-press options explicitly.
