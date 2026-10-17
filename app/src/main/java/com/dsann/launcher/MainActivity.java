@@ -4012,15 +4012,18 @@ public class MainActivity extends Activity {
 
     /** Live push-aside behavior for workspace items while a widget or shortcut is dragged. */
     private void updateLiveDisplacements(FrameLayout page, View movingView) {
-        if (page == null || movingView == null || movingView.getParent() != page) return;
+        if (page == null || movingView == null || movingView.getParent() != page
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+
         int[] moving = itemGeometry(movingView);
         if (moving[2] <= 0 || moving[3] <= 0) return;
         android.graphics.Rect movingRect = new android.graphics.Rect(
                 moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
         int gap = LauncherUiUtils.dp(this, 5);
 
-        // Restore displaced items when the moving item no longer covers their
-        // original location. This happens during MOVE, without lifting the finger.
+        // First restore items whose saved slots are no longer covered by the drag.
+        // Their original slots are reserved below so another displaced item cannot
+        // occupy a slot that must later be restored.
         java.util.Iterator<java.util.Map.Entry<View, int[]>> iterator =
                 liveDisplacedItems.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -4032,8 +4035,6 @@ public class MainActivity extends Activity {
                 continue;
             }
             int[] g = itemGeometry(displaced);
-            // Test the item's saved/original slot, not its temporary pushed-aside
-            // position; otherwise it would snap back and be pushed away every frame.
             android.graphics.Rect originalRect = new android.graphics.Rect(
                     original[0], original[1], original[0] + g[2], original[1] + g[3]);
             if (!overlapsWithGap(movingRect, originalRect, gap)) {
@@ -4050,34 +4051,68 @@ public class MainActivity extends Activity {
 
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
-            if (other == movingView || !isWorkspaceItem(other) || liveDisplacedItems.containsKey(other)) continue;
+            if (other == movingView || !isWorkspaceItem(other)
+                    || liveDisplacedItems.containsKey(other)) continue;
+
             int[] g = itemGeometry(other);
             if (g[2] <= 0 || g[3] <= 0) continue;
-            android.graphics.Rect otherRect = new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
+            android.graphics.Rect otherRect = new android.graphics.Rect(
+                    g[0], g[1], g[0] + g[2], g[1] + g[3]);
             if (!overlapsWithGap(movingRect, otherRect, gap)) continue;
 
-            int maxX = Math.max(0, page.getWidth() - g[2]);
-            int maxY = Math.max(0, page.getHeight() - g[3]);
-            int step = Math.max(1, LauncherUiUtils.dp(this, 4));
+            int maxX = page.getWidth() - g[2] - gap;
+            int maxY = page.getHeight() - g[3] - gap;
+            int min = gap;
+            if (maxX < min || maxY < min) continue;
+
+            // Build candidate coordinates from the edges of real obstacles rather
+            // than scanning every 4dp across the entire screen on every MOVE frame.
+            // This works for mixed-size widgets and shortcuts and avoids missing a
+            // narrow valid gap because the step does not divide the page dimensions.
+            java.util.ArrayList<android.graphics.Rect> obstacles =
+                    new java.util.ArrayList<android.graphics.Rect>();
+            for (int j = 0; j < page.getChildCount(); j++) {
+                View blocker = page.getChildAt(j);
+                if (blocker == other || !isWorkspaceItem(blocker)) continue;
+                int[] bg = itemGeometry(blocker);
+                if (bg[2] <= 0 || bg[3] <= 0) continue;
+                obstacles.add(new android.graphics.Rect(
+                        bg[0], bg[1], bg[0] + bg[2], bg[1] + bg[3]));
+            }
+            for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
+                View reserved = entry.getKey();
+                if (reserved == other || reserved.getParent() != page) continue;
+                int[] original = entry.getValue();
+                int[] rg = itemGeometry(reserved);
+                obstacles.add(new android.graphics.Rect(
+                        original[0], original[1], original[0] + rg[2], original[1] + rg[3]));
+            }
+
+            java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
+            java.util.TreeSet<Integer> yCandidates = new java.util.TreeSet<Integer>();
+            xCandidates.add(Math.max(min, Math.min(maxX, g[0])));
+            yCandidates.add(Math.max(min, Math.min(maxY, g[1])));
+            xCandidates.add(min);
+            xCandidates.add(maxX);
+            yCandidates.add(min);
+            yCandidates.add(maxY);
+            for (android.graphics.Rect obstacle : obstacles) {
+                xCandidates.add(Math.max(min, Math.min(maxX, obstacle.left - g[2] - gap)));
+                xCandidates.add(Math.max(min, Math.min(maxX, obstacle.right + gap)));
+                yCandidates.add(Math.max(min, Math.min(maxY, obstacle.top - g[3] - gap)));
+                yCandidates.add(Math.max(min, Math.min(maxY, obstacle.bottom + gap)));
+            }
+
             int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
-            for (int y = 0; y <= maxY; y += step) {
-                for (int x = 0; x <= maxX; x += step) {
-                    android.graphics.Rect candidate = new android.graphics.Rect(x, y, x + g[2], y + g[3]);
+            for (Integer candidateY : yCandidates) {
+                for (Integer candidateX : xCandidates) {
+                    int x = candidateX.intValue();
+                    int y = candidateY.intValue();
                     android.graphics.Rect candidateWithGap = new android.graphics.Rect(
-                            candidate.left - gap, candidate.top - gap,
-                            candidate.right + gap, candidate.bottom + gap);
+                            x - gap, y - gap, x + g[2] + gap, y + g[3] + gap);
                     boolean blocked = false;
-                    for (int j = 0; j < page.getChildCount(); j++) {
-                        View blocker = page.getChildAt(j);
-                        // The dragged widget/shortcut must also block candidate
-                        // positions; excluding it let the displaced item jump directly
-                        // underneath the moving item, making live displacement appear broken.
-                        if (blocker == other || !isWorkspaceItem(blocker)) continue;
-                        int[] bg = itemGeometry(blocker);
-                        if (bg[2] <= 0 || bg[3] <= 0) continue;
-                        android.graphics.Rect blockerRect = new android.graphics.Rect(
-                                bg[0], bg[1], bg[0] + bg[2], bg[1] + bg[3]);
-                        if (android.graphics.Rect.intersects(candidateWithGap, blockerRect)) {
+                    for (android.graphics.Rect obstacle : obstacles) {
+                        if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
                             blocked = true;
                             break;
                         }
@@ -4091,6 +4126,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
+
             if (bestX >= 0) {
                 liveDisplacedItems.put(other, new int[]{g[0], g[1]});
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) other.getLayoutParams();
