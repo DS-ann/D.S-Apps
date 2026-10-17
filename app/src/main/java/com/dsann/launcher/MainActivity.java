@@ -4069,7 +4069,10 @@ public class MainActivity extends Activity {
                     boolean blocked = false;
                     for (int j = 0; j < page.getChildCount(); j++) {
                         View blocker = page.getChildAt(j);
-                        if (blocker == other || blocker == movingView || !isWorkspaceItem(blocker)) continue;
+                        // The dragged widget/shortcut must also block candidate
+                        // positions; excluding it let the displaced item jump directly
+                        // underneath the moving item, making live displacement appear broken.
+                        if (blocker == other || !isWorkspaceItem(blocker)) continue;
                         int[] bg = itemGeometry(blocker);
                         if (bg[2] <= 0 || bg[3] <= 0) continue;
                         android.graphics.Rect blockerRect = new android.graphics.Rect(
