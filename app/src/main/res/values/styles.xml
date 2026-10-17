@@ -3,4 +3,10 @@
     <item name="android:fontFamily">sans</item><item name="android:colorAccent">#7C9CFF</item>
     <item name="android:statusBarColor">#121620</item><item name="android:navigationBarColor">#121620</item>
     <item name="android:windowLightStatusBar">false</item>
-</style></resources>
+    <item name="android:windowAnimationStyle">@style/LauncherWindowAnimations</item>
+</style>
+<style name="LauncherWindowAnimations" parent="@android:style/Animation.Activity">
+    <item name="android:taskCloseEnterAnimation">@anim/launcher_task_close_enter</item>
+    <item name="android:taskCloseExitAnimation">@anim/launcher_task_close_exit</item>
+</style>
+</resources>
