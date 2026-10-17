@@ -351,6 +351,16 @@ public class MainActivity extends Activity {
                     ? hitClockResizeEdge(event.getRawX(), event.getRawY()) : 0;
             gestureStartedOnClock = touchStartedOnClock(event.getRawX(), event.getRawY())
                     || clockResizeEdge != 0;
+            // A tap anywhere outside the clock cancels its 1-second move-ready
+            // dance immediately, even before the 2-second edit mode has begun.
+            if (!gestureStartedOnClock && clockWidgetMoving && !clockWidgetEditing) {
+                handler.removeCallbacks(clockWidgetLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
+                LauncherUiUtils.stopMoveHint(clockPanel);
+                clockWidgetMoving = false;
+                clockWidgetLongPressActivated = false;
+                setWorkspaceGridVisible(false, null);
+            }
             if (clockWidgetEditing && !gestureStartedOnClock) {
                 exitClockWidgetEditMode();
             }
@@ -1003,8 +1013,14 @@ public class MainActivity extends Activity {
         clockUpdatesActive = true;
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
+        // Do not reconnect every AppWidgetHost synchronously inside onResume: on
+        // Android 6 that can delay the first Home frame when returning from an app.
+        // Let the cached workspace draw first, then resume provider listening.
+        handler.postDelayed(() -> {
+            if (!clockUpdatesActive || widgetHost == null) return;
+            try { widgetHost.startListening(); } catch (Exception ignored) {}
+        }, 120L);
         // The app list is loaded at startup and refreshed only by package add/remove broadcasts.
-        try { widgetHost.startListening(); } catch (Exception ignored) {}
     }
 
     @Override protected void onPause() {
@@ -1014,6 +1030,9 @@ public class MainActivity extends Activity {
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
         handler.removeCallbacks(clockWidgetEditLongPress);
+        LauncherUiUtils.stopMoveHint(clockPanel);
+        clockWidgetMoving = false;
+        clockWidgetLongPressActivated = false;
         clockUpdatesActive = false;
         handler.removeCallbacks(clockUpdater);
         try { widgetHost.stopListening(); } catch (Exception ignored) {}
@@ -4089,6 +4108,11 @@ public class MainActivity extends Activity {
     };
 
     private void exitClockWidgetEditMode() {
+        LauncherUiUtils.stopMoveHint(clockPanel);
+        clockWidgetMoving = false;
+        clockWidgetLongPressActivated = false;
+        handler.removeCallbacks(clockWidgetLongPress);
+        handler.removeCallbacks(clockWidgetEditLongPress);
         clockWidgetEditing = false;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
         for (View grip : clockEdgeHandles) if (grip != null) grip.setVisibility(View.GONE);
@@ -5531,8 +5555,10 @@ public class MainActivity extends Activity {
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
-                markerParams.width = LauncherUiUtils.dp(this, 24);
-                markerParams.height = LauncherUiUtils.dp(this, 18);
+                // Reserve enough width for the enlarged bold "AM"/"PM" label;
+                // its 13.5sp type remains 50% taller than the original 9sp marker.
+                markerParams.width = LauncherUiUtils.dp(this, 32);
+                markerParams.height = LauncherUiUtils.dp(this, 20);
                 markerParams.gravity = Gravity.LEFT | Gravity.TOP;
                 // Keep the marker's horizontal anchor tied to the digits in every style;
                 // its vertical anchor is centered between the colon's upper and lower dots.
@@ -5554,8 +5580,15 @@ public class MainActivity extends Activity {
                 // The colon's two dots straddle the vertical midpoint of the
                 // clock glyph row. Recompute this from the current row height on every
                 // resize so AM/PM remains centered for all clock styles and sizes.
+                float colonCenterY = rowHeight / 2f;
+                if (!sevenSegment) {
+                    // Typography clocks translate their glyph canvas down by 5dp;
+                    // follow that offset so AM/PM stays centered between the two
+                    // custom colon dots even after the clock breadth is resized.
+                    colonCenterY += LauncherUiUtils.dp(this, 5);
+                }
                 markerParams.topMargin = Math.max(0,
-                        Math.round((rowHeight - markerParams.height) / 2f));
+                        Math.round(colonCenterY - markerParams.height / 2f));
                 amPmText.setLayoutParams(markerParams);
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
