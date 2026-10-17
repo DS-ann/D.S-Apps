@@ -5187,87 +5187,72 @@ public class MainActivity extends Activity {
 
     /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
     private void finishLiveDisplacements(boolean commit, View movingView) {
-        if (liveDisplacedItems.isEmpty()) {
-            if (movingView != null && movingView.getParent() instanceof FrameLayout) {
-                resolveAllWorkspaceOverlaps((FrameLayout) movingView.getParent(), movingView);
-                refreshWorkspaceGrid();
+        // Finalize every displaced workspace item through the same decision path,
+        // regardless of whether it is a widget, shortcut, or clock. A clock must
+        // not be committed unconditionally: if the dragged item ended elsewhere,
+        // restoring the clock is necessary to avoid leaving an unexplained gap.
+        java.util.ArrayList<View> displacedViews =
+                new java.util.ArrayList<View>(liveDisplacedItems.keySet());
+
+        for (View displaced : displacedViews) {
+            int[] original = liveDisplacedItems.get(displaced);
+            if (original == null) continue;
+            if (!(displaced.getParent() instanceof FrameLayout)) continue;
+
+            FrameLayout page = (FrameLayout) displaced.getParent();
+            boolean keepDisplacement = commit && movingView != null
+                    && movingView.getParent() == page;
+            int[] displacedGeometry = itemGeometry(displaced);
+            int displacedWidth = Math.max(1, displacedGeometry[2]);
+            int displacedHeight = Math.max(1, displacedGeometry[3]);
+
+            if (keepDisplacement) {
+                int[] movingGeometry = itemGeometry(movingView);
+                android.graphics.Rect movingRect = new android.graphics.Rect(
+                        movingGeometry[0], movingGeometry[1],
+                        movingGeometry[0] + movingGeometry[2],
+                        movingGeometry[1] + movingGeometry[3]);
+                android.graphics.Rect originalRect = new android.graphics.Rect(
+                        original[0], original[1],
+                        original[0] + displacedWidth, original[1] + displacedHeight);
+                // Keep a neighbour displaced only when the dropped item actually
+                // occupies its original footprint. This rule applies equally to
+                // widget↔widget, widget↔shortcut, shortcut↔clock, and every other
+                // combination of supported workspace item types.
+                keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
             }
-            return;
-        }
-        int columns = getHomeColumns();
-        int cellWidth = Math.max(1, pageViewport == null ? 1 : pageViewport.getWidth() / columns);
-        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-        java.util.ArrayList<View> displacedViews = new java.util.ArrayList<>(liveDisplacedItems.keySet());
-        for (View view : displacedViews) {
-            int[] original = liveDisplacedItems.get(view);
-            if (view.getParent() instanceof FrameLayout) {
-                FrameLayout page = (FrameLayout) view.getParent();
-                boolean keepDisplacement = commit;
-                if (view == clockPanel) {
-                    if (!keepDisplacement) {
-                        setClampedClockTranslation(original[0] - clockPanel.getLeft()
-                                        - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
-                                original[1] - clockPanel.getTop()
-                                        - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
-                    } else {
-                        int pageIndex = pagesStrip == null ? 0 : Math.max(0, pagesStrip.indexOfChild(page));
-                        prefs.edit()
-                                .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), clockPanel.getTranslationX())
-                                .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex), clockPanel.getTranslationY())
-                                .apply();
-                    }
-                    continue;
-                }
-                if (keepDisplacement && movingView != null
-                        && movingView.getParent() == page) {
-                    // Commit a neighbour's new slot only if the dragged item still
-                    // occupies the neighbour's original slot after drop resolution.
-                    // If collision handling sends the dragged widget elsewhere,
-                    // put the neighbour back instead of leaving a pointless gap.
-                    int[] movingGeometry = itemGeometry(movingView);
-                    int[] neighbourGeometry = itemGeometry(view);
-                    android.graphics.Rect movingRect = new android.graphics.Rect(
-                            movingGeometry[0], movingGeometry[1],
-                            movingGeometry[0] + movingGeometry[2],
-                            movingGeometry[1] + movingGeometry[3]);
-                    android.graphics.Rect originalRect = new android.graphics.Rect(
-                            original[0], original[1],
-                            original[0] + neighbourGeometry[2],
-                            original[1] + neighbourGeometry[3]);
-                    keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
-                }
-                if (!keepDisplacement) {
-                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
-                    lp.leftMargin = original[0];
-                    lp.topMargin = original[1];
-                    view.setLayoutParams(lp);
+
+            if (!keepDisplacement) {
+                if (displaced == clockPanel) {
+                    setClampedClockTranslation(
+                            original[0] - clockPanel.getLeft()
+                                    - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
+                            original[1] - clockPanel.getTop()
+                                    - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
                 } else {
-                    int[] g = itemGeometry(view);
-                    Object rawTag = view.getTag();
-                    if (rawTag instanceof String) {
-                        String tag = (String) rawTag;
-                        int pageIndex = pagesStrip == null ? 0 : Math.max(0, pagesStrip.indexOfChild(page));
-                        if (tag.startsWith("launcher_widget:")) {
-                            try { saveWidgetGeometry(Integer.parseInt(tag.substring("launcher_widget:".length())), pageIndex, (FrameLayout) view); }
-                            catch (NumberFormatException ignored) {}
-                        } else if (tag.startsWith("launcher_app:")) {
-                            String pkg = tag.substring("launcher_app:".length());
-                            int col = Math.max(0, Math.min(columns - 1, Math.round((float) g[0] / cellWidth)));
-                            int row = Math.max(0, Math.round((float) g[1] / cellHeight));
-                            saveIconSlot(pkg, col, row, columns);
-                            prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
-                        } else if ("launcher_contact_shortcut".equals(tag)) {
-                            prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex)
-                                    .putFloat(KEY_SHORTCUT_X, g[0] / (float) Math.max(1, page.getWidth() - g[2]))
-                                    .putFloat(KEY_SHORTCUT_Y, g[1] / (float) Math.max(1, page.getHeight() - g[3])).apply();
-                        }
+                    ViewGroup.LayoutParams raw = displaced.getLayoutParams();
+                    if (raw instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                        lp.leftMargin = original[0];
+                        lp.topMargin = original[1];
+                        displaced.setLayoutParams(lp);
                     }
                 }
+            } else {
+                int[] finalGeometry = itemGeometry(displaced);
+                persistWorkspaceItemPosition(page, displaced,
+                        finalGeometry[0], finalGeometry[1],
+                        finalGeometry[2], finalGeometry[3]);
             }
         }
+
         liveDisplacedItems.clear();
         if (movingView != null && movingView.getParent() instanceof FrameLayout) {
-            resolveAllWorkspaceOverlaps((FrameLayout) movingView.getParent(), movingView);
+            FrameLayout page = (FrameLayout) movingView.getParent();
+            // Resolve the whole page after committing/restoring temporary positions,
+            // then persist all final positions. This catches residual overlaps caused
+            // by different item sizes or clock clamping at the page edges.
+            resolveAllWorkspaceOverlaps(page, movingView);
         }
         refreshWorkspaceGrid();
     }
