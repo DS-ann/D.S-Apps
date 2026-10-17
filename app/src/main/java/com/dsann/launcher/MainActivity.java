@@ -574,19 +574,16 @@ public class MainActivity extends Activity {
                     int[] actual = itemGeometry(clockPanel);
                     float adjustX = 0f;
                     float adjustY = 0f;
-                    boolean typographyClock = !(clockText instanceof SevenSegmentClockTextView)
-                            || prefs.getInt(KEY_CLOCK_STYLE, 0) != 5;
                     if (resizingEdge == 1) {
-                        // Typography clock's left grip must track the requested left
-                        // edge directly after relayout. Its scaled width can change
-                        // while layout params still report the natural width, so
-                        // correcting from the computed right edge can leave the left
-                        // handle visually stuck. The width ratio above preserves the
-                        // opposite edge when the rendered width matches the target.
-                        adjustX = typographyClock
-                                ? targetLeft - actual[0]
-                                : targetRight - (actual[0] + actual[2]);
-                    } else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
+                        // A left-edge resize must keep the RIGHT edge fixed for every
+                        // clock style. Anchor using the measured visual rectangle after
+                        // relayout, not the unscaled panel width; otherwise typography
+                        // clocks drift and appear to resize from the wrong side.
+                        adjustX = targetRight - (actual[0] + actual[2]);
+                    } else if (resizingEdge == 2) {
+                        // A right-edge resize keeps the LEFT edge fixed.
+                        adjustX = targetLeft - actual[0];
+                    }
                     if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
                     else if (resizingEdge == 4) adjustY = targetTop - actual[1];
                     setClampedClockTranslation(clockPanel.getTranslationX() + adjustX,
