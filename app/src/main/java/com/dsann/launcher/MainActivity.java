@@ -2040,7 +2040,7 @@ public class MainActivity extends Activity {
         if (page == null || width <= 0 || height <= 0 || pageViewport == null) return false;
         int columns = getHomeColumns();
         int cellW = Math.max(1, pageViewport.getWidth() / columns);
-        int cellH = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int cellH = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = Math.max(1, pageViewport.getHeight() / cellH);
         // Test the snapped one-cell target, exactly as the app icon placer does.
         int col = Math.max(0, Math.min(columns - 1,
@@ -2269,7 +2269,7 @@ public class MainActivity extends Activity {
                     lp.leftMargin = Math.max(0, Math.min(maxX,
                             Math.round(event.getRawX() - pageLocation[0] - view.getWidth() / 2f - pageOffsetX)));
                     int slotHeight = LauncherUiUtils.dp(this,
-                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                            homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                     int gridRows = Math.max(1, page.getHeight() / slotHeight);
                     int requestedTop = Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f);
                     int snappedRow = Math.max(0, Math.min(gridRows - 1, requestedTop / slotHeight));
@@ -2338,7 +2338,7 @@ public class MainActivity extends Activity {
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
                     int columns = getHomeColumns();
                     int slotHeight = LauncherUiUtils.dp(this,
-                            Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                            homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                     // Fixed-size slots are shared by both screens. The usable page
                     // ends above the page indicator/dock, so a complete slot must fit.
                     int rows = Math.max(1,
@@ -2831,7 +2831,7 @@ public class MainActivity extends Activity {
                                 - LauncherUiUtils.dp(this, 260));
         int cellWidth = Math.max(1, width / columns);
         int cellHeight = LauncherUiUtils.dp(this,
-                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = Math.max(1, height / cellHeight);
         boolean[][] occupied = new boolean[rows][columns];
 
@@ -3514,7 +3514,7 @@ public class MainActivity extends Activity {
                         int columns = getHomeColumns();
                         w = Math.max(1, pageWidth / Math.max(1, columns));
                         h = LauncherUiUtils.dp(this,
-                                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                     }
                     if (w > 0 && h > 0 && android.graphics.Rect.intersects(
                             candidate, new android.graphics.Rect(x, y, x + w, y + h))) {
@@ -4158,7 +4158,7 @@ public class MainActivity extends Activity {
         if (liveDisplacedItems.isEmpty()) return;
         int columns = getHomeColumns();
         int cellWidth = Math.max(1, pageViewport == null ? 1 : pageViewport.getWidth() / columns);
-        int cellHeight = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         java.util.ArrayList<View> displacedViews = new java.util.ArrayList<>(liveDisplacedItems.keySet());
         for (View view : displacedViews) {
             int[] original = liveDisplacedItems.get(view);
@@ -4205,7 +4205,7 @@ public class MainActivity extends Activity {
         int columns = getHomeColumns();
         int cellWidth = Math.max(1, page.getWidth() / columns);
         int cellHeight = LauncherUiUtils.dp(this,
-                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = Math.max(1, page.getHeight() / cellHeight);
         FrameLayout.LayoutParams widgetLp = (FrameLayout.LayoutParams) widgetContainer.getLayoutParams();
         int wx1 = widgetLp.leftMargin, wy1 = widgetLp.topMargin;
@@ -4307,7 +4307,7 @@ public class MainActivity extends Activity {
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
         int slotHeight = LauncherUiUtils.dp(this,
-                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int usableHeight = pageViewport != null && pageViewport.getHeight() > 0
                 ? pageViewport.getHeight()
                 : Math.max(slotHeight, getResources().getDisplayMetrics().heightPixels
