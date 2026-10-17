@@ -430,8 +430,9 @@ public class MainActivity extends Activity {
                         float currentVisualWidth = clockPanel.getWidth() * clockPanel.getScaleX();
                         targetX += startVisualWidth - currentVisualWidth;
                     } else if (resizingEdge == 3) {
-                        float startVisualHeight = clockWidgetStartPanelHeight
-                                * (clockWidgetStartBreadth / 100f);
+                        // The panel now changes its real measured height with breadth;
+                        // preserve the opposite (bottom) edge using actual visual bounds.
+                        float startVisualHeight = clockWidgetStartPanelHeight;
                         float currentVisualHeight = clockPanel.getHeight() * clockPanel.getScaleY();
                         targetY += startVisualHeight - currentVisualHeight;
                     }
@@ -4519,7 +4520,7 @@ public class MainActivity extends Activity {
             // The LED renderer reserves an invisible leading cell for 1–9 hour
             // values. Include that cell in the measured panel width too.
             if (firstHourDigits == 1 && separators > 0) digits++;
-            float clockHeight = LauncherUiUtils.dp(this, 114)
+            float clockHeight = rowHeight
                     - clockText.getPaddingTop() - clockText.getPaddingBottom();
             naturalClockWidth = Math.max(1f,
                     (digits * 0.72f + separators * 0.34f) * clockHeight * 0.91f
@@ -4580,8 +4581,7 @@ public class MainActivity extends Activity {
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
-        final int rowHeight = Math.max(naturalRowHeight,
-                Math.round(naturalRowHeight * breadthScale));
+        final int rowHeight = Math.max(1, Math.round(naturalRowHeight * breadthScale));
 
         clockPanel.setGravity(alignment);
         clockPanel.setPivotY(0f);
@@ -4686,7 +4686,8 @@ public class MainActivity extends Activity {
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
         // compensates for the centered pivot so the extra height goes downward.
         clockText.setScaleY(sevenSegment ? 1f
-                : normalizedNonLedHeightScale * nonLedDigitScale * (1.20f + 20f / 114f));
+                : normalizedNonLedHeightScale * nonLedDigitScale
+                        * (1.20f + 20f / 114f) * breadthScale);
         // Shift the seven-segment digits 15 dp left relative to their background.
         // Compensate for panel scaling so the visual offset remains exactly 15 dp
         // at every clock length setting; the panel/background itself stays put.
@@ -4694,8 +4695,9 @@ public class MainActivity extends Activity {
                 ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale) : 0f);
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
-        clockText.setTranslationY(sevenSegment ? 0f
-                : LauncherUiUtils.dp(this, 5) / Math.max(0.01f, breadthScale));
+        // The panel itself no longer uses scaleY, so this offset must remain a
+        // fixed physical distance rather than being inversely scaled with breadth.
+        clockText.setTranslationY(sevenSegment ? 0f : LauncherUiUtils.dp(this, 5));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
@@ -4705,7 +4707,7 @@ public class MainActivity extends Activity {
             textParams.width = sevenSegment
                     ? ViewGroup.LayoutParams.MATCH_PARENT
                     : ViewGroup.LayoutParams.WRAP_CONTENT;
-            textParams.height = LauncherUiUtils.dp(this, 114);
+            textParams.height = rowHeight;
             textParams.gravity = Gravity.LEFT | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
