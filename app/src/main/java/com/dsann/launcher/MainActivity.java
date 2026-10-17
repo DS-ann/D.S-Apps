@@ -857,7 +857,19 @@ public class MainActivity extends Activity {
         // Hit-test the actual visible grips, with only a small accessibility margin.
         // This prevents corner touches from being misclassified as another edge.
         float margin = LauncherUiUtils.dp(this, 6);
-        for (int i = 0; i < clockEdgeHandles.length; i++) {
+        // At corners, prioritize top/bottom grips so a vertical resize can never
+        // accidentally be interpreted as a horizontal resize.
+        for (int i = 2; i <= 3; i++) {
+            View grip = clockEdgeHandles[i];
+            if (grip == null || grip.getVisibility() != View.VISIBLE) continue;
+            int[] loc = new int[2];
+            grip.getLocationOnScreen(loc);
+            if (rawX >= loc[0] - margin && rawX <= loc[0] + grip.getWidth() + margin
+                    && rawY >= loc[1] - margin && rawY <= loc[1] + grip.getHeight() + margin) {
+                return i + 1;
+            }
+        }
+        for (int i = 0; i <= 1; i++) {
             View grip = clockEdgeHandles[i];
             if (grip == null || grip.getVisibility() != View.VISIBLE) continue;
             int[] loc = new int[2];
@@ -4746,34 +4758,32 @@ public class MainActivity extends Activity {
                 // sits close to the final digit instead of in a separate slot far away.
                 // This intentional small overlap is needed for the compact corner-marker look.
                 int cornerInset = LauncherUiUtils.dp(this, 2);
+                // Counter-scaling keeps the marker's text and physical dimensions fixed.
+                // Compensate its local position for the parent's scale so its lower-right
+                // anchor follows the clock's visual lower-right corner at every size.
                 markerParams.leftMargin = Math.max(0, Math.min(
                         contentWidth - markerParams.width,
-                        (int) Math.ceil(naturalClockWidth) - markerParams.width
+                        (int) Math.ceil(naturalClockWidth)
+                                - (int) Math.ceil(markerParams.width / Math.max(0.01f, lengthScale))
                                 - cornerInset - LauncherUiUtils.dp(this, 3)));
-                // The entire panel already scales vertically. Keep this position
-                // in unscaled coordinates; scaling the margin too makes AM/PM travel
-                // faster than the background during resize.
-                int baseClockHeight = LauncherUiUtils.dp(this, 114);
-                markerParams.topMargin = Math.max(0,
-                        Math.min(rowHeight - markerParams.height,
-                                baseClockHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
+                markerParams.topMargin = Math.max(0, Math.min(
+                        rowHeight - markerParams.height,
+                        rowHeight - (int) Math.ceil(markerParams.height / Math.max(0.01f, breadthScale))
+                                - LauncherUiUtils.dp(this, 1)));
                 amPmText.setLayoutParams(markerParams);
             }
-            // For seven-segment only, shift the marker 3 dp left from the previous position
-            // (7 dp total) and 2 dp up relative to the digits. Compensate for
-            // parent scaling so the offset remains stable while resizing.
+            // Counter-scale AM/PM as well as the date so neither font changes size
+            // when the clock panel is resized. Keep offsets constant in screen pixels.
+            amPmText.setScaleX(1f / Math.max(0.01f, lengthScale));
+            amPmText.setScaleY(1f / Math.max(0.01f, breadthScale));
+            amPmText.setPivotX(0f);
+            amPmText.setPivotY(0f);
             if (sevenSegment) {
                 amPmText.setTranslationX(LauncherUiUtils.dp(this, 7) / Math.max(0.01f, lengthScale));
                 amPmText.setTranslationY(-LauncherUiUtils.dp(this, 2) / Math.max(0.01f, breadthScale));
             } else {
-                // Non-seven-segment AM/PM stays attached to the clock background.
-                // These offsets are intentionally in the panel's unscaled coordinate
-                // space: the panel's scaleX/scaleY must scale the marker's inset and
-                // requested 37 dp right / 3 dp down adjustment together with the
-                // background. Counter-scaling here left the marker outside the panel
-                // when the user reduced the clock size.
-                amPmText.setTranslationX(LauncherUiUtils.dp(this, 24));
-                amPmText.setTranslationY(LauncherUiUtils.dp(this, 3));
+                amPmText.setTranslationX(LauncherUiUtils.dp(this, 24) / Math.max(0.01f, lengthScale));
+                amPmText.setTranslationY(LauncherUiUtils.dp(this, 3) / Math.max(0.01f, breadthScale));
             }
         }
         clockText.invalidate();
