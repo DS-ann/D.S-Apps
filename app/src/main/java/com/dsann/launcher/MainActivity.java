@@ -5044,7 +5044,8 @@ public class MainActivity extends Activity {
                     item.setScaleX(prefs.getFloat(baseXKey, 1f));
                     item.setScaleY(prefs.getFloat(baseYKey, 1f));
                     prefs.edit().remove("workspace_scale_x_" + tag)
-                            .remove("workspace_scale_y_" + tag).apply();
+                            .remove("workspace_scale_y_" + tag)
+                            .remove(baseXKey).remove(baseYKey).apply();
                 }
             }
             int[] g = itemGeometry(item);
