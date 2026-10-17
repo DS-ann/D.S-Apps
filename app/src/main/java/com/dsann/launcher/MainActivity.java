@@ -4192,7 +4192,7 @@ public class MainActivity extends Activity {
                             prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex)
                                     .putFloat(KEY_SHORTCUT_X, g[0] / (float) Math.max(1, page.getWidth() - g[2]))
                                     .putFloat(KEY_SHORTCUT_Y, g[1] / (float) Math.max(1, page.getHeight() - g[3])).apply();
-
+                        }
                     }
                 }
             }
