@@ -3993,8 +3993,27 @@ public class MainActivity extends Activity {
                         char hourDigit = clockValue.charAt(firstDigit);
                         char invisibleOne = (char) (hourDigit - Character.digit(hourDigit, 10) + 1);
                         displayClock.insert(0, String.valueOf(invisibleOne));
-                        displayClock.setSpan(new android.text.style.ForegroundColorSpan(Color.TRANSPARENT),
-                                0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        // A transparent color span can be overridden by other text styling
+                        // and make the reserved '1' visible (e.g. 5:xx becomes 15:xx).
+                        // ReplacementSpan reserves the width of '1' but never draws a glyph.
+                        displayClock.setSpan(new android.text.style.ReplacementSpan() {
+                            @Override
+                            public int getSize(android.graphics.Paint paint, CharSequence text,
+                                    int start, int end, android.graphics.Paint.FontMetricsInt fm) {
+                                if (fm != null) {
+                                    android.graphics.Paint.FontMetricsInt metrics = paint.getFontMetricsInt();
+                                    fm.set(metrics);
+                                }
+                                return Math.round(paint.measureText("1"));
+                            }
+
+                            @Override
+                            public void draw(android.graphics.Canvas canvas, CharSequence text,
+                                    int start, int end, float x, int top, int y, int bottom,
+                                    android.graphics.Paint paint) {
+                                // Intentionally draw nothing; this cell only stabilizes alignment.
+                            }
+                        }, 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                 }
                 // Draw the colon's two dots at the vertical center of the clock
