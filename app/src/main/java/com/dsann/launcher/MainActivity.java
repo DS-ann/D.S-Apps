@@ -2016,14 +2016,14 @@ public class MainActivity extends Activity {
                         if (!(tag.startsWith("launcher_app:") || tag.startsWith("launcher_widget:")
                                 || "launcher_contact_shortcut".equals(tag)
                                 || "launcher_clock_widget".equals(tag))) continue;
-                        FrameLayout.LayoutParams otherLp = other.getLayoutParams() instanceof FrameLayout.LayoutParams
-                                ? (FrameLayout.LayoutParams) other.getLayoutParams() : null;
-                        int ox = otherLp != null ? otherLp.leftMargin : other.getLeft();
-                        int oy = otherLp != null ? otherLp.topMargin : other.getTop();
-                        int ow = otherLp != null && otherLp.width > 0 ? otherLp.width : other.getWidth();
-                        int oh = otherLp != null && otherLp.height > 0 ? otherLp.height : other.getHeight();
-                        if (ow > 0 && oh > 0 && android.graphics.Rect.intersects(candidate,
-                                new android.graphics.Rect(ox, oy, ox + ow, oy + oh))) {
+                        // Use the shared visual geometry helper so scaled/translated
+                        // clock bounds and pending layout changes are checked correctly.
+                        int[] otherGeometry = itemGeometry(other);
+                        if (otherGeometry[2] > 0 && otherGeometry[3] > 0
+                                && android.graphics.Rect.intersects(candidate,
+                                new android.graphics.Rect(otherGeometry[0], otherGeometry[1],
+                                        otherGeometry[0] + otherGeometry[2],
+                                        otherGeometry[1] + otherGeometry[3]))) {
                             overlap = true;
                             break;
                         }
