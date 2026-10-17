@@ -32,6 +32,8 @@ final class WidgetInteractionController {
         void showPage(int page, boolean animate);
         LinearLayout getPagesStrip();
         void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
+        void updateLiveDisplacements(FrameLayout page, View movingView);
+        void finishLiveDisplacements(boolean commit, View movingView);
         void setWorkspaceGridVisible(boolean visible, View movingView);
     }
 
