@@ -507,19 +507,10 @@ public class MainActivity extends Activity {
                 }
                 android.graphics.Rect candidate = new android.graphics.Rect(left, top, right, bottom);
 
-                boolean overlaps = false;
-                for (int i = 0; i < activePage.getChildCount(); i++) {
-                    View other = activePage.getChildAt(i);
-                    if (other == clockPanel || !isWorkspaceItem(other)) continue;
-                    int[] g = itemGeometry(other);
-                    if (g[2] <= 0 || g[3] <= 0) continue;
-                    android.graphics.Rect obstacle = new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
-                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                        overlaps = true;
-                        break;
-                    }
-                }
-                if (overlaps) return true;
+                // Resizing uses the same push-aside behavior as clock dragging.
+                // Do not stop at the first widget/icon in the way; apply the
+                // candidate rectangle and displace any colliding workspace items
+                // after the new visual bounds have been laid out.
 
                 // Convert the accepted visual rectangle back to the clock's
                 // persisted scale using its unscaled natural dimensions. Using the
@@ -555,7 +546,7 @@ public class MainActivity extends Activity {
                     breadthPercent = Math.round(clockWidgetStartBreadth
                             * (bottom - top) / (float) Math.max(1, clockWidgetStartVisualHeight));
                 }
-                lengthPercent = Math.max(80, Math.min(250, lengthPercent));
+                lengthPercent = Math.max(80, Math.min(600, lengthPercent));
                 breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
                         .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), lengthPercent)
@@ -583,6 +574,9 @@ public class MainActivity extends Activity {
                     float[] bounded = clampClockTranslation(clockPanel,
                             clockPanel.getTranslationX(), clockPanel.getTranslationY());
                     setClampedClockTranslation(bounded[0], bounded[1], true);
+                    if (clockPanel.getParent() instanceof FrameLayout) {
+                        updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
+                    }
                     updateClockResizeHandles();
                 });
                 return true;
@@ -1991,7 +1985,15 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 48), Math.min(desiredTileWidth, desiredTileHeight)));
+        float initialShortcutScale = Math.min(
+                desiredTileWidth / (float) Math.max(1, cellW),
+                desiredTileHeight / (float) Math.max(1, cellH));
+        int configuredShortcutIconDp = Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48));
+        int initialIconSize = Math.max(LauncherUiUtils.dp(this, 24),
+                Math.min(LauncherUiUtils.dp(this, 120),
+                        Math.min(Math.min(desiredTileWidth, desiredTileHeight),
+                                Math.round(LauncherUiUtils.dp(this, configuredShortcutIconDp)
+                                        * initialShortcutScale))));
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         tileContent.setGravity(Gravity.CENTER);
         tileContent.setOrientation(LinearLayout.VERTICAL);
@@ -2032,7 +2034,12 @@ public class MainActivity extends Activity {
             grip.setTag("launcher_shortcut_resize_handle");
             // Full-length edge strips make resizing reliable on small phone screens.
             // The strips are children of the shortcut so their touch targets track its bounds.
-            int thick = LauncherUiUtils.dp(this, 28);
+            // Keep opposite edge handles from covering each other on compact
+            // shortcuts; overlapping 28dp strips made one horizontal/vertical
+            // resize edge steal the other edge's touch stream.
+            int thick = Math.max(LauncherUiUtils.dp(this, 12),
+                    Math.min(LauncherUiUtils.dp(this, 20),
+                            Math.min(tileWidth, tileHeight) / 3));
             FrameLayout.LayoutParams gripParams;
             if (edge < 2) {
                 gripParams = new FrameLayout.LayoutParams(thick,
@@ -2280,11 +2287,19 @@ public class MainActivity extends Activity {
                         lp.leftMargin = left;
                         lp.topMargin = top;
                         tile.setLayoutParams(lp);
-                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), currentPage)
+                        float density = getResources().getDisplayMetrics().density;
+                        int pageIndex = pagesStrip == null ? currentPage : pagesStrip.indexOfChild(page);
+                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
+                                        pageIndex >= 0 ? pageIndex : currentPage)
                                 .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
                                         left / (float) Math.max(1, page.getWidth() - tile.getWidth()))
                                 .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                                        top / (float) Math.max(1, page.getHeight() - tile.getHeight())).apply();
+                                        top / (float) Math.max(1, page.getHeight() - tile.getHeight()))
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
+                                        Math.max(1, Math.round(lp.width / density)))
+                                .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
+                                        Math.max(1, Math.round(lp.height / density)))
+                                .apply();
                     }
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                     setWorkspaceGridVisible(false, null);
@@ -5650,7 +5665,7 @@ public class MainActivity extends Activity {
     private int getClockLength() {
         int fallback = activeClockPage == 0 && prefs != null
                 ? prefs.getInt(KEY_CLOCK_LENGTH, 100) : 100;
-        return Math.max(80, Math.min(250, prefs == null ? 100
+        return Math.max(80, Math.min(600, prefs == null ? 100
                 : prefs.getInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), fallback)));
     }
 
