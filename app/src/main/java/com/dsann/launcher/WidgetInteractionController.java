@@ -499,8 +499,8 @@ final class WidgetInteractionController {
                     down[0] = event.getRawX(); down[1] = event.getRawY();
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                     origin[0] = current.leftMargin; origin[1] = current.topMargin;
-                    origin[2] = current.resizeWidth > 0 ? current.resizeWidth : container.getWidth();
-                    origin[3] = current.resizeHeight > 0 ? current.resizeHeight : container.getHeight();
+                    origin[2] = current.width > 0 ? current.width : container.getWidth();
+                    origin[3] = current.height > 0 ? current.height : container.getHeight();
                     container.getParent().requestDisallowInterceptTouchEvent(true);
                     return true;
                 }
@@ -530,7 +530,7 @@ final class WidgetInteractionController {
                         if (android.graphics.Rect.intersects(candidate, workspaceBounds(other))) { overlap = true; break; }
                     }
                     if (!overlap) {
-                        current.leftMargin = left; current.topMargin = top; current.resizeWidth = resizeWidth; current.resizeHeight = resizeHeight;
+                        current.leftMargin = left; current.topMargin = top; current.width = resizeWidth; current.height = resizeHeight;
                         container.setLayoutParams(current);
                     }
                     listener.setWorkspaceGridVisible(false, null);
@@ -541,12 +541,12 @@ final class WidgetInteractionController {
                     FrameLayout.LayoutParams finalParams = (FrameLayout.LayoutParams) container.getLayoutParams();
                     if (action == MotionEvent.ACTION_CANCEL) {
                         finalParams.leftMargin = origin[0]; finalParams.topMargin = origin[1];
-                        finalParams.resizeWidth = origin[2]; finalParams.resizeHeight = origin[3]; container.setLayoutParams(finalParams);
+                        finalParams.width = origin[2]; finalParams.height = origin[3]; container.setLayoutParams(finalParams);
                     }
                     if (container.getChildAt(0) instanceof AppWidgetHostView) {
                         WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
                                 widgetId, (AppWidgetHostView) container.getChildAt(0),
-                                activity.getResources().getDisplayMetrics().density, finalParams.resizeWidth, finalParams.resizeHeight);
+                                activity.getResources().getDisplayMetrics().density, finalParams.width, finalParams.height);
                     }
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout)
