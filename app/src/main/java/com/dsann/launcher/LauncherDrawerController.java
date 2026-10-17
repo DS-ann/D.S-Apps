@@ -60,18 +60,16 @@ final class LauncherDrawerController {
         title.setGravity(Gravity.CENTER);
         title.setTypeface(android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL));
         title.setLetterSpacing(0.015f);
-        headerRow.addView(title, new LinearLayout.LayoutParams(0, -1, 1f));
+        headerRow.addView(title, new LinearLayout.LayoutParams(-1, -1));
         final TextView searchButton = LauncherUiUtils.text(activity, "⌕", 27,
                 android.graphics.Color.WHITE, true);
         searchButton.setGravity(Gravity.CENTER);
         searchButton.setContentDescription("Search apps");
         searchButton.setBackgroundResource(android.R.drawable.list_selector_background);
-        searchButton.setPadding(LauncherUiUtils.dp(activity, 10), 0,
-                LauncherUiUtils.dp(activity, 10), 0);
-        headerRow.addView(searchButton, new LinearLayout.LayoutParams(
-                LauncherUiUtils.dp(activity, 44), -1));
+        searchButton.setPadding(0, 0, 0, 0);
         screen.addView(headerRow, headerParams);
 
+        FrameLayout drawerBody = new FrameLayout(activity);
         GridView grid = new GridView(activity);
         grid.setNumColumns(actions.getColumns());
         grid.setVerticalSpacing(LauncherUiUtils.dp(activity, spacing));
@@ -87,7 +85,12 @@ final class LauncherDrawerController {
                     }
                 });
         grid.setAdapter(adapter);
-        screen.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
+        drawerBody.addView(grid, new FrameLayout.LayoutParams(-1, -1));
+        FrameLayout.LayoutParams floatingSearchParams = new FrameLayout.LayoutParams(
+                LauncherUiUtils.dp(activity, 44), LauncherUiUtils.dp(activity, 44),
+                Gravity.RIGHT | Gravity.BOTTOM);
+        drawerBody.addView(searchButton, floatingSearchParams);
+        screen.addView(drawerBody, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         // Keep the inline query field immediately under the header so it remains visible
         // above the keyboard on Android 6 even when adjustResize is ineffective.
