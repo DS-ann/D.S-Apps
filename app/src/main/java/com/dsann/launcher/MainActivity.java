@@ -1675,8 +1675,7 @@ public class MainActivity extends Activity {
                         boolean occupied = false;
                         for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                             View child = page.getChildAt(childIndex);
-                            if ("launcher_contact_shortcut".equals(child.getTag())
-                                    || "launcher_clock_widget".equals(child.getTag())) continue;
+                            if ("launcher_contact_shortcut".equals(child.getTag())) continue;
                             FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
                                     ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
                             int childLeft = p != null ? p.leftMargin : child.getLeft();
@@ -1819,7 +1818,8 @@ public class MainActivity extends Activity {
                             String otherTag = (String) other.getTag();
                             if (!otherTag.startsWith("launcher_app:")
                                     && !otherTag.startsWith("launcher_widget:")
-                                    && !"launcher_contact_shortcut".equals(otherTag)) continue;
+                                    && !"launcher_contact_shortcut".equals(otherTag)
+                                    && !"launcher_clock_widget".equals(otherTag)) continue;
                             FrameLayout.LayoutParams otherParams =
                                     (FrameLayout.LayoutParams) other.getLayoutParams();
                             int otherWidth = other.getWidth() > 0 ? other.getWidth() : otherParams.width;
