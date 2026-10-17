@@ -5560,7 +5560,6 @@ public class MainActivity extends Activity {
                     if (!blocked) { bestX = candidateX; bestY = candidateY; break outerScan; }
                     }
                 }
-                }
             }
             if (bestX < 0) continue;
             ViewGroup oldParent = (ViewGroup) item.getParent();
