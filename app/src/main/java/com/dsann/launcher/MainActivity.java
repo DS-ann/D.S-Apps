@@ -356,7 +356,6 @@ public class MainActivity extends Activity {
             if (!gestureStartedOnClock && clockWidgetMoving && !clockWidgetEditing) {
                 handler.removeCallbacks(clockWidgetLongPress);
                 handler.removeCallbacks(clockWidgetEditLongPress);
-                LauncherUiUtils.stopMoveHint(clockPanel);
                 showClockMoveBorder(false);
                 clockWidgetMoving = false;
                 clockWidgetLongPressActivated = false;
@@ -1031,7 +1030,6 @@ public class MainActivity extends Activity {
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
         handler.removeCallbacks(clockWidgetEditLongPress);
-        LauncherUiUtils.stopMoveHint(clockPanel);
         clockWidgetMoving = false;
         clockWidgetLongPressActivated = false;
         clockUpdatesActive = false;
@@ -1307,19 +1305,8 @@ public class MainActivity extends Activity {
         clockText.setLetterSpacing(0f);
         applyClockStyle();
         clockGroup.addView(clockText);
-        amPmText = new TextView(this);
-        amPmText.setTextColor(clockText.getCurrentTextColor());
-        amPmText.setTextSize(8);
-        amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        amPmText.setGravity(Gravity.CENTER);
-        amPmText.setIncludeFontPadding(false);
-        amPmText.setPadding(0, 0, 0, 0);
-        // AM/PM sits inside the clock, centered in the vertical gap between
-        // the colon dots rather than outside the digits at the right edge.
-        FrameLayout.LayoutParams markerParams = new FrameLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 20),
-                Gravity.CENTER);
-        clockGroup.addView(amPmText, markerParams);
+        // AM/PM is shown at the start of the date line, never over the clock digits.
+        amPmText = null;
         FrameLayout.LayoutParams groupParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
                 clockGravity() | Gravity.CENTER_VERTICAL);
@@ -1449,17 +1436,8 @@ public class MainActivity extends Activity {
         digits.setLetterSpacing(0f);
         group.addView(digits);
 
-        TextView marker = new TextView(this);
-        marker.setTextColor(digits.getCurrentTextColor());
-        marker.setTextSize(8);
-        marker.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        marker.setGravity(Gravity.CENTER);
-        marker.setIncludeFontPadding(false);
-        marker.setPadding(0, 0, 0, 0);
-        // Keep AM/PM inside the clock and centered between the colon dots.
-        group.addView(marker, new FrameLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 20),
-                Gravity.CENTER));
+        // AM/PM is displayed at the start of the date line, not over the digits.
+        TextView marker = null;
         row.addView(group, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
                 Gravity.RIGHT | Gravity.CENTER_VERTICAL));
@@ -3907,8 +3885,12 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
         Date now = new Date();
-        String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
         boolean use24Hour = DateFormat.is24HourFormat(this);
+        String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
+        if (!use24Hour) {
+            String period = new SimpleDateFormat("a", Locale.getDefault()).format(now);
+            dateValue = period + "  " + dateValue;
+        }
         int restorePage = Math.max(0, Math.min(1, currentPage));
         for (int page = 0; page < clockPanelsByPage.length; page++) {
             activateClockForPage(page);
@@ -4082,6 +4064,13 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(false, null);
                     updateClockResizeHandles();
                 }
+                // Move-ready is a press-and-hold hint only. Releasing the finger
+                // or cancelling the gesture removes its outline and grid immediately.
+                if (!clockWidgetEditing && clockWidgetMoving) {
+                    showClockMoveBorder(false);
+                    clockWidgetMoving = false;
+                    setWorkspaceGridVisible(false, null);
+                }
                 // A long press intentionally leaves the grips visible after ACTION_UP.
                 // Only the root's outside-tap check dismisses edit mode.
                 clockWidgetLongPressActivated = false;
@@ -4113,8 +4102,9 @@ public class MainActivity extends Activity {
 
     private final Runnable clockWidgetEditLongPress = () -> {
         if (clockPanel == null || drawerOpen) return;
+        // Keep the configured length scale intact when entering edit mode.
         showClockMoveBorder(false);
-        LauncherUiUtils.stopMoveHint(clockPanel);
+        clockWidgetMoving = false;
         clockWidgetLongPressActivated = true;
         clockWidgetEditing = true;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
@@ -4141,7 +4131,6 @@ public class MainActivity extends Activity {
 
     private void exitClockWidgetEditMode() {
         showClockMoveBorder(false);
-        LauncherUiUtils.stopMoveHint(clockPanel);
         clockWidgetMoving = false;
         clockWidgetLongPressActivated = false;
         handler.removeCallbacks(clockWidgetLongPress);
