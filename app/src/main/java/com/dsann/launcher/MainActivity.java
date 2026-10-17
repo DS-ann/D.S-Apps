@@ -1486,7 +1486,7 @@ public class MainActivity extends Activity {
         // Check the complete resized shortcut footprint, not only its first grid cell.
         // Default contact shortcuts use a compact visual footprint, not a full
         // invisible grid cell. Explicitly resized shortcuts retain their saved size.
-        int compactShortcutSize = LauncherUiUtils.dp(this, 64);
+        int compactShortcutSize = LauncherUiUtils.dp(this, 48);
         // Old builds could persist an oversized footprint even before the user
         // deliberately resized it. Normalize those legacy values on restore.
         if (savedWidthDp > 96 || savedHeightDp > 96) {
@@ -1497,8 +1497,8 @@ public class MainActivity extends Activity {
         }
         // A direct-call shortcut is an app-like icon, not a miniature widget tile.
         // Its default footprint is the same compact size as the app icon cell.
-        int defaultShortcutWidth = LauncherUiUtils.dp(this, 28);
-        int defaultShortcutHeight = LauncherUiUtils.dp(this, 28);
+        int defaultShortcutWidth = LauncherUiUtils.dp(this, 48);
+        int defaultShortcutHeight = LauncherUiUtils.dp(this, 48);
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
                         : Math.min(cellW, defaultShortcutWidth)));
@@ -1669,7 +1669,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 28), Math.min(desiredTileWidth, desiredTileHeight)));
+        int initialIconSize = Math.max(1, Math.min(LauncherUiUtils.dp(this, 48), Math.min(desiredTileWidth, desiredTileHeight)));
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         tileContent.setGravity(Gravity.CENTER);
         tileContent.setOrientation(LinearLayout.VERTICAL);
@@ -1764,6 +1764,14 @@ public class MainActivity extends Activity {
                             p.height = previousHeight;
                         }
                         tile.setLayoutParams(p);
+                        // Keep the label below the resized icon tile instead of letting it
+                        // remain at the original height and overlap the icon.
+                        ViewGroup.LayoutParams rawLabel = label.getLayoutParams();
+                        if (rawLabel instanceof FrameLayout.LayoutParams) {
+                            FrameLayout.LayoutParams labelLp = (FrameLayout.LayoutParams) rawLabel;
+                            labelLp.topMargin = p.height + LauncherUiUtils.dp(this, 3);
+                            label.setLayoutParams(labelLp);
+                        }
                         refreshWorkspaceGrid();
                         // Grow the actual contact/app icon as the tile grows; changing only
                         // the tile bounds leaves the icon visually stuck at its original size.
@@ -1773,9 +1781,9 @@ public class MainActivity extends Activity {
                         float widthScale = (float) p.width / (float) cellW;
                         float heightScale = (float) p.height / (float) cellH;
                         float tileScale = Math.min(widthScale, heightScale);
-                        int iconSize = Math.max(LauncherUiUtils.dp(this, 28),
+                        int iconSize = Math.max(LauncherUiUtils.dp(this, 48),
                                 Math.min(LauncherUiUtils.dp(this, 96),
-                                        Math.round(LauncherUiUtils.dp(this, 28) * tileScale)));
+                                        Math.round(LauncherUiUtils.dp(this, 48) * tileScale)));
                         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
                         if (iconParams != null && (iconParams.width != iconSize || iconParams.height != iconSize)) {
                             iconParams.width = iconSize;
@@ -3274,16 +3282,34 @@ public class MainActivity extends Activity {
                     : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
             int minWidth = LauncherUiUtils.dp(this, Math.max(0, info.minWidth));
             int minHeight = LauncherUiUtils.dp(this, Math.max(0, info.minHeight));
-            int width = Math.min(Math.max(LauncherUiUtils.dp(this, 180), minWidth),
-                    Math.max(LauncherUiUtils.dp(this, 140), availableWidth - LauncherUiUtils.dp(this, 16)));
-            int height = Math.min(Math.max(LauncherUiUtils.dp(this, 100), minHeight),
-                    Math.max(LauncherUiUtils.dp(this, 90), availableHeight - LauncherUiUtils.dp(this, 80)));
+            // Start closer to the provider's requested dimensions instead of forcing
+            // every widget into a large 180x100dp footprint that hides usable space.
+            int width = Math.min(Math.max(LauncherUiUtils.dp(this, 96), minWidth),
+                    Math.max(LauncherUiUtils.dp(this, 96), availableWidth - LauncherUiUtils.dp(this, 16)));
+            int height = Math.min(Math.max(LauncherUiUtils.dp(this, 72), minHeight),
+                    Math.max(LauncherUiUtils.dp(this, 72), availableHeight - LauncherUiUtils.dp(this, 80)));
             AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
             widget.setAppWidget(widgetId, info);
+            widget.setPadding(0, 0, 0, 0);
             int[] freeWidgetPosition = findFreeWidgetPosition(page, width, height);
+            if (freeWidgetPosition == null && pagesStrip != null) {
+                // A free rectangle may exist on the other workspace page. Try it before
+                // reporting that the widget cannot fit.
+                int otherPageIndex = targetPage == 0 ? 1 : 0;
+                if (otherPageIndex < pagesStrip.getChildCount()
+                        && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
+                    FrameLayout otherPage = (FrameLayout) pagesStrip.getChildAt(otherPageIndex);
+                    int[] otherPosition = findFreeWidgetPosition(otherPage, width, height);
+                    if (otherPosition != null) {
+                        page = otherPage;
+                        targetPage = otherPageIndex;
+                        freeWidgetPosition = otherPosition;
+                    }
+                }
+            }
             if (freeWidgetPosition == null) {
                 try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
-                Toast.makeText(this, "No free space large enough for this widget on that screen", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "No free space large enough for this widget on either screen", Toast.LENGTH_LONG).show();
                 return;
             }
             addWidgetContainer(page, widget, widgetId, targetPage, freeWidgetPosition[0], freeWidgetPosition[1], width, height);
