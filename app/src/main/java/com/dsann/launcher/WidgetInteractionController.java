@@ -45,12 +45,10 @@ final class WidgetInteractionController {
     private final Listener listener;
     private static final class EditChrome {
         final View container;
-        final View resizeHandle;
+        final View[] resizeHandles;
         final Runnable clear;
-        EditChrome(View container, View resizeHandle, Runnable clear) {
-            this.container = container;
-            this.resizeHandle = resizeHandle;
-            this.clear = clear;
+        EditChrome(View container, View[] resizeHandles, Runnable clear) {
+            this.container = container; this.resizeHandles = resizeHandles; this.clear = clear;
         }
     }
     private final java.util.ArrayList<EditChrome> editChrome = new java.util.ArrayList<>();
@@ -63,11 +61,13 @@ final class WidgetInteractionController {
                 editChrome.remove(i);
                 continue;
             }
-            if (chrome.resizeHandle.getVisibility() != View.VISIBLE) continue;
-            int[] location = new int[2];
-            chrome.resizeHandle.getLocationOnScreen(location);
-            boolean onHandle = rawX >= location[0] && rawX < location[0] + chrome.resizeHandle.getWidth()
-                    && rawY >= location[1] && rawY < location[1] + chrome.resizeHandle.getHeight();
+            boolean onHandle = false;
+            for (View handle : chrome.resizeHandles) {
+                if (handle == null || handle.getVisibility() != View.VISIBLE) continue;
+                int[] location = new int[2]; handle.getLocationOnScreen(location);
+                if (rawX >= location[0] && rawX < location[0] + handle.getWidth()
+                        && rawY >= location[1] && rawY < location[1] + handle.getHeight()) { onHandle = true; break; }
+            }
             if (!onHandle) chrome.clear.run();
         }
     }
@@ -131,15 +131,22 @@ final class WidgetInteractionController {
         widget.setTag("launcher_widget_content:" + widgetId);
         widget.setFocusable(true);
         container.addView(widget, new FrameLayout.LayoutParams(-1, -1));
-        final View resizeHandle = new View(activity);
-        resizeHandle.setTag("launcher_widget_resize_handle");
-        GradientDrawable handleBg = new GradientDrawable();
-        handleBg.setColor(Color.rgb(115, 159, 255));
-        handleBg.setCornerRadius(LauncherUiUtils.dp(activity, 5));
-        resizeHandle.setBackground(handleBg);
-        resizeHandle.setVisibility(View.GONE);
-        FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(LauncherUiUtils.dp(activity, 26), LauncherUiUtils.dp(activity, 26), Gravity.RIGHT | Gravity.BOTTOM);
-        container.addView(resizeHandle, handleLp);
+        final View[] resizeHandles = new View[4];
+        for (int edge = 0; edge < resizeHandles.length; edge++) {
+            View handle = new View(activity);
+            handle.setTag("launcher_widget_resize_handle");
+            GradientDrawable handleBg = new GradientDrawable();
+            handleBg.setColor(Color.rgb(115, 159, 255));
+            handleBg.setCornerRadius(LauncherUiUtils.dp(activity, 4));
+            handle.setBackground(handleBg);
+            handle.setVisibility(View.GONE);
+            int side = LauncherUiUtils.dp(activity, 28), thin = LauncherUiUtils.dp(activity, 8);
+            FrameLayout.LayoutParams handleLp = edge < 2
+                    ? new FrameLayout.LayoutParams(thin, side, edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
+                    : new FrameLayout.LayoutParams(side, thin, edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            container.addView(handle, handleLp);
+            resizeHandles[edge] = handle;
+        }
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(1, width), Math.max(1, height), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = x;
         lp.topMargin = y;
@@ -157,7 +164,7 @@ final class WidgetInteractionController {
         gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(75, 115, 159, 255), Color.argb(25, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
         FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(-1, -1, Gravity.TOP | Gravity.LEFT);
         container.addView(gestureGrip, gripLp);
-        resizeHandle.bringToFront();
+        for (View handle : resizeHandles) handle.bringToFront();
 
         final int[] editMode = {0}; // 0 idle, 1 moving
         final float[] down = {0f, 0f};
@@ -187,11 +194,11 @@ final class WidgetInteractionController {
         gestureGrip.setBackgroundColor(Color.TRANSPARENT);
         clearEditChrome[0] = () -> {
             listener.setWorkspaceGridVisible(false, null);
-            resizeHandle.setVisibility(View.GONE);
+            for (View handle : resizeHandles) handle.setVisibility(View.GONE);
             container.setBackground(null);
             gestureGrip.setBackgroundColor(Color.TRANSPARENT);
         };
-        editChrome.add(new EditChrome(container, resizeHandle, () -> {
+        editChrome.add(new EditChrome(container, resizeHandles, () -> {
             clearEditChrome[0].run();
             editMode[0] = 0;
         }));
@@ -199,7 +206,7 @@ final class WidgetInteractionController {
             editMode[0] = 1;
             LauncherUiUtils.startMoveHint(container, activity);
             listener.setWorkspaceGridVisible(false, null);
-            resizeHandle.setVisibility(View.VISIBLE);
+            for (View handle : resizeHandles) handle.setVisibility(View.VISIBLE);
             container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
             gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(20, 80, 128, 245), Color.argb(10, 54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
             Toast.makeText(activity, "Move widget", Toast.LENGTH_SHORT).show();
@@ -221,7 +228,7 @@ final class WidgetInteractionController {
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                     listener.renderHomePages(false);
                 } else if (which == 1) {
-                    resizeHandle.setVisibility(View.VISIBLE);
+                    for (View handle : resizeHandles) handle.setVisibility(View.VISIBLE);
                     container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
                 }
@@ -442,85 +449,72 @@ final class WidgetInteractionController {
             if (!childCanceled[0]) widget.dispatchTouchEvent(event);
             return true;
         });
-        resizeHandle.setOnTouchListener((v, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                listener.setWorkspaceGridVisible(false, null);
-                down[0] = event.getRawX(); down[1] = event.getRawY();
-                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                origin[2] = current.width; origin[3] = current.height;
-                return true;
-            }
-            if (action == MotionEvent.ACTION_MOVE) {
-                FrameLayout activePage = container.getParent() instanceof FrameLayout
-                        ? (FrameLayout) container.getParent() : page;
-                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                int previousWidth = current.width;
-                int previousHeight = current.height;
-                // Clamp the minimum size to the space actually available. On narrow
-                // Android 6 phones, forcing a 140dp/90dp minimum after the max clamp
-                // can push the widget outside the workspace.
-                int availableWidth = Math.max(1, activePage.getWidth() - current.leftMargin);
-                int availableHeight = Math.max(1, activePage.getHeight() - current.topMargin);
-                int minimumWidth = Math.min(LauncherUiUtils.dp(activity, 140), availableWidth);
-                int minimumHeight = Math.min(LauncherUiUtils.dp(activity, 90), availableHeight);
-                current.width = Math.max(minimumWidth, Math.min(availableWidth,
-                        origin[2] + Math.round(event.getRawX() - down[0])));
-                current.height = Math.max(minimumHeight, Math.min(availableHeight,
-                        origin[3] + Math.round(event.getRawY() - down[1])));
-                // Resizing may not grow through another widget. Reject the proposed
-                // frame rather than allowing overlapping AppWidgetHostViews.
-                boolean overlapsWidget = false;
-                int right = current.leftMargin + current.width;
-                int bottom = current.topMargin + current.height;
-                for (int i = 0; i < activePage.getChildCount(); i++) {
-                    View other = activePage.getChildAt(i);
-                    if (other == container || !(other.getTag() instanceof String)
-                            || !((String) other.getTag()).startsWith("launcher_widget:")) continue;
-                    FrameLayout.LayoutParams otherParams =
-                            (FrameLayout.LayoutParams) other.getLayoutParams();
-                    int otherRight = otherParams.leftMargin + other.getWidth();
-                    int otherBottom = otherParams.topMargin + other.getHeight();
-                    if (current.leftMargin < otherRight && right > otherParams.leftMargin
-                            && current.topMargin < otherBottom && bottom > otherParams.topMargin) {
-                        overlapsWidget = true;
-                        break;
+        for (int edge = 0; edge < resizeHandles.length; edge++) {
+            final int resizeEdge = edge;
+            resizeHandles[edge].setOnTouchListener((v, event) -> {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    listener.setWorkspaceGridVisible(false, null);
+                    down[0] = event.getRawX(); down[1] = event.getRawY();
+                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    origin[0] = current.leftMargin; origin[1] = current.topMargin;
+                    origin[2] = current.width > 0 ? current.width : container.getWidth();
+                    origin[3] = current.height > 0 ? current.height : container.getHeight();
+                    container.getParent().requestDisallowInterceptTouchEvent(true);
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_MOVE) {
+                    FrameLayout activePage = container.getParent() instanceof FrameLayout ? (FrameLayout) container.getParent() : page;
+                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    int dx = Math.round(event.getRawX() - down[0]), dy = Math.round(event.getRawY() - down[1]);
+                    int minW = Math.min(LauncherUiUtils.dp(activity, 140), Math.max(1, activePage.getWidth()));
+                    int minH = Math.min(LauncherUiUtils.dp(activity, 90), Math.max(1, activePage.getHeight()));
+                    int left = origin[0], top = origin[1], width = origin[2], height = origin[3];
+                    if (resizeEdge == 0) { width = Math.max(minW, origin[2] - dx); left = origin[0] + origin[2] - width; }
+                    else if (resizeEdge == 1) width = Math.max(minW, origin[2] + dx);
+                    else if (resizeEdge == 2) { height = Math.max(minH, origin[3] - dy); top = origin[1] + origin[3] - height; }
+                    else height = Math.max(minH, origin[3] + dy);
+                    left = Math.max(0, Math.min(left, Math.max(0, activePage.getWidth() - minW)));
+                    top = Math.max(0, Math.min(top, Math.max(0, activePage.getHeight() - minH)));
+                    width = Math.max(minW, Math.min(width, Math.max(minW, activePage.getWidth() - left)));
+                    height = Math.max(minH, Math.min(height, Math.max(minH, activePage.getHeight() - top)));
+                    android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + width, top + height);
+                    boolean overlap = false;
+                    for (int i = 0; i < activePage.getChildCount(); i++) {
+                        View other = activePage.getChildAt(i);
+                        if (other == container || !(other.getTag() instanceof String)) continue;
+                        String tag = (String) other.getTag();
+                        if (!(tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
+                                || "launcher_contact_shortcut".equals(tag) || "launcher_clock_widget".equals(tag))) continue;
+                        if (android.graphics.Rect.intersects(candidate, workspaceBounds(other))) { overlap = true; break; }
                     }
+                    if (!overlap) {
+                        current.leftMargin = left; current.topMargin = top; current.width = width; current.height = height;
+                        container.setLayoutParams(current);
+                    }
+                    listener.setWorkspaceGridVisible(false, null);
+                    return true;
                 }
-                if (overlapsWidget) {
-                    current.width = previousWidth;
-                    current.height = previousHeight;
-                }
-                container.setLayoutParams(current);
-                listener.setWorkspaceGridVisible(false, null);
-                return true;
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                listener.setWorkspaceGridVisible(false, null);
-                FrameLayout.LayoutParams finalParams =
-                        (FrameLayout.LayoutParams) container.getLayoutParams();
-                if (action == MotionEvent.ACTION_CANCEL) {
-                    // A cancelled resize must not commit a partial size. Restore the
-                    // dimensions captured at ACTION_DOWN, just as a cancelled move
-                    // restores its original position.
-                    finalParams.width = origin[2];
-                    finalParams.height = origin[3];
-                    container.setLayoutParams(finalParams);
-                }
-                if (container.getChildAt(0) instanceof AppWidgetHostView) {
-                    WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
-                            widgetId, (AppWidgetHostView) container.getChildAt(0),
-                            activity.getResources().getDisplayMetrics().density,
-                            finalParams.width, finalParams.height);
-                }
-                listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
-                if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout) {
-                    listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    listener.setWorkspaceGridVisible(false, null);
+                    FrameLayout.LayoutParams finalParams = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    if (action == MotionEvent.ACTION_CANCEL) {
+                        finalParams.leftMargin = origin[0]; finalParams.topMargin = origin[1];
+                        finalParams.width = origin[2]; finalParams.height = origin[3]; container.setLayoutParams(finalParams);
+                    }
+                    if (container.getChildAt(0) instanceof AppWidgetHostView) {
+                        WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
+                                widgetId, (AppWidgetHostView) container.getChildAt(0),
+                                activity.getResources().getDisplayMetrics().density, finalParams.width, finalParams.height);
+                    }
+                    listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
+                    if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout)
+                        listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
+                    return true;
                 }
                 return true;
-            }
-            return true;
-        });
+            });
+        }
     
     }
 }
