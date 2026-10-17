@@ -136,15 +136,15 @@ public final class SevenSegmentClockTextView extends TextView {
         // Intentionally let the left half of the first hour digit sit beyond
         // the clock background's left edge, matching the requested clipped LED look.
         // The colon and minute digits move together with the hour digits.
-        float dotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
-        // Position the hour and minute as two groups around the fixed colon.
-        // This keeps the dots between the two groups instead of moving only the dots
-        // over an otherwise left-aligned string. A blank leading hour cell still
-        // reserves the same space as a two-digit hour.
+        float baseDotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
+        // Keep the hour digits anchored where they were. Move the colon 15dp
+        // right, then leave a further 15dp gap before the minute group.
         float hourStartX = colonIndex >= 0
-                ? dotX - unit * 0.17f - (colonIndex * advance)
+                ? baseDotX - unit * 0.17f - (colonIndex * advance)
                 : leftBound + (availableWidth - totalWidth) / 2f;
-        float minuteStartX = dotX + unit * 0.17f;
+        float dp = getResources().getDisplayMetrics().density;
+        float dotX = baseDotX + 15f * dp;
+        float minuteStartX = dotX + unit * 0.17f + 15f * dp;
         int horizontalGravity = getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
         if (colonIndex < 0 && horizontalGravity == Gravity.LEFT) hourStartX = leftBound;
         else if (colonIndex < 0 && horizontalGravity == Gravity.RIGHT) {
