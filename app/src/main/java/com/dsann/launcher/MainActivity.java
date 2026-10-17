@@ -4721,21 +4721,24 @@ public class MainActivity extends Activity {
     }
 
     private int getClockLength() {
+        int fallback = activeClockPage == 0 && prefs != null
+                ? prefs.getInt(KEY_CLOCK_LENGTH, 100) : 100;
         return Math.max(80, Math.min(250, prefs == null ? 100
-                : prefs.getInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage),
-                        prefs.getInt(KEY_CLOCK_LENGTH, 100))));
+                : prefs.getInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), fallback)));
     }
 
     private int getClockBreadth() {
+        int fallback = activeClockPage == 0 && prefs != null
+                ? prefs.getInt(KEY_CLOCK_BREADTH, 100) : 100;
         return Math.max(80, Math.min(250, prefs == null ? 100
-                : prefs.getInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage),
-                        prefs.getInt(KEY_CLOCK_BREADTH, 100))));
+                : prefs.getInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), fallback)));
     }
 
     private int getClockPosition() {
+        int fallback = activeClockPage == 0 && prefs != null
+                ? prefs.getInt(KEY_CLOCK_POSITION, 2) : 2;
         return Math.max(0, Math.min(2, prefs == null ? 2
-                : prefs.getInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage),
-                        prefs.getInt(KEY_CLOCK_POSITION, 2))));
+                : prefs.getInt(clockPrefKey(KEY_CLOCK_POSITION, activeClockPage), fallback)));
     }
 
     private float getEffectiveClockLengthScale() {
