@@ -102,6 +102,7 @@ public class MainActivity extends Activity {
     private static final String KEY_SHORTCUT_SPAN_Y = "contact_shortcut_span_y";
     private static final String KEY_SHORTCUT_WIDTH_DP = "contact_shortcut_width_dp";
     private static final String KEY_SHORTCUT_HEIGHT_DP = "contact_shortcut_height_dp";
+    private static final String KEY_SHORTCUT_ICON_SIZE_DP = "contact_shortcut_icon_size_dp";
     private static final String KEY_SHORTCUT_X = "contact_shortcut_x";
     private static final String KEY_SHORTCUT_Y = "contact_shortcut_y";
     private static final int REQUEST_WALLPAPER = 7301;
@@ -1719,7 +1720,8 @@ public class MainActivity extends Activity {
                 String id = "legacy";
                 String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
                         KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
-                        KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
+                        KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_ICON_SIZE_DP,
+                        KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
                 android.content.SharedPreferences.Editor edit = prefs.edit();
                 for (String key : keys) {
                     if (!prefs.contains(key)) continue;
@@ -1743,7 +1745,8 @@ public class MainActivity extends Activity {
     private void removeSavedShortcut(String id) {
         String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
                 KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
-                KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
+                KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_ICON_SIZE_DP,
+                KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
         android.content.SharedPreferences.Editor edit = prefs.edit();
         for (String key : keys) edit.remove(shortcutPrefKey(key, id));
         java.util.ArrayList<String> ids = getSavedShortcutIds();
@@ -1985,15 +1988,17 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        float initialShortcutScale = Math.min(
-                desiredTileWidth / (float) Math.max(1, cellW),
-                desiredTileHeight / (float) Math.max(1, cellH));
-        int configuredShortcutIconDp = Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48));
+        // Keep the shortcut icon's own size independent from the invisible
+        // collision/resize footprint. The previous render-time scale recomputed
+        // from tile bounds and made the icon shrink whenever another item triggered
+        // a workspace rebuild.
+        int configuredShortcutIconDp = Math.max(24, prefs.getInt(
+                shortcutPrefKey(KEY_SHORTCUT_ICON_SIZE_DP, shortcutId),
+                Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48))));
         int initialIconSize = Math.max(LauncherUiUtils.dp(this, 24),
                 Math.min(LauncherUiUtils.dp(this, 120),
                         Math.min(Math.min(desiredTileWidth, desiredTileHeight),
-                                Math.round(LauncherUiUtils.dp(this, configuredShortcutIconDp)
-                                        * initialShortcutScale))));
+                                LauncherUiUtils.dp(this, configuredShortcutIconDp))));
         tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
         tileContent.setGravity(Gravity.CENTER);
         tileContent.setOrientation(LinearLayout.VERTICAL);
@@ -2132,6 +2137,9 @@ public class MainActivity extends Activity {
                             iconLp.width = iconSize; iconLp.height = iconSize;
                             icon.setLayoutParams(iconLp);
                         }
+                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_ICON_SIZE_DP, shortcutId),
+                                Math.max(24, Math.round(iconSize / getResources().getDisplayMetrics().density)))
+                                .apply();
                         refreshWorkspaceGrid();
                     }
                     return true;
@@ -2262,11 +2270,13 @@ public class MainActivity extends Activity {
                                 break;
                             }
                         }
-                        if (!blocked) {
-                            lp.leftMargin = left;
-                            lp.topMargin = top;
-                            tile.setLayoutParams(lp);
-                        }
+                        // Use the same live displacement behavior as widgets so
+                        // each shortcut remains independently movable even when
+                        // another shortcut currently occupies the candidate area.
+                        lp.leftMargin = left;
+                        lp.topMargin = top;
+                        tile.setLayoutParams(lp);
+                        updateLiveDisplacements(page, tile);
                     }
                     return true;
                 }
@@ -2289,6 +2299,7 @@ public class MainActivity extends Activity {
                         tile.setLayoutParams(lp);
                         float density = getResources().getDisplayMetrics().density;
                         int pageIndex = pagesStrip == null ? currentPage : pagesStrip.indexOfChild(page);
+                        finishLiveDisplacements(true, tile);
                         prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
                                         pageIndex >= 0 ? pageIndex : currentPage)
                                 .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
