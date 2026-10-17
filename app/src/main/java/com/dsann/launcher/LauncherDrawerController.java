@@ -89,6 +89,11 @@ final class LauncherDrawerController {
         FrameLayout.LayoutParams floatingSearchParams = new FrameLayout.LayoutParams(
                 LauncherUiUtils.dp(activity, 44), LauncherUiUtils.dp(activity, 44),
                 Gravity.RIGHT | Gravity.BOTTOM);
+        // The drawer screen has 18dp side padding and 8dp bottom padding.
+        // Offset those insets so the search control itself reaches the actual
+        // bottom-right corner of the drawer surface with no visual gap.
+        floatingSearchParams.rightMargin = -LauncherUiUtils.dp(activity, 18);
+        floatingSearchParams.bottomMargin = -LauncherUiUtils.dp(activity, 8);
         drawerBody.addView(searchButton, floatingSearchParams);
         screen.addView(drawerBody, new LinearLayout.LayoutParams(-1, 0, 1f));
 
