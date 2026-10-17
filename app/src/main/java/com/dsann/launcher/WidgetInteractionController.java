@@ -150,6 +150,47 @@ final class WidgetInteractionController {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(1, width), Math.max(1, height), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = x;
         lp.topMargin = y;
+        // Choose a free rectangle before the widget becomes visible. The post-layout
+        // collision pass remains as a safety net, but initial placement must not flash
+        // or persist on top of an app, another widget, shortcut, or clock.
+        if (page.getWidth() > 0 && page.getHeight() > 0) {
+            int step = Math.max(1, LauncherUiUtils.dp(activity, 24));
+            int maxX = Math.max(0, page.getWidth() - lp.width);
+            int maxY = Math.max(0, page.getHeight() - lp.height);
+            int desiredX = Math.max(0, Math.min(maxX, x));
+            int desiredY = Math.max(0, Math.min(maxY, y));
+            int bestX = -1, bestY = -1;
+            long bestDistance = Long.MAX_VALUE;
+            for (int cy = 0; cy <= maxY; cy += step) {
+                for (int cx = 0; cx <= maxX; cx += step) {
+                    android.graphics.Rect candidate = new android.graphics.Rect(cx, cy, cx + lp.width, cy + lp.height);
+                    boolean occupied = false;
+                    for (int i = 0; i < page.getChildCount(); i++) {
+                        View other = page.getChildAt(i);
+                        if (!(other.getTag() instanceof String)) continue;
+                        String tag = (String) other.getTag();
+                        if (!(tag.startsWith("launcher_app:") || tag.startsWith("launcher_widget:")
+                                || "launcher_contact_shortcut".equals(tag)
+                                || "launcher_clock_widget".equals(tag))) continue;
+                        if (android.graphics.Rect.intersects(candidate, workspaceBounds(other))) {
+                            occupied = true;
+                            break;
+                        }
+                    }
+                    if (occupied) continue;
+                    long distance = Math.abs((long) cx - desiredX) + Math.abs((long) cy - desiredY);
+                    if (distance < bestDistance) { bestDistance = distance; bestX = cx; bestY = cy; }
+                }
+            }
+            if (bestX >= 0) {
+                lp.leftMargin = bestX;
+                lp.topMargin = bestY;
+            } else {
+                // Do not intentionally place a new widget over existing content.
+                Toast.makeText(activity, "No free space for this widget", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
         page.addView(container, lp);
         container.bringToFront();
         // First placement needs the same collision pass as a completed drag/resize.
