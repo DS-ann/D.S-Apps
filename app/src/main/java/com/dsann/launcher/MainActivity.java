@@ -5616,7 +5616,7 @@ public class MainActivity extends Activity {
         }
         boolean wasShowing = dialog.isShowing();
         if (!wasShowing) dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 24), LauncherUiUtils.dp(this, 480)),
+        if (dialog.getWindow() != null) dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 480)),
                 Math.min(getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 70), LauncherUiUtils.dp(this, 720)));
         if (restoreScrollY > 0) scroll.post(() -> scroll.scrollTo(0, restoreScrollY));
         if (animateOpening && !wasShowing) {
@@ -5755,7 +5755,7 @@ public class MainActivity extends Activity {
         // automatically instead of drawing beyond the background.
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
         final int availablePanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
-                screenWidth - LauncherUiUtils.dp(this, 24));
+                screenWidth - LauncherUiUtils.dp(this, 8));
         int measuredDateWidth = 0;
         final int configuredDateSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15)));
         final int configuredPmSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14)));
