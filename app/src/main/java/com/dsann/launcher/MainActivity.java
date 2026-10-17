@@ -5171,6 +5171,13 @@ public class MainActivity extends Activity {
             if (bestX < 0) {
                 float originalScaleX = item.getScaleX();
                 float originalScaleY = item.getScaleY();
+                if (item.getTag() instanceof String && prefs != null) {
+                    String scaleTag = (String) item.getTag();
+                    prefs.edit()
+                            .putFloat("workspace_base_scale_x_" + scaleTag, originalScaleX)
+                            .putFloat("workspace_base_scale_y_" + scaleTag, originalScaleY)
+                            .apply();
+                }
                 for (float factor = 0.90f; factor >= 0.05f && bestX < 0; factor -= 0.05f) {
                     item.setScaleX(originalScaleX * factor);
                     item.setScaleY(originalScaleY * factor);
