@@ -1015,31 +1015,21 @@ public class MainActivity extends Activity {
 
     private void updateClockResizeHandles() {
         if (clockPanel == null || root == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
-        if (!(clockPanel.getParent() instanceof View)) return;
-        // Use the exact same visual-rectangle calculation as widget collision,
-        // clamping, and resize transactions. Mixing getLocationOnScreen() with
-        // itemGeometry() caused the handles and the resize math to disagree when
-        // a panel had pending layout params, a non-central pivot, or translation.
-        View pageView = clockPanel.getParent() instanceof View
-                ? (View) clockPanel.getParent() : null;
-        if (pageView == null) return;
-        int[] geometry = itemGeometry(clockPanel);
-        int[] rootOnScreen = new int[2];
-        int[] pageOnScreen = new int[2];
-        root.getLocationOnScreen(rootOnScreen);
-        pageView.getLocationOnScreen(pageOnScreen);
-        int visualLeft = pageOnScreen[0] - rootOnScreen[0] + geometry[0];
-        int visualTop = pageOnScreen[1] - rootOnScreen[1] + geometry[1];
-        int w = Math.max(1, geometry[2]);
-        int h = Math.max(1, geometry[3]);
-        // Match the widget resizer: 18dp-thick grips, 40dp long.
-        int side = LauncherUiUtils.dp(this, 40);
-        int thin = LauncherUiUtils.dp(this, 18);
+        int[] panel = new int[2];
+        int[] rootLoc = new int[2];
+        clockPanel.getLocationOnScreen(panel);
+        root.getLocationOnScreen(rootLoc);
+        // Resize grips follow the transformed visual rectangle, not the
+        // fixed layout footprint reserved to keep home items from reflowing.
+        int w = Math.max(1, Math.round(clockPanel.getWidth() * clockPanel.getScaleX()));
+        int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
+        int side = LauncherUiUtils.dp(this, 28);
+        int thin = LauncherUiUtils.dp(this, 8);
         int[][] positions = new int[][] {
-                {visualLeft, visualTop + h / 2 - side / 2},
-                {visualLeft + w - thin, visualTop + h / 2 - side / 2},
-                {visualLeft + w / 2 - side / 2, visualTop},
-                {visualLeft + w / 2 - side / 2, visualTop + h - thin}
+                {panel[0] - rootLoc[0], panel[1] - rootLoc[1] + h / 2 - side / 2},
+                {panel[0] - rootLoc[0] + w - thin, panel[1] - rootLoc[1] + h / 2 - side / 2},
+                {panel[0] - rootLoc[0] + w / 2 - side / 2, panel[1] - rootLoc[1]},
+                {panel[0] - rootLoc[0] + w / 2 - side / 2, panel[1] - rootLoc[1] + h - thin}
         };
         for (int i = 0; i < clockEdgeHandles.length; i++) {
             View grip = clockEdgeHandles[i];
@@ -4660,59 +4650,24 @@ public class MainActivity extends Activity {
         int baseWidth = view.getWidth();
         int baseHeight = view.getHeight();
 
-        // Pending layout params must be resolved using the child's gravity.
-        // A centered/right-aligned clock can legitimately have leftMargin != getLeft();
-        // treating that margin as its actual X coordinate shifts the resize handles
-        // and makes left/right edge anchoring drift during live resizing.
+        // setLayoutParams() does not update getLeft()/getTop() synchronously.
+        // During a drag, collision resolution can run before the next measure/layout
+        // pass; use the pending FrameLayout geometry in that case, or we may approve
+        // a drop using the item's previous position and create a real overlap.
         android.view.ViewParent parent = view.getParent();
         ViewGroup.LayoutParams raw = view.getLayoutParams();
-        if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams
-                && view.isLayoutRequested()) {
-            FrameLayout page = (FrameLayout) parent;
+        if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-            if (lp.width > 0) baseWidth = lp.width;
-            if (lp.height > 0) baseHeight = lp.height;
-
-            int horizontalGravity = Gravity.getAbsoluteGravity(
-                    lp.gravity, view.getLayoutDirection()) & Gravity.HORIZONTAL_GRAVITY_MASK;
-            int verticalGravity = lp.gravity & Gravity.VERTICAL_GRAVITY_MASK;
-            int contentWidth = Math.max(0, page.getWidth()
-                    - page.getPaddingLeft() - page.getPaddingRight());
-            int contentHeight = Math.max(0, page.getHeight()
-                    - page.getPaddingTop() - page.getPaddingBottom());
-
-            if (page.getWidth() > 0) {
-                if (horizontalGravity == Gravity.RIGHT) {
-                    baseX = page.getWidth() - page.getPaddingRight()
-                            - lp.rightMargin - baseWidth;
-                } else if (horizontalGravity == Gravity.CENTER_HORIZONTAL) {
-                    baseX = page.getPaddingLeft() + (contentWidth - baseWidth) / 2
-                            + lp.leftMargin - lp.rightMargin;
-                } else {
-                    baseX = page.getPaddingLeft() + lp.leftMargin;
-                }
-            } else {
+            if (view.isLayoutRequested() || lp.leftMargin != view.getLeft()
+                    || lp.topMargin != view.getTop()) {
                 baseX = lp.leftMargin;
-            }
-
-            if (page.getHeight() > 0) {
-                if (verticalGravity == Gravity.BOTTOM) {
-                    baseY = page.getHeight() - page.getPaddingBottom()
-                            - lp.bottomMargin - baseHeight;
-                } else if (verticalGravity == Gravity.CENTER_VERTICAL) {
-                    baseY = page.getPaddingTop() + (contentHeight - baseHeight) / 2
-                            + lp.topMargin - lp.bottomMargin;
-                } else {
-                    baseY = page.getPaddingTop() + lp.topMargin;
-                }
-            } else {
                 baseY = lp.topMargin;
             }
+            if (lp.width > 0) baseWidth = lp.width;
+            if (lp.height > 0) baseHeight = lp.height;
         }
-
-        // Include translation and pivot-based scaling so the reported rectangle
-        // matches the transformed visual bounds used by resize handles and collision
-        // checks. Once layout has settled, use the actual laid-out left/top values.
+        // Include translations and scale/pivot so collision geometry matches the
+        // visible footprint, including the clock and temporary displacement animation.
         int x = Math.round(baseX + view.getTranslationX() + view.getPivotX() * (1f - sx));
         int y = Math.round(baseY + view.getTranslationY() + view.getPivotY() * (1f - sy));
         return new int[]{x, y, Math.max(1, Math.round(Math.max(1, baseWidth) * sx)),
