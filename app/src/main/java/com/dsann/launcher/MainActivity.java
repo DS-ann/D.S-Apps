@@ -4032,8 +4032,11 @@ public class MainActivity extends Activity {
                 continue;
             }
             int[] g = itemGeometry(displaced);
-            android.graphics.Rect currentRect = new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
-            if (!overlapsWithGap(movingRect, currentRect, gap)) {
+            // Test the item's saved/original slot, not its temporary pushed-aside
+            // position; otherwise it would snap back and be pushed away every frame.
+            android.graphics.Rect originalRect = new android.graphics.Rect(
+                    original[0], original[1], original[0] + g[2], original[1] + g[3]);
+            if (!overlapsWithGap(movingRect, originalRect, gap)) {
                 ViewGroup.LayoutParams raw = displaced.getLayoutParams();
                 if (raw instanceof FrameLayout.LayoutParams) {
                     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
