@@ -4967,9 +4967,18 @@ public class MainActivity extends Activity {
                 int cornerInset = LauncherUiUtils.dp(this, 2);
                 markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
                         - (int) Math.ceil((markerParams.width + cornerInset) / Math.max(0.01f, lengthScale)));
+                // Follow the rendered digit bottom, not the fixed row bottom.
+                // At short clock heights the non-LED glyph is vertically scaled around
+                // its pivot, so a fixed row-based anchor makes AM/PM float away.
+                float digitPivotY = clockText.getPivotY();
+                float digitScaleY = clockText.getScaleY();
+                float digitBottom = digitPivotY
+                        + (rowHeight - digitPivotY) * digitScaleY
+                        + clockText.getTranslationY();
                 markerParams.topMargin = Math.max(0, Math.min(
-                        rowHeight - markerParams.height,
-                        rowHeight - markerParams.height - LauncherUiUtils.dp(this, 1)));
+                        Math.max(0, rowHeight - markerParams.height),
+                        Math.round(digitBottom - markerParams.height
+                                - LauncherUiUtils.dp(this, 1))));
                 amPmText.setLayoutParams(markerParams);
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
