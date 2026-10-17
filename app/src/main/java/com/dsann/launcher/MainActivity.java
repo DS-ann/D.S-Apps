@@ -1856,6 +1856,7 @@ public class MainActivity extends Activity {
                 .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), normalizedX).putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), normalizedY).apply();
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
+        tile.setContentDescription("launcher_shortcut_id:" + shortcutId);
         tile.setClipChildren(false);
         chosenPage.setClipChildren(false);
         LinearLayout tileContent = new LinearLayout(this);
@@ -4923,26 +4924,84 @@ public class MainActivity extends Activity {
                 saveIconSlot(pkg, bestCol, bestRow, columns);
             }
         }
-        // If a widget is moved over the contact shortcut, place the shortcut again
-        // using its complete bounds and check both home pages.
-        View contactShortcut = null;
+        // Resolve collisions against every saved shortcut, not just the first one.
+        android.graphics.Rect widgetBounds = new android.graphics.Rect(wx1, wy1, wx2, wy2);
         for (int i = 0; i < page.getChildCount(); i++) {
-            View child = page.getChildAt(i);
-            if ("launcher_contact_shortcut".equals(child.getTag())) {
-                contactShortcut = child;
-                break;
-            }
-        }
-        if (contactShortcut != null) {
-            FrameLayout.LayoutParams shortcutLp = (FrameLayout.LayoutParams) contactShortcut.getLayoutParams();
-            android.graphics.Rect widgetBounds = new android.graphics.Rect(wx1, wy1, wx2, wy2);
+            View shortcut = page.getChildAt(i);
+            if (!"launcher_contact_shortcut".equals(shortcut.getTag())) continue;
+            ViewGroup.LayoutParams rawShortcutLp = shortcut.getLayoutParams();
+            if (!(rawShortcutLp instanceof FrameLayout.LayoutParams)) continue;
+            FrameLayout.LayoutParams shortcutLp = (FrameLayout.LayoutParams) rawShortcutLp;
+            int shortcutWidth = shortcutLp.width > 0 ? shortcutLp.width : shortcut.getWidth();
+            int shortcutHeight = shortcutLp.height > 0 ? shortcutLp.height : shortcut.getHeight();
             android.graphics.Rect shortcutBounds = new android.graphics.Rect(shortcutLp.leftMargin,
-                    shortcutLp.topMargin, shortcutLp.leftMargin + contactShortcut.getWidth(),
-                    shortcutLp.topMargin + contactShortcut.getHeight());
-            if (android.graphics.Rect.intersects(widgetBounds, shortcutBounds)) {
-                int pageIndex = pagesStrip == null ? 0 : pagesStrip.indexOfChild(page);
-                prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex == 0 ? 1 : 0).apply();
-                renderSavedContactShortcut();
+                    shortcutLp.topMargin, shortcutLp.leftMargin + shortcutWidth,
+                    shortcutLp.topMargin + shortcutHeight);
+            if (!android.graphics.Rect.intersects(widgetBounds, shortcutBounds)) continue;
+
+            boolean placed = false;
+            for (int row = 0; row < rows && !placed; row++) {
+                for (int col = 0; col < columns && !placed; col++) {
+                    int candidateLeft = col * cellWidth;
+                    int candidateTop = row * cellHeight;
+                    if (candidateLeft + shortcutWidth > page.getWidth()
+                            || candidateTop + shortcutHeight > page.getHeight()) continue;
+                    if (isContactShortcutPositionFree(page, shortcut, candidateLeft, candidateTop,
+                            shortcutWidth, shortcutHeight)) {
+                        shortcutLp.leftMargin = candidateLeft;
+                        shortcutLp.topMargin = candidateTop;
+                        shortcut.setLayoutParams(shortcutLp);
+                        Object description = shortcut.getContentDescription();
+                        String id = description == null ? null : description.toString()
+                                .replace("launcher_shortcut_id:", "");
+                        if (id != null && !id.isEmpty() && !id.equals(description.toString())) {
+                            prefs.edit()
+                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, id),
+                                            candidateLeft / (float) Math.max(1, page.getWidth() - shortcutWidth))
+                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, id),
+                                            candidateTop / (float) Math.max(1, page.getHeight() - shortcutHeight))
+                                    .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, id),
+                                            pagesStrip == null ? 0 : pagesStrip.indexOfChild(page))
+                                    .apply();
+                        }
+                        placed = true;
+                    }
+                }
+            }
+            if (!placed && pagesStrip != null && pagesStrip.getChildCount() > 1) {
+                int currentIndex = pagesStrip.indexOfChild(page);
+                int otherIndex = currentIndex == 0 ? 1 : 0;
+                View otherView = pagesStrip.getChildAt(otherIndex);
+                if (otherView instanceof FrameLayout) {
+                    FrameLayout otherPage = (FrameLayout) otherView;
+                    for (int row = 0; row < rows && !placed; row++) {
+                        for (int col = 0; col < columns && !placed; col++) {
+                            int candidateLeft = col * cellWidth;
+                            int candidateTop = row * cellHeight;
+                            if (candidateLeft + shortcutWidth > otherPage.getWidth()
+                                    || candidateTop + shortcutHeight > otherPage.getHeight()) continue;
+                            if (!isContactShortcutPositionFree(otherPage, null, candidateLeft, candidateTop,
+                                    shortcutWidth, shortcutHeight)) continue;
+                            ViewParent parent = shortcut.getParent();
+                            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(shortcut);
+                            shortcutLp.leftMargin = candidateLeft;
+                            shortcutLp.topMargin = candidateTop;
+                            otherPage.addView(shortcut, shortcutLp);
+                            Object description = shortcut.getContentDescription();
+                            String id = description == null ? null : description.toString()
+                                    .replace("launcher_shortcut_id:", "");
+                            if (id != null && !id.isEmpty() && !id.equals(description.toString())) {
+                                prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, id), otherIndex)
+                                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, id),
+                                                candidateLeft / (float) Math.max(1, otherPage.getWidth() - shortcutWidth))
+                                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, id),
+                                                candidateTop / (float) Math.max(1, otherPage.getHeight() - shortcutHeight))
+                                        .apply();
+                            }
+                            placed = true;
+                        }
+                    }
+                }
             }
         }
     }
