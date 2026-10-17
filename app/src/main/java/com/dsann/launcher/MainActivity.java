@@ -527,18 +527,14 @@ public class MainActivity extends Activity {
                 // by a visual-width ratio fails when the old width was capped to the
                 // page: the saved percentage then no longer represents the rendered
                 // width, especially for typography clocks with date/AM-PM extras.
-                boolean resizingSevenSegment = clockText instanceof SevenSegmentClockTextView
-                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-                // Typography clocks can have a rendered width different from their
-                // unscaled layout width because the panel is page-capped. Resize from
-                // the actual visible starting width and the saved preference instead;
-                // dividing by the unscaled width caused non-LED clocks to stop growing
-                // early even when the rest of the page was empty. Leave LED math intact.
-                int lengthPercent = resizingSevenSegment
-                        ? Math.round((right - left) * 100f
-                                / Math.max(1, clockWidgetStartPanelWidth))
-                        : Math.round(clockWidgetStartLength * (right - left) / (float)
-                                Math.max(1, clockWidgetStartVisualWidth));
+                // Match ordinary widget resizing: the finger controls the visible
+                // rectangle, and the saved size is derived from the rectangle at gesture
+                // start. Use the same visual-width ratio for every clock style. In
+                // particular, never divide by the unscaled panel width: when a clock is
+                // capped by the page width, that value no longer describes what the user
+                // sees, so the resize handle can appear stuck or jump.
+                int lengthPercent = Math.round(clockWidgetStartLength
+                        * (right - left) / (float) Math.max(1, clockWidgetStartVisualWidth));
                 int breadthPercent;
                 if (!resizingSevenSegment) {
                     // Typography clocks include a date area that does not scale with
