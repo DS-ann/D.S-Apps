@@ -402,12 +402,8 @@ public class MainActivity extends Activity {
                 float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
                 float moveX = (event.getRawX() - clockWidgetDownRawX) / density;
                 float moveY = (event.getRawY() - clockWidgetDownRawY) / density;
-                clockPanel.setTranslationX(clockWidgetStartX + moveX);
-                clockPanel.setTranslationY(clockWidgetStartY + moveY);
-                prefs.edit()
-                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
-                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
-                        .apply();
+                setClampedClockTranslation(clockWidgetStartX + moveX,
+                        clockWidgetStartY + moveY, true);
                 updateClockResizeHandles();
                 return true;
             }
@@ -445,10 +441,9 @@ public class MainActivity extends Activity {
                         float currentVisualHeight = clockPanel.getHeight() * clockPanel.getScaleY();
                         targetY += startVisualHeight - currentVisualHeight;
                     }
-                    clockPanel.setTranslationX(clockPanel.getTranslationX() + targetX - now[0]);
-                    clockPanel.setTranslationY(clockPanel.getTranslationY() + targetY - now[1]);
-                    prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
-                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY()).apply();
+                    setClampedClockTranslation(
+                            clockPanel.getTranslationX() + targetX - now[0],
+                            clockPanel.getTranslationY() + targetY - now[1], true);
                     updateClockResizeHandles();
                 });
                 return true;
@@ -3909,10 +3904,7 @@ public class MainActivity extends Activity {
                     float targetY = clockWidgetStartY + dy;
                     // The clock is a free-positioned widget: do not constrain it to
                     // the header band or reject overlaps with workspace content.
-                    clockPanel.setTranslationX(targetX);
-                    clockPanel.setTranslationY(targetY);
-                    prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
-                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY()).apply();
+                    setClampedClockTranslation(targetX, targetY, true);
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
                 } else if (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
@@ -3938,8 +3930,13 @@ public class MainActivity extends Activity {
         });
         float fallbackX = activeClockPage == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_X, 0f) : 0f;
         float fallbackY = activeClockPage == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_Y, 0f) : 0f;
-        clockPanel.setTranslationX(getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), fallbackX));
-        clockPanel.setTranslationY(getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), fallbackY));
+        float savedClockX = getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), fallbackX);
+        float savedClockY = getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), fallbackY);
+        clockPanel.post(() -> {
+            if (clockPanel == null || clockPanel.getParent() == null) return;
+            setClampedClockTranslation(savedClockX, savedClockY, true);
+            updateClockResizeHandles();
+        });
     }
 
     private final Runnable clockWidgetLongPress = () -> {
@@ -4045,6 +4042,63 @@ public class MainActivity extends Activity {
         return android.graphics.Rect.intersects(expanded, b);
     }
 
+    /**
+     * Keep the clock's scaled visual bounds inside its own home-page viewport.
+     * Translation is clamped in parent coordinates, accounting for the scale pivot
+     * so left/center/right-aligned clocks all respect the same screen edges.
+     */
+    private float[] clampClockTranslation(View panel, float translationX, float translationY) {
+        if (panel == null || !(panel.getParent() instanceof ViewGroup)) {
+            return new float[]{translationX, translationY};
+        }
+        ViewGroup parent = (ViewGroup) panel.getParent();
+        int parentWidth = parent.getWidth();
+        int parentHeight = parent.getHeight();
+        if (parentWidth <= 0 || parentHeight <= 0 || panel.getWidth() <= 0 || panel.getHeight() <= 0) {
+            return new float[]{translationX, translationY};
+        }
+        float scaleX = Math.max(0.01f, panel.getScaleX());
+        float scaleY = Math.max(0.01f, panel.getScaleY());
+        float visualWidth = panel.getWidth() * scaleX;
+        float visualHeight = panel.getHeight() * scaleY;
+        float visualLeft = panel.getLeft() + translationX
+                + panel.getPivotX() * (1f - scaleX);
+        float visualTop = panel.getTop() + translationY
+                + panel.getPivotY() * (1f - scaleY);
+        if (visualWidth <= parentWidth) {
+            if (visualLeft < 0f) translationX -= visualLeft;
+            else if (visualLeft + visualWidth > parentWidth) {
+                translationX -= visualLeft + visualWidth - parentWidth;
+            }
+        } else {
+            // If a user-selected clock size is wider than the screen, keep its
+            // left edge visible; no translation can fit the entire oversized clock.
+            translationX -= visualLeft;
+        }
+        if (visualHeight <= parentHeight) {
+            if (visualTop < 0f) translationY -= visualTop;
+            else if (visualTop + visualHeight > parentHeight) {
+                translationY -= visualTop + visualHeight - parentHeight;
+            }
+        } else {
+            translationY -= visualTop;
+        }
+        return new float[]{translationX, translationY};
+    }
+
+    private void setClampedClockTranslation(float translationX, float translationY, boolean persist) {
+        if (clockPanel == null) return;
+        float[] clamped = clampClockTranslation(clockPanel, translationX, translationY);
+        clockPanel.setTranslationX(clamped[0]);
+        clockPanel.setTranslationY(clamped[1]);
+        if (persist) {
+            prefs.edit()
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clamped[0])
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clamped[1])
+                    .apply();
+        }
+    }
+
     /** Live push-aside behavior for workspace items while a widget or shortcut is dragged. */
     private void updateLiveDisplacements(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
@@ -4054,7 +4108,9 @@ public class MainActivity extends Activity {
         if (moving[2] <= 0 || moving[3] <= 0) return;
         android.graphics.Rect movingRect = new android.graphics.Rect(
                 moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
-        int gap = LauncherUiUtils.dp(this, 5);
+        // Start moving neighbours while the dragged item approaches from any side,
+        // not only after their visible bounds already touch.
+        int gap = LauncherUiUtils.dp(this, 16);
 
         // First restore items whose saved slots are no longer covered by the drag.
         // Their original slots are reserved below so another displaced item cannot
