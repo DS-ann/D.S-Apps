@@ -4736,7 +4736,11 @@ public class MainActivity extends Activity {
             // The LED renderer reserves an invisible leading cell for 1–9 hour
             // values. Include that cell in the measured panel width too.
             if (firstHourDigits == 1 && separators > 0) digits++;
-            float clockHeight = LauncherUiUtils.dp(this, 114) * breadthScale
+            // The seven-segment renderer's natural width must not depend on
+            // the user's vertical breadth setting. Otherwise the top/bottom grips
+            // indirectly change panel width because this width is later scaled by
+            // lengthScale. Vertical resizing changes rowHeight only.
+            float clockHeight = LauncherUiUtils.dp(this, 114)
                     - clockText.getPaddingTop() - clockText.getPaddingBottom();
             naturalClockWidth = Math.max(1f,
                     (digits * 0.72f + separators * 0.34f) * clockHeight * 0.91f
