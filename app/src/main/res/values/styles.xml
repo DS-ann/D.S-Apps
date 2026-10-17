@@ -6,6 +6,8 @@
     <item name="android:windowAnimationStyle">@style/LauncherWindowAnimations</item>
 </style>
 <style name="LauncherWindowAnimations" parent="@android:style/Animation.Activity">
+    <item name="android:activityCloseEnterAnimation">@anim/launcher_task_close_enter</item>
+    <item name="android:activityCloseExitAnimation">@anim/launcher_task_close_exit</item>
     <item name="android:taskCloseEnterAnimation">@anim/launcher_task_close_enter</item>
     <item name="android:taskCloseExitAnimation">@anim/launcher_task_close_exit</item>
 </style>
