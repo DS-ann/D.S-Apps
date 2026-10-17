@@ -4218,6 +4218,54 @@ public class MainActivity extends Activity {
         appliedClockStyles.put(clockText, style);
     }
 
+    /**
+     * Formats only the numeric time for the large clock. On some locales the
+     * platform time pattern renders a day period as "p.m." or "a.m."; removing
+     * the literal "PM" text from the formatted result does not catch those forms,
+     * leaving a stray lowercase "p" rendered in the large clock font. Remove the
+     * day-period field from the locale's pattern before formatting instead.
+     */
+    private String formatClockDigits(Date now, boolean use24Hour) {
+        java.text.DateFormat formatter = DateFormat.getTimeFormat(this);
+        if (!use24Hour && formatter instanceof SimpleDateFormat) {
+            String pattern = ((SimpleDateFormat) formatter).toPattern();
+            StringBuilder digitsPattern = new StringBuilder(pattern.length());
+            boolean quoted = false;
+            for (int i = 0; i < pattern.length(); i++) {
+                char ch = pattern.charAt(i);
+                if (ch == '\\'') {
+                    digitsPattern.append(ch);
+                    if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '\\'') {
+                        digitsPattern.append(pattern.charAt(++i));
+                    } else {
+                        quoted = !quoted;
+                    }
+                    continue;
+                }
+                if (!quoted && ch == 'a') {
+                    while (digitsPattern.length() > 0 && isClockPatternSpace(
+                            digitsPattern.charAt(digitsPattern.length() - 1))) {
+                        digitsPattern.setLength(digitsPattern.length() - 1);
+                    }
+                    while (i + 1 < pattern.length() && pattern.charAt(i + 1) == 'a') i++;
+                    while (i + 1 < pattern.length() && isClockPatternSpace(pattern.charAt(i + 1))) i++;
+                    continue;
+                }
+                digitsPattern.append(ch);
+            }
+            try {
+                return new SimpleDateFormat(digitsPattern.toString(), Locale.getDefault()).format(now);
+            } catch (IllegalArgumentException ignored) {
+                // Fall back to the platform formatter and its existing marker removal below.
+            }
+        }
+        return formatter.format(now);
+    }
+
+    private boolean isClockPatternSpace(char ch) {
+        return Character.isWhitespace(ch) || Character.isSpaceChar(ch);
+    }
+
     private void updateClock() {
         if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
         Date now = new Date();
@@ -4239,7 +4287,7 @@ public class MainActivity extends Activity {
         int restorePage = Math.max(0, Math.min(1, currentPage));
         for (int page = 0; page < clockPanelsByPage.length; page++) {
             activateClockForPage(page);
-            String clockValue = DateFormat.getTimeFormat(this).format(now);
+            String clockValue = formatClockDigits(now, use24Hour);
             if (amPmText != null) {
                 if (use24Hour) {
                     if (amPmText.length() != 0) amPmText.setText("");
