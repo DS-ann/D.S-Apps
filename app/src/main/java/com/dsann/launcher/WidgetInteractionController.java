@@ -82,6 +82,37 @@ final class WidgetInteractionController {
         this.listener = listener;
     }
 
+    /**
+     * Visual workspace bounds, accounting for pending FrameLayout margins, requested
+     * dimensions, translation and scale. This avoids stale geometry during drop.
+     */
+    private android.graphics.Rect workspaceBounds(View view) {
+        if (view == null) return new android.graphics.Rect();
+        int left = view.getLeft();
+        int top = view.getTop();
+        int width = view.getWidth();
+        int height = view.getHeight();
+        ViewParent parent = view.getParent();
+        ViewGroup.LayoutParams raw = view.getLayoutParams();
+        if (parent instanceof FrameLayout && raw instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            if (view.isLayoutRequested() || lp.leftMargin != view.getLeft()
+                    || lp.topMargin != view.getTop()) {
+                left = lp.leftMargin;
+                top = lp.topMargin;
+            }
+            if (lp.width > 0) width = lp.width;
+            if (lp.height > 0) height = lp.height;
+        }
+        float sx = Math.max(0.01f, view.getScaleX());
+        float sy = Math.max(0.01f, view.getScaleY());
+        left = Math.round(left + view.getTranslationX() + view.getPivotX() * (1f - sx));
+        top = Math.round(top + view.getTranslationY() + view.getPivotY() * (1f - sy));
+        width = Math.max(1, Math.round(Math.max(1, width) * sx));
+        height = Math.max(1, Math.round(Math.max(1, height) * sy));
+        return new android.graphics.Rect(left, top, left + width, top + height);
+    }
+
     private void clearFocusRecursively(View view) {
         if (view == null) return;
         if (view instanceof ViewGroup) {
@@ -298,21 +329,19 @@ final class WidgetInteractionController {
                         // drops near the top/edges to resolve against the wrong coordinates.
                         int[] targetPageLocation = new int[2];
                         targetPage.getLocationOnScreen(targetPageLocation);
-                        int maxX = Math.max(0, targetPage.getWidth() - container.getWidth());
-                        int maxY = Math.max(0, targetPage.getHeight() - container.getHeight());
+                        FrameLayout.LayoutParams dropParams = (FrameLayout.LayoutParams) container.getLayoutParams();
+                        int dropWidth = Math.max(1, dropParams.width > 0 ? dropParams.width : container.getWidth());
+                        int dropHeight = Math.max(1, dropParams.height > 0 ? dropParams.height : container.getHeight());
+                        int maxX = Math.max(0, targetPage.getWidth() - dropWidth);
+                        int maxY = Math.max(0, targetPage.getHeight() - dropHeight);
                         int requestedX = Math.max(0, Math.min(maxX,
-                                Math.round(event.getRawX() - targetPageLocation[0] - container.getWidth() / 2f)));
+                                Math.round(event.getRawX() - targetPageLocation[0] - dropWidth / 2f)));
                         int requestedY = Math.max(0, Math.min(maxY,
-                                Math.round(event.getRawY() - targetPageLocation[1] - container.getHeight() / 2f)));
-                        // Widgets use free positioning, not app-icon grid snapping.
-                        // Keep the requested point when clear; otherwise find the nearest
-                        // clear point in small increments so widgets never overlap items.
-                        int step = Math.max(1, LauncherUiUtils.dp(activity, 8));
-                        int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
-                        // Search the requested neighbourhood first, then the entire page
-                        // if it appears blocked. Use rendered child bounds (including
-                        // translations) rather than layout margins, which can be stale
-                        // during live displacement, especially around the clock/top area.
+                                Math.round(event.getRawY() - targetPageLocation[1] - dropHeight / 2f)));
+                        // Exact obstacle-edge candidates avoid missing narrow free pockets
+                        // and are cheaper than scanning the entire page at a fixed interval.
+                        int bestX = -1, bestY = -1;
+                        long bestDistance = Long.MAX_VALUE;
                         java.util.ArrayList<android.graphics.Rect> occupied =
                                 new java.util.ArrayList<android.graphics.Rect>();
                         for (int ci = 0; ci < targetPage.getChildCount(); ci++) {
@@ -323,44 +352,45 @@ final class WidgetInteractionController {
                                     || tag.startsWith("launcher_app:")
                                     || "launcher_contact_shortcut".equals(tag)
                                     || "launcher_clock_widget".equals(tag))) continue;
-                            int ox = other.getLeft() + Math.round(other.getTranslationX());
-                            int oy = other.getTop() + Math.round(other.getTranslationY());
-                            int ow = other.getWidth();
-                            int oh = other.getHeight();
-                            if (ow > 0 && oh > 0) {
-                                occupied.add(new android.graphics.Rect(ox, oy, ox + ow, oy + oh));
-                            }
+                            android.graphics.Rect bounds = workspaceBounds(other);
+                            if (!bounds.isEmpty()) occupied.add(bounds);
                         }
-                        for (int pass = 0; pass < 2 && bestX < 0; pass++) {
-                            int startY = pass == 0 ? Math.max(0, requestedY - container.getHeight()) : 0;
-                            int endY = pass == 0 ? Math.min(maxY, requestedY + container.getHeight()) : maxY;
-                            int startX = pass == 0 ? Math.max(0, requestedX - container.getWidth()) : 0;
-                            int endX = pass == 0 ? Math.min(maxX, requestedX + container.getWidth()) : maxX;
-                            for (int gy = startY; gy <= endY; gy += step) {
-                                int candidateY = Math.min(maxY, gy);
-                                for (int gx = startX; gx <= endX; gx += step) {
-                                    int candidateX = Math.min(maxX, gx);
-                                    android.graphics.Rect candidate = new android.graphics.Rect(
-                                            candidateX, candidateY,
-                                            candidateX + container.getWidth(),
-                                            candidateY + container.getHeight());
-                                    boolean blocked = false;
-                                    for (android.graphics.Rect obstacle : occupied) {
-                                        if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                            blocked = true;
-                                            break;
-                                        }
-                                    }
-                                    if (blocked) continue;
-                                    int distance = Math.abs(candidateX - requestedX)
-                                            + Math.abs(candidateY - requestedY);
-                                    if (distance < bestDistance) {
-                                        bestDistance = distance;
-                                        bestX = candidateX;
-                                        bestY = candidateY;
+                        java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
+                        java.util.TreeSet<Integer> yCandidates = new java.util.TreeSet<Integer>();
+                        xCandidates.add(requestedX);
+                        yCandidates.add(requestedY);
+                        xCandidates.add(0);
+                        yCandidates.add(0);
+                        xCandidates.add(maxX);
+                        yCandidates.add(maxY);
+                        for (android.graphics.Rect obstacle : occupied) {
+                            xCandidates.add(Math.max(0, Math.min(maxX, obstacle.left - dropWidth)));
+                            xCandidates.add(Math.max(0, Math.min(maxX, obstacle.right)));
+                            yCandidates.add(Math.max(0, Math.min(maxY, obstacle.top - dropHeight)));
+                            yCandidates.add(Math.max(0, Math.min(maxY, obstacle.bottom)));
+                        }
+                        for (Integer yValue : yCandidates) {
+                            int candidateY = yValue.intValue();
+                            for (Integer xValue : xCandidates) {
+                                int candidateX = xValue.intValue();
+                                android.graphics.Rect candidate = new android.graphics.Rect(
+                                        candidateX, candidateY,
+                                        candidateX + dropWidth, candidateY + dropHeight);
+                                boolean blocked = false;
+                                for (android.graphics.Rect obstacle : occupied) {
+                                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                        blocked = true;
+                                        break;
                                     }
                                 }
-                                if (candidateY == maxY) break;
+                                if (blocked) continue;
+                                long distance = Math.abs((long) candidateX - requestedX)
+                                        + Math.abs((long) candidateY - requestedY);
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    bestX = candidateX;
+                                    bestY = candidateY;
+                                }
                             }
                         }
                         if (bestDistance != Integer.MAX_VALUE) {
