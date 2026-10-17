@@ -1418,6 +1418,14 @@ public class MainActivity extends Activity {
         activateClockForPage(0);
     }
 
+    // SharedPreferences.getFloat() throws ClassCastException when an older build
+    // stored the same setting as an Integer. Accept any numeric representation so
+    // legacy clock positions cannot crash a page rebuild or launcher startup.
+    private float getFloatPreferenceCompat(String key, float fallback) {
+        Object value = prefs.getAll().get(key);
+        return value instanceof Number ? ((Number) value).floatValue() : fallback;
+    }
+
     private void attachClockPanelsToPages() {
         if (pagesStrip == null) return;
         for (int pageIndex = 0; pageIndex < clockPanelsByPage.length; pageIndex++) {
@@ -1434,10 +1442,12 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                         Gravity.TOP | Gravity.LEFT));
             }
-            panel.setTranslationX(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex),
-                    prefs.getFloat(KEY_CLOCK_WIDGET_X, 0f)));
-            panel.setTranslationY(prefs.getFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex),
-                    prefs.getFloat(KEY_CLOCK_WIDGET_Y, 0f)));
+            panel.setTranslationX(getFloatPreferenceCompat(
+                    clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex),
+                    getFloatPreferenceCompat(KEY_CLOCK_WIDGET_X, 0f)));
+            panel.setTranslationY(getFloatPreferenceCompat(
+                    clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex),
+                    getFloatPreferenceCompat(KEY_CLOCK_WIDGET_Y, 0f)));
             // Keep the clock above icons/widgets even after the page content is rebuilt.
             panel.bringToFront();
         }
