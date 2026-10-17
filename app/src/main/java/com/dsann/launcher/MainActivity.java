@@ -574,8 +574,18 @@ public class MainActivity extends Activity {
                     int[] actual = itemGeometry(clockPanel);
                     float adjustX = 0f;
                     float adjustY = 0f;
-                    if (resizingEdge == 1) adjustX = targetRight - (actual[0] + actual[2]);
-                    else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
+                    boolean typographyClock = !(clockText instanceof SevenSegmentClockTextView)
+                            || prefs.getInt(KEY_CLOCK_STYLE, 0) != 5;
+                    if (resizingEdge == 1) {
+                        // For non-LED clocks, explicitly anchor the right edge from
+                        // the requested rectangle after relayout. The old edge-based
+                        // correction could be neutralized by right/center gravity and
+                        // clamping, making the left grip appear inert until the right
+                        // grip was dragged past the page edge.
+                        adjustX = typographyClock
+                                ? targetRight - (actual[0] + actual[2])
+                                : targetRight - (actual[0] + actual[2]);
+                    } else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
                     if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
                     else if (resizingEdge == 4) adjustY = targetTop - actual[1];
                     setClampedClockTranslation(clockPanel.getTranslationX() + adjustX,
