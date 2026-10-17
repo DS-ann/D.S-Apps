@@ -4290,9 +4290,117 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Final safety pass after a drag/resize. Treat every app, widget, shortcut and
+     * clock as a rectangle and place each item into a genuinely free pixel position.
+     * App icons keep their existing size; non-app items use their visual dimensions.
+     */
+    private void resolveAllWorkspaceOverlaps(FrameLayout page, View priorityView) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        java.util.ArrayList<View> items = new java.util.ArrayList<View>();
+        if (priorityView != null && priorityView.getParent() == page && isWorkspaceItem(priorityView)) {
+            items.add(priorityView);
+        }
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (child != priorityView && isWorkspaceItem(child)) items.add(child);
+        }
+        java.util.ArrayList<android.graphics.Rect> accepted = new java.util.ArrayList<android.graphics.Rect>();
+        for (View item : items) {
+            int[] g = itemGeometry(item);
+            int w = Math.max(1, g[2]), h = Math.max(1, g[3]);
+            int maxX = Math.max(0, page.getWidth() - w);
+            int maxY = Math.max(0, page.getHeight() - h);
+            int startX = Math.max(0, Math.min(maxX, g[0]));
+            int startY = Math.max(0, Math.min(maxY, g[1]));
+            java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
+            java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
+            xs.add(startX); ys.add(startY); xs.add(0); ys.add(0); xs.add(maxX); ys.add(maxY);
+            for (android.graphics.Rect a : accepted) {
+                xs.add(Math.max(0, Math.min(maxX, a.left - w)));
+                xs.add(Math.max(0, Math.min(maxX, a.right)));
+                ys.add(Math.max(0, Math.min(maxY, a.top - h)));
+                ys.add(Math.max(0, Math.min(maxY, a.bottom)));
+            }
+            int bestX = -1, bestY = -1;
+            long bestDistance = Long.MAX_VALUE;
+            for (Integer cy : ys) for (Integer cx : xs) {
+                int x = cx.intValue(), y = cy.intValue();
+                android.graphics.Rect candidate = new android.graphics.Rect(x, y, x + w, y + h);
+                boolean blocked = false;
+                for (android.graphics.Rect a : accepted) {
+                    if (android.graphics.Rect.intersects(candidate, a)) { blocked = true; break; }
+                }
+                if (blocked) continue;
+                long distance = Math.abs((long) x - g[0]) + Math.abs((long) y - g[1]);
+                if (distance < bestDistance) { bestDistance = distance; bestX = x; bestY = y; }
+            }
+            // Keep an oversized non-clock widget inside the page as far as possible.
+            // A clock is scaled down by the clock clamp if it exceeds the viewport.
+            if (bestX < 0) {
+                if (item == clockPanel) {
+                    float[] bounded = clampClockTranslation(clockPanel,
+                            clockPanel.getTranslationX(), clockPanel.getTranslationY());
+                    setClampedClockTranslation(bounded[0], bounded[1], true);
+                    int[] now = itemGeometry(item);
+                    accepted.add(new android.graphics.Rect(now[0], now[1], now[0] + now[2], now[1] + now[3]));
+                } else {
+                    // Do not knowingly move an item on top of another item when no
+                    // fitting rectangle exists on this page.
+                    accepted.add(new android.graphics.Rect(g[0], g[1], g[0] + w, g[1] + h));
+                }
+                continue;
+            }
+            if (item == clockPanel) {
+                setClampedClockTranslation(clockPanel.getTranslationX() + bestX - g[0],
+                        clockPanel.getTranslationY() + bestY - g[1], true);
+            } else if (item.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+                lp.leftMargin += bestX - g[0];
+                lp.topMargin += bestY - g[1];
+                item.setLayoutParams(lp);
+            }
+            accepted.add(new android.graphics.Rect(bestX, bestY, bestX + w, bestY + h));
+            persistWorkspaceItemPosition(page, item, bestX, bestY, w, h);
+        }
+    }
+
+    private void persistWorkspaceItemPosition(FrameLayout page, View item, int x, int y, int width, int height) {
+        Object rawTag = item.getTag();
+        if (!(rawTag instanceof String)) return;
+        String tag = (String) rawTag;
+        int pageIndex = pagesStrip == null ? 0 : Math.max(0, pagesStrip.indexOfChild(page));
+        if (tag.startsWith("launcher_widget:")) {
+            try { saveWidgetGeometry(Integer.parseInt(tag.substring("launcher_widget:".length())), pageIndex, (FrameLayout) item); }
+            catch (NumberFormatException ignored) {}
+        } else if (tag.startsWith("launcher_app:")) {
+            int columns = getHomeColumns();
+            int cellWidth = Math.max(1, page.getWidth() / columns);
+            int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+            String pkg = tag.substring("launcher_app:".length());
+            int col = Math.max(0, Math.min(columns - 1, Math.round((float) x / cellWidth)));
+            int row = Math.max(0, Math.round((float) y / cellHeight));
+            saveIconSlot(pkg, col, row, columns);
+            prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
+        } else if ("launcher_contact_shortcut".equals(tag)) {
+            prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex)
+                    .putFloat(KEY_SHORTCUT_X, x / (float) Math.max(1, page.getWidth() - width))
+                    .putFloat(KEY_SHORTCUT_Y, y / (float) Math.max(1, page.getHeight() - height)).apply();
+        } else if ("launcher_clock_widget".equals(tag)) {
+            prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), item.getTranslationX())
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex), item.getTranslationY()).apply();
+        }
+    }
+
     /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
     private void finishLiveDisplacements(boolean commit, View movingView) {
-        if (liveDisplacedItems.isEmpty()) return;
+        if (liveDisplacedItems.isEmpty()) {
+            if (movingView != null && movingView.getParent() instanceof FrameLayout) {
+                resolveAllWorkspaceOverlaps((FrameLayout) movingView.getParent(), movingView);
+                refreshWorkspaceGrid();
+            }
+            return;
+        }
         int columns = getHomeColumns();
         int cellWidth = Math.max(1, pageViewport == null ? 1 : pageViewport.getWidth() / columns);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
@@ -4365,6 +4473,9 @@ public class MainActivity extends Activity {
             }
         }
         liveDisplacedItems.clear();
+        if (movingView != null && movingView.getParent() instanceof FrameLayout) {
+            resolveAllWorkspaceOverlaps((FrameLayout) movingView.getParent(), movingView);
+        }
         refreshWorkspaceGrid();
     }
 
