@@ -364,6 +364,7 @@ public class MainActivity extends Activity {
                 clockWidgetStartY = clockPanel.getTranslationY();
                 setWorkspaceGridVisible(true, clockPanel);
                 handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
                 return true;
             }
             if (clockResizeEdge != 0 && clockWidgetEditing) {
@@ -387,8 +388,12 @@ public class MainActivity extends Activity {
                 }
             handler.removeCallbacks(homeLongPress);
             handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
             // Clock edit/resize gestures must never be interpreted as workspace gestures.
-            if (gestureStartedOnClock && !drawerOpen) handler.postDelayed(clockWidgetLongPress, 650L);
+            if (gestureStartedOnClock && !drawerOpen) {
+                handler.postDelayed(clockWidgetLongPress, 1000L);
+                handler.postDelayed(clockWidgetEditLongPress, 2000L);
+            }
             if (!drawerOpen && !gestureStartedOnAppCell && !gestureStartedOnWidget
                     && !gestureStartedOnContactShortcut && !gestureStartedOnClock)
                 handler.postDelayed(homeLongPress, 2000L);
@@ -398,7 +403,11 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
         if (action == MotionEvent.ACTION_MOVE) {
-            if (clockWidgetMoving && clockWidgetEditing && clockPanel != null) {
+            if (clockWidgetMoving && clockPanel != null) {
+                if (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
+                        || Math.abs(dy) > LauncherUiUtils.dp(this, 5)) {
+                    handler.removeCallbacks(clockWidgetEditLongPress);
+                }
                 float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
                 float moveX = (event.getRawX() - clockWidgetDownRawX) / density;
                 float moveY = (event.getRawY() - clockWidgetDownRawY) / density;
@@ -504,6 +513,7 @@ public class MainActivity extends Activity {
                 }
                 handler.removeCallbacks(homeLongPress);
                 handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
                 super.dispatchTouchEvent(cancel);
@@ -606,6 +616,7 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_CANCEL) {
             handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
             if (clockWidgetMoving) {
                 clockWidgetMoving = false;
                 if (clockPanel != null) {
@@ -662,9 +673,10 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
             if (clockWidgetMoving) {
                 clockWidgetMoving = false;
-                setWorkspaceGridVisible(false, null);
+                setWorkspaceGridVisible(clockWidgetEditing, clockWidgetEditing ? clockPanel : null);
                 updateClockResizeHandles();
                 return true;
             }
@@ -805,6 +817,7 @@ public class MainActivity extends Activity {
         clockResizeEdge = 0;
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
 
         if (cancelled) {
             prefs.edit()
@@ -993,6 +1006,7 @@ public class MainActivity extends Activity {
         if (clockWidgetEditing) exitClockWidgetEditMode();
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
         clockUpdatesActive = false;
         handler.removeCallbacks(clockUpdater);
         try { widgetHost.stopListening(); } catch (Exception ignored) {}
@@ -2309,6 +2323,7 @@ public class MainActivity extends Activity {
             // after finger-up and later swipes could keep changing clock dimensions.
             if (clockResizeEdge != 0) {
                 handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
                 clockResizeEdge = 0;
                 clockWidgetDragging = false;
                 setWorkspaceGridVisible(false, null);
@@ -3906,6 +3921,7 @@ public class MainActivity extends Activity {
             root.addView(grip, gripLp);
         }
         updateClockResizeHandles();
+        final LinearLayout panelView = clockPanel;
         final int panelPage = activeClockPage;
         clockPanel.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -3916,7 +3932,10 @@ public class MainActivity extends Activity {
                 clockWidgetStartX = clockPanel.getTranslationX();
                 clockWidgetStartY = clockPanel.getTranslationY();
                 handler.removeCallbacks(clockWidgetLongPress);
-                handler.postDelayed(clockWidgetLongPress, 650L);
+            handler.removeCallbacks(clockWidgetEditLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
+                handler.postDelayed(clockWidgetLongPress, 1000L);
+                handler.postDelayed(clockWidgetEditLongPress, 2000L);
                 // Do not block a parent horizontal/vertical swipe until a long-press
                 // actually puts the clock into widget-edit mode.
                 if (view.getParent() != null) {
@@ -3941,6 +3960,7 @@ public class MainActivity extends Activity {
                 } else if (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 8)) {
                     handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
                     // Outside edit mode the clock must not swallow workspace swipes.
                     // Let the parent pager / global swipe detector take over.
                     if (view.getParent() != null) {
@@ -3953,6 +3973,7 @@ public class MainActivity extends Activity {
             if (event.getActionMasked() == MotionEvent.ACTION_UP
                     || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(clockWidgetLongPress);
+            handler.removeCallbacks(clockWidgetEditLongPress);
                 if (clockWidgetDragging) {
                     finishLiveDisplacements(event.getActionMasked() == MotionEvent.ACTION_UP, clockPanel);
                     clockWidgetDragging = false;
@@ -3970,25 +3991,31 @@ public class MainActivity extends Activity {
         float fallbackY = activeClockPage == 0 ? getFloatPreferenceCompat(KEY_CLOCK_WIDGET_Y, 0f) : 0f;
         float savedClockX = getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), fallbackX);
         float savedClockY = getFloatPreferenceCompat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), fallbackY);
-        clockPanel.post(() -> {
-            if (clockPanel == null || clockPanel.getParent() == null) return;
-            setClampedClockTranslation(savedClockX, savedClockY, true);
-            updateClockResizeHandles();
+        panelView.post(() -> {
+            if (panelView.getParent() == null) return;
+            // Restore this exact page's geometry without mutating the active page
+            // or rewriting saved coordinates during an intermediate layout.
+            setClampedClockTranslationForPanel(panelView, panelPage, savedClockX, savedClockY, false);
+            if (clockPanel == panelView) updateClockResizeHandles();
         });
     }
 
     private final Runnable clockWidgetLongPress = () -> {
+        if (clockPanel == null || drawerOpen) return;
+        clockWidgetMoving = true;
+        clockWidgetLongPressActivated = true;
+        setWorkspaceGridVisible(true, clockPanel);
+    };
+
+    private final Runnable clockWidgetEditLongPress = () -> {
         if (clockPanel == null || drawerOpen) return;
         clockWidgetLongPressActivated = true;
         clockWidgetEditing = true;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
         for (View grip : clockEdgeHandles) if (grip != null) grip.setVisibility(View.VISIBLE);
         updateClockResizeHandles();
-        // Keep the clock's actual colour background visible during editing.
-        // The edge grips and workspace grid already communicate edit mode; replacing
-        // the background here made it appear to vanish while moving/resizing.
         setWorkspaceGridVisible(true, clockPanel);
-        Toast.makeText(this, "Clock widget: drag to move; drag the middle of any edge to resize; tap outside to finish",
+        Toast.makeText(this, "Clock edit mode: drag to move; drag an edge to resize; tap outside to finish",
                 Toast.LENGTH_LONG).show();
     };
 
@@ -4149,17 +4176,23 @@ public class MainActivity extends Activity {
         return new float[]{translationX, translationY};
     }
 
-    private void setClampedClockTranslation(float translationX, float translationY, boolean persist) {
-        if (clockPanel == null) return;
-        float[] clamped = clampClockTranslation(clockPanel, translationX, translationY);
-        clockPanel.setTranslationX(clamped[0]);
-        clockPanel.setTranslationY(clamped[1]);
+    private void setClampedClockTranslationForPanel(View panel, int page,
+            float translationX, float translationY, boolean persist) {
+        if (panel == null) return;
+        float[] clamped = clampClockTranslation(panel, translationX, translationY);
+        panel.setTranslationX(clamped[0]);
+        panel.setTranslationY(clamped[1]);
         if (persist) {
             prefs.edit()
-                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clamped[0])
-                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clamped[1])
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, page), clamped[0])
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, page), clamped[1])
                     .apply();
         }
+    }
+
+    private void setClampedClockTranslation(float translationX, float translationY, boolean persist) {
+        setClampedClockTranslationForPanel(clockPanel, activeClockPage,
+                translationX, translationY, persist);
     }
 
     /** Live push-aside behavior for workspace items while a widget or shortcut is dragged. */
