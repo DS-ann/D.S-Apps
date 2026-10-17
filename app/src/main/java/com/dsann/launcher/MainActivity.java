@@ -1440,6 +1440,9 @@ public class MainActivity extends Activity {
             LinearLayout panel = clockPanelsByPage[pageIndex];
             if (panel == null) continue;
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+            // Also enforce clipping on pages that already existed before this rebuild.
+            page.setClipChildren(true);
+            page.setClipToPadding(true);
             if (panel.getParent() != page) {
                 if (panel.getParent() instanceof ViewGroup) {
                     ((ViewGroup) panel.getParent()).removeView(panel);
@@ -2463,7 +2466,10 @@ public class MainActivity extends Activity {
         if (pagesStrip != null) {
             while (pagesStrip.getChildCount() < HomePageModel.PAGE_COUNT) {
                 FrameLayout page = new FrameLayout(this);
-                page.setClipChildren(false);
+                // Each page is a hard drawing boundary: clocks must never bleed
+                // across the seam into the adjacent home screen.
+                page.setClipChildren(true);
+                page.setClipToPadding(true);
                 pagesStrip.addView(page, new LinearLayout.LayoutParams(pageWidth, -1));
             }
         }
