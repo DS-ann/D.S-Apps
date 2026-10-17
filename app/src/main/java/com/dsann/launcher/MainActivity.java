@@ -509,10 +509,14 @@ public class MainActivity extends Activity {
                 }
                 if (overlaps) return true;
 
-                int lengthPercent = Math.round(clockWidgetStartLength * (right - left)
-                        / (float) Math.max(1, clockWidgetStartVisualWidth));
-                int breadthPercent = Math.round(clockWidgetStartBreadth * (bottom - top)
-                        / (float) Math.max(1, clockWidgetStartVisualHeight));
+                // Convert the accepted visual rectangle back to the clock's
+                // persisted scale using its unscaled natural dimensions. Using the
+                // current visual width here fails when the old size was already capped
+                // by the page width, making an oversized clock impossible to shrink.
+                int lengthPercent = Math.round((right - left) * 100f
+                        / Math.max(1, clockWidgetStartPanelWidth));
+                int breadthPercent = Math.round((bottom - top) * 100f
+                        / Math.max(1, LauncherUiUtils.dp(this, 114)));
                 lengthPercent = Math.max(80, Math.min(250, lengthPercent));
                 breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
