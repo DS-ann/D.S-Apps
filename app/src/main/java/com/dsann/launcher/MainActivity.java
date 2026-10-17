@@ -1872,8 +1872,15 @@ public class MainActivity extends Activity {
                     resizeStart[1] = event.getRawY();
                     resizeBase[0] = Math.max(1, (int) Math.ceil((float) tile.getWidth() / cellW));
                     resizeBase[1] = Math.max(1, (int) Math.ceil((float) tile.getHeight() / cellH));
-                    resizeBasePx[0] = tile.getWidth();
-                    resizeBasePx[1] = tile.getHeight();
+                    ViewGroup.LayoutParams startParams = tile.getLayoutParams();
+                    if (startParams instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams startLp = (FrameLayout.LayoutParams) startParams;
+                        resizeBasePx[0] = Math.max(cellW, startLp.width > 0 ? startLp.width : tile.getWidth());
+                        resizeBasePx[1] = Math.max(cellH, startLp.height > 0 ? startLp.height : tile.getHeight());
+                    } else {
+                        resizeBasePx[0] = Math.max(cellW, tile.getWidth());
+                        resizeBasePx[1] = Math.max(cellH, tile.getHeight());
+                    }
                     tile.getParent().requestDisallowInterceptTouchEvent(true);
                     return true;
                 case MotionEvent.ACTION_MOVE:
@@ -1950,13 +1957,18 @@ public class MainActivity extends Activity {
                 case MotionEvent.ACTION_CANCEL:
                     if (resizingShortcut[0]) {
                         resizingShortcut[0] = false;
-                        int finalX = Math.max(1, Math.min(columns, (int) Math.ceil((float) tile.getWidth() / cellW)));
-                        int finalY = Math.max(1, Math.min(rows, (int) Math.ceil((float) tile.getHeight() / cellH)));
+                        FrameLayout.LayoutParams finalLp = (FrameLayout.LayoutParams) tile.getLayoutParams();
+                        // Layout may not have run yet for the final MOVE event. Persist the
+                        // authoritative requested dimensions, not stale measured getWidth().
+                        int finalWidth = Math.max(cellW, finalLp.width);
+                        int finalHeight = Math.max(cellH, finalLp.height);
+                        int finalX = Math.max(1, Math.min(columns, (int) Math.ceil((float) finalWidth / cellW)));
+                        int finalY = Math.max(1, Math.min(rows, (int) Math.ceil((float) finalHeight / cellH)));
                         float density = getResources().getDisplayMetrics().density;
                         prefs.edit().putInt(KEY_SHORTCUT_SPAN_X, finalX)
                                 .putInt(KEY_SHORTCUT_SPAN_Y, finalY)
-                                .putInt(KEY_SHORTCUT_WIDTH_DP, Math.max(1, Math.round(tile.getWidth() / density)))
-                                .putInt(KEY_SHORTCUT_HEIGHT_DP, Math.max(1, Math.round(tile.getHeight() / density)))
+                                .putInt(KEY_SHORTCUT_WIDTH_DP, Math.max(1, Math.round(finalWidth / density)))
+                                .putInt(KEY_SHORTCUT_HEIGHT_DP, Math.max(1, Math.round(finalHeight / density)))
                                 .apply();
                         if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                         setWorkspaceGridVisible(false, null);
