@@ -2262,6 +2262,7 @@ public class MainActivity extends Activity {
                 };
                 iconShowOptions = () -> {
                     if (activeDragView == view && !iconDragging) {
+                        LauncherUiUtils.stopMoveHint(view);
                         longPressTriggered = true;
                         ResolveInfo app = findApp(packageName);
                         if (app != null) showAppOptions(app, true);
@@ -4027,11 +4028,15 @@ public class MainActivity extends Activity {
         if (clockPanel == null || drawerOpen) return;
         clockWidgetMoving = true;
         clockWidgetLongPressActivated = true;
+        // Match app/widget/shortcut move-ready feedback without bobbing the clock's
+        // translationY, which is also its persisted workspace position.
+        LauncherUiUtils.startMoveHint(clockPanel, this, false);
         setWorkspaceGridVisible(true, clockPanel);
     };
 
     private final Runnable clockWidgetEditLongPress = () -> {
         if (clockPanel == null || drawerOpen) return;
+        LauncherUiUtils.stopMoveHint(clockPanel);
         clockWidgetLongPressActivated = true;
         clockWidgetEditing = true;
         if (clockWidgetResizeHandle != null) clockWidgetResizeHandle.setVisibility(View.GONE);
