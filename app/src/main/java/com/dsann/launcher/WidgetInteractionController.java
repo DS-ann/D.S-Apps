@@ -323,11 +323,6 @@ final class WidgetInteractionController {
                                     int oy = op == null ? other.getTop() : op.topMargin;
                                     int ow = op != null && op.width > 0 ? op.width : other.getWidth();
                                     int oh = op != null && op.height > 0 ? op.height : other.getHeight();
-                                    if (tag.startsWith("launcher_app:")) {
-                                        int columns = Math.max(1, listener.getHomeColumns());
-                                        ow = Math.max(1, targetPage.getWidth() / columns);
-                                        oh = LauncherUiUtils.dp(activity, 76);
-                                    }
                                     if (ow > 0 && oh > 0 && android.graphics.Rect.intersects(
                                             candidate, new android.graphics.Rect(ox, oy, ox + ow, oy + oh))) {
                                         blocked = true;
