@@ -4019,7 +4019,8 @@ public class MainActivity extends Activity {
         if (moving[2] <= 0 || moving[3] <= 0) return;
         android.graphics.Rect movingRect = new android.graphics.Rect(
                 moving[0], moving[1], moving[0] + moving[2], moving[1] + moving[3]);
-        int gap = LauncherUiUtils.dp(this, 5);
+        // Displace only at actual border contact/overlap; no 5dp early trigger.
+        int gap = 0;
 
         // First restore items whose saved slots are no longer covered by the drag.
         // Their original slots are reserved below so another displaced item cannot
@@ -5015,10 +5016,20 @@ public class MainActivity extends Activity {
                 // clock style. Compensate for the panel's horizontal scale so the marker
                 // stays a fixed physical distance from the digit as the panel is resized.
                 int cornerInset = LauncherUiUtils.dp(this, 2);
-                int nonLedExtraRight = sevenSegment ? 0 : LauncherUiUtils.dp(this, 22);
-                markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
-                        - (int) Math.ceil((markerParams.width + cornerInset) / Math.max(0.01f, lengthScale))
-                        + (int) Math.ceil(nonLedExtraRight / Math.max(0.01f, lengthScale)));
+                int nonLedExtraRight = LauncherUiUtils.dp(this, 22);
+                if (sevenSegment) {
+                    // Preserve the existing LED marker position exactly.
+                    markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
+                            - (int) Math.ceil((markerParams.width + cornerInset)
+                                    / Math.max(0.01f, lengthScale)));
+                } else {
+                    // Keep the non-LED marker tied to the digit's layout position.
+                    // Do not divide this anchor by the panel scale: inverse-scaled
+                    // margins magnify small-slider changes and make AM/PM appear to
+                    // race sideways as the clock gets smaller.
+                    markerParams.leftMargin = Math.max(0, (int) Math.ceil(naturalClockWidth)
+                            - markerParams.width - cornerInset + nonLedExtraRight);
+                }
                 // Follow the rendered digit bottom, not the fixed row bottom.
                 // At short clock heights the non-LED glyph is vertically scaled around
                 // its pivot, so a fixed row-based anchor makes AM/PM float away.
