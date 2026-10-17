@@ -1119,7 +1119,7 @@ public class MainActivity extends Activity {
         int cellWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth() / Math.max(1, getHomeColumns())
                 : LauncherUiUtils.dp(this, 90));
-        int cellHeight = LauncherUiUtils.dp(this, Math.max(56, iconSize + 28));
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
             if (!(pagesStrip.getChildAt(i) instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(i);
@@ -1269,7 +1269,7 @@ public class MainActivity extends Activity {
         // Keep the existing 13sp date size; improve contrast instead of enlarging it.
         dateText = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
         dateText.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.BOLD));
-        dateText.setGravity(Gravity.RIGHT);
+        dateText.setGravity(Gravity.CENTER);
         dateText.setLetterSpacing(0.04f);
         dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(220, 0, 0, 0));
@@ -1327,6 +1327,12 @@ public class MainActivity extends Activity {
         dockParams.bottomMargin = LauncherUiUtils.dp(this, 2);
         homeScreen.addView(dockContainer, dockParams);
         restoreDockApps();
+    }
+
+    /** Home cell geometry must include the label's measured height when labels are enabled. */
+    private int homeCellHeightDp(int iconSize) {
+        boolean labelsVisible = prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
+        return Math.max(56, iconSize + (labelsVisible ? 46 : 28));
     }
 
     private String clockPrefKey(String key, int page) {
@@ -1395,7 +1401,7 @@ public class MainActivity extends Activity {
 
         TextView date = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
         date.setTypeface(Typeface.create("sans-serif-condensed-medium", Typeface.BOLD));
-        date.setGravity(Gravity.RIGHT);
+        date.setGravity(Gravity.CENTER);
         date.setLetterSpacing(0.04f);
         date.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(220, 0, 0, 0));
@@ -1520,7 +1526,7 @@ public class MainActivity extends Activity {
         int rows = getHomeGridRows();
         int cellW = Math.max(1, pageViewport.getWidth() / columns);
         int cellH = LauncherUiUtils.dp(this,
-                Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) return;
 
         FrameLayout chosenPage = null;
@@ -1943,7 +1949,7 @@ public class MainActivity extends Activity {
                     } else {
                         int dragColumns = getHomeColumns();
                         int dragCellW = Math.max(1, pageViewport.getWidth() / dragColumns);
-                        int dragCellH = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                        int dragCellH = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                         int proposedLeft = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
                                 Math.round((p.leftMargin + tile.getWidth() / 2f - dragCellW / 2f) / dragCellW) * dragCellW));
                         int proposedTop = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
