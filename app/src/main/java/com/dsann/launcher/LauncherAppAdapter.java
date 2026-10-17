@@ -202,6 +202,13 @@ public final class LauncherAppAdapter extends BaseAdapter {
         if (label.getVisibility() != targetVisibility) {
             label.setVisibility(targetVisibility);
         }
+        // Labeled home cells can be clipped at the top on older Android versions
+        // when icon bounds exactly fill the cell's measured height. Keep overflow
+        // clipping disabled only for labeled home cells; unlabeled layout is unchanged.
+        if (!drawer && targetVisibility == View.VISIBLE) {
+            cell.setClipChildren(false);
+            cell.setClipToPadding(false);
+        }
         cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
         cell.setOnClickListener(v -> { if (actions != null) actions.onAppClick(app, icon); });
         cell.setOnLongClickListener(v -> {
