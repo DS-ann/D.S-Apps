@@ -141,6 +141,8 @@ public class MainActivity extends Activity {
     // intended destination even if the 120 ms push animation has not finished.
     private final java.util.IdentityHashMap<View, int[]> liveDisplacementTargets =
             new java.util.IdentityHashMap<>();
+    private final java.util.WeakHashMap<View, Boolean> workspaceScaleRestored =
+            new java.util.WeakHashMap<View, Boolean>();
     private int workspaceGridCellWidth = 1;
     private int workspaceGridCellHeight = 1;
     private int workspaceGridWidgetWidth = 1;
@@ -4655,6 +4657,17 @@ public class MainActivity extends Activity {
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
+        // Restore any emergency visual scale used to preserve non-overlap on a
+        // physically crowded page. This is only applied once per View instance.
+        if (!workspaceScaleRestored.containsKey(view)) {
+            workspaceScaleRestored.put(view, Boolean.TRUE);
+            float sx = prefs == null ? 1f : prefs.getFloat("workspace_scale_x_" + tag, 1f);
+            float sy = prefs == null ? 1f : prefs.getFloat("workspace_scale_y_" + tag, 1f);
+            if (sx > 0f && sy > 0f && (sx < 0.999f || sy < 0.999f)) {
+                view.setScaleX(sx);
+                view.setScaleY(sy);
+            }
+        }
         // Include the clock in workspace displacement so widgets and shortcuts
         // cannot be dropped over it without the same push-aside behavior.
         return tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
@@ -5059,7 +5072,7 @@ public class MainActivity extends Activity {
             // coarse step, including the final right/bottom edge. The nearest legal
             // rectangle wins; this is the same rectangle geometry used by drag/resize.
             if (bestX < 0) {
-                int step = 1;
+                int step = Math.max(1, LauncherUiUtils.dp(this, 1));
                 outerScan:
                 for (int y = 0; y <= maxY; y += step) {
                     int candidateY = Math.min(maxY, y);
@@ -5143,9 +5156,57 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Last-resort protection: if both pages are crowded, reduce this item's
+            // visual scale in small steps until its actual visible bounds fit a free
+            // rectangle. This is preferable to leaving two things visibly overlapping.
+            if (bestX < 0) {
+                float originalScaleX = item.getScaleX();
+                float originalScaleY = item.getScaleY();
+                for (float factor = 0.90f; factor >= 0.05f && bestX < 0; factor -= 0.05f) {
+                    item.setScaleX(originalScaleX * factor);
+                    item.setScaleY(originalScaleY * factor);
+                    g = itemGeometry(item);
+                    w = Math.max(1, g[2]);
+                    h = Math.max(1, g[3]);
+                    maxX = Math.max(0, page.getWidth() - w);
+                    maxY = Math.max(0, page.getHeight() - h);
+                    for (int y = 0; y <= maxY && bestX < 0; y++) {
+                        for (int x = 0; x <= maxX; x++) {
+                            android.graphics.Rect candidate = collisionRectAt(item, x, y, w, h);
+                            boolean blocked = false;
+                            for (android.graphics.Rect obstacle : accepted) {
+                                if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                    blocked = true;
+                                    break;
+                                }
+                            }
+                            if (!blocked) {
+                                bestX = x;
+                                bestY = y;
+                                break;
+                            }
+                        }
+                    }
+                    if (bestX >= 0 && item.getTag() instanceof String && prefs != null) {
+                        String scaleKey = (String) item.getTag();
+                        prefs.edit()
+                                .putFloat("workspace_scale_x_" + scaleKey, item.getScaleX())
+                                .putFloat("workspace_scale_y_" + scaleKey, item.getScaleY())
+                                .apply();
+                    }
+                }
+                if (bestX < 0) {
+                    item.setScaleX(originalScaleX);
+                    item.setScaleY(originalScaleY);
+                    g = itemGeometry(item);
+                    w = Math.max(1, g[2]);
+                    h = Math.max(1, g[3]);
+                }
+            }
+
             // Keep the item visible, but never deliberately register an overlapping
-            // rectangle as accepted. The resolver has already tried exact placement
-            // and moving a neighbour to the other page before reaching this branch.
+            // rectangle as accepted. The resolver has already tried exact placement,
+            // moving a neighbour to the other page, and shrinking its visual bounds.
             if (bestX < 0) {
                 if (item == clockPanel) {
                     float[] bounded = clampClockTranslation(clockPanel,
