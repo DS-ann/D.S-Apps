@@ -159,7 +159,7 @@ final class WidgetInteractionController {
         movePress[0] = () -> {
             editMode[0] = 1;
             LauncherUiUtils.startMoveHint(container, activity);
-            listener.setWorkspaceGridVisible(true, container);
+            listener.setWorkspaceGridVisible(false, null);
             resizeHandle.setVisibility(View.VISIBLE);
             container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
             gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(20, 80, 128, 245), Color.argb(10, 54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
@@ -239,7 +239,7 @@ final class WidgetInteractionController {
                     LauncherUiUtils.stopMoveHint(container);
                     if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
                             || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
-                    listener.setWorkspaceGridVisible(true, container);
+                    listener.setWorkspaceGridVisible(false, null);
                     cancelWidgetTouch.run();
                     // Fixed two-screen workspace: widget dragging never changes screens.
                     edgeLatch[0] = 0;
@@ -297,50 +297,60 @@ final class WidgetInteractionController {
                                 Math.round(event.getRawX() - viewportLocation[0] - container.getWidth() / 2f)));
                         int requestedY = Math.max(0, Math.min(maxY,
                                 Math.round(event.getRawY() - viewportLocation[1] - container.getHeight() / 2f)));
-                        // Snap the widget to a grid whose pitch equals this widget's
-                        // own size. Clamp the full widget inside the workspace above the dock.
-                        int pitchX = Math.max(1, container.getWidth());
-                        int pitchY = Math.max(1, container.getHeight());
-                        current.leftMargin = Math.min(maxX,
-                                Math.max(0, Math.round(requestedX / (float) pitchX) * pitchX));
-                        current.topMargin = Math.min(maxY,
-                                Math.max(0, Math.round(requestedY / (float) pitchY) * pitchY));
-                        // Do not allow widget-sized cells to overlap another widget.
-                        boolean collision;
-                        do {
-                            collision = false;
-                            int bestX = current.leftMargin, bestY = current.topMargin;
-                            int bestDistance = Integer.MAX_VALUE;
-                            for (int gy = 0; gy <= maxY; gy += pitchY) {
-                                for (int gx = 0; gx <= maxX; gx += pitchX) {
-                                    boolean blocked = false;
-                                    for (int ci = 0; ci < targetPage.getChildCount(); ci++) {
-                                        View other = targetPage.getChildAt(ci);
-                                        if (other == container || !(other.getTag() instanceof String)
-                                                || !((String) other.getTag()).startsWith("launcher_widget:")) continue;
-                                        FrameLayout.LayoutParams op = (FrameLayout.LayoutParams) other.getLayoutParams();
-                                        int ox = op.leftMargin, oy = op.topMargin;
-                                        if (gx < ox + other.getWidth() && gx + container.getWidth() > ox
-                                                && gy < oy + other.getHeight() && gy + container.getHeight() > oy) {
-                                            blocked = true; break;
-                                        }
+                        // Widgets use free positioning, not app-icon grid snapping.
+                        // Keep the requested point when clear; otherwise find the nearest
+                        // clear point in small increments so widgets never overlap items.
+                        int step = Math.max(1, LauncherUiUtils.dp(activity, 8));
+                        int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
+                        for (int gy = Math.max(0, requestedY - container.getHeight());
+                                gy <= Math.min(maxY, requestedY + container.getHeight()); gy += step) {
+                            for (int gx = Math.max(0, requestedX - container.getWidth());
+                                    gx <= Math.min(maxX, requestedX + container.getWidth()); gx += step) {
+                                boolean blocked = false;
+                                android.graphics.Rect candidate = new android.graphics.Rect(
+                                        gx, gy, gx + container.getWidth(), gy + container.getHeight());
+                                for (int ci = 0; ci < targetPage.getChildCount(); ci++) {
+                                    View other = targetPage.getChildAt(ci);
+                                    if (other == container || !(other.getTag() instanceof String)) continue;
+                                    String tag = (String) other.getTag();
+                                    if (!(tag.startsWith("launcher_widget:")
+                                            || tag.startsWith("launcher_app:")
+                                            || "launcher_contact_shortcut".equals(tag)
+                                            || "launcher_clock_widget".equals(tag))) continue;
+                                    FrameLayout.LayoutParams op = other.getLayoutParams() instanceof FrameLayout.LayoutParams
+                                            ? (FrameLayout.LayoutParams) other.getLayoutParams() : null;
+                                    int ox = op == null ? other.getLeft() : op.leftMargin;
+                                    int oy = op == null ? other.getTop() : op.topMargin;
+                                    int ow = op != null && op.width > 0 ? op.width : other.getWidth();
+                                    int oh = op != null && op.height > 0 ? op.height : other.getHeight();
+                                    if (tag.startsWith("launcher_app:")) {
+                                        int columns = Math.max(1, listener.getHomeColumns());
+                                        ow = Math.max(1, targetPage.getWidth() / columns);
+                                        oh = LauncherUiUtils.dp(activity, 76);
                                     }
-                                    if (blocked) continue;
-                                    int distance = Math.abs(gx - requestedX) + Math.abs(gy - requestedY);
-                                    if (distance < bestDistance) {
-                                        bestDistance = distance; bestX = gx; bestY = gy;
+                                    if (ow > 0 && oh > 0 && android.graphics.Rect.intersects(
+                                            candidate, new android.graphics.Rect(ox, oy, ox + ow, oy + oh))) {
+                                        blocked = true;
+                                        break;
                                     }
                                 }
+                                if (blocked) continue;
+                                int distance = Math.abs(gx - requestedX) + Math.abs(gy - requestedY);
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    bestX = gx;
+                                    bestY = gy;
+                                }
                             }
-                            if (bestDistance != Integer.MAX_VALUE) {
-                                current.leftMargin = bestX;
-                                current.topMargin = bestY;
-                            } else {
-                                current.leftMargin = Math.min(maxX, origin[0]);
-                                current.topMargin = Math.min(maxY, origin[1]);
-                            }
-                            collision = false;
-                        } while (collision);
+                        }
+                        if (bestDistance != Integer.MAX_VALUE) {
+                            current.leftMargin = bestX;
+                            current.topMargin = bestY;
+                        } else {
+                            current.leftMargin = Math.min(maxX, origin[0]);
+                            current.topMargin = Math.min(maxY, origin[1]);
+                            Toast.makeText(activity, "No non-overlapping space for this widget", Toast.LENGTH_SHORT).show();
+                        }
                     }
                     container.setTranslationX(0f);
                     container.setLayoutParams(current);
@@ -367,7 +377,7 @@ final class WidgetInteractionController {
         resizeHandle.setOnTouchListener((v, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
-                listener.setWorkspaceGridVisible(true, container);
+                listener.setWorkspaceGridVisible(false, null);
                 down[0] = event.getRawX(); down[1] = event.getRawY();
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                 origin[2] = current.width; origin[3] = current.height;
@@ -414,7 +424,7 @@ final class WidgetInteractionController {
                     current.height = previousHeight;
                 }
                 container.setLayoutParams(current);
-                listener.setWorkspaceGridVisible(true, container);
+                listener.setWorkspaceGridVisible(false, null);
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
