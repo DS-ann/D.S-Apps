@@ -339,10 +339,14 @@ final class WidgetInteractionController {
                         int dropHeight = Math.max(1, dropParams.height > 0 ? dropParams.height : container.getHeight());
                         int maxX = Math.max(0, targetPage.getWidth() - dropWidth);
                         int maxY = Math.max(0, targetPage.getHeight() - dropHeight);
+                        // Preserve the exact finger-to-widget grab offset captured at
+                        // ACTION_DOWN. Centering the widget under the finger on release made
+                        // it jump even though the live drag itself tracked correctly.
+                        // Collision resolution below may move it only when space is occupied.
                         int requestedX = Math.max(0, Math.min(maxX,
-                                Math.round(event.getRawX() - targetPageLocation[0] - dropWidth / 2f)));
+                                Math.round(event.getRawX() - targetPageLocation[0] - fingerOffset[0])));
                         int requestedY = Math.max(0, Math.min(maxY,
-                                Math.round(event.getRawY() - targetPageLocation[1] - dropHeight / 2f)));
+                                Math.round(event.getRawY() - targetPageLocation[1] - fingerOffset[1])));
                         // Exact obstacle-edge candidates avoid missing narrow free pockets
                         // and are cheaper than scanning the entire page at a fixed interval.
                         int bestX = -1, bestY = -1;
