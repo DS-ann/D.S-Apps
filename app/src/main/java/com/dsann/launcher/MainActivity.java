@@ -5658,8 +5658,14 @@ public class MainActivity extends Activity {
     private float getEffectiveClockLengthScale() {
         float requested = getClockLength() / 100f;
         if (clockPanel == null || clockPanel.getWidth() <= 0) return requested;
-        int available = Math.max(LauncherUiUtils.dp(this, 96),
-                getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 24));
+        // Use the actual workspace page width, not the physical display width.
+        // The page may be narrower because of its container/insets; using display
+        // width here creates a hidden horizontal gap and makes the left grip stop
+        // before reaching the page edge.
+        int pageWidth = clockPanel.getParent() instanceof View
+                ? ((View) clockPanel.getParent()).getWidth() : 0;
+        if (pageWidth <= 0) pageWidth = getResources().getDisplayMetrics().widthPixels;
+        int available = Math.max(1, pageWidth);
         return Math.min(requested, available / (float) clockPanel.getWidth());
     }
 
@@ -5679,7 +5685,10 @@ public class MainActivity extends Activity {
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
-        final int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        final int screenWidth = clockPanel.getParent() instanceof View
+                ? ((View) clockPanel.getParent()).getWidth()
+                : getResources().getDisplayMetrics().widthPixels;
+        final int availablePageWidth = Math.max(1, screenWidth);
         final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         // Establish the selected preset's measurement font before measuring any width.
@@ -5754,8 +5763,9 @@ public class MainActivity extends Activity {
         // marker and small side insets share that width, so long clocks shrink
         // automatically instead of drawing beyond the background.
         final int markerWidth = amPmText == null ? 0 : LauncherUiUtils.dp(this, 22);
-        final int availablePanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
-                screenWidth - LauncherUiUtils.dp(this, 8));
+        // Let the background reach the actual page edges. A display-width cap
+        // leaves an unresizable strip when the workspace itself is narrower.
+        final int availablePanelWidth = availablePageWidth;
         int measuredDateWidth = 0;
         final int configuredDateSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15)));
         final int configuredPmSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14)));
