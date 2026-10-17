@@ -145,6 +145,11 @@ final class WidgetInteractionController {
         lp.topMargin = y;
         page.addView(container, lp);
         container.bringToFront();
+        // First placement needs the same collision pass as a completed drag/resize.
+        // Post it so the page and widget have measured geometry before bounds are tested.
+        page.post(() -> {
+            if (container.getParent() == page) listener.resolveWidgetCollisions(page, container);
+        });
 
         // A transparent interaction layer observes long presses across the full widget.
         // Ordinary touch events are forwarded to the AppWidgetHostView so its controls still work.
