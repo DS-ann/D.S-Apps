@@ -1776,8 +1776,7 @@ public class MainActivity extends Activity {
                     boolean occupied = false;
                     for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                         View child = page.getChildAt(childIndex);
-                        if ("launcher_contact_shortcut".equals(child.getTag())
-                                || "launcher_clock_widget".equals(child.getTag())) continue;
+                        if ("launcher_clock_widget".equals(child.getTag())) continue;
                         android.graphics.Rect bounds;
                         ViewGroup.LayoutParams rawParams = child.getLayoutParams();
                         if (rawParams instanceof FrameLayout.LayoutParams) {
@@ -1821,7 +1820,7 @@ public class MainActivity extends Activity {
                         boolean occupied = false;
                         for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                             View child = page.getChildAt(childIndex);
-                            if ("launcher_contact_shortcut".equals(child.getTag())) continue;
+                            // Other shortcut tiles occupy real space and must not be ignored here.
                             FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
                                     ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
                             int childLeft = p != null ? p.leftMargin : child.getLeft();
@@ -1971,7 +1970,6 @@ public class MainActivity extends Activity {
                             String otherTag = (String) other.getTag();
                             if (!otherTag.startsWith("launcher_app:")
                                     && !otherTag.startsWith("launcher_widget:")
-                                    && !"launcher_contact_shortcut".equals(otherTag)
                                     && !"launcher_clock_widget".equals(otherTag)) continue;
                             FrameLayout.LayoutParams otherParams =
                                     (FrameLayout.LayoutParams) other.getLayoutParams();
@@ -2235,7 +2233,7 @@ public class MainActivity extends Activity {
                 if (appCol == col && appRow == row) return false;
                 continue;
             }
-            if (tag.equals("launcher_contact_shortcut")) continue;
+            // Count other shortcuts as occupied space; only the explicitly ignored view is skipped.
             FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
                     ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
             int childLeft = p != null ? p.leftMargin : child.getLeft();
