@@ -94,7 +94,11 @@ final class LauncherDrawerController {
         // bottom-right corner of the drawer surface with no visual gap.
         floatingSearchParams.rightMargin = -LauncherUiUtils.dp(activity, 18);
         floatingSearchParams.bottomMargin = -LauncherUiUtils.dp(activity, 8);
+        // Keep search as a floating overlay above the drawer grid; it must not
+        // consume a grid cell or be covered by app items.
+        searchButton.setElevation(LauncherUiUtils.dp(activity, 8));
         drawerBody.addView(searchButton, floatingSearchParams);
+        searchButton.bringToFront();
         screen.addView(drawerBody, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         // Keep the inline query field immediately under the header so it remains visible
