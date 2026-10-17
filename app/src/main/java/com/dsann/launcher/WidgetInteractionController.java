@@ -156,6 +156,7 @@ final class WidgetInteractionController {
 
         final int[] editMode = {0}; // 0 idle, 1 moving
         final float[] down = {0f, 0f};
+        final float[] fingerOffset = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
         final int[] widgetPage = {pageIndex};
         final int[] originalPageAtDown = {pageIndex};
@@ -232,6 +233,10 @@ final class WidgetInteractionController {
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
                 downTime[0] = event.getDownTime();
+                int[] containerLocation = new int[2];
+                container.getLocationOnScreen(containerLocation);
+                fingerOffset[0] = down[0] - containerLocation[0];
+                fingerOffset[1] = down[1] - containerLocation[1];
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                 origin[0] = current.leftMargin;
                 origin[1] = current.topMargin;
@@ -291,9 +296,9 @@ final class WidgetInteractionController {
                     // Store coordinates relative to the still-attached source page, not the viewport.
                     // Remove the temporary cross-page translation before calculating layout margins.
                     current.leftMargin = Math.max(0, Math.min(maxX,
-                            Math.round(event.getRawX() - pageLocation[0] - container.getTranslationX() - container.getWidth() / 2f)));
+                            Math.round(event.getRawX() - pageLocation[0] - fingerOffset[0])));
                     current.topMargin = Math.max(0, Math.min(maxY,
-                            Math.round(event.getRawY() - pageLocation[1] - container.getHeight() / 2f)));
+                            Math.round(event.getRawY() - pageLocation[1] - fingerOffset[1])));
                     container.setLayoutParams(current);
                     listener.updateLiveDisplacements(activePage, container);
                     return true;
