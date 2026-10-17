@@ -491,11 +491,15 @@ public class MainActivity extends Activity {
                     setClampedClockTranslation(
                             clockPanel.getTranslationX() + targetX - now[0],
                             clockPanel.getTranslationY() + targetY - now[1], true);
-                    // Clamp the actual scaled panel after layout; translation-only
-                    // movement already had a boundary, but breadth/length resize did not.
+                    // Clamp the actual resized panel after layout, then run the same
+                    // collision/displacement pass used by clock dragging. Previously
+                    // resizing changed the clock footprint without updating neighbours.
                     float[] bounded = clampClockTranslation(clockPanel,
                             clockPanel.getTranslationX(), clockPanel.getTranslationY());
                     setClampedClockTranslation(bounded[0], bounded[1], true);
+                    if (clockPanel.getParent() instanceof FrameLayout) {
+                        updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
+                    }
                     updateClockResizeHandles();
                 });
                 return true;
@@ -909,6 +913,9 @@ public class MainActivity extends Activity {
             setClampedClockTranslation(clockPanel.getTranslationX(), clockPanel.getTranslationY(), true);
             updateClockResizeHandles();
         });
+        if (clockPanel.getParent() instanceof FrameLayout) {
+            finishLiveDisplacements(!cancelled, clockPanel);
+        }
         setWorkspaceGridVisible(false, null);
         updateClockResizeHandles();
     }
@@ -1945,13 +1952,19 @@ public class MainActivity extends Activity {
             grip.setBackground(gripBackground);
             grip.setVisibility(View.GONE);
             grip.setTag("launcher_shortcut_resize_handle");
-            int side = LauncherUiUtils.dp(this, 36);
-            int thick = LauncherUiUtils.dp(this, 18);
-            FrameLayout.LayoutParams gripParams = edge < 2
-                    ? new FrameLayout.LayoutParams(thick, side,
-                            edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
-                    : new FrameLayout.LayoutParams(side, thick,
-                            edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            // Full-length edge strips make resizing reliable on small phone screens.
+            // The strips are children of the shortcut so their touch targets track its bounds.
+            int thick = LauncherUiUtils.dp(this, 28);
+            FrameLayout.LayoutParams gripParams;
+            if (edge < 2) {
+                gripParams = new FrameLayout.LayoutParams(thick,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        edge == 0 ? Gravity.LEFT : Gravity.RIGHT);
+            } else {
+                gripParams = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, thick,
+                        edge == 2 ? Gravity.TOP : Gravity.BOTTOM);
+            }
             tile.addView(grip, gripParams);
             grip.bringToFront();
             shortcutResizeHandles[edge] = grip;
