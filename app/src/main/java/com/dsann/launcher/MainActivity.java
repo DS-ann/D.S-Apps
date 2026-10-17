@@ -2811,16 +2811,15 @@ public class MainActivity extends Activity {
                     final int collisionPageIndex = committedPage;
                     pageViewport.post(() -> {
                         if (pagesStrip == null || collisionPageIndex >= pagesStrip.getChildCount()) return;
-                        FrameLayout collisionPage = (FrameLayout) pagesStrip.getChildAt(collisionPageIndex);
+                        View pageView = pagesStrip.getChildAt(collisionPageIndex);
+                        if (!(pageView instanceof FrameLayout)) return;
+                        FrameLayout collisionPage = (FrameLayout) pageView;
                         collisionPage.post(() -> {
-                            for (int wi = 0; wi < collisionPage.getChildCount(); wi++) {
-                                View item = collisionPage.getChildAt(wi);
-                                Object tag = item.getTag();
-                                if (tag instanceof String && ((String) tag).startsWith("launcher_widget:")
-                                        && item instanceof FrameLayout) {
-                                    resolveWidgetIconCollisions(collisionPage, (FrameLayout) item);
-                                }
-                            }
+                            if (collisionPage.getParent() != pagesStrip) return;
+                            // Always validate the whole page after an app drop, even
+                            // if the page contains no widgets. The clock and shortcuts
+                            // are workspace collision surfaces as well.
+                            resolveAllWorkspaceOverlaps(collisionPage, null);
                         });
                     });
                     return true;
@@ -3299,6 +3298,21 @@ public class MainActivity extends Activity {
         ensurePageExists(targetPage);
         renderHomePages(false);
         showPage(targetPage, false);
+        // Adding an app can collide with the clock even on pages with no widgets.
+        // Run the same all-item collision pass after the new icon cells are measured.
+        final int addedAppPageIndex = targetPage;
+        pageViewport.post(() -> {
+            if (pagesStrip == null || addedAppPageIndex < 0
+                    || addedAppPageIndex >= pagesStrip.getChildCount()) return;
+            View targetView = pagesStrip.getChildAt(addedAppPageIndex);
+            if (!(targetView instanceof FrameLayout)) return;
+            FrameLayout targetFrame = (FrameLayout) targetView;
+            targetFrame.post(() -> {
+                if (targetFrame.getParent() == pagesStrip) {
+                    resolveAllWorkspaceOverlaps(targetFrame, null);
+                }
+            });
+        });
         Toast.makeText(this, "Added to Home", Toast.LENGTH_SHORT).show();
         return true;
     }
