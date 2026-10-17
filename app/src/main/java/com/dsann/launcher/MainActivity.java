@@ -3276,6 +3276,7 @@ public class MainActivity extends Activity {
             }
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(targetPage);
             if (page == null) return;
+            int resolvedPage = targetPage;
             int availableWidth = page.getWidth() > 0 ? page.getWidth()
                     : Math.max(LauncherUiUtils.dp(this, 180), getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
             int availableHeight = page.getHeight() > 0 ? page.getHeight()
@@ -3302,7 +3303,7 @@ public class MainActivity extends Activity {
                     int[] otherPosition = findFreeWidgetPosition(otherPage, width, height);
                     if (otherPosition != null) {
                         page = otherPage;
-                        targetPage = otherPageIndex;
+                        resolvedPage = otherPageIndex;
                         freeWidgetPosition = otherPosition;
                     }
                 }
@@ -3312,7 +3313,7 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "No free space large enough for this widget on either screen", Toast.LENGTH_LONG).show();
                 return;
             }
-            addWidgetContainer(page, widget, widgetId, targetPage, freeWidgetPosition[0], freeWidgetPosition[1], width, height);
+            addWidgetContainer(page, widget, widgetId, resolvedPage, freeWidgetPosition[0], freeWidgetPosition[1], width, height);
             FrameLayout container = null;
             for (int i = 0; i < page.getChildCount(); i++) {
                 View child = page.getChildAt(i);
@@ -3324,12 +3325,13 @@ public class MainActivity extends Activity {
             if (container != null) {
                 WidgetController.updateWidgetSize(widgetManager, widgetId, widget, getResources().getDisplayMetrics().density,
                         container.getLayoutParams().width, container.getLayoutParams().height);
-                saveWidgetGeometry(widgetId, targetPage, container);
+                saveWidgetGeometry(widgetId, resolvedPage, container);
                 final FrameLayout placedWidget = container;
-                page.post(() -> resolveWidgetIconCollisions(page, placedWidget));
+                final FrameLayout placedPage = page;
+                page.post(() -> resolveWidgetIconCollisions(placedPage, placedWidget));
             } else {
                 String stored = prefs.getString(KEY_WIDGET_IDS, "");
-                String entry = widgetId + ":" + targetPage;
+                String entry = widgetId + ":" + resolvedPage;
                 if (!containsWidgetId(stored, widgetId)) {
                     prefs.edit().putString(KEY_WIDGET_IDS, stored.isEmpty() ? entry : stored + "\n" + entry).apply();
                 }
