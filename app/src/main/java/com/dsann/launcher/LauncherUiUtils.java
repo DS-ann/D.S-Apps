@@ -23,6 +23,19 @@ final class LauncherUiUtils {
         startMoveHint(view, context, true);
     }
 
+    /** Static move-ready feedback for position-sensitive items: enlarge without dancing. */
+    static void startScaleHint(View view, float scale) {
+        if (view == null) return;
+        stopMoveHint(view);
+        float baseRotation = view.getRotation();
+        float baseTranslationY = view.getTranslationY();
+        float baseScaleX = view.getScaleX();
+        float baseScaleY = view.getScaleY();
+        MOVE_HINT_BASES.put(view, new float[]{baseRotation, baseTranslationY, baseScaleX, baseScaleY});
+        view.setScaleX(baseScaleX * scale);
+        view.setScaleY(baseScaleY * scale);
+    }
+
     /** Allows position-sensitive widgets (such as the clock) to dance without bobbing. */
     static void startMoveHint(View view, Context context, boolean verticalBob) {
         if (view == null) return;
