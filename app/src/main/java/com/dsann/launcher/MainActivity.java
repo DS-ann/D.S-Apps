@@ -357,6 +357,7 @@ public class MainActivity extends Activity {
                 handler.removeCallbacks(clockWidgetLongPress);
                 handler.removeCallbacks(clockWidgetEditLongPress);
                 LauncherUiUtils.stopMoveHint(clockPanel);
+                showClockMoveBorder(false);
                 clockWidgetMoving = false;
                 clockWidgetLongPressActivated = false;
                 setWorkspaceGridVisible(false, null);
@@ -3996,6 +3997,8 @@ public class MainActivity extends Activity {
         clockPanel.setTag("launcher_clock_widget");
         clockPanel.setClipChildren(false);
         clockPanel.setClipToPadding(false);
+        // A thin white outline indicates move-ready mode without animating or
+        // scaling the clock. It is removed when edit mode begins or the clock is tapped.
         // Four visible resize grips are hosted by the root overlay, not inside the
         // vertical clock layout, so they never add unwanted height to the clock/date.
         for (int i = 0; i < clockEdgeHandles.length; i++) {
@@ -4019,6 +4022,13 @@ public class MainActivity extends Activity {
         clockPanel.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 activateClockForPage(panelPage);
+                if (clockWidgetMoving && !clockWidgetEditing) {
+                    handler.removeCallbacks(clockWidgetLongPress);
+                    handler.removeCallbacks(clockWidgetEditLongPress);
+                    showClockMoveBorder(false);
+                    clockWidgetMoving = false;
+                    setWorkspaceGridVisible(false, null);
+                }
                 clockWidgetLongPressActivated = false;
                 clockWidgetDownRawX = event.getRawX();
                 clockWidgetDownRawY = event.getRawY();
@@ -4053,8 +4063,8 @@ public class MainActivity extends Activity {
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 8)) {
                     handler.removeCallbacks(clockWidgetLongPress);
                     handler.removeCallbacks(clockWidgetEditLongPress);
-                    // Outside edit mode the clock must not swallow workspace swipes.
-                    // Let the parent pager / global swipe detector take over.
+                    // Do not consume the move: allow the parent pager and the
+                    // activity-level swipe detector to receive the gesture sequence.
                     if (view.getParent() != null) {
                         view.getParent().requestDisallowInterceptTouchEvent(false);
                     }
@@ -4096,14 +4106,14 @@ public class MainActivity extends Activity {
         if (clockPanel == null || drawerOpen) return;
         clockWidgetMoving = true;
         clockWidgetLongPressActivated = true;
-        // Match app/widget/shortcut move-ready feedback without bobbing the clock's
-        // translationY, which is also its persisted workspace position.
-        LauncherUiUtils.startScaleHint(clockPanel, 1.10f);
+        // Show a subtle move-ready outline without changing clock size or position.
+        showClockMoveBorder(true);
         setWorkspaceGridVisible(true, clockPanel);
     };
 
     private final Runnable clockWidgetEditLongPress = () -> {
         if (clockPanel == null || drawerOpen) return;
+        showClockMoveBorder(false);
         LauncherUiUtils.stopMoveHint(clockPanel);
         clockWidgetLongPressActivated = true;
         clockWidgetEditing = true;
@@ -4115,7 +4125,22 @@ public class MainActivity extends Activity {
                 Toast.LENGTH_LONG).show();
     };
 
+    private void showClockMoveBorder(boolean visible) {
+        if (clockPanel == null) return;
+        if (!visible) {
+            clockPanel.setForeground(null);
+            return;
+        }
+        android.graphics.drawable.GradientDrawable outline =
+                new android.graphics.drawable.GradientDrawable();
+        outline.setColor(Color.TRANSPARENT);
+        outline.setCornerRadius(LauncherUiUtils.dp(this, 2));
+        outline.setStroke(LauncherUiUtils.dp(this, 1), Color.WHITE);
+        clockPanel.setForeground(outline);
+    }
+
     private void exitClockWidgetEditMode() {
+        showClockMoveBorder(false);
         LauncherUiUtils.stopMoveHint(clockPanel);
         clockWidgetMoving = false;
         clockWidgetLongPressActivated = false;
@@ -5575,6 +5600,9 @@ public class MainActivity extends Activity {
                 markerParams.rightMargin = 0;
                 markerParams.topMargin = 0;
                 markerParams.bottomMargin = 0;
+                // The seven-segment glyphs and their colon are shifted left by
+                // 15dp; apply that exact same offset to AM/PM.
+                amPmText.setTranslationX(sevenSegment ? -LauncherUiUtils.dp(this, 15) : 0f);
                 amPmText.setLayoutParams(markerParams);
             }
             // Counter-scale AM/PM as well as the date so neither font changes size
