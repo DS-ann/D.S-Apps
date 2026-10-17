@@ -1509,8 +1509,9 @@ public class MainActivity extends Activity {
         }
         // A direct-call shortcut is an app-like icon, not a miniature widget tile.
         // Its default footprint is the same compact size as the app icon cell.
-        int defaultShortcutWidth = LauncherUiUtils.dp(this, 48);
-        int defaultShortcutHeight = LauncherUiUtils.dp(this, 68);
+        // Match the shortcut's default footprint to one normal home-app grid cell.
+        int defaultShortcutWidth = cellW;
+        int defaultShortcutHeight = cellH;
         int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
                 savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
                         : Math.min(cellW, defaultShortcutWidth)));
@@ -1793,9 +1794,10 @@ public class MainActivity extends Activity {
                         float widthScale = (float) p.width / (float) cellW;
                         float heightScale = (float) p.height / (float) cellH;
                         float tileScale = Math.min(widthScale, heightScale);
-                        int iconSize = Math.max(LauncherUiUtils.dp(this, 48),
-                                Math.min(LauncherUiUtils.dp(this, 96),
-                                        Math.round(LauncherUiUtils.dp(this, 48) * tileScale)));
+                        int configuredIconDp = Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48));
+                        int iconSize = Math.max(LauncherUiUtils.dp(this, 24),
+                                Math.min(LauncherUiUtils.dp(this, 120),
+                                        Math.round(LauncherUiUtils.dp(this, configuredIconDp) * tileScale)));
                         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
                         if (iconParams != null && (iconParams.width != iconSize || iconParams.height != iconSize)) {
                             iconParams.width = iconSize;
@@ -1894,8 +1896,13 @@ public class MainActivity extends Activity {
                 handler.removeCallbacks(shortcutPopupRunnable[0]);
                 if (shortcutDragging[0]) {
                     FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                    int proposedLeft = p.leftMargin;
-                    int proposedTop = p.topMargin;
+                    int columns = getHomeColumns();
+                    int cellW = Math.max(1, pageViewport.getWidth() / columns);
+                    int cellH = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+                    int proposedLeft = Math.max(0, Math.min(pageViewport.getWidth() - tile.getWidth(),
+                            Math.round((p.leftMargin + tile.getWidth() / 2f - cellW / 2f) / cellW) * cellW));
+                    int proposedTop = Math.max(0, Math.min(pageViewport.getHeight() - tile.getHeight(),
+                            Math.round((p.topMargin + tile.getHeight() / 2f - cellH / 2f) / cellH) * cellH));
                     if (!isContactShortcutPositionFree(shortcutResizePage, tile, proposedLeft, proposedTop,
                             tile.getWidth(), tile.getHeight())) {
                         p.leftMargin = shortcutPositionStart[0];
@@ -1903,7 +1910,9 @@ public class MainActivity extends Activity {
                         tile.setLayoutParams(p);
                         Toast.makeText(this, "That spot is occupied", Toast.LENGTH_SHORT).show();
                     } else {
-                        float density = getResources().getDisplayMetrics().density;
+                        p.leftMargin = proposedLeft;
+                        p.topMargin = proposedTop;
+                        tile.setLayoutParams(p);
                         prefs.edit().putInt(KEY_SHORTCUT_PAGE, pagesStrip.indexOfChild(shortcutResizePage))
                                 .putFloat(KEY_SHORTCUT_X, proposedLeft / (float) Math.max(1,
                                         pageViewport.getWidth() - tile.getWidth()))
@@ -1982,12 +1991,37 @@ public class MainActivity extends Activity {
 
     private boolean isContactShortcutPositionFree(FrameLayout page, View ignore, int left, int top,
             int width, int height) {
-        if (page == null || width <= 0 || height <= 0) return false;
-        android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + width, top + height);
+        if (page == null || width <= 0 || height <= 0 || pageViewport == null) return false;
+        int columns = getHomeColumns();
+        int cellW = Math.max(1, pageViewport.getWidth() / columns);
+        int cellH = LauncherUiUtils.dp(this, Math.max(56, prefs.getInt(KEY_ICON_SIZE, 48) + 28));
+        int rows = Math.max(1, pageViewport.getHeight() / cellH);
+        // Test the snapped one-cell target, exactly as the app icon placer does.
+        int col = Math.max(0, Math.min(columns - 1,
+                Math.round((left + width / 2f - cellW / 2f) / cellW)));
+        int row = Math.max(0, Math.min(rows - 1,
+                Math.round((top + height / 2f - cellH / 2f) / cellH)));
+        int snappedLeft = col * cellW, snappedTop = row * cellH;
+        android.graphics.Rect candidate = new android.graphics.Rect(snappedLeft, snappedTop,
+                snappedLeft + cellW, snappedTop + cellH);
+        if (candidate.right > pageViewport.getWidth() || candidate.bottom > pageViewport.getHeight()) return false;
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
             if (child == ignore || "launcher_clock_widget".equals(child.getTag())
-                    || "launcher_contact_shortcut".equals(child.getTag())) continue;
+                    || child == workspaceGridOverlays[0] || child == workspaceGridOverlays[1]) continue;
+            Object rawTag = child.getTag();
+            String tag = rawTag instanceof String ? (String) rawTag : "";
+            if (tag.startsWith("launcher_app:")) {
+                FrameLayout.LayoutParams appLp = child.getLayoutParams() instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
+                int appLeft = appLp != null ? appLp.leftMargin : child.getLeft();
+                int appTop = appLp != null ? appLp.topMargin : child.getTop();
+                int appCol = Math.max(0, Math.min(columns - 1, Math.round(appLeft / (float) cellW)));
+                int appRow = Math.max(0, Math.min(rows - 1, Math.round(appTop / (float) cellH)));
+                if (appCol == col && appRow == row) return false;
+                continue;
+            }
+            if (tag.equals("launcher_contact_shortcut")) continue;
             FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
                     ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
             int childLeft = p != null ? p.leftMargin : child.getLeft();
@@ -1995,9 +2029,7 @@ public class MainActivity extends Activity {
             int childWidth = p != null && p.width > 0 ? p.width : child.getWidth();
             int childHeight = p != null && p.height > 0 ? p.height : child.getHeight();
             if (childWidth > 0 && childHeight > 0 && android.graphics.Rect.intersects(candidate,
-                    new android.graphics.Rect(childLeft, childTop, childLeft + childWidth, childTop + childHeight))) {
-                return false;
-            }
+                    new android.graphics.Rect(childLeft, childTop, childLeft + childWidth, childTop + childHeight))) return false;
         }
         return true;
     }
