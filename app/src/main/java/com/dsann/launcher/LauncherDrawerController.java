@@ -49,15 +49,28 @@ final class LauncherDrawerController {
         int side = LauncherUiUtils.dp(activity, 18);
         screen.setPadding(side, side, side, LauncherUiUtils.dp(activity, 8));
         screen.setBackground(background);
+        LinearLayout headerRow = new LinearLayout(activity);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams headerParams =
+                new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 48));
+        headerParams.bottomMargin = LauncherUiUtils.dp(activity, 4);
         TextView title = LauncherUiUtils.text(activity, "My Apps", 28,
                 android.graphics.Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         title.setTypeface(android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL));
         title.setLetterSpacing(0.015f);
-        LinearLayout.LayoutParams titleParams =
-                new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 48));
-        titleParams.bottomMargin = LauncherUiUtils.dp(activity, 4);
-        screen.addView(title, titleParams);
+        headerRow.addView(title, new LinearLayout.LayoutParams(0, -1, 1f));
+        final TextView searchButton = LauncherUiUtils.text(activity, "⌕", 27,
+                android.graphics.Color.WHITE, true);
+        searchButton.setGravity(Gravity.CENTER);
+        searchButton.setContentDescription("Search apps");
+        searchButton.setBackgroundResource(android.R.drawable.list_selector_background);
+        searchButton.setPadding(LauncherUiUtils.dp(activity, 10), 0,
+                LauncherUiUtils.dp(activity, 10), 0);
+        headerRow.addView(searchButton, new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(activity, 44), -1));
+        screen.addView(headerRow, headerParams);
 
         GridView grid = new GridView(activity);
         grid.setNumColumns(actions.getColumns());
@@ -76,33 +89,19 @@ final class LauncherDrawerController {
         grid.setAdapter(adapter);
         screen.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        // Keep the inline query field immediately under the header so it remains visible
+        // above the keyboard on Android 6 even when adjustResize is ineffective.
         LinearLayout searchRow = new LinearLayout(activity);
         searchRow.setGravity(Gravity.CENTER_VERTICAL);
         searchRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams searchRowParams =
                 new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 42));
-        searchRowParams.topMargin = LauncherUiUtils.dp(activity, 2);
-        screen.addView(searchRow, searchRowParams);
-        // Keep the active text field above the keyboard on Android 6, where the launcher
-        // draws edge-to-edge and adjustResize may not shrink the window. Move the row
-        // above the app grid so typing remains visible even when the keyboard covers the bottom.
-        screen.removeView(searchRow);
+        searchRowParams.bottomMargin = LauncherUiUtils.dp(activity, 2);
+        searchRow.setVisibility(View.GONE);
         screen.addView(searchRow, 1, searchRowParams);
 
-        // The search control lives in the drawer's bottom row. Tapping it expands
-        // that same row into an inline field, so the keyboard pushes the row up
-        // instead of covering it or opening a dialog.
         final List<ResolveInfo> originalApps = new java.util.ArrayList<>(drawerApps);
         final EditText[] activeQuery = new EditText[1];
-        final TextView searchButton = LauncherUiUtils.text(activity, "⌕", 27,
-                android.graphics.Color.WHITE, true);
-        searchButton.setGravity(Gravity.CENTER);
-        searchButton.setContentDescription("Search apps");
-        searchButton.setBackgroundResource(android.R.drawable.list_selector_background);
-        searchButton.setPadding(LauncherUiUtils.dp(activity, 10), 0,
-                LauncherUiUtils.dp(activity, 10), 0);
-        searchRow.addView(searchButton, new LinearLayout.LayoutParams(
-                LauncherUiUtils.dp(activity, 44), -1));
 
         Runnable restoreApps = () -> {
             drawerApps.clear();
@@ -119,14 +118,14 @@ final class LauncherDrawerController {
             }
             activeQuery[0] = null;
             searchRow.removeAllViews();
-            searchRow.addView(searchButton, new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(activity, 44), -1));
+            searchRow.setVisibility(View.GONE);
             restoreApps.run();
         };
         closeSearchRef[0] = closeSearch;
 
         searchButton.setOnClickListener(v -> {
             if (activeQuery[0] != null) return;
+            searchRow.setVisibility(View.VISIBLE);
             searchRow.removeAllViews();
             EditText queryInput = new EditText(activity);
             activeQuery[0] = queryInput;
