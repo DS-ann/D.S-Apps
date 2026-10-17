@@ -168,6 +168,8 @@ public class MainActivity extends Activity {
     private int clockWidgetStartLength, clockWidgetStartBreadth;
     private int clockWidgetStartScreenX, clockWidgetStartScreenY;
     private int clockWidgetStartPanelWidth, clockWidgetStartPanelHeight;
+    private int clockWidgetStartVisualX, clockWidgetStartVisualY;
+    private int clockWidgetStartVisualWidth, clockWidgetStartVisualHeight;
     private float clockWidgetStartPanelScaleX = 1f;
     private boolean clockWidgetLongPressActivated = false;
     // 0 = none, 1 = left edge, 2 = right edge, 3 = top edge, 4 = bottom edge.
@@ -383,6 +385,11 @@ public class MainActivity extends Activity {
                     clockWidgetStartPanelWidth = clockPanel.getWidth();
                     clockWidgetStartPanelHeight = clockPanel.getHeight();
                     clockWidgetStartPanelScaleX = clockPanel.getScaleX();
+                    int[] startGeometry = itemGeometry(clockPanel);
+                    clockWidgetStartVisualX = startGeometry[0];
+                    clockWidgetStartVisualY = startGeometry[1];
+                    clockWidgetStartVisualWidth = startGeometry[2];
+                    clockWidgetStartVisualHeight = startGeometry[3];
                     clockResizeGeneration++;
                     clockWidgetStartX = clockPanel.getTranslationX();
                     clockWidgetStartY = clockPanel.getTranslationY();
@@ -453,53 +460,87 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (clockResizeEdge != 0 && clockWidgetDragging) {
-                float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
-                // Resize values are stored in dp-like preference units. Use a gentler
-                // half-rate mapping so the handle follows the finger without racing ahead.
-                int resizeDx = Math.round((event.getRawX() - clockWidgetDownRawX) / density * 0.5f);
-                int resizeDy = Math.round((event.getRawY() - clockWidgetDownRawY) / density * 0.5f);
-                int lengthDelta = clockResizeEdge == 1 ? -resizeDx : (clockResizeEdge == 2 ? resizeDx : 0);
-                int breadthDelta = clockResizeEdge == 3 ? -resizeDy : (clockResizeEdge == 4 ? resizeDy : 0);
+                // Use the widget resizer's pixel-space rules: page boundaries are hard
+                // limits, the opposite edge stays fixed, and overlapping candidates are rejected.
+                if (!(clockPanel.getParent() instanceof FrameLayout)) return true;
+                FrameLayout activePage = (FrameLayout) clockPanel.getParent();
+                float dx = event.getRawX() - clockWidgetDownRawX;
+                float dy = event.getRawY() - clockWidgetDownRawY;
+                int pageWidth = activePage.getWidth();
+                int pageHeight = activePage.getHeight();
+                if (pageWidth <= 0 || pageHeight <= 0) return true;
+
+                int left = clockWidgetStartVisualX;
+                int top = clockWidgetStartVisualY;
+                int right = left + clockWidgetStartVisualWidth;
+                int bottom = top + clockWidgetStartVisualHeight;
+                int minW = Math.min(LauncherUiUtils.dp(this, 140), pageWidth);
+                int minH = Math.min(LauncherUiUtils.dp(this, 90), pageHeight);
+                if (clockResizeEdge == 1) {
+                    left = Math.round(clockWidgetStartVisualX + dx);
+                    left = Math.max(0, Math.min(left, right - minW));
+                } else if (clockResizeEdge == 2) {
+                    right = Math.round(clockWidgetStartVisualX + clockWidgetStartVisualWidth + dx);
+                    right = Math.max(left + minW, Math.min(right, pageWidth));
+                } else if (clockResizeEdge == 3) {
+                    top = Math.round(clockWidgetStartVisualY + dy);
+                    top = Math.max(0, Math.min(top, bottom - minH));
+                } else if (clockResizeEdge == 4) {
+                    bottom = Math.round(clockWidgetStartVisualY + clockWidgetStartVisualHeight + dy);
+                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                }
+                left = Math.max(0, Math.min(left, pageWidth - minW));
+                top = Math.max(0, Math.min(top, pageHeight - minH));
+                right = Math.max(left + minW, Math.min(right, pageWidth));
+                bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                android.graphics.Rect candidate = new android.graphics.Rect(left, top, right, bottom);
+
+                boolean overlaps = false;
+                for (int i = 0; i < activePage.getChildCount(); i++) {
+                    View other = activePage.getChildAt(i);
+                    if (other == clockPanel || !isWorkspaceItem(other)) continue;
+                    int[] g = itemGeometry(other);
+                    if (g[2] <= 0 || g[3] <= 0) continue;
+                    android.graphics.Rect obstacle = new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
+                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if (overlaps) return true;
+
+                int lengthPercent = Math.round((right - left) * 100f
+                        / Math.max(1f, clockWidgetStartPanelWidth * clockWidgetStartPanelScaleX));
+                int breadthPercent = Math.round((bottom - top) * 100f
+                        / Math.max(1f, LauncherUiUtils.dp(this, 114)));
+                lengthPercent = Math.max(80, Math.min(250, lengthPercent));
+                breadthPercent = Math.max(80, Math.min(250, breadthPercent));
                 prefs.edit()
-                        .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), Math.max(80, Math.min(250, clockWidgetStartLength + lengthDelta)))
-                        .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), Math.max(80, Math.min(250, clockWidgetStartBreadth + breadthDelta)))
+                        .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), lengthPercent)
+                        .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), breadthPercent)
                         .apply();
                 applyClockPositionAndSize();
                 final int resizingEdge = clockResizeEdge;
+                final int targetLeft = left;
+                final int targetTop = top;
+                final int targetRight = right;
+                final int targetBottom = bottom;
                 final int resizeGeneration = ++clockResizeGeneration;
                 clockPanel.post(() -> {
-                    // Complete the final geometry correction even if ACTION_UP arrived
-                    // before this layout callback ran; discard only stale resize frames.
-                    if (resizeGeneration != clockResizeGeneration || clockPanel == null) return;
-                    int[] now = new int[2];
-                    clockPanel.getLocationOnScreen(now);
-                    float targetX = clockWidgetStartScreenX;
-                    float targetY = clockWidgetStartScreenY;
-                    // Preserve the opposite VISUAL edge. Vertical scaling changes
-                    // the panel's drawn height while its reserved layout height stays fixed.
-                    if (resizingEdge == 1) {
-                        float startVisualWidth = clockWidgetStartPanelWidth * clockWidgetStartPanelScaleX;
-                        float currentVisualWidth = clockPanel.getWidth() * clockPanel.getScaleX();
-                        targetX += startVisualWidth - currentVisualWidth;
-                    } else if (resizingEdge == 3) {
-                        // The panel now changes its real measured height with breadth;
-                        // preserve the opposite (bottom) edge using actual visual bounds.
-                        float startVisualHeight = clockWidgetStartPanelHeight;
-                        float currentVisualHeight = clockPanel.getHeight() * clockPanel.getScaleY();
-                        targetY += startVisualHeight - currentVisualHeight;
-                    }
-                    setClampedClockTranslation(
-                            clockPanel.getTranslationX() + targetX - now[0],
-                            clockPanel.getTranslationY() + targetY - now[1], true);
-                    // Clamp the actual resized panel after layout, then run the same
-                    // collision/displacement pass used by clock dragging. Previously
-                    // resizing changed the clock footprint without updating neighbours.
+                    if (resizeGeneration != clockResizeGeneration || clockPanel == null
+                            || !(clockPanel.getParent() instanceof FrameLayout)) return;
+                    int[] actual = itemGeometry(clockPanel);
+                    float adjustX = 0f;
+                    float adjustY = 0f;
+                    if (resizingEdge == 1) adjustX = targetRight - (actual[0] + actual[2]);
+                    else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
+                    if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
+                    else if (resizingEdge == 4) adjustY = targetTop - actual[1];
+                    setClampedClockTranslation(clockPanel.getTranslationX() + adjustX,
+                            clockPanel.getTranslationY() + adjustY, true);
                     float[] bounded = clampClockTranslation(clockPanel,
                             clockPanel.getTranslationX(), clockPanel.getTranslationY());
                     setClampedClockTranslation(bounded[0], bounded[1], true);
-                    if (clockPanel.getParent() instanceof FrameLayout) {
-                        updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
-                    }
                     updateClockResizeHandles();
                 });
                 return true;
@@ -930,8 +971,9 @@ public class MainActivity extends Activity {
         // fixed layout footprint reserved to keep home items from reflowing.
         int w = Math.max(1, Math.round(clockPanel.getWidth() * clockPanel.getScaleX()));
         int h = Math.max(1, Math.round(clockPanel.getHeight() * clockPanel.getScaleY()));
-        int side = LauncherUiUtils.dp(this, 28);
-        int thin = LauncherUiUtils.dp(this, 8);
+        // Match the widget resizer: 18dp-thick grips, 40dp long.
+        int side = LauncherUiUtils.dp(this, 40);
+        int thin = LauncherUiUtils.dp(this, 18);
         int[][] positions = new int[][] {
                 {panel[0] - rootLoc[0], panel[1] - rootLoc[1] + h / 2 - side / 2},
                 {panel[0] - rootLoc[0] + w - thin, panel[1] - rootLoc[1] + h / 2 - side / 2},
