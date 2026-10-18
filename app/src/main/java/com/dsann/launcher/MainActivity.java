@@ -68,8 +68,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
-    private static final String KEY_CUBE_ROTATION = "cube_rotation_degrees";
-    private static final String KEY_ANIMATION_SPEED = "animation_speed";
+remove obsolete setting key    private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final String KEY_PAGE_TRANSITION = "page_transition";
     private static final String KEY_DRAWER_TRANSITION = "drawer_transition";
     private static final String KEY_DRAWER_OPACITY = "drawer_background_opacity";
@@ -281,6 +280,9 @@ public class MainActivity extends Activity {
     private boolean gestureStartedOnResizeHandle = false;
     // A first pull at the drawer's top arms closing; the next downward pull closes.
     private boolean pageSwipeActive = false;
+    // Remains true from the first finger-driven frame until the settle animator ends.
+    private boolean pageTransitionBusy = false;
+    private boolean pageTransitionBusyAtDown = false;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
     private boolean gestureStartedOnDrawerGrid = false;
@@ -604,6 +606,7 @@ public class MainActivity extends Activity {
             longPressDownY = event.getY();
             longPressTriggered = false;
             pageSwipeActive = false;
+            pageTransitionBusyAtDown = pageTransitionBusy;
             pageSwipeChildCancelled = false;
             verticalSwipeClaimed = false;
             drawerCloseSwipeClaimed = false;
@@ -947,6 +950,12 @@ public class MainActivity extends Activity {
             // All other vertical gestures are left to the app grid for normal scrolling.
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dy) > Math.abs(dx) * 1.15f;
+            // Consume vertical movement when this touch began during a page settle.
+            // It must not open the drawer/control center as the pages are transitioning.
+            if (pageTransitionBusyAtDown && !pageSwipeActive && verticalSwipe) {
+                handler.removeCallbacks(homeLongPress);
+                return true;
+            }
             if (drawerCloseSwipeClaimed) {
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                         ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
@@ -964,6 +973,7 @@ public class MainActivity extends Activity {
             boolean itemManipulation = gestureStartedOnClock || gestureStartedOnResizeHandle || iconDragArmed || iconDragging
                     || heldItemGesture;
             if (!drawerOpen && !itemManipulation
+                    && !pageTransitionBusyAtDown && !pageTransitionBusy
                     && !verticalSwipeClaimed && verticalSwipe) {
                 verticalSwipeClaimed = true;
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
@@ -1028,6 +1038,7 @@ public class MainActivity extends Activity {
                 if (adjacent >= 0 && adjacent < pagesStrip.getChildCount()) {
                     if (!pageSwipeActive) {
                         pageSwipeActive = true;
+                        pageTransitionBusy = true;
                         pageSwipeChildCancelled = false;
                         wheelSwipeProgress = 0f;
                         wheelSwipeDirection = direction;
@@ -1216,6 +1227,7 @@ public class MainActivity extends Activity {
                         && releaseGestureDuration > 450L)
                     || (gestureStartedOnContactShortcut && releaseGestureDuration >= 1000L);
             if (!drawerOpen && !itemManipulationOnRelease
+                    && !pageTransitionBusyAtDown && !pageTransitionBusy
                     && (verticalSwipeClaimed
                         || (Math.abs(dy) > LauncherUiUtils.dp(this, 65)
                             && Math.abs(dy) > Math.abs(dx) * 1.15f))) {
@@ -4168,8 +4180,10 @@ public class MainActivity extends Activity {
         // The wheel must combine face rotation with continuous horizontal travel.
         // Rotating two stationary neighbouring faces alone looks like a panel flip,
         // not a wheel carrying the next page into the viewport.
-        pagesStrip.setTranslationX(-from * width
-                - ((effect == 0 || effect == 2) ? direction * width * progress : 0f));
+        // Move the adjacent page into view continuously. In Cube this carries the
+        // common face edge with the finger; in Page Flip it makes the fading-in page
+        // enter the viewport instead of remaining outside it.
+        pagesStrip.setTranslationX(-from * width - direction * width * progress);
         // Cross-fade the pages without changing any transition geometry.
         outgoing.setAlpha(1f - progress);
         if (incomingFace != null) incomingFace.setAlpha(progress);
@@ -4190,24 +4204,27 @@ public class MainActivity extends Activity {
 
         outgoing.setCameraDistance(10000f * density);
         if (effect == 1) {
-            // 3D Cube: rotate each face around the shared vertical edge with depth separation.
+            // Fixed 90-degree cube faces. The strip advances with the finger so
+            // the outgoing and incoming faces share a hinge that travels across
+            // the viewport: the first face folds away and the next enters from right.
+            final float cubeAngle = 90f;
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
-            float cubeAngle = getCubeRotationDegrees();
-            outgoing.setRotationY(direction * cubeAngle * progress);
+            outgoing.setRotationY(-direction * cubeAngle * progress);
             outgoing.setTranslationZ(-density * 28f * progress);
-            outgoing.setTranslationX(-direction * width * 0.04f * progress);
+            outgoing.setTranslationX(0f);
             if (to >= 0 && to < pagesStrip.getChildCount()) {
                 View incoming = pagesStrip.getChildAt(to);
                 incoming.setCameraDistance(10000f * density);
                 incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
                 incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setRotationY(-direction * cubeAngle * (1f - progress));
+                incoming.setRotationY(direction * cubeAngle * (1f - progress));
                 incoming.setTranslationZ(density * 28f * progress);
-                incoming.setTranslationX(-direction * width + direction * width * 0.04f * (1f - progress));
+                incoming.setTranslationX(0f);
             }
         } else if (effect == 3) {
-            // Page Flip: hinge from the top edge on the X axis, like a turning sheet.
+            // Page Flip: both pages cross-fade while the incoming face moves into
+            // the viewport. Previously its alpha rose while it stayed offscreen.
             outgoing.setPivotX(width * 0.5f);
             outgoing.setPivotY(0f);
             outgoing.setRotationX(direction * 68f * progress);
@@ -4259,6 +4276,7 @@ public class MainActivity extends Activity {
             pagesStrip.setTranslationX(-from * (float) width);
             wheelSwipeProgress = 0f;
             wheelSwipeDirection = 0;
+            pageTransitionBusy = false;
             return;
         }
 
@@ -4285,6 +4303,7 @@ public class MainActivity extends Activity {
                 releasePageLayers();
                 wheelSwipeProgress = 0f;
                 wheelSwipeDirection = 0;
+                pageTransitionBusy = false;
                 if (pageIndicator != null) {
                     boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
                     pageIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
@@ -8759,13 +8778,7 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
-        // Display a user-facing scale offset by 40 degrees; keep the stored animation
-        // angle unchanged. Thus the existing internal 130° appears as 90° in Home Studio.
-        addMappedSliderRow(content, "Cube rotation angle", 0, 140,
-                Math.max(0, Math.min(140, getCubeRotationDegrees() - 40)), "°", value -> {
-                    prefs.edit().putInt(KEY_CUBE_ROTATION, value + 40).apply();
-                });
-        addSliderRowWithHint(content, "Animation speed", 40, 200,
+remove Cube angle slider        addSliderRowWithHint(content, "Animation speed", 40, 200,
                 LauncherMotion.speedPercent(this), "%",
                 "Applies to timed launcher animations. Left = slower; 100% = normal; right = faster.",
                 value -> prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply());
@@ -8911,12 +8924,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int getCubeRotationDegrees() {
-        return Math.max(30, Math.min(180,
-                prefs == null ? 90 : prefs.getInt(KEY_CUBE_ROTATION, 90)));
-    }
-
-    private int getPageRotationDegrees() {
+remove obsolete getter    private int getPageRotationDegrees() {
         return Math.max(50, Math.min(180, prefs == null ? 90 : prefs.getInt(KEY_PAGE_ROTATION, 90)));
     }
 
