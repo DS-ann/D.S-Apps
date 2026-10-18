@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
     private static final String KEY_DRAWER_FONT_SIZE = "drawer_font_size";
     private static final String KEY_FONT_SIZE_SLIDER_VALUES = "font_size_slider_values_v1";
     private static final String KEY_CLOCK_STYLE = "clock_style";
+    private static final String KEY_CLOCK_DIGIT_GRADIENT = "animated_clock_digit_colours";
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
@@ -120,6 +121,16 @@ public class MainActivity extends Activity {
     private int pendingWidgetTargetPage = 0;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
+    private static final int CLOCK_DIGIT_SILVER = Color.rgb(196, 200, 209);
+    private static final int[] CLOCK_DATE_GRADIENT_COLORS = new int[] {
+            Color.rgb(96, 231, 255), Color.rgb(143, 143, 255),
+            Color.rgb(255, 133, 204), Color.rgb(255, 208, 125)
+    };
+    private static final int[] CLOCK_DIGIT_GRADIENT_COLORS = new int[] {
+            Color.rgb(77, 163, 255), Color.rgb(71, 240, 232),
+            Color.rgb(169, 139, 255), Color.rgb(255, 120, 191),
+            Color.rgb(217, 247, 255)
+    };
     private static final long ICON_EDGE_SWITCH_DELAY_MS = 200L;
     private static final int ICON_EDGE_SWITCH_ZONE_DP = 24;
     private interface IntAction { void onSelect(int value); }
@@ -241,6 +252,21 @@ public class MainActivity extends Activity {
     private int activeClockPage = 0;
     // Each clock panel has its own drawable; remember the last applied five-minute colour phase.
     private int lastClockPanelColorPhase = -1;
+    private android.animation.ValueAnimator clockColorAnimator;
+    private float clockColorPhase;
+    private long clockColorLastFrameUptime;
+    private long clockGradientResumeAtUptime;
+    private static final class ClockTextGradientState {
+        int viewWidth;
+        float spanWidth;
+        String textValue = "";
+        android.graphics.LinearGradient shader;
+        final android.graphics.Matrix matrix = new android.graphics.Matrix();
+    }
+    private final java.util.WeakHashMap<TextView, ClockTextGradientState> clockDateGradients =
+            new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, ClockTextGradientState> clockDigitGradients =
+            new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
@@ -1539,6 +1565,7 @@ public class MainActivity extends Activity {
         clockUpdatesActive = true;
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
+        startClockColorAnimator();
         // Do not reconnect every AppWidgetHost synchronously inside onResume: on
         // Android 6 that can delay the first Home frame when returning from an app.
         // Let the cached workspace draw first, then resume provider listening.
@@ -1560,6 +1587,7 @@ public class MainActivity extends Activity {
         clockWidgetLongPressActivated = false;
         clockUpdatesActive = false;
         handler.removeCallbacks(clockUpdater);
+        stopClockColorAnimator();
         try { widgetHost.stopListening(); } catch (Exception ignored) {}
         super.onPause();
     }
@@ -1715,6 +1743,14 @@ public class MainActivity extends Activity {
             applyClockPositionAndSize();
             attachClockPanelsToPages();
             updateClockResizeHandles();
+            // Build page 2's initial hardware texture after the first workspace frame,
+            // rather than paying that cost on the final frames of the first forward swipe.
+            root.postDelayed(() -> {
+                if (isFinishing() || pagesStrip == null || pagesStrip.getChildCount() < 2) return;
+                View secondPage = pagesStrip.getChildAt(1);
+                secondPage.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                if (secondPage.isHardwareAccelerated()) secondPage.buildLayer();
+            }, 280L);
         });
     }
 
@@ -4377,6 +4413,9 @@ public class MainActivity extends Activity {
                 releasePageLayers();
                 wheelSwipeProgress = 0f;
                 wheelSwipeDirection = 0;
+                // Avoid invalidating the newly settled page's cached texture on the
+                // exact final frame of its entrance animation.
+                clockGradientResumeAtUptime = android.os.SystemClock.uptimeMillis() + 180L;
                 pageTransitionBusy = false;
                 if (pageIndicator != null) {
                     boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
@@ -4401,7 +4440,6 @@ public class MainActivity extends Activity {
             face.setTranslationX(0f);
             face.setTranslationY(0f);
             face.setTranslationZ(0f);
-            face.setLayerType(View.LAYER_TYPE_NONE, null);
         }
     }
 
@@ -4412,8 +4450,13 @@ public class MainActivity extends Activity {
      */
     private void releasePageLayers() {
         if (pagesStrip == null) return;
+        // Page 2 is the expensive forward-transition destination on this launcher.
+        // Keep only its composed texture warm while idle; drop page 1's texture to
+        // avoid permanently caching both whole-screen surfaces on older devices.
+        int cachedPage = Math.min(1, pagesStrip.getChildCount() - 1);
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
-            pagesStrip.getChildAt(i).setLayerType(View.LAYER_TYPE_NONE, null);
+            View page = pagesStrip.getChildAt(i);
+            page.setLayerType(i == cachedPage ? View.LAYER_TYPE_HARDWARE : View.LAYER_TYPE_NONE, null);
         }
     }
 
@@ -5789,6 +5832,107 @@ public class MainActivity extends Activity {
         return Character.isWhitespace(ch) || Character.isSpaceChar(ch);
     }
 
+    private void startClockColorAnimator() {
+        if (clockColorAnimator != null && clockColorAnimator.isRunning()) return;
+        android.animation.ValueAnimator animator = android.animation.ValueAnimator.ofFloat(
+                clockColorPhase, clockColorPhase + 1f);
+        animator.setDuration(8200L);
+        animator.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        animator.setInterpolator(new android.view.animation.LinearInterpolator());
+        animator.addUpdateListener(value -> {
+            float raw = (Float) value.getAnimatedValue();
+            clockColorPhase = raw - (float) Math.floor(raw);
+            long now = android.os.SystemClock.uptimeMillis();
+            if (!clockUpdatesActive || pageTransitionBusy
+                    || now < clockGradientResumeAtUptime
+                    || now - clockColorLastFrameUptime < 33L) return;
+            clockColorLastFrameUptime = now;
+            applyClockColorEffectsToActivePage(clockColorPhase);
+        });
+        clockColorAnimator = animator;
+        animator.start();
+        applyClockColorEffectsToActivePage(clockColorPhase);
+    }
+
+    private void stopClockColorAnimator() {
+        if (clockColorAnimator != null) {
+            clockColorAnimator.cancel();
+            clockColorAnimator = null;
+        }
+    }
+
+    private void applyClockColorEffects(float phase, boolean bothPages) {
+        int restorePage = Math.max(0, Math.min(1, currentPage));
+        int firstPage = bothPages ? 0 : restorePage;
+        int lastPage = bothPages ? clockPanelsByPage.length - 1 : restorePage;
+        for (int page = firstPage; page <= lastPage; page++) {
+            if (clockPanelsByPage[page] == null) continue;
+            activateClockForPage(page);
+            applyClockColorEffectsToActivePage(phase);
+        }
+        activateClockForPage(restorePage);
+    }
+
+    private void applyClockColorEffectsToActivePage(float phase) {
+        if (dateText != null) {
+            applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
+                    phase, clockDateGradients);
+        }
+        if (clockText == null) return;
+        boolean digitsAnimated = prefs != null
+                && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+        boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
+                && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        if (clockText instanceof SevenSegmentClockTextView) {
+            ((SevenSegmentClockTextView) clockText).setSegmentGradientEnabled(
+                    digitsAnimated && sevenSegment, phase, CLOCK_DIGIT_GRADIENT_COLORS);
+        }
+        if (digitsAnimated) {
+            applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
+                    phase, clockDigitGradients);
+        } else {
+            clockDigitGradients.remove(clockText);
+            if (clockText.getPaint().getShader() != null) {
+                clockText.getPaint().setShader(null);
+                clockText.invalidate();
+            }
+            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
+                clockText.setTextColor(CLOCK_DIGIT_SILVER);
+            }
+        }
+    }
+
+    private void applyAnimatedTextGradient(TextView view, int[] colors, float phase,
+            java.util.Map<TextView, ClockTextGradientState> cache) {
+        if (view == null || colors == null || colors.length < 2) return;
+        int viewWidth = Math.max(1, view.getWidth());
+        String value = view.getText() == null ? "" : view.getText().toString();
+        float measured = view.getPaint().measureText(value);
+        float span = Math.max(1f, Math.min((float) viewWidth,
+                measured > 0f ? measured : (float) viewWidth));
+        ClockTextGradientState state = cache.get(view);
+        if (state == null || state.viewWidth != viewWidth
+                || Math.abs(state.spanWidth - span) > 1f
+                || !state.textValue.equals(value)) {
+            state = new ClockTextGradientState();
+            state.viewWidth = viewWidth;
+            state.spanWidth = span;
+            state.textValue = value;
+            float startX = (viewWidth - span) * 0.5f;
+            state.shader = new android.graphics.LinearGradient(startX, 0f,
+                    startX + span, 0f, colors, null,
+                    android.graphics.Shader.TileMode.MIRROR);
+            cache.put(view, state);
+        }
+        float normalized = phase - (float) Math.floor(phase);
+        state.matrix.setTranslate(-normalized * state.spanWidth * 2f, 0f);
+        state.shader.setLocalMatrix(state.matrix);
+        if (view.getPaint().getShader() != state.shader) {
+            view.getPaint().setShader(state.shader);
+        }
+        view.invalidate();
+    }
+
     private void updateClock() {
         if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
         Date now = new Date();
@@ -5910,6 +6054,7 @@ public class MainActivity extends Activity {
         // recalculates the panel from the current digits/date, so the background
         // can shrink and the clock shifts horizontally at a minute/day boundary.
         // Geometry is recalculated on creation, style changes, and explicit resize.
+        applyClockColorEffects(clockColorPhase, true);
         updateClockResizeHandles();
         applyBrandVisibility();
     }
@@ -8831,6 +8976,13 @@ public class MainActivity extends Activity {
             activateClockForPage(restorePage);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
+        addSettingRow(content, "✦", "Animated clock digit colours",
+                prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false) ? "On" : "Off", () -> {
+            boolean enabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+            prefs.edit().putBoolean(KEY_CLOCK_DIGIT_GRADIENT, enabled).apply();
+            applyClockColorEffects(clockColorPhase, true);
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
 
         addSliderRow(content, "Date font size", 8, 24,
                 Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15))), " sp", value -> {
@@ -9574,49 +9726,45 @@ public class MainActivity extends Activity {
         heading.addView(valueLabel);
         block.addView(heading);
 
+        int[] spectrumColors = LauncherIconDrawable.spectrumTrackColors();
+        FrameLayout sliderFrame = new FrameLayout(this);
+        sliderFrame.setClipChildren(false);
+        sliderFrame.setClipToPadding(false);
+        LinearLayout.LayoutParams sliderFrameParams = new LinearLayout.LayoutParams(
+                -1, LauncherUiUtils.dp(this, 42));
+        View spectrumRail = new View(this);
+        GradientDrawable spectrumBackground = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
+        spectrumBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
+        spectrumRail.setBackground(spectrumBackground);
+        FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(
+                -1, LauncherUiUtils.dp(this, 8), Gravity.CENTER_VERTICAL);
+        railParams.leftMargin = LauncherUiUtils.dp(this, 9);
+        railParams.rightMargin = LauncherUiUtils.dp(this, 9);
+        sliderFrame.addView(spectrumRail, railParams);
+
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(1000);
         int initial = Math.max(0, Math.min(1000, current));
         seekBar.setProgress(initial);
         seekBar.setSplitTrack(false);
+        seekBar.setBackgroundColor(Color.TRANSPARENT);
+        seekBar.setPadding(LauncherUiUtils.dp(this, 9), 0,
+                LauncherUiUtils.dp(this, 9), 0);
+        seekBar.setThumbOffset(LauncherUiUtils.dp(this, 9));
+        seekBar.setProgressDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        seekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.TRANSPARENT));
+        seekBar.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.TRANSPARENT));
 
-        int[] spectrumColors = LauncherIconDrawable.spectrumTrackColors();
-        GradientDrawable trackBackground = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
-        GradientDrawable trackSecondary = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
-        GradientDrawable trackProgress = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
-        float trackRadius = LauncherUiUtils.dp(this, 5);
-        trackBackground.setCornerRadius(trackRadius);
-        trackSecondary.setCornerRadius(trackRadius);
-        trackProgress.setCornerRadius(trackRadius);
-        // A full-spectrum background guarantees that every colour stays visible
-        // across the whole track; the progress layer uses the same gradient.
-        android.graphics.drawable.LayerDrawable spectrumTrack =
-                new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[] {
-                        trackBackground, trackSecondary,
-                        new android.graphics.drawable.ClipDrawable(trackProgress,
-                                Gravity.LEFT, android.graphics.drawable.ClipDrawable.HORIZONTAL)
-                });
-        spectrumTrack.setId(0, android.R.id.background);
-        spectrumTrack.setId(1, android.R.id.secondaryProgress);
-        spectrumTrack.setId(2, android.R.id.progress);
-        seekBar.setProgressDrawable(new android.graphics.drawable.InsetDrawable(
-                spectrumTrack, 0, LauncherUiUtils.dp(this, 16), 0, LauncherUiUtils.dp(this, 16)));
-        seekBar.setProgressTintList(null);
-        seekBar.setProgressBackgroundTintList(null);
-
-        // The rounded colour-picker thumb is 50% larger than the typical 12dp
-        // visible SeekBar thumb, with a light outline to separate it from the track.
+        // The round 18dp thumb is 50% larger than a standard 12dp picker thumb.
         final GradientDrawable pickerThumb = new GradientDrawable();
         pickerThumb.setShape(GradientDrawable.OVAL);
         pickerThumb.setSize(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18));
         pickerThumb.setColor(LauncherIconDrawable.spectrumColorForPosition(initial));
         pickerThumb.setStroke(LauncherUiUtils.dp(this, 2), Color.WHITE);
         seekBar.setThumb(pickerThumb);
-        block.addView(seekBar, new LinearLayout.LayoutParams(
-                -1, LauncherUiUtils.dp(this, 42)));
+        sliderFrame.addView(seekBar, new FrameLayout.LayoutParams(-1, -1));
+        block.addView(sliderFrame, sliderFrameParams);
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 int color = LauncherIconDrawable.spectrumColorForPosition(progress);
