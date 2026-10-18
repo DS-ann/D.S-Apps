@@ -586,11 +586,11 @@ final class WidgetInteractionController {
                     if (commit) {
                         int[] targetLocation = new int[2];
                         targetPage.getLocationOnScreen(targetLocation);
-                        int width = Math.max(1, current.width > 0 ? current.width : container.getWidth());
-                        int height = Math.max(1, current.height > 0 ? current.height : container.getHeight());
-                        current.leftMargin = Math.max(0, Math.min(Math.max(0, targetPage.getWidth() - width),
+                        int dropWidth = Math.max(1, current.width > 0 ? current.width : container.getWidth());
+                        int dropHeight = Math.max(1, current.height > 0 ? current.height : container.getHeight());
+                        current.leftMargin = Math.max(0, Math.min(Math.max(0, targetPage.getWidth() - dropWidth),
                                 Math.round(event.getRawX() - targetLocation[0] - fingerOffset[0])));
-                        current.topMargin = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - height),
+                        current.topMargin = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - dropHeight),
                                 Math.round(event.getRawY() - targetLocation[1] - fingerOffset[1])));
                     } else {
                         current.leftMargin = origin[0];
