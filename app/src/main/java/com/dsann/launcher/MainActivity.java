@@ -261,6 +261,7 @@ public class MainActivity extends Activity {
     private boolean workspaceIconReparenting = false;
     private boolean suppressResizeOutsideTouchStream = false;
     private float iconTouchRawX, iconTouchRawY;
+    private float iconDragFingerOffsetY;
     private int iconOriginalLeft, iconOriginalTop;
     private int iconDragPageIndex = -1;
     private int iconOriginalPageIndex = -1;
@@ -3688,6 +3689,8 @@ public class MainActivity extends Activity {
                 if (iconDragPageAnimator != null) finishIconDragPageAnimation();
                 iconTouchRawX = event.getRawX();
                 iconTouchRawY = event.getRawY();
+                iconDragFingerOffsetY = Math.max(0f,
+                        Math.min(event.getY(), Math.max(1, view.getHeight())));
                 iconDragLastRawX = event.getRawX();
                 iconDragLastRawY = event.getRawY();
                 iconDragArmed = false;
@@ -3769,14 +3772,11 @@ public class MainActivity extends Activity {
                             - view.getWidth() / 2f - pageOffsetX);
                     lp.leftMargin = iconDragPageIndex == sourcePageIndex
                             ? Math.max(0, Math.min(maxX, desiredLeft)) : desiredLeft;
-                    int slotHeight = LauncherUiUtils.dp(this,
-                            homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-                    int gridRows = Math.max(1, page.getHeight() / slotHeight);
-                    int requestedTop = Math.round(event.getRawY() - pageLocation[1] - view.getHeight() / 2f);
-                    int snappedRow = Math.max(0, Math.min(gridRows - 1,
-                            Math.round(requestedTop / (float) Math.max(1, slotHeight))));
-                    // Keep drag snapping identical to the fixed row positions used by the renderer.
-                    lp.topMargin = snappedRow * slotHeight;
+                    int requestedTop = Math.round(event.getRawY()
+                            - pageLocation[1] - iconDragFingerOffsetY);
+                    // The guide grid remains active, but the dragged app follows the
+                    // finger continuously. Grid snapping is applied only at drop time.
+                    lp.topMargin = Math.max(0, Math.min(maxY, requestedTop));
                     view.setLayoutParams(lp);
                     // Preview collision displacement during an app drag on its current
                     // page. When the edge switch starts, that page's preview is rolled back
@@ -3892,7 +3892,8 @@ public class MainActivity extends Activity {
                     float desiredLeft = event.getRawX() - viewportLocation[0] - cellWidth / 2f;
                     int targetCol = Math.max(0, Math.min(columns - 1,
                             Math.round(desiredLeft / cellWidth)));
-                    float desiredTop = event.getRawY() - viewportLocation[1] - cellHeight / 2f;
+                    float desiredTop = event.getRawY()
+                            - viewportLocation[1] - iconDragFingerOffsetY;
                     int targetRow = Math.max(0, Math.min(rows - 1,
                             Math.round(desiredTop / (float) Math.max(1, cellHeight))));
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
@@ -6430,6 +6431,27 @@ public class MainActivity extends Activity {
         return bounds;
     }
 
+    /**
+     * Pair-aware collision bounds. Two home app cells collide only when their visible
+     * icon/label bounds overlap; the legacy safety margin still applies to mixed-type
+     * interactions such as an app icon with a widget or shortcut.
+     */
+    private android.graphics.Rect collisionRectForInteraction(
+            View view, int[] geometry, View other) {
+        if (isWorkspaceAppIcon(view) && isWorkspaceAppIcon(other)) {
+            return appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3]);
+        }
+        return collisionRect(view, geometry);
+    }
+
+    private android.graphics.Rect collisionRectAtForInteraction(
+            View view, int x, int y, int width, int height, View other) {
+        if (isWorkspaceAppIcon(view) && isWorkspaceAppIcon(other)) {
+            return appIconVisualRectAt(view, x, y, width, height);
+        }
+        return collisionRectAt(view, x, y, width, height);
+    }
+
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
         android.graphics.Rect expanded = new android.graphics.Rect(
                 a.left - gap, a.top - gap, a.right + gap, a.bottom + gap);
@@ -6503,6 +6525,7 @@ public class MainActivity extends Activity {
         if (page == null || movingView == null || movingRect == null) return;
         java.util.ArrayList<View> candidates =
                 new java.util.ArrayList<View>(liveDisplacedItems.keySet());
+        int[] movingGeometry = itemGeometry(movingView);
         for (View displaced : candidates) {
             if (displaced == movingView || displaced.getParent() != page) continue;
             int[] original = liveDisplacedItems.get(displaced);
@@ -6513,10 +6536,12 @@ public class MainActivity extends Activity {
             int[] geometry = itemGeometry(displaced);
             int width = Math.max(1, geometry[2]);
             int height = Math.max(1, geometry[3]);
-            android.graphics.Rect originalBounds = collisionRectAt(
-                    displaced, original[0], original[1], width, height);
-            // Don't return an item while the mover still occupies its old slot.
-            if (android.graphics.Rect.intersects(movingRect, originalBounds)) continue;
+            android.graphics.Rect originalBounds = collisionRectAtForInteraction(
+                    displaced, original[0], original[1], width, height, movingView);
+            android.graphics.Rect movingBounds = collisionRectForInteraction(
+                    movingView, movingGeometry, displaced);
+            // Don't return an item while the mover still occupies its old visible area.
+            if (android.graphics.Rect.intersects(movingBounds, originalBounds)) continue;
             if (originalBounds.left < 0 || originalBounds.top < 0
                     || originalBounds.right > page.getWidth()
                     || originalBounds.bottom > page.getHeight()) continue;
@@ -6530,23 +6555,24 @@ public class MainActivity extends Activity {
                 int[] blockerGeometry = itemGeometry(blocker);
                 if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
                 if (android.graphics.Rect.intersects(originalBounds,
-                        collisionRect(blocker, blockerGeometry))) {
+                        collisionRectForInteraction(blocker, blockerGeometry, displaced))) {
                     blocked = true;
                     break;
                 }
                 int[] blockerTarget = liveDisplacementTargets.get(blocker);
                 if (blockerTarget != null
                         && android.graphics.Rect.intersects(originalBounds,
-                                collisionRectAt(blocker, blockerTarget[0], blockerTarget[1],
-                                        blockerGeometry[2], blockerGeometry[3]))) {
+                                collisionRectAtForInteraction(blocker,
+                                        blockerTarget[0], blockerTarget[1],
+                                        blockerGeometry[2], blockerGeometry[3], displaced))) {
                     blocked = true;
                     break;
                 }
             }
             if (blocked) continue;
 
-            // The origin is clear now. Retargeting rather than deleting the record makes
-            // the return animated and allows a reversed finger movement to push it again.
+            // Retargeting preserves the transaction record: if the finger moves forward
+            // again, this same neighbour can be pushed away from its original position.
             liveDisplacementTargets.put(displaced,
                     new int[]{original[0], original[1]});
             animateDisplacedItemTo(displaced, original[0], original[1]);
@@ -6611,11 +6637,13 @@ public class MainActivity extends Activity {
             int[] existingTarget = liveDisplacementTargets.get(other);
             int[] g = cachedLiveDragGeometry(other);
             if (g[2] <= 0 || g[3] <= 0) continue;
-            android.graphics.Rect otherRect = collisionRect(other, g);
-            boolean currentCollides = overlapsWithGap(movingRect, otherRect, gap);
+            android.graphics.Rect movingBoundsForOther =
+                    collisionRectForInteraction(movingView, moving, other);
+            android.graphics.Rect otherRect = collisionRectForInteraction(other, g, movingView);
+            boolean currentCollides = overlapsWithGap(movingBoundsForOther, otherRect, gap);
             boolean targetCollides = alreadyDisplaced && existingTarget != null
-                    && overlapsWithGap(movingRect, collisionRectAt(other,
-                            existingTarget[0], existingTarget[1], g[2], g[3]), gap);
+                    && overlapsWithGap(movingBoundsForOther, collisionRectAtForInteraction(other,
+                            existingTarget[0], existingTarget[1], g[2], g[3], movingView), gap);
             // An item whose assigned destination is clear must be allowed to finish
             // moving out of its original collision zone. Replanning from its current
             // animation frame on every MOVE cancelled its animation repeatedly.
@@ -6651,11 +6679,12 @@ public class MainActivity extends Activity {
                 // assigned to an in-flight neighbour. Without target reservations, two
                 // items processed in the same MOVE event can choose the same empty pocket
                 // because the first animation has not moved its view there yet.
-                obstacles.add(collisionRect(blocker, bg));
+                obstacles.add(collisionRectForInteraction(blocker, bg, other));
                 int[] plannedTarget = liveDisplacementTargets.get(blocker);
                 if (plannedTarget != null) {
-                    obstacles.add(collisionRectAt(blocker, plannedTarget[0], plannedTarget[1],
-                            Math.max(1, bg[2]), Math.max(1, bg[3])));
+                    obstacles.add(collisionRectAtForInteraction(blocker,
+                            plannedTarget[0], plannedTarget[1],
+                            Math.max(1, bg[2]), Math.max(1, bg[3]), other));
                 }
             }
             for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
@@ -6663,7 +6692,8 @@ public class MainActivity extends Activity {
                 if (reserved == other || reserved.getParent() != page) continue;
                 int[] original = entry.getValue();
                 int[] rg = cachedLiveDragGeometry(reserved);
-                obstacles.add(collisionRectAt(reserved, original[0], original[1], rg[2], rg[3]));
+                obstacles.add(collisionRectAtForInteraction(
+                        reserved, original[0], original[1], rg[2], rg[3], other));
             }
 
             java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
@@ -6845,7 +6875,6 @@ public class MainActivity extends Activity {
                 && workspaceTransferTargetPage != workspaceTransferOriginPage) return;
 
         int[] geometry = itemGeometry(movingView);
-        android.graphics.Rect bounds = collisionRect(movingView, geometry);
         boolean collision = false;
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
@@ -6853,7 +6882,11 @@ public class MainActivity extends Activity {
                     || !isWorkspaceItem(other)) continue;
             int[] otherGeometry = itemGeometry(other);
             if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
-            if (android.graphics.Rect.intersects(bounds, collisionRect(other, otherGeometry))) {
+            android.graphics.Rect movingBounds =
+                    collisionRectForInteraction(movingView, geometry, other);
+            android.graphics.Rect otherBounds =
+                    collisionRectForInteraction(other, otherGeometry, movingView);
+            if (android.graphics.Rect.intersects(movingBounds, otherBounds)) {
                 collision = true;
                 break;
             }
@@ -6934,7 +6967,7 @@ public class MainActivity extends Activity {
                 if (blocker == item || blocker == movingView || !isWorkspaceItem(blocker)) continue;
                 int[] bg = itemGeometry(blocker);
                 if (bg[2] <= 0 || bg[3] <= 0) continue;
-                android.graphics.Rect bounds = collisionRect(blocker, bg);
+                android.graphics.Rect bounds = collisionRectForInteraction(blocker, bg, item);
                 xs.add(Math.max(0, Math.min(maxX, bounds.left - width)));
                 xs.add(Math.max(0, Math.min(maxX, bounds.right)));
                 ys.add(Math.max(0, Math.min(maxY, bounds.top - height)));
@@ -6942,8 +6975,8 @@ public class MainActivity extends Activity {
                 int[] target = plan.get(blocker);
                 if (target == null) target = liveDisplacementTargets.get(blocker);
                 if (target != null) {
-                    android.graphics.Rect targetBounds = collisionRectAt(blocker,
-                            target[0], target[1], bg[2], bg[3]);
+                    android.graphics.Rect targetBounds = collisionRectAtForInteraction(blocker,
+                            target[0], target[1], bg[2], bg[3], item);
                     xs.add(Math.max(0, Math.min(maxX, targetBounds.left - width)));
                     xs.add(Math.max(0, Math.min(maxX, targetBounds.right)));
                     ys.add(Math.max(0, Math.min(maxY, targetBounds.top - height)));
@@ -6976,8 +7009,12 @@ public class MainActivity extends Activity {
         for (int[] candidatePosition : candidates) {
             if (searchBudget[0]-- <= 0) break;
             int x = candidatePosition[0], y = candidatePosition[1];
-            android.graphics.Rect candidate = collisionRectAt(item, x, y, width, height);
-            if (android.graphics.Rect.intersects(candidate, movingRect)) continue;
+            android.graphics.Rect candidateForMover =
+                    collisionRectAtForInteraction(item, x, y, width, height, movingView);
+            int[] movingGeometry = itemGeometry(movingView);
+            android.graphics.Rect movingBoundsForItem =
+                    collisionRectForInteraction(movingView, movingGeometry, item);
+            if (android.graphics.Rect.intersects(candidateForMover, movingBoundsForItem)) continue;
 
             java.util.ArrayList<View> blockers = new java.util.ArrayList<View>();
             for (int i = 0; i < page.getChildCount(); i++) {
@@ -6986,19 +7023,21 @@ public class MainActivity extends Activity {
                 int[] bg = itemGeometry(blocker);
                 if (bg[2] <= 0 || bg[3] <= 0) continue;
 
+                android.graphics.Rect candidateForBlocker =
+                        collisionRectAtForInteraction(item, x, y, width, height, blocker);
                 int[] localTarget = plan.get(blocker);
                 int[] existingTarget = liveDisplacementTargets.get(blocker);
                 if (localTarget != null) {
-                    android.graphics.Rect targetRect = collisionRectAt(blocker,
-                            localTarget[0], localTarget[1], bg[2], bg[3]);
-                    if (android.graphics.Rect.intersects(candidate, targetRect)) blockers.add(blocker);
+                    android.graphics.Rect targetRect = collisionRectAtForInteraction(blocker,
+                            localTarget[0], localTarget[1], bg[2], bg[3], item);
+                    if (android.graphics.Rect.intersects(candidateForBlocker, targetRect)) blockers.add(blocker);
                 } else {
-                    android.graphics.Rect currentRect = collisionRect(blocker, bg);
-                    boolean hit = android.graphics.Rect.intersects(candidate, currentRect);
+                    android.graphics.Rect currentRect = collisionRectForInteraction(blocker, bg, item);
+                    boolean hit = android.graphics.Rect.intersects(candidateForBlocker, currentRect);
                     if (existingTarget != null) {
-                        android.graphics.Rect targetRect = collisionRectAt(blocker,
-                                existingTarget[0], existingTarget[1], bg[2], bg[3]);
-                        hit = hit || android.graphics.Rect.intersects(candidate, targetRect);
+                        android.graphics.Rect targetRect = collisionRectAtForInteraction(blocker,
+                                existingTarget[0], existingTarget[1], bg[2], bg[3], item);
+                        hit = hit || android.graphics.Rect.intersects(candidateForBlocker, targetRect);
                     }
                     if (hit) blockers.add(blocker);
                 }
@@ -7392,7 +7431,9 @@ public class MainActivity extends Activity {
         // destination rectangles must be handled independently and consistently.
         java.util.ArrayList<View> displacedViews =
                 new java.util.ArrayList<View>(liveDisplacedItems.keySet());
-        // Finalize all reserved destinations, then perform a final visual overlap check.
+        boolean committedLivePlan = commit && !displacedViews.isEmpty();
+        // Commit the live plan as one transaction. A second resolver pass after release
+        // used to reshuffle neighbors that had already reached their reserved positions.
         // The resolver is a no-op on a collision-free page and only reflows if the exact
         // release geometry still overlaps after the live displacement plan.
 
@@ -7431,9 +7472,14 @@ public class MainActivity extends Activity {
                     displaced.setLayoutParams(lp);
                 }
                 int[] finalGeometry = itemGeometry(displaced);
+                // For grid-based app icons persist the exact reserved slot, not a
+                // potentially stale pre-layout view origin from the just-updated margins.
+                int persistX = isWorkspaceAppIcon(displaced)
+                        ? destination[0] : finalGeometry[0];
+                int persistY = isWorkspaceAppIcon(displaced)
+                        ? destination[1] : finalGeometry[1];
                 persistWorkspaceItemPosition(page, displaced,
-                        finalGeometry[0], finalGeometry[1],
-                        finalGeometry[2], finalGeometry[3]);
+                        persistX, persistY, finalGeometry[2], finalGeometry[3]);
             } else {
                 if (isClockWorkspaceItem(displaced)) {
                     setClockVisualPosition(displaced, original[0], original[1], true);
@@ -7458,7 +7504,7 @@ public class MainActivity extends Activity {
         if (commit || isClockWorkspaceItem(movingView)) {
             liveDragLastSafeGeometry.remove(movingView);
         }
-        if (commit && movingView != null
+        if (commit && !committedLivePlan && movingView != null
                 && movingView.getParent() instanceof FrameLayout
                 && isWorkspaceItem(movingView)) {
             FrameLayout page = (FrameLayout) movingView.getParent();
