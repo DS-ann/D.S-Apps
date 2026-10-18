@@ -2918,10 +2918,14 @@ public class MainActivity extends Activity {
         });
         animator.start();
 
-        createWorkspaceTransferProxy(requestedTargetPage);
-        updateWorkspaceTransferDisplacements(workspaceTransferItem,
-                workspaceTransferLastRawX, workspaceTransferLastRawY,
-                workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
+        // The source page uses the real dragged item for live collisions. Create an
+        // invisible collision proxy only when previewing a different destination page.
+        if (requestedTargetPage != workspaceTransferOriginPage) {
+            createWorkspaceTransferProxy(requestedTargetPage);
+            updateWorkspaceTransferDisplacements(workspaceTransferItem,
+                    workspaceTransferLastRawX, workspaceTransferLastRawY,
+                    workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
+        }
     }
 
     private void createWorkspaceTransferProxy(int pageIndex) {
