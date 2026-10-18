@@ -219,6 +219,7 @@ public class MainActivity extends Activity {
     private boolean iconDragArmed = false;
     private boolean iconDragging = false;
     private boolean iconMovedTooEarly = false;
+    private boolean workspaceIconReparenting = false;
     private float iconTouchRawX, iconTouchRawY;
     private int iconOriginalLeft, iconOriginalTop;
     private int iconDragPageIndex = -1;
@@ -3353,7 +3354,7 @@ public class MainActivity extends Activity {
         cell.setOnLongClickListener(null);
         final boolean[] iconReparenting = new boolean[1];
         cell.setOnTouchListener((view, event) -> {
-            if (iconReparenting[0]) return true;
+            if (workspaceIconReparenting || iconReparenting[0]) return true;
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 clearIconEdgeHover();
@@ -3580,9 +3581,22 @@ public class MainActivity extends Activity {
                     if (occupant != null && otherPackage != null) {
                         FrameLayout.LayoutParams otherLp =
                                 (FrameLayout.LayoutParams) occupant.getLayoutParams();
+                        otherLp.width = sourceCellWidth;
+                        otherLp.height = sourceCellHeight;
+                        otherLp.gravity = Gravity.TOP | Gravity.LEFT;
                         otherLp.leftMargin = sourceCol * sourceCellWidth;
                         otherLp.topMargin = sourceRow * sourceCellHeight;
-                        occupant.setLayoutParams(otherLp);
+                        if (movedAcrossPage) {
+                            // The destination app cell is swapped back to the vacated
+                            // source slot before collision validation, rather than leaving
+                            // a duplicate tagged app in the destination page.
+                            workspaceIconReparenting = true;
+                            targetPage.removeView(occupant);
+                            sourceView.addView(occupant, otherLp);
+                            workspaceIconReparenting = false;
+                        } else {
+                            occupant.setLayoutParams(otherLp);
+                        }
                         saveIconSlot(otherPackage, sourceCol, sourceRow, columns);
                         if (movedAcrossPage) {
                             prefs.edit().putInt(KEY_ICON_PAGE + otherPackage, sourcePage).apply();
@@ -3592,23 +3606,58 @@ public class MainActivity extends Activity {
                     // intermediate pointer frame. This prevents a final grid snap from
                     // creating a collision that only the slow post-render resolver would see.
                     boolean hadLiveDisplacementPlan;
+                    FrameLayout.LayoutParams finalIconParams =
+                            new FrameLayout.LayoutParams(cellWidth, cellHeight,
+                                    Gravity.TOP | Gravity.LEFT);
+                    finalIconParams.leftMargin = targetCol * cellWidth;
+                    finalIconParams.topMargin = targetRow * cellHeight;
+                    view.animate().cancel();
+                    view.setTranslationX(0f);
+                    view.setTranslationY(0f);
+
                     if (!movedAcrossPage) {
-                        FrameLayout.LayoutParams finalIconParams =
-                                (FrameLayout.LayoutParams) view.getLayoutParams();
-                        finalIconParams.leftMargin = targetCol * cellWidth;
-                        finalIconParams.topMargin = targetRow * cellHeight;
-                        view.setTranslationX(0f);
-                        view.setTranslationY(0f);
                         view.setLayoutParams(finalIconParams);
                         updateLiveDisplacements(sourceView, view);
-                        hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
-                        if (hadLiveDisplacementPlan) finishLiveDisplacements(true, view);
                     } else {
-                        hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
-                        if (hadLiveDisplacementPlan) finishLiveDisplacements(false, view);
+                        // Snap the destination-page collision proxy to the exact app-grid
+                        // cell that will be committed. This catches overlap created by the
+                        // release snap, even when the final MOVE event landed between cells.
+                        workspaceTransferTargetPage = destinationPage;
+                        if (workspaceTransferProxy == null
+                                || workspaceTransferProxy.getParent() != targetPage) {
+                            if (workspaceTransferProxy != null
+                                    && workspaceTransferProxy.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) workspaceTransferProxy.getParent())
+                                        .removeView(workspaceTransferProxy);
+                            }
+                            workspaceTransferProxy = null;
+                            workspaceTransferProxyPage = -1;
+                            createWorkspaceTransferProxy(destinationPage);
+                        }
+                        if (workspaceTransferProxy != null
+                                && workspaceTransferProxy.getLayoutParams()
+                                        instanceof FrameLayout.LayoutParams) {
+                            workspaceTransferProxy.setScaleX(1f);
+                            workspaceTransferProxy.setScaleY(1f);
+                            workspaceTransferProxy.setPivotX(0f);
+                            workspaceTransferProxy.setPivotY(0f);
+                            FrameLayout.LayoutParams proxyLp =
+                                    (FrameLayout.LayoutParams) workspaceTransferProxy.getLayoutParams();
+                            proxyLp.leftMargin = targetCol * cellWidth;
+                            proxyLp.topMargin = targetRow * cellHeight;
+                            workspaceTransferProxy.setLayoutParams(proxyLp);
+                            updateLiveDisplacements(targetPage, workspaceTransferProxy);
+                        }
+                        // The icon stays in its original parent during MOVE. Reparent only
+                        // once the release cell is known so collision reservations survive UP.
+                        workspaceIconReparenting = true;
+                        sourceView.removeView(view);
+                        targetPage.addView(view, finalIconParams);
+                        workspaceIconReparenting = false;
                     }
-                    // The dragged view intentionally stays attached to its source page until UP;
-                    // reparenting during MOVE cancels Android's active touch target.
+                    hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
+                    finishWorkspaceTransferDrag(view, true);
+                    if (hadLiveDisplacementPlan) finishLiveDisplacements(true, view);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     int committedPage = destinationPage;
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
