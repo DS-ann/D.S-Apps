@@ -6293,6 +6293,11 @@ public class MainActivity extends Activity {
         // destination rectangles must be handled independently and consistently.
         java.util.ArrayList<View> displacedViews =
                 new java.util.ArrayList<View>(liveDisplacedItems.keySet());
+        // A successful live-displacement plan already chose and reserved exact
+        // destinations for every affected item. Running the page-wide resolver after
+        // clearing that plan treats those destinations as ordinary starting positions
+        // and can shuffle the items again on finger-up.
+        boolean committedDisplacementPlan = commit && !displacedViews.isEmpty();
 
         for (View displaced : displacedViews) {
             int[] original = liveDisplacedItems.get(displaced);
@@ -6370,10 +6375,12 @@ public class MainActivity extends Activity {
 
         liveDisplacedItems.clear();
         liveDisplacementTargets.clear();
-        if (movingView != null && movingView.getParent() instanceof FrameLayout) {
+        if (!committedDisplacementPlan
+                && movingView != null && movingView.getParent() instanceof FrameLayout) {
             FrameLayout page = (FrameLayout) movingView.getParent();
-            // The final pass is a second line of defence against mixed-size
-            // collisions and rounding at page boundaries.
+            // Keep the legacy safety pass for gestures without a displacement plan.
+            // For a committed plan, its exact destinations are authoritative: do not
+            // run a page-wide nearest-free search that moves the committed neighbours.
             resolveAllWorkspaceOverlaps(page, movingView);
         }
         refreshWorkspaceGrid();
