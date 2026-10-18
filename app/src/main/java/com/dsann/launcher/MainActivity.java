@@ -4256,14 +4256,11 @@ public class MainActivity extends Activity {
         int pageHeight = page.getHeight() > 0 ? page.getHeight()
                 : Math.max(LauncherUiUtils.dp(this, 240), getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
         int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
-        // Keep the full widget inside the workspace with a minimum 5dp inset.
-        int minLeft = gap;
-        int minTop = gap;
+        int minLeft = gap, minTop = gap;
         int maxLeft = pageWidth - widgetWidth - gap;
         int maxTop = pageHeight - widgetHeight - gap;
 
-        // The dock is a separate view on some layouts. Treat its top edge as a
-        // hard workspace boundary and retain the same 5dp clearance above it.
+        // The dock is a hard lower boundary for widget placement.
         if (dockContainer != null && dockContainer.getVisibility() == View.VISIBLE
                 && dockContainer.getHeight() > 0 && page.getWidth() > 0 && page.getHeight() > 0) {
             int[] pageLocation = new int[2];
@@ -4277,50 +4274,66 @@ public class MainActivity extends Activity {
         }
         if (maxLeft < minLeft || maxTop < minTop) return null;
 
-        // Widgets use continuous free positioning, not app-icon grid cells.
-        // Search in small increments and require at least 5dp clearance from
-        // the screen/workspace edges and every existing workspace item.
+        java.util.ArrayList<android.graphics.Rect> occupied =
+                new java.util.ArrayList<android.graphics.Rect>();
+        java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
+        java.util.TreeSet<Integer> yCandidates = new java.util.TreeSet<Integer>();
         int step = Math.max(1, LauncherUiUtils.dp(this, 4));
-        for (int top = minTop; top <= maxTop; top += step) {
-            for (int left = minLeft; left <= maxLeft; left += step) {
+        for (int x = minLeft; x <= maxLeft; x += step) xCandidates.add(x);
+        for (int y = minTop; y <= maxTop; y += step) yCandidates.add(y);
+        // A stepped scan must never skip the exact right/bottom legal position.
+        xCandidates.add(maxLeft);
+        yCandidates.add(maxTop);
+
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            Object rawTag = child.getTag();
+            if (!(rawTag instanceof String)) continue;
+            String tag = (String) rawTag;
+            if (!(tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
+                    || "launcher_contact_shortcut".equals(tag)
+                    || "launcher_clock_widget".equals(tag))) continue;
+
+            int[] geometry = itemGeometry(child);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            android.graphics.Rect bounds = collisionRect(child, geometry);
+            // Reserve the requested clearance around the *visual* obstacle, not its
+            // stale layout margins or an app cell's invisible slot.
+            bounds.inset(-gap, -gap);
+            occupied.add(bounds);
+            xCandidates.add(Math.max(minLeft, Math.min(maxLeft, bounds.left - widgetWidth)));
+            xCandidates.add(Math.max(minLeft, Math.min(maxLeft, bounds.right)));
+            yCandidates.add(Math.max(minTop, Math.min(maxTop, bounds.top - widgetHeight)));
+            yCandidates.add(Math.max(minTop, Math.min(maxTop, bounds.bottom)));
+        }
+
+        int bestX = -1, bestY = -1;
+        long bestDistance = Long.MAX_VALUE;
+        // Prefer the earliest row/column when there is no saved-position preference,
+        // but evaluate all exact obstacle edges so narrow free pockets are not missed.
+        for (Integer yValue : yCandidates) {
+            int y = yValue.intValue();
+            for (Integer xValue : xCandidates) {
+                int x = xValue.intValue();
                 android.graphics.Rect candidate = new android.graphics.Rect(
-                        left - gap, top - gap, left + widgetWidth + gap, top + widgetHeight + gap);
+                        x - gap, y - gap, x + widgetWidth + gap, y + widgetHeight + gap);
                 boolean blocked = false;
-                for (int i = 0; i < page.getChildCount(); i++) {
-                    View child = page.getChildAt(i);
-                    Object rawTag = child.getTag();
-                    if (!(rawTag instanceof String)) continue;
-                    String tag = (String) rawTag;
-                    if (!(tag.startsWith("launcher_widget:")
-                            || tag.startsWith("launcher_app:")
-                            || "launcher_contact_shortcut".equals(tag)
-                            || "launcher_clock_widget".equals(tag))) continue;
-                    ViewGroup.LayoutParams raw = child.getLayoutParams();
-                    int x = child.getLeft(), y = child.getTop();
-                    int w = child.getWidth(), h = child.getHeight();
-                    if (raw instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-                        x = lp.leftMargin;
-                        y = lp.topMargin;
-                        if (lp.width > 0) w = lp.width;
-                        if (lp.height > 0) h = lp.height;
-                    }
-                    if (tag.startsWith("launcher_app:")) {
-                        int columns = getHomeColumns();
-                        w = Math.max(1, pageWidth / Math.max(1, columns));
-                        h = LauncherUiUtils.dp(this,
-                                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-                    }
-                    if (w > 0 && h > 0 && android.graphics.Rect.intersects(
-                            candidate, new android.graphics.Rect(x, y, x + w, y + h))) {
+                for (android.graphics.Rect obstacle : occupied) {
+                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
                         blocked = true;
                         break;
                     }
                 }
-                if (!blocked) return new int[]{left, top};
+                if (blocked) continue;
+                long distance = (long) (y - minTop) * Math.max(1, pageWidth) + (x - minLeft);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestX = x;
+                    bestY = y;
+                }
             }
         }
-        return null;
+        return bestX < 0 ? null : new int[]{bestX, bestY};
     }
 
     private boolean containsWidgetId(String stored, int widgetId) {
@@ -4329,7 +4342,13 @@ public class MainActivity extends Activity {
 
     private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
             int x, int y, int width, int height) {
-        widgetInteractionController.addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height);
+        addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height, true);
+    }
+
+    private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
+            int x, int y, int width, int height, boolean showNoSpaceToast) {
+        widgetInteractionController.addWidgetContainer(
+                page, widget, widgetId, pageIndex, x, y, width, height, showNoSpaceToast);
     }
 
     private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
@@ -4448,12 +4467,62 @@ public class MainActivity extends Activity {
                             Math.max(0, availableWidth - width)));
                     int y = Math.max(0, Math.min(prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8)),
                             Math.max(0, availableHeight - height)));
+                    FrameLayout restorePage = page;
+                    int resolvedPageIndex = pageIndex;
+                    // Restoring a saved widget must not fail merely because its original
+                    // page became crowded after an update. Keep the saved page when any
+                    // valid placement exists there; otherwise try the other page.
+                    if (findFreeWidgetPosition(restorePage, width, height) == null) {
+                        int otherPageIndex = pageIndex == 0 ? 1 : 0;
+                        if (otherPageIndex < pagesStrip.getChildCount()
+                                && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
+                            FrameLayout otherPage = (FrameLayout) pagesStrip.getChildAt(otherPageIndex);
+                            int[] otherPosition = findFreeWidgetPosition(otherPage, width, height);
+                            if (otherPosition != null) {
+                                restorePage = otherPage;
+                                resolvedPageIndex = otherPageIndex;
+                                x = otherPosition[0];
+                                y = otherPosition[1];
+                            }
+                        }
+                    }
+                    // If neither page has enough room at the saved size, try the same
+                    // two-page search at 50% before leaving the stored widget for retry.
+                    if (findFreeWidgetPosition(restorePage, width, height) == null) {
+                        int smallerWidth = Math.max(LauncherUiUtils.dp(this, 48), Math.round(width * 0.5f));
+                        int smallerHeight = Math.max(LauncherUiUtils.dp(this, 48), Math.round(height * 0.5f));
+                        int[] smallerPosition = findFreeWidgetPosition(restorePage, smallerWidth, smallerHeight);
+                        if (smallerPosition == null) {
+                            int otherPageIndex = resolvedPageIndex == 0 ? 1 : 0;
+                            if (otherPageIndex < pagesStrip.getChildCount()
+                                    && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
+                                FrameLayout otherPage = (FrameLayout) pagesStrip.getChildAt(otherPageIndex);
+                                smallerPosition = findFreeWidgetPosition(otherPage, smallerWidth, smallerHeight);
+                                if (smallerPosition != null) {
+                                    restorePage = otherPage;
+                                    resolvedPageIndex = otherPageIndex;
+                                }
+                            }
+                        }
+                        if (smallerPosition != null) {
+                            width = smallerWidth;
+                            height = smallerHeight;
+                            x = smallerPosition[0];
+                            y = smallerPosition[1];
+                        }
+                    }
                     AppWidgetHostView widget = widgetHost.createView(this, id, info);
                     widget.setAppWidget(id, info);
-                    addWidgetContainer(page, widget, id, pageIndex, x, y, width, height);
+                    addWidgetContainer(restorePage, widget, id, resolvedPageIndex, x, y, width, height, false);
                     WidgetController.updateWidgetSize(widgetManager, id, widget, getResources().getDisplayMetrics().density, width, height);
-                    final View candidate = page.findViewWithTag("launcher_widget:" + id);
-                    if (candidate instanceof FrameLayout) page.post(() -> resolveWidgetIconCollisions(page, (FrameLayout) candidate));
+                    final int savedPageIndex = resolvedPageIndex;
+                    final FrameLayout finalRestorePage = restorePage;
+                    final View candidate = finalRestorePage.findViewWithTag("launcher_widget:" + id);
+                    if (candidate instanceof FrameLayout) {
+                        saveWidgetGeometry(id, savedPageIndex, (FrameLayout) candidate);
+                        finalRestorePage.post(() ->
+                                resolveWidgetIconCollisions(finalRestorePage, (FrameLayout) candidate));
+                    }
                 } catch (Exception ignored) {}
             }
             if (removedStaleWidget) renderHomePages(false);
