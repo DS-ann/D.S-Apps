@@ -538,6 +538,38 @@ final class WidgetInteractionController {
                                 }
                             }
                         }
+                        if (bestX < 0 || bestY < 0) {
+                            // Boundary candidates handle normal cases. Use a finer scan only
+                            // as a fallback so narrow but valid drop locations are not rejected.
+                            int step = Math.max(1, LauncherUiUtils.dp(activity, 6));
+                            long nearest = Long.MAX_VALUE;
+                            outerDropScan:
+                            for (int cy = 0; cy <= maxY; cy += step) {
+                                int candidateY = Math.min(maxY, cy);
+                                for (int cx = 0; cx <= maxX; cx += step) {
+                                    int candidateX = Math.min(maxX, cx);
+                                    android.graphics.Rect candidate = new android.graphics.Rect(
+                                            candidateX, candidateY,
+                                            candidateX + dropWidth, candidateY + dropHeight);
+                                    boolean blocked = false;
+                                    for (android.graphics.Rect obstacle : occupied) {
+                                        if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                            blocked = true;
+                                            break;
+                                        }
+                                    }
+                                    if (blocked) continue;
+                                    long distance = Math.abs((long) candidateX - requestedX)
+                                            + Math.abs((long) candidateY - requestedY);
+                                    if (distance < nearest) {
+                                        nearest = distance;
+                                        bestX = candidateX;
+                                        bestY = candidateY;
+                                    }
+                                }
+                                if (candidateY == maxY) break outerDropScan;
+                            }
+                        }
                         if (bestX >= 0 && bestY >= 0) {
                             current.leftMargin = bestX;
                             current.topMargin = bestY;
