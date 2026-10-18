@@ -7414,31 +7414,102 @@ public class MainActivity extends Activity {
      */
 
 
+    private int compareCascadeCandidates(long distanceA, int xA, int yA,
+            long distanceB, int xB, int yB) {
+        int compare = Long.compare(distanceA, distanceB);
+        if (compare == 0) compare = Integer.compare(yA, yB);
+        if (compare == 0) compare = Integer.compare(xA, xB);
+        return compare;
+    }
+
     /**
-     * Maintains the 96 closest coordinates in the same order as the previous stable sort:
-     * Manhattan distance first, then ascending y/x for equal-distance candidates.
-     * Only retained candidates allocate an array.
+     * Selects the nearest 96 candidate coordinates using a fixed-size max-heap.
+     * It avoids allocating/sorting the full Cartesian product while preserving the
+     * old stable-sort order: Manhattan distance, then ascending y/x.
      */
-    private void retainNearestCascadeCandidate(java.util.ArrayList<int[]> candidates,
-            int x, int y, int preferredX, int preferredY) {
-        long distance = Math.abs((long) x - preferredX)
-                + Math.abs((long) y - preferredY);
-        int low = 0;
-        int high = candidates.size();
-        while (low < high) {
-            int middle = (low + high) >>> 1;
-            int[] current = candidates.get(middle);
-            long currentDistance = Math.abs((long) current[0] - preferredX)
-                    + Math.abs((long) current[1] - preferredY);
-            int compare = Long.compare(currentDistance, distance);
-            if (compare == 0) compare = Integer.compare(current[1], y);
-            if (compare == 0) compare = Integer.compare(current[0], x);
-            if (compare <= 0) low = middle + 1;
-            else high = middle;
+    private java.util.ArrayList<int[]> nearestCascadeCandidates(
+            java.util.TreeSet<Integer> xs, java.util.TreeSet<Integer> ys,
+            int preferredX, int preferredY) {
+        final int limit = Math.min(96, xs.size() * ys.size());
+        java.util.ArrayList<int[]> result = new java.util.ArrayList<int[]>(limit);
+        if (limit <= 0) return result;
+
+        int[] heapX = new int[limit];
+        int[] heapY = new int[limit];
+        long[] heapDistance = new long[limit];
+        int count = 0;
+        for (Integer cyValue : ys) {
+            int y = cyValue.intValue();
+            for (Integer cxValue : xs) {
+                int x = cxValue.intValue();
+                long distance = Math.abs((long) x - preferredX)
+                        + Math.abs((long) y - preferredY);
+                if (count < limit) {
+                    int index = count++;
+                    heapX[index] = x;
+                    heapY[index] = y;
+                    heapDistance[index] = distance;
+                    while (index > 0) {
+                        int parent = (index - 1) >>> 1;
+                        if (compareCascadeCandidates(heapDistance[parent],
+                                heapX[parent], heapY[parent], heapDistance[index],
+                                heapX[index], heapY[index]) >= 0) break;
+                        swapCascadeHeapEntries(
+                                heapX, heapY, heapDistance, parent, index);
+                        index = parent;
+                    }
+                } else if (compareCascadeCandidates(distance, x, y,
+                        heapDistance[0], heapX[0], heapY[0]) < 0) {
+                    heapX[0] = x;
+                    heapY[0] = y;
+                    heapDistance[0] = distance;
+                    int parent = 0;
+                    while (true) {
+                        int left = parent * 2 + 1;
+                        if (left >= count) break;
+                        int right = left + 1;
+                        int largest = left;
+                        if (right < count
+                                && compareCascadeCandidates(heapDistance[right],
+                                        heapX[right], heapY[right],
+                                        heapDistance[left], heapX[left], heapY[left]) > 0) {
+                            largest = right;
+                        }
+                        if (compareCascadeCandidates(heapDistance[parent],
+                                heapX[parent], heapY[parent], heapDistance[largest],
+                                heapX[largest], heapY[largest]) >= 0) break;
+                        swapCascadeHeapEntries(
+                                heapX, heapY, heapDistance, parent, largest);
+                        parent = largest;
+                    }
+                }
+            }
         }
-        if (low >= 96) return;
-        candidates.add(low, new int[]{x, y});
-        if (candidates.size() > 96) candidates.remove(96);
+
+        for (int i = 0; i < count; i++) {
+            result.add(new int[]{heapX[i], heapY[i]});
+        }
+        java.util.Collections.sort(result, (a, b) -> {
+            long da = Math.abs((long) a[0] - preferredX)
+                    + Math.abs((long) a[1] - preferredY);
+            long db = Math.abs((long) b[0] - preferredX)
+                    + Math.abs((long) b[1] - preferredY);
+            return compareCascadeCandidates(da, a[0], a[1], db, b[0], b[1]);
+        });
+        return result;
+    }
+
+    private void swapCascadeHeapEntries(
+            int[] xs, int[] ys, long[] distances, int a, int b) {
+        int x = xs[a];
+        xs[a] = xs[b];
+        xs[b] = x;
+        int y = ys[a];
+        ys[a] = ys[b];
+        ys[b] = y;
+        long distance = distances[a];
+        distances[a] = distances[b];
+        distances[b] = distance;
     }
 
     private boolean findCascadeDisplacementPlan(FrameLayout page, View item, View movingView,
@@ -7506,17 +7577,9 @@ public class MainActivity extends Activity {
             // search does not multiply thousands of scan candidates at every depth.
         }
 
-        // Keep only the nearest 96 candidates while enumerating the Cartesian product.
-        // The old path allocated and sorted every coordinate pair, then immediately
-        // discarded all but 96; bounded insertion preserves the same stable tie order.
-        java.util.ArrayList<int[]> candidates = new java.util.ArrayList<int[]>(96);
-        final int px = preferredX, py = preferredY;
-        for (Integer cy : ys) {
-            for (Integer cx : xs) {
-                retainNearestCascadeCandidate(
-                        candidates, cx.intValue(), cy.intValue(), px, py);
-            }
-        }
+        // Avoid allocating the full Cartesian product; retain only the nearest 96.
+        java.util.ArrayList<int[]> candidates =
+                nearestCascadeCandidates(xs, ys, preferredX, preferredY);
 
         recursionStack.put(item, Boolean.TRUE);
         for (int[] candidatePosition : candidates) {
