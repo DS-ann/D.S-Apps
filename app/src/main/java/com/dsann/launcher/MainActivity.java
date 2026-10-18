@@ -6287,6 +6287,12 @@ public class MainActivity extends Activity {
                 && ((String) view.getTag()).startsWith("launcher_app:");
     }
 
+    private boolean isAppIconCollisionParticipant(View view) {
+        return isWorkspaceAppIcon(view)
+                || (view != null && "workspace_transfer_proxy".equals(view.getTag())
+                    && isWorkspaceAppIcon(workspaceTransferItem));
+    }
+
     /**
      * Visual collision bounds for a home app cell. The cell fills its grid slot,
      * but only the icon artwork and (when enabled) the rendered label are visible
@@ -6297,8 +6303,13 @@ public class MainActivity extends Activity {
             View view, int cellX, int cellY, int cellWidth, int cellHeight) {
         android.graphics.Rect cellBounds = new android.graphics.Rect(
                 cellX, cellY, cellX + Math.max(1, cellWidth), cellY + Math.max(1, cellHeight));
-        if (!(view instanceof ViewGroup)) return cellBounds;
-        ViewGroup cell = (ViewGroup) view;
+        View visualTemplate = view;
+        if (view != null && "workspace_transfer_proxy".equals(view.getTag())
+                && workspaceTransferItem instanceof ViewGroup) {
+            visualTemplate = workspaceTransferItem;
+        }
+        if (!(visualTemplate instanceof ViewGroup)) return cellBounds;
+        ViewGroup cell = (ViewGroup) visualTemplate;
         if (cell.getChildCount() == 0) return cellBounds;
 
         float parentScaleX = Math.max(0.01f, view.getScaleX());
@@ -6438,7 +6449,7 @@ public class MainActivity extends Activity {
      */
     private android.graphics.Rect collisionRectForInteraction(
             View view, int[] geometry, View other) {
-        if (isWorkspaceAppIcon(view) && isWorkspaceAppIcon(other)) {
+        if (isAppIconCollisionParticipant(view) && isAppIconCollisionParticipant(other)) {
             return appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3]);
         }
         return collisionRect(view, geometry);
@@ -6446,7 +6457,7 @@ public class MainActivity extends Activity {
 
     private android.graphics.Rect collisionRectAtForInteraction(
             View view, int x, int y, int width, int height, View other) {
-        if (isWorkspaceAppIcon(view) && isWorkspaceAppIcon(other)) {
+        if (isAppIconCollisionParticipant(view) && isAppIconCollisionParticipant(other)) {
             return appIconVisualRectAt(view, x, y, width, height);
         }
         return collisionRectAt(view, x, y, width, height);
@@ -6665,6 +6676,7 @@ public class MainActivity extends Activity {
             // narrow valid gap because the step does not divide the page dimensions.
             java.util.ArrayList<android.graphics.Rect> obstacles =
                     new java.util.ArrayList<android.graphics.Rect>();
+            java.util.ArrayList<View> obstacleOwners = new java.util.ArrayList<View>();
             for (int j = 0; j < page.getChildCount(); j++) {
                 View blocker = page.getChildAt(j);
                 // The cross-screen drag proxy is intentionally not a workspace item
@@ -6680,11 +6692,13 @@ public class MainActivity extends Activity {
                 // items processed in the same MOVE event can choose the same empty pocket
                 // because the first animation has not moved its view there yet.
                 obstacles.add(collisionRectForInteraction(blocker, bg, other));
+                obstacleOwners.add(blocker);
                 int[] plannedTarget = liveDisplacementTargets.get(blocker);
                 if (plannedTarget != null) {
                     obstacles.add(collisionRectAtForInteraction(blocker,
                             plannedTarget[0], plannedTarget[1],
                             Math.max(1, bg[2]), Math.max(1, bg[3]), other));
+                    obstacleOwners.add(blocker);
                 }
             }
             for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
@@ -6694,6 +6708,7 @@ public class MainActivity extends Activity {
                 int[] rg = cachedLiveDragGeometry(reserved);
                 obstacles.add(collisionRectAtForInteraction(
                         reserved, original[0], original[1], rg[2], rg[3], other));
+                obstacleOwners.add(reserved);
             }
 
             java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
@@ -6738,9 +6753,19 @@ public class MainActivity extends Activity {
                     // candidate creates substantial short-lived garbage during live drag.
                     int candidateRight = x + g[2];
                     int candidateBottom = y + g[3];
+                    android.graphics.Rect candidateVisible = isWorkspaceAppIcon(other)
+                            ? appIconVisualRectAt(other, x, y, g[2], g[3]) : null;
                     boolean blocked = false;
-                    for (android.graphics.Rect obstacle : obstacles) {
-                        if (x < obstacle.right && candidateRight > obstacle.left
+                    for (int obstacleIndex = 0; obstacleIndex < obstacles.size(); obstacleIndex++) {
+                        android.graphics.Rect obstacle = obstacles.get(obstacleIndex);
+                        View obstacleOwner = obstacleOwners.get(obstacleIndex);
+                        if (candidateVisible != null
+                                && isAppIconCollisionParticipant(obstacleOwner)) {
+                            if (android.graphics.Rect.intersects(candidateVisible, obstacle)) {
+                                blocked = true;
+                                break;
+                            }
+                        } else if (x < obstacle.right && candidateRight > obstacle.left
                                 && y < obstacle.bottom && candidateBottom > obstacle.top) {
                             blocked = true;
                             break;
