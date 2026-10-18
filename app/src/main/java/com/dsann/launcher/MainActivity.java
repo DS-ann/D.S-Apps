@@ -327,10 +327,13 @@ public class MainActivity extends Activity {
             if (intent == null) return;
             String action = intent.getAction();
             if (Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
-                // Package replacement can leave pre-update TextView measurements cached.
-                // Recompute both independent clock panels without changing saved geometry.
+                // Reset bounded retries after every replacement. Provider metadata and
+                // AppWidgetHostView state can be briefly unavailable during app updates.
+                handler.removeCallbacks(widgetRestoreRetry);
+                widgetRestoreRetryScheduled = false;
+                widgetRestoreRetryCount = 0;
                 handler.removeCallbacks(refreshClockGeometryAfterPackageChange);
-                handler.postDelayed(refreshClockGeometryAfterPackageChange, 180L);
+                handler.postDelayed(refreshClockGeometryAfterPackageChange, 350L);
                 return;
             }
             if (!Intent.ACTION_PACKAGE_ADDED.equals(action)
@@ -351,20 +354,39 @@ public class MainActivity extends Activity {
     private final Runnable refreshAppsAfterPackageChange = new Runnable() {
         @Override public void run() { loadApps(); }
     };
+    private static final int MAX_WIDGET_RESTORE_RETRIES = 8;
+    private boolean widgetRestoreRetryScheduled = false;
+    private int widgetRestoreRetryCount = 0;
+    private final Runnable widgetRestoreRetry = () -> {
+        widgetRestoreRetryScheduled = false;
+        if (isFinishing() || widgetRestoreRetryCount >= MAX_WIDGET_RESTORE_RETRIES) return;
+        widgetRestoreRetryCount++;
+        restoreWidgetsOnPages();
+    };
+    private void scheduleWidgetRestoreRetry() {
+        if (widgetRestoreRetryScheduled || widgetRestoreRetryCount >= MAX_WIDGET_RESTORE_RETRIES
+                || isFinishing()) return;
+        widgetRestoreRetryScheduled = true;
+        handler.postDelayed(widgetRestoreRetry, 750L);
+    }
     private final Runnable refreshClockGeometryAfterPackageChange = new Runnable() {
         @Override public void run() {
-            if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
-            int restorePage = Math.max(0, Math.min(1, currentPage));
-            updateClock();
-            for (int page = 0; page < clockPanelsByPage.length; page++) {
-                if (clockPanelsByPage[page] == null) continue;
-                activateClockForPage(page);
-                applyClockStyle();
-                applyClockPositionAndSize();
-                applyClockPanelColor(false);
+            if (clockPanelsByPage[0] != null && clockPanelsByPage[1] != null) {
+                int restorePage = Math.max(0, Math.min(1, currentPage));
+                updateClock();
+                for (int page = 0; page < clockPanelsByPage.length; page++) {
+                    if (clockPanelsByPage[page] == null) continue;
+                    activateClockForPage(page);
+                    applyClockStyle();
+                    applyClockPositionAndSize();
+                    applyClockPanelColor(false);
+                }
+                activateClockForPage(restorePage);
+                updateClockResizeHandles();
             }
-            activateClockForPage(restorePage);
-            updateClockResizeHandles();
+            // A provider update can temporarily invalidate an AppWidgetHostView. Re-run
+            // restoration after the package manager has had time to publish new metadata.
+            restoreWidgetsOnPages();
         }
     };
     private final Runnable clockUpdater = new Runnable() {
@@ -4930,8 +4952,13 @@ public class MainActivity extends Activity {
         pagesStrip.post(() -> {
             if (pagesStrip == null || isFinishing()) return;
             String stored = prefs.getString(KEY_WIDGET_IDS, "");
-            if (stored.isEmpty()) return;
-            boolean removedStaleWidget = false;
+            if (stored.isEmpty()) {
+                widgetRestoreRetryCount = 0;
+                widgetRestoreRetryScheduled = false;
+                handler.removeCallbacks(widgetRestoreRetry);
+                return;
+            }
+            boolean retryNeeded = false;
             for (String entry : stored.split("\\n")) {
                 String[] parts = entry.split(":");
                 if (parts.length < 2) continue;
@@ -4948,8 +4975,10 @@ public class MainActivity extends Activity {
                     if (exists) continue;
                     AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(id);
                     if (info == null) {
-                        WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
-                        removedStaleWidget = true;
+                        // Null metadata is not proof that the user removed this widget;
+                        // it is commonly transient while an application is updating.
+                        // Keep the stored ID and retry, rather than silently deleting it.
+                        retryNeeded = true;
                         continue;
                     }
                     int availableWidth = page.getWidth() > 0 ? page.getWidth()
@@ -5024,9 +5053,19 @@ public class MainActivity extends Activity {
                         finalRestorePage.post(() ->
                                 resolveWidgetIconCollisions(finalRestorePage, (FrameLayout) candidate));
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                    // Failures during a provider refresh must be retried. The saved host ID
+                    // and position remain untouched so the widget can reappear afterward.
+                    retryNeeded = true;
+                }
             }
-            if (removedStaleWidget) renderHomePages(false);
+            if (retryNeeded) {
+                scheduleWidgetRestoreRetry();
+            } else {
+                widgetRestoreRetryCount = 0;
+                widgetRestoreRetryScheduled = false;
+                handler.removeCallbacks(widgetRestoreRetry);
+            }
         });
     }
 
