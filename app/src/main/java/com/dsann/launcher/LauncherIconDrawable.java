@@ -99,16 +99,22 @@ final class LauncherIconDrawable extends Drawable {
     private void setShapePath(RectF target) {
         path.reset();
         if (shape == SHAPE_TRIANGLE) {
-            // Keep the lower vertices inside the rounded tile's bottom edge. Using the
-            // same corner radius as the background prevents sharp tips from protruding
-            // through the rounded-square corners while preserving the full drawable size.
-            float baseInset = showBackground
-                    ? Math.min(target.width(), target.height()) * 0.23f : 0f;
-            float leftBase = target.left + baseInset;
-            float rightBase = target.right - baseInset;
             path.moveTo(target.centerX(), target.top);
-            path.lineTo(rightBase, target.bottom);
-            path.lineTo(leftBase, target.bottom);
+            if (showBackground) {
+                // Keep the triangle's overall base as wide as the rounded-square tile.
+                // Round only the two lower corners; don't inset both base vertices by
+                // the corner radius (that made the base look too short).
+                float corner = Math.min(target.width(), target.height()) * 0.23f;
+                path.lineTo(target.right, target.bottom - corner);
+                path.quadTo(target.right, target.bottom,
+                        target.right - corner, target.bottom);
+                path.lineTo(target.left + corner, target.bottom);
+                path.quadTo(target.left, target.bottom,
+                        target.left, target.bottom - corner);
+            } else {
+                path.lineTo(target.right, target.bottom);
+                path.lineTo(target.left, target.bottom);
+            }
             path.close();
         } else if (shape == SHAPE_PEAR) {
             // Pear silhouette: narrow rounded top, widening toward a full lower half.

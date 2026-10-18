@@ -8312,6 +8312,13 @@ public class MainActivity extends Activity {
                 Color.blue(color) * 3 / 4);
     }
 
+    private GradientDrawable studioSolidRoundRect(int color, float radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(LauncherUiUtils.dp(this, radiusDp));
+        return drawable;
+    }
+
     private GradientDrawable studioControlBackground() {
         return LauncherUiUtils.roundRect(this,
                 new int[]{Color.rgb(35, 43, 65), Color.rgb(22, 28, 45)},
@@ -8320,8 +8327,7 @@ public class MainActivity extends Activity {
 
     private void addStudioAccentLine(LinearLayout container) {
         View line = new View(this);
-        line.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{homeStudioAccentColor}, LauncherUiUtils.dp(this, 2)));
+        line.setBackground(studioSolidRoundRect(homeStudioAccentColor, 2));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1,
                 LauncherUiUtils.dp(this, 3));
         params.bottomMargin = LauncherUiUtils.dp(this, 8);
@@ -8402,8 +8408,7 @@ public class MainActivity extends Activity {
         rp.bottomMargin = LauncherUiUtils.dp(this, 7);
 
         View rail = new View(this);
-        rail.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{homeStudioAccentColor}, LauncherUiUtils.dp(this, 2)));
+        rail.setBackground(studioSolidRoundRect(homeStudioAccentColor, 2));
         row.addView(rail, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 3),
                 LauncherUiUtils.dp(this, 42)));
 
