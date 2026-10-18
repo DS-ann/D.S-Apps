@@ -4237,30 +4237,32 @@ public class MainActivity extends Activity {
                 ? pagesStrip.getChildAt(to) : null;
 
         if (effect == 3) {
-            // Page Flip rotates two overlapping faces around their vertical edges.
-            // Keep the strip fixed for the entire gesture. The neighbour is aligned
-            // with a constant offset (not animated sideways), then turns into view.
+            // Page Flip hinges each face around the top horizontal edge. Align the
+            // incoming page once beneath the outgoing page; no horizontal motion or
+            // vertical strip travel is animated during the turn.
             pagesStrip.setTranslationX(-from * width);
             outgoing.setCameraDistance(10000f * density);
             outgoing.setTranslationX(0f);
-            outgoing.setPivotX(direction > 0 ? width : 0f);
-            outgoing.setPivotY(height * 0.5f);
-            outgoing.setRotationX(0f);
-            outgoing.setRotationY(-direction * 90f * progress);
+            outgoing.setPivotX(width * 0.5f);
+            outgoing.setPivotY(0f);
+            outgoing.setRotationY(0f);
+            outgoing.setRotationX(-direction * 90f * progress);
             outgoing.setTranslationZ(-density * 8f * progress);
-            outgoing.setScaleX(1f - 0.04f * progress);
+            outgoing.setScaleX(1f);
+            outgoing.setScaleY(1f);
             outgoing.setAlpha(1f - progress);
             if (incomingFace != null) {
                 incomingFace.setCameraDistance(10000f * density);
-                // This alignment remains constant for every progress frame; it is not
-                // a slide animation. resetPageTransforms() clears it after the flip.
+                // This is a fixed layout correction so both faces share the same
+                // viewport, not an animated left/right slide.
                 incomingFace.setTranslationX(-direction * width);
-                incomingFace.setPivotX(direction > 0 ? 0f : incomingFace.getWidth());
-                incomingFace.setPivotY(incomingFace.getHeight() * 0.5f);
-                incomingFace.setRotationX(0f);
-                incomingFace.setRotationY(direction * 90f * (1f - progress));
+                incomingFace.setPivotX(incomingFace.getWidth() * 0.5f);
+                incomingFace.setPivotY(0f);
+                incomingFace.setRotationY(0f);
+                incomingFace.setRotationX(direction * 90f * (1f - progress));
                 incomingFace.setTranslationZ(density * 8f * progress);
-                incomingFace.setScaleX(0.96f + 0.04f * progress);
+                incomingFace.setScaleX(1f);
+                incomingFace.setScaleY(1f);
                 incomingFace.setAlpha(progress);
             }
             return;
@@ -8961,12 +8963,27 @@ public class MainActivity extends Activity {
             applyBrandVisibility(); loadApps(); renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
-        TextView authorCredit = LauncherUiUtils.text(this, "made by debarghya Sannigrahi",
-                17, Color.rgb(167, 180, 207), false);
+        TextView authorCredit = LauncherUiUtils.text(this, "made by Debarghya Sannigrahi",
+                24, Color.WHITE, false);
         authorCredit.setTypeface(android.graphics.Typeface.create("cursive",
                 android.graphics.Typeface.NORMAL));
         authorCredit.setGravity(Gravity.CENTER);
         authorCredit.setPadding(0, LauncherUiUtils.dp(this, 16), 0, LauncherUiUtils.dp(this, 7));
+        // Match Home Studio's cyan-to-lavender-to-pink-to-warm-orange gradient,
+        // but span the text itself so the complete gradient remains visible.
+        authorCredit.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> {
+            float textWidth = authorCredit.getPaint().measureText(
+                    authorCredit.getText().toString());
+            if (right <= left || textWidth <= 0f) return;
+            float startX = Math.max(0f, ((right - left) - textWidth) * 0.5f);
+            authorCredit.getPaint().setShader(new android.graphics.LinearGradient(
+                    startX, 0f, startX + textWidth, 0f,
+                    new int[] {Color.rgb(96, 231, 255), Color.rgb(143, 143, 255),
+                            Color.rgb(255, 133, 204), Color.rgb(255, 208, 125)},
+                    null, android.graphics.Shader.TileMode.CLAMP));
+            authorCredit.invalidate();
+        });
         content.addView(authorCredit, new LinearLayout.LayoutParams(-1, -2));
 
         if (!reuseContent) {
@@ -9562,25 +9579,50 @@ public class MainActivity extends Activity {
         int initial = Math.max(0, Math.min(1000, current));
         seekBar.setProgress(initial);
         seekBar.setSplitTrack(false);
-        GradientDrawable spectrumTrack = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT,
-                LauncherIconDrawable.spectrumTrackColors());
-        spectrumTrack.setCornerRadius(LauncherUiUtils.dp(this, 4));
-        // Keep the multicolour spectrum visible along the entire track, independent
-        // of the thumb position, just like a colour picker in an image editor.
+
+        int[] spectrumColors = LauncherIconDrawable.spectrumTrackColors();
+        GradientDrawable trackBackground = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
+        GradientDrawable trackSecondary = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
+        GradientDrawable trackProgress = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
+        float trackRadius = LauncherUiUtils.dp(this, 5);
+        trackBackground.setCornerRadius(trackRadius);
+        trackSecondary.setCornerRadius(trackRadius);
+        trackProgress.setCornerRadius(trackRadius);
+        // A full-spectrum background guarantees that every colour stays visible
+        // across the whole track; the progress layer uses the same gradient.
+        android.graphics.drawable.LayerDrawable spectrumTrack =
+                new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[] {
+                        trackBackground, trackSecondary,
+                        new android.graphics.drawable.ClipDrawable(trackProgress,
+                                Gravity.LEFT, android.graphics.drawable.ClipDrawable.HORIZONTAL)
+                });
+        spectrumTrack.setId(0, android.R.id.background);
+        spectrumTrack.setId(1, android.R.id.secondaryProgress);
+        spectrumTrack.setId(2, android.R.id.progress);
         seekBar.setProgressDrawable(new android.graphics.drawable.InsetDrawable(
                 spectrumTrack, 0, LauncherUiUtils.dp(this, 16), 0, LauncherUiUtils.dp(this, 16)));
         seekBar.setProgressTintList(null);
         seekBar.setProgressBackgroundTintList(null);
-        seekBar.setThumbTintList(android.content.res.ColorStateList.valueOf(
-                LauncherIconDrawable.spectrumColorForPosition(initial)));
+
+        // The rounded colour-picker thumb is 50% larger than the typical 12dp
+        // visible SeekBar thumb, with a light outline to separate it from the track.
+        final GradientDrawable pickerThumb = new GradientDrawable();
+        pickerThumb.setShape(GradientDrawable.OVAL);
+        pickerThumb.setSize(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18));
+        pickerThumb.setColor(LauncherIconDrawable.spectrumColorForPosition(initial));
+        pickerThumb.setStroke(LauncherUiUtils.dp(this, 2), Color.WHITE);
+        seekBar.setThumb(pickerThumb);
         block.addView(seekBar, new LinearLayout.LayoutParams(
                 -1, LauncherUiUtils.dp(this, 42)));
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 int color = LauncherIconDrawable.spectrumColorForPosition(progress);
                 valueLabel.setText(colorValueLabel(color));
-                bar.setThumbTintList(android.content.res.ColorStateList.valueOf(color));
+                pickerThumb.setColor(color);
+                pickerThumb.invalidateSelf();
                 if (fromUser) action.onChange(progress);
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
