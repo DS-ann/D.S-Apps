@@ -35,6 +35,14 @@ final class WidgetInteractionController {
         void updateLiveDisplacements(FrameLayout page, View movingView);
         void finishLiveDisplacements(boolean commit, View movingView);
         void setWorkspaceGridVisible(boolean visible, View movingView);
+        void beginWorkspaceTransferDrag(View item, int sourcePage, float rawX, float rawY,
+                float fingerOffsetX, float fingerOffsetY);
+        void updateWorkspaceTransferEdge(float rawX, float rawY);
+        int getWorkspaceTransferTargetPage();
+        void updateWorkspaceTransferDisplacements(View item, float rawX, float rawY,
+                float fingerOffsetX, float fingerOffsetY);
+        int finishWorkspaceTransferAnimation();
+        void finishWorkspaceTransferDrag(View item, boolean commit);
     }
 
     private final Activity activity;
@@ -505,7 +513,10 @@ final class WidgetInteractionController {
                     if (!pastSlop) return true;
                     dragging[0] = true;
                     handler.removeCallbacks(menuPress[0]);
+                    listener.beginWorkspaceTransferDrag(container, originalPageAtDown[0],
+                            event.getRawX(), event.getRawY(), fingerOffset[0], fingerOffset[1]);
                 }
+                listener.updateWorkspaceTransferEdge(event.getRawX(), event.getRawY());
                 cancelWidgetTouch.run();
                 ViewParent gestureParent = gestureGrip.getParent();
                 if (gestureParent instanceof ViewGroup) {
@@ -515,37 +526,36 @@ final class WidgetInteractionController {
                 LinearLayout strip = listener.getPagesStrip();
                 FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                         ? (FrameLayout) container.getParent() : page;
-                // Widgets stay on their original page; use that page's coordinates even
-                // if the launcher viewport or current page changes during the gesture.
-                int destinationPage = originalPageAtDown[0];
+                // Keep the actively touched view in its original parent while the other
+                // page is revealed. Reparenting a live touch target sends ACTION_CANCEL.
+                int destinationPage = listener.getWorkspaceTransferTargetPage();
+                if (destinationPage < 0) destinationPage = originalPageAtDown[0];
                 listener.ensurePageExists(destinationPage);
                 FrameLayout targetPage = strip != null && destinationPage < strip.getChildCount()
                         && strip.getChildAt(destinationPage) instanceof FrameLayout
                         ? (FrameLayout) strip.getChildAt(destinationPage) : sourcePage;
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                int[] targetPageLocation = new int[2];
-                targetPage.getLocationOnScreen(targetPageLocation);
+                int[] sourcePageLocation = new int[2];
+                sourcePage.getLocationOnScreen(sourcePageLocation);
                 int dropWidth = Math.max(1, current.width > 0 ? current.width : container.getWidth());
                 int dropHeight = Math.max(1, current.height > 0 ? current.height : container.getHeight());
-                int maxX = Math.max(0, targetPage.getWidth() - dropWidth);
-                int maxY = Math.max(0, targetPage.getHeight() - dropHeight);
-                current.leftMargin = Math.max(0, Math.min(maxX,
-                        Math.round(event.getRawX() - targetPageLocation[0] - fingerOffset[0])));
-                current.topMargin = Math.max(0, Math.min(maxY,
-                        Math.round(event.getRawY() - targetPageLocation[1] - fingerOffset[1])));
-                container.setTranslationX(0f);
-                container.setTranslationY(0f);
+                int maxX = Math.max(0, sourcePage.getWidth() - dropWidth);
+                int maxY = Math.max(0, sourcePage.getHeight() - dropHeight);
+                int left = Math.round(event.getRawX() - sourcePageLocation[0]
+                        - fingerOffset[0] - container.getTranslationX());
+                int top = Math.round(event.getRawY() - sourcePageLocation[1]
+                        - fingerOffset[1] - container.getTranslationY());
+                current.leftMargin = Math.max(0, Math.min(maxX, left));
+                current.topMargin = Math.max(0, Math.min(maxY, top));
                 container.setLayoutParams(current);
-                if (sourcePage != targetPage) {
-                    reparenting[0] = true;
-                    sourcePage.removeView(container);
-                    targetPage.addView(container, current);
-                    reparenting[0] = false;
+                if (destinationPage != originalPageAtDown[0]) {
+                    listener.updateWorkspaceTransferDisplacements(container, event.getRawX(),
+                            event.getRawY(), fingerOffset[0], fingerOffset[1]);
+                } else {
+                    // Same-page placement can displace items directly around the real widget.
+                    listener.updateLiveDisplacements(sourcePage, container);
                 }
                 widgetPage[0] = destinationPage;
-                // Move neighbouring items live, but do not commit/rollback that
-                // collision transaction until the actual release/cancel event.
-                listener.updateLiveDisplacements(targetPage, container);
                 return true;
             }
 
@@ -560,18 +570,51 @@ final class WidgetInteractionController {
                 }
 
                 if (didDrag) {
+                    boolean commit = action == MotionEvent.ACTION_UP;
+                    int targetIndex = listener.finishWorkspaceTransferAnimation();
+                    if (!commit || targetIndex < 0) targetIndex = originalPageAtDown[0];
+                    FrameLayout sourcePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    LinearLayout strip = listener.getPagesStrip();
+                    FrameLayout targetPage = sourcePage;
+                    if (commit && strip != null && targetIndex >= 0
+                            && targetIndex < strip.getChildCount()
+                            && strip.getChildAt(targetIndex) instanceof FrameLayout) {
+                        targetPage = (FrameLayout) strip.getChildAt(targetIndex);
+                    }
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    if (action == MotionEvent.ACTION_CANCEL) {
+                    if (commit) {
+                        int[] targetLocation = new int[2];
+                        targetPage.getLocationOnScreen(targetLocation);
+                        int width = Math.max(1, current.width > 0 ? current.width : container.getWidth());
+                        int height = Math.max(1, current.height > 0 ? current.height : container.getHeight());
+                        current.leftMargin = Math.max(0, Math.min(Math.max(0, targetPage.getWidth() - width),
+                                Math.round(event.getRawX() - targetLocation[0] - fingerOffset[0])));
+                        current.topMargin = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - height),
+                                Math.round(event.getRawY() - targetLocation[1] - fingerOffset[1])));
+                    } else {
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
                     }
                     container.setTranslationX(0f);
                     container.setTranslationY(0f);
                     container.setLayoutParams(current);
+                    if (commit && targetPage != sourcePage) {
+                        listener.updateWorkspaceTransferDisplacements(container, event.getRawX(),
+                                event.getRawY(), fingerOffset[0], fingerOffset[1]);
+                        reparenting[0] = true;
+                        sourcePage.removeView(container);
+                        targetPage.addView(container, current);
+                        reparenting[0] = false;
+                        widgetPage[0] = targetIndex;
+                    } else {
+                        widgetPage[0] = originalPageAtDown[0];
+                    }
+                    listener.finishWorkspaceTransferDrag(container, commit);
                     listener.setWorkspaceGridVisible(false, null);
-                    // Exactly one final transaction: commit on release, roll back on cancel.
-                    listener.finishLiveDisplacements(action == MotionEvent.ACTION_UP, container);
-                    listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
+                    // One collision transaction: commit on finger-up, roll back on cancel.
+                    listener.finishLiveDisplacements(commit, container);
+                    if (commit) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                 } else {
                     listener.setWorkspaceGridVisible(false, null);
                     if (!childCanceled[0]) widget.dispatchTouchEvent(event);
