@@ -61,23 +61,37 @@ final class WidgetInteractionController {
     }
     private final java.util.ArrayList<EditChrome> editChrome = new java.util.ArrayList<>();
 
-    /** Hide resize outlines when the user taps anywhere except the active resize handle. */
-    void clearEditChromeOutsideTouch(float rawX, float rawY) {
+    /** Dismiss active widget-resize mode only when the tap is outside that widget. */
+    boolean clearEditChromeOutsideTouch(float rawX, float rawY) {
+        boolean dismissed = false;
         for (int i = editChrome.size() - 1; i >= 0; i--) {
             EditChrome chrome = editChrome.get(i);
             if (chrome.container.getParent() == null) {
                 editChrome.remove(i);
                 continue;
             }
-            boolean onHandle = false;
+            boolean resizeMode = false;
             for (View handle : chrome.resizeHandles) {
-                if (handle == null || handle.getVisibility() != View.VISIBLE) continue;
-                int[] location = new int[2]; handle.getLocationOnScreen(location);
-                if (rawX >= location[0] && rawX < location[0] + handle.getWidth()
-                        && rawY >= location[1] && rawY < location[1] + handle.getHeight()) { onHandle = true; break; }
+                if (handle != null && handle.getVisibility() == View.VISIBLE) {
+                    resizeMode = true;
+                    break;
+                }
             }
-            if (!onHandle) chrome.clear.run();
+            if (!resizeMode) continue;
+            int[] location = new int[2];
+            chrome.container.getLocationOnScreen(location);
+            float scaleX = Math.max(0.01f, chrome.container.getScaleX());
+            float scaleY = Math.max(0.01f, chrome.container.getScaleY());
+            boolean insideContainer = rawX >= location[0]
+                    && rawX < location[0] + chrome.container.getWidth() * scaleX
+                    && rawY >= location[1]
+                    && rawY < location[1] + chrome.container.getHeight() * scaleY;
+            if (!insideContainer) {
+                chrome.clear.run();
+                dismissed = true;
+            }
         }
+        return dismissed;
     }
 
     WidgetInteractionController(Activity activity, Handler handler, AppWidgetHost widgetHost,
@@ -209,17 +223,31 @@ final class WidgetInteractionController {
         container.addView(widget, new FrameLayout.LayoutParams(-1, -1));
         final View[] resizeHandles = new View[4];
         for (int edge = 0; edge < resizeHandles.length; edge++) {
+            final int resizeEdge = edge;
             View handle = new View(activity);
             handle.setTag("launcher_widget_resize_handle");
+            final int touchSide = LauncherUiUtils.dp(activity, 56);
+            final int visualLength = LauncherUiUtils.dp(activity, 32);
+            final int visualThickness = LauncherUiUtils.dp(activity, 4);
             GradientDrawable handleBg = new GradientDrawable();
             handleBg.setColor(Color.rgb(115, 159, 255));
-            handleBg.setCornerRadius(LauncherUiUtils.dp(activity, 4));
-            handle.setBackground(handleBg);
+            handleBg.setCornerRadius(visualThickness / 2f);
+            int centeredInset = Math.max(0, (touchSide - visualLength) / 2);
+            int thinInset = Math.max(0, touchSide - visualThickness);
+            int insetLeft = resizeEdge == 0 ? 0 : resizeEdge == 1 ? thinInset : centeredInset;
+            int insetTop = resizeEdge == 2 ? 0 : resizeEdge == 3 ? thinInset : centeredInset;
+            int insetRight = resizeEdge == 1 ? 0 : resizeEdge == 0 ? thinInset : centeredInset;
+            int insetBottom = resizeEdge == 3 ? 0 : resizeEdge == 2 ? thinInset : centeredInset;
+            handle.setBackground(new android.graphics.drawable.InsetDrawable(
+                    handleBg, insetLeft, insetTop, insetRight, insetBottom));
             handle.setVisibility(View.GONE);
-            int side = LauncherUiUtils.dp(activity, 40), thin = LauncherUiUtils.dp(activity, 18);
             FrameLayout.LayoutParams handleLp = edge < 2
-                    ? new FrameLayout.LayoutParams(thin, side, edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
-                    : new FrameLayout.LayoutParams(side, thin, edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                    ? new FrameLayout.LayoutParams(touchSide, touchSide,
+                            edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL
+                                    : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
+                    : new FrameLayout.LayoutParams(touchSide, touchSide,
+                            edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL
+                                    : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
             container.addView(handle, handleLp);
             resizeHandles[edge] = handle;
         }
@@ -381,6 +409,7 @@ final class WidgetInteractionController {
         final Runnable[] menuPress = new Runnable[1];
         final Runnable[] clearEditChrome = new Runnable[1];
         final boolean[] childCanceled = {false};
+        final boolean[] resizeModeTouch = {false};
         final boolean[] menuShown = {false};
         final boolean[] dragging = {false};
         // Removing a touched widget synchronously dispatches ACTION_CANCEL on some Android
@@ -449,6 +478,21 @@ final class WidgetInteractionController {
             // detaching this view. Never run the gesture completion path recursively.
             if (reparenting[0]) return true;
             int action = event.getActionMasked();
+            if (resizeModeTouch[0]) {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    resizeModeTouch[0] = false;
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_DOWN) {
+                for (View handle : resizeHandles) {
+                    if (handle != null && handle.getVisibility() == View.VISIBLE) {
+                        // Taps inside the widget are inert while it is in resize mode.
+                        resizeModeTouch[0] = true;
+                        return true;
+                    }
+                }
+            }
             lastTouch[0] = event.getX();
             lastTouch[1] = event.getY();
 
@@ -609,6 +653,8 @@ final class WidgetInteractionController {
                         targetPage.addView(container, current);
                         reparenting[0] = false;
                         widgetPage[0] = targetIndex;
+                        // Recheck the actual widget at its final destination geometry.
+                        listener.updateLiveDisplacements(targetPage, container);
                     } else {
                         widgetPage[0] = originalPageAtDown[0];
                     }

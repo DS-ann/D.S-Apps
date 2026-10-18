@@ -220,6 +220,7 @@ public class MainActivity extends Activity {
     private boolean iconDragging = false;
     private boolean iconMovedTooEarly = false;
     private boolean workspaceIconReparenting = false;
+    private boolean suppressResizeOutsideTouchStream = false;
     private float iconTouchRawX, iconTouchRawY;
     private int iconOriginalLeft, iconOriginalTop;
     private int iconDragPageIndex = -1;
@@ -494,11 +495,23 @@ public class MainActivity extends Activity {
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
+        if (suppressResizeOutsideTouchStream) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                suppressResizeOutsideTouchStream = false;
+            }
+            return true;
+        }
         if (action == MotionEvent.ACTION_DOWN) {
-            // A resize outline is transient edit chrome. Dismiss it on the next tap
-            // anywhere in the launcher, while preserving direct touches on its handle.
+            boolean dismissedResizeMode = false;
             if (widgetInteractionController != null) {
-                widgetInteractionController.clearEditChromeOutsideTouch(event.getRawX(), event.getRawY());
+                dismissedResizeMode |= widgetInteractionController.clearEditChromeOutsideTouch(
+                        event.getRawX(), event.getRawY());
+            }
+            dismissedResizeMode |= clearShortcutResizeModeOutsideTouch(
+                    event.getRawX(), event.getRawY());
+            if (dismissedResizeMode) {
+                suppressResizeOutsideTouchStream = true;
+                return true;
             }
             clockGestureLockedAtDown = clockWidgetMoving || clockWidgetEditing;
             gestureDownX = event.getX();
@@ -1277,6 +1290,47 @@ public class MainActivity extends Activity {
             target = parent instanceof View ? (View) parent : null;
         }
         return false;
+    }
+
+    /** Exit shortcut-resize mode only for a tap outside its tile. */
+    private boolean clearShortcutResizeModeOutsideTouch(float rawX, float rawY) {
+        if (pagesStrip == null) return false;
+        boolean dismissed = false;
+        for (int p = 0; p < pagesStrip.getChildCount(); p++) {
+            View page = pagesStrip.getChildAt(p);
+            if (!(page instanceof ViewGroup)) continue;
+            ViewGroup pageGroup = (ViewGroup) page;
+            for (int i = 0; i < pageGroup.getChildCount(); i++) {
+                View tile = pageGroup.getChildAt(i);
+                if (!"launcher_contact_shortcut".equals(tile.getTag())
+                        || !(tile instanceof ViewGroup)) continue;
+                ViewGroup shortcutGroup = (ViewGroup) tile;
+                boolean resizeMode = false;
+                for (int h = 0; h < shortcutGroup.getChildCount(); h++) {
+                    View child = shortcutGroup.getChildAt(h);
+                    if ("launcher_shortcut_resize_handle".equals(child.getTag())
+                            && child.getVisibility() == View.VISIBLE) {
+                        resizeMode = true;
+                        break;
+                    }
+                }
+                if (!resizeMode) continue;
+                int[] location = new int[2];
+                tile.getLocationOnScreen(location);
+                boolean inside = rawX >= location[0] && rawX < location[0] + tile.getWidth()
+                        && rawY >= location[1] && rawY < location[1] + tile.getHeight();
+                if (inside) continue;
+                for (int h = 0; h < shortcutGroup.getChildCount(); h++) {
+                    View child = shortcutGroup.getChildAt(h);
+                    if ("launcher_shortcut_resize_handle".equals(child.getTag())) {
+                        child.setVisibility(View.GONE);
+                    }
+                }
+                tile.setBackground(null);
+                dismissed = true;
+            }
+        }
+        return dismissed;
     }
 
     private boolean touchStartedOnContactShortcut(float rawX, float rawY) {
@@ -2260,20 +2314,25 @@ public class MainActivity extends Activity {
         for (int edge = 0; edge < shortcutResizeHandles.length; edge++) {
             final int resizeEdge = edge; // 0 left, 1 right, 2 top, 3 bottom
             View grip = new View(this);
+            final int visualThickness = LauncherUiUtils.dp(this, 3);
             GradientDrawable gripBackground = new GradientDrawable();
             gripBackground.setColor(Color.rgb(115, 159, 255));
-            gripBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
-            grip.setBackground(gripBackground);
+            gripBackground.setCornerRadius(visualThickness / 2f);
             grip.setVisibility(View.GONE);
             grip.setTag("launcher_shortcut_resize_handle");
-            // Full-length edge strips make resizing reliable on small phone screens.
-            // The strips are children of the shortcut so their touch targets track its bounds.
-            // Keep opposite edge handles from covering each other on compact
-            // shortcuts; overlapping 28dp strips made one horizontal/vertical
-            // resize edge steal the other edge's touch stream.
-            int thick = Math.max(LauncherUiUtils.dp(this, 12),
-                    Math.min(LauncherUiUtils.dp(this, 20),
-                            Math.min(tileWidth, tileHeight) / 3));
+            // Transparent hit strips are wider than the visible blue edge marker.
+            int thick = Math.max(LauncherUiUtils.dp(this, 18),
+                    Math.min(LauncherUiUtils.dp(this, 32),
+                            Math.min(tileWidth, tileHeight) / 2));
+            int edgeInset = Math.max(0, Math.min(LauncherUiUtils.dp(this, 10),
+                    Math.min(tileWidth, tileHeight) / 4));
+            int visualInset = Math.max(0, thick - visualThickness);
+            int insetLeft = resizeEdge == 0 ? 0 : resizeEdge == 1 ? visualInset : edgeInset;
+            int insetTop = resizeEdge == 2 ? 0 : resizeEdge == 3 ? visualInset : edgeInset;
+            int insetRight = resizeEdge == 1 ? 0 : resizeEdge == 0 ? visualInset : edgeInset;
+            int insetBottom = resizeEdge == 3 ? 0 : resizeEdge == 2 ? visualInset : edgeInset;
+            grip.setBackground(new android.graphics.drawable.InsetDrawable(
+                    gripBackground, insetLeft, insetTop, insetRight, insetBottom));
             FrameLayout.LayoutParams gripParams;
             if (edge < 2) {
                 gripParams = new FrameLayout.LayoutParams(thick,
@@ -2407,8 +2466,7 @@ public class MainActivity extends Activity {
         }
         tile.setOnClickListener(v -> {
             if (shortcutResizeHandles[0].getVisibility() == View.VISIBLE) {
-                for (View handle : shortcutResizeHandles) handle.setVisibility(View.GONE);
-                tile.setBackgroundColor(Color.TRANSPARENT);
+                // Outside taps are the only way to exit resize mode.
                 return;
             }
             try {
@@ -2440,10 +2498,20 @@ public class MainActivity extends Activity {
         final boolean[] shortcutMoveArmed = new boolean[1];
         final boolean[] shortcutPopupShown = new boolean[1];
         final boolean[] shortcutReparenting = new boolean[1];
+        final boolean[] shortcutResizeModeTouch = {false};
         final android.os.Handler shortcutTouchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-        final Runnable armShortcutMove = () -> shortcutMoveArmed[0] = true;
+        final Runnable armShortcutMove = () -> {
+            if (shortcutPopupShown[0] || shortcutDragging[0]) return;
+            for (View handle : shortcutResizeHandles) {
+                if (handle != null && handle.getVisibility() == View.VISIBLE) return;
+            }
+            shortcutMoveArmed[0] = true;
+            // Match widgets: steady 10% enlargement after the move-ready hold.
+            LauncherUiUtils.startScaleHint(tile, 1.10f);
+        };
         final Runnable showShortcutPopup = () -> {
             if (!shortcutMoved[0] && !shortcutDragging[0]) {
+                LauncherUiUtils.stopMoveHint(tile);
                 shortcutPopupShown[0] = true;
                 tile.performLongClick();
             }
@@ -2451,6 +2519,20 @@ public class MainActivity extends Activity {
         tile.setOnTouchListener((view, event) -> {
             if (shortcutReparenting[0]) return true;
             int action = event.getActionMasked();
+            if (shortcutResizeModeTouch[0]) {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    shortcutResizeModeTouch[0] = false;
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_DOWN) {
+                for (View handle : shortcutResizeHandles) {
+                    if (handle != null && handle.getVisibility() == View.VISIBLE) {
+                        shortcutResizeModeTouch[0] = true;
+                        return true;
+                    }
+                }
+            }
             if (action == MotionEvent.ACTION_DOWN) {
                 shortcutTouchStart[0] = event.getRawX();
                 shortcutTouchStart[1] = event.getRawY();
@@ -2499,7 +2581,7 @@ public class MainActivity extends Activity {
                         tile.setScaleY(baseScaleY);
                         tile.bringToFront();
                         tile.animate().scaleX(targetScaleX).scaleY(targetScaleY)
-                                .setDuration(animationDuration(120L)).start();
+                                .alpha(1f).setDuration(animationDuration(120L)).start();
                         beginWorkspaceTransferDrag(tile, shortcutOriginalPage[0],
                                 event.getRawX(), event.getRawY(),
                                 shortcutFingerOffset[0], shortcutFingerOffset[1]);
@@ -2578,6 +2660,8 @@ public class MainActivity extends Activity {
                             ((ViewGroup) sourcePage).removeView(tile);
                             targetPage.addView(tile, lp);
                             shortcutReparenting[0] = false;
+                            // Validate the real destination tile, not just the transfer proxy.
+                            updateLiveDisplacements(targetPage, tile);
                         }
                         finishWorkspaceTransferDrag(tile, commit);
                         finishLiveDisplacements(commit, tile);
@@ -2605,11 +2689,15 @@ public class MainActivity extends Activity {
                         finishWorkspaceTransferDrag(tile, commit);
                     }
                     shortcutDragging[0] = false;
+                    LauncherUiUtils.stopMoveHint(tile);
+                    tile.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                            .setDuration(animationDuration(120L)).start();
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                     setWorkspaceGridVisible(false, null);
                     refreshWorkspaceGrid();
                     return true;
                 }
+                LauncherUiUtils.stopMoveHint(tile);
                 if (!shortcutPopupShown[0] && !shortcutMoved[0] && action == MotionEvent.ACTION_UP) {
                     tile.performClick();
                 }
@@ -3654,6 +3742,9 @@ public class MainActivity extends Activity {
                         sourceView.removeView(view);
                         targetPage.addView(view, finalIconParams);
                         workspaceIconReparenting = false;
+                        // Finalize collision checks against the real snapped icon, not
+                        // solely its temporary destination-page proxy.
+                        updateLiveDisplacements(targetPage, view);
                     }
                     hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
                     finishWorkspaceTransferDrag(view, true);
@@ -6972,11 +7063,9 @@ public class MainActivity extends Activity {
         // destination rectangles must be handled independently and consistently.
         java.util.ArrayList<View> displacedViews =
                 new java.util.ArrayList<View>(liveDisplacedItems.keySet());
-        // A successful live-displacement plan already chose and reserved exact
-        // destinations for every affected item. Running the page-wide resolver after
-        // clearing that plan treats those destinations as ordinary starting positions
-        // and can shuffle the items again on finger-up.
-        boolean committedDisplacementPlan = commit && !displacedViews.isEmpty();
+        // Finalize all reserved destinations, then perform a final visual overlap check.
+        // The resolver is a no-op on a collision-free page and only reflows if the exact
+        // release geometry still overlaps after the live displacement plan.
 
         for (View displaced : displacedViews) {
             int[] original = liveDisplacedItems.get(displaced);
@@ -7037,13 +7126,10 @@ public class MainActivity extends Activity {
 
         liveDisplacedItems.clear();
         liveDisplacementTargets.clear();
-        if (!committedDisplacementPlan && commit
-                && movingView != null && movingView.getParent() instanceof FrameLayout
+        if (commit && movingView != null
+                && movingView.getParent() instanceof FrameLayout
                 && isWorkspaceItem(movingView)) {
             FrameLayout page = (FrameLayout) movingView.getParent();
-            // Keep the legacy safety pass for gestures without a displacement plan.
-            // For a committed plan, its exact destinations are authoritative: do not
-            // run a page-wide nearest-free search that moves the committed neighbours.
             resolveAllWorkspaceOverlaps(page, movingView);
         }
         refreshWorkspaceGrid();
