@@ -99,10 +99,16 @@ final class LauncherIconDrawable extends Drawable {
     private void setShapePath(RectF target) {
         path.reset();
         if (shape == SHAPE_TRIANGLE) {
-            // Equilateral-style triangle, centered in the target bounds.
+            // Keep the lower vertices inside the rounded tile's bottom edge. Using the
+            // same corner radius as the background prevents sharp tips from protruding
+            // through the rounded-square corners while preserving the full drawable size.
+            float baseInset = showBackground
+                    ? Math.min(target.width(), target.height()) * 0.23f : 0f;
+            float leftBase = target.left + baseInset;
+            float rightBase = target.right - baseInset;
             path.moveTo(target.centerX(), target.top);
-            path.lineTo(target.right, target.bottom);
-            path.lineTo(target.left, target.bottom);
+            path.lineTo(rightBase, target.bottom);
+            path.lineTo(leftBase, target.bottom);
             path.close();
         } else if (shape == SHAPE_PEAR) {
             // Pear silhouette: narrow rounded top, widening toward a full lower half.

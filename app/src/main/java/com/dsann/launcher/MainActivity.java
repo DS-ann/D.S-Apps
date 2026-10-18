@@ -2060,6 +2060,9 @@ public class MainActivity extends Activity {
         renderSavedContactShortcut();
         renderDock();
         attachClockPanelsToPages();
+        // Validate after the controller's posted layout corrections and clock remeasurements.
+        // This keeps icon-label, font, page-indicator, and other settings changes collision-safe.
+        validateWorkspacePagesAfterLayout();
     }
 
     private static final String KEY_SHORTCUT_IDS = "contact_shortcut_ids";
@@ -2895,6 +2898,47 @@ public class MainActivity extends Activity {
             saved.append(packageName);
         }
         prefs.edit().putString(KEY_DOCK_APPS, saved.toString()).apply();
+    }
+
+    /**
+     * Refresh only the icon artwork when a visual icon option changes. Rebuilding the
+     * entire workspace here detached every shortcut and re-ran placement/capacity logic,
+     * which caused visible flicker and could make icons appear to move or vanish briefly.
+     */
+    private void refreshWorkspaceIconAppearance() {
+        if (pagesStrip != null) {
+            boolean showBackground = prefs.getBoolean("icon_rounded_square_background", false);
+            int shape = Math.max(LauncherIconDrawable.SHAPE_ORIGINAL,
+                    Math.min(LauncherIconDrawable.SHAPE_PEAR,
+                            prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL)));
+            int backgroundChoice = prefs.getInt(KEY_ICON_BACKGROUND_COLOR,
+                    LauncherIconDrawable.BACKGROUND_BLACK);
+            int backgroundColor = LauncherIconDrawable.backgroundColorForChoice(backgroundChoice);
+            for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
+                View pageView = pagesStrip.getChildAt(pageIndex);
+                if (!(pageView instanceof FrameLayout)) continue;
+                FrameLayout page = (FrameLayout) pageView;
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View child = page.getChildAt(childIndex);
+                    Object rawTag = child.getTag();
+                    if (!(rawTag instanceof String)
+                            || !((String) rawTag).startsWith("launcher_app:")) continue;
+                    String packageName = ((String) rawTag).substring("launcher_app:".length());
+                    ResolveInfo app = findApp(packageName);
+                    if (app == null || !(child instanceof ViewGroup)
+                            || ((ViewGroup) child).getChildCount() == 0) continue;
+                    View iconView = ((ViewGroup) child).getChildAt(0);
+                    if (!(iconView instanceof android.widget.ImageView)) continue;
+                    android.graphics.drawable.Drawable source = app.loadIcon(packageManager);
+                    android.widget.ImageView icon = (android.widget.ImageView) iconView;
+                    icon.setImageDrawable(source == null ? null : new LauncherIconDrawable(
+                            source, showBackground, shape, backgroundColor));
+                    icon.invalidate();
+                }
+            }
+        }
+        if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+        renderDock();
     }
 
     private void renderDock() {
@@ -7134,98 +7178,19 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            // If this item cannot fit around the already accepted items, move a
-            // lower-priority neighbour to the other page and retry. This is important
-            // for a clock or large widget colliding with several smaller items.
-            if (bestX < 0 && !isWorkspaceAppIcon(item) && !acceptedViews.isEmpty()) {
-                for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
-                    View movable = acceptedViews.get(j);
-                    if (movable == priorityView || isClockWorkspaceItem(movable)) continue;
-                    int[] mg = itemGeometry(movable);
-                    if (!tryMoveWorkspaceItemToOtherPage(page, movable, mg[2], mg[3])) continue;
-                    acceptedViews.remove(j);
-                    accepted.remove(j);
-                    int retryStep = Math.max(1, LauncherUiUtils.dp(this, 6));
-                    outerRetry:
-                    for (int y = 0; y <= maxY + retryStep; y += retryStep) {
-                        int candidateY = Math.min(maxY, y);
-                        for (int x = 0; x <= maxX + retryStep; x += retryStep) {
-                            int candidateX = Math.min(maxX, x);
-                            android.graphics.Rect candidate = collisionRectAt(item, candidateX, candidateY, w, h);
-                            boolean blocked = false;
-                            for (android.graphics.Rect obstacle : accepted) {
-                                if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                    blocked = true;
-                                    break;
-                                }
-                            }
-                            if (!blocked) {
-                                bestX = candidateX;
-                                bestY = candidateY;
-                                break outerRetry;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Prefer moving the item itself to the other home page before shrinking
-            // it. Shrink-to-fit is reserved for cases where neither page has room.
-            if (bestX < 0 && !isClockWorkspaceItem(item) && !isWorkspaceAppIcon(item)
-                    && tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
+            // Collision repair is strictly page-local. Cross-screen moves are handled only
+            // by the explicit edge-drag interaction, never by layout or overlap repair.
+            if (bestX < 0 && isWorkspaceAppIcon(item)) {
+                // If this page has no legal grid slot, keep the shortcut visible here.
+                // Register its actual bounds so later items do not get placed on top of it.
+                int[] retainedGeometry = itemGeometry(item);
+                accepted.add(collisionRect(item, retainedGeometry));
+                acceptedViews.add(item);
                 continue;
             }
 
-            // App icons must retain their configured size and grid alignment. If no
-            // free slot exists, first try moving a colliding widget/shortcut to the
-            // other page; only retain the icon in place after all legal alternatives fail.
-            if (bestX < 0 && isWorkspaceAppIcon(item)) {
-                if (!acceptedViews.isEmpty()) {
-                    for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
-                        View movable = acceptedViews.get(j);
-                        if (movable == priorityView || isClockWorkspaceItem(movable)
-                                || isWorkspaceAppIcon(movable)) continue;
-                        Object movableTag = movable.getTag();
-                        if ("launcher_clock_widget".equals(movableTag)) continue;
-                        int[] mg = itemGeometry(movable);
-                        if (!tryMoveWorkspaceItemToOtherPage(page, movable, mg[2], mg[3])) continue;
-                        acceptedViews.remove(j);
-                        accepted.remove(j);
-                        outerAppRetry:
-                        for (Integer cy : ys) {
-                            for (Integer cx : xs) {
-                                android.graphics.Rect candidate = collisionRectAt(
-                                        item, cx.intValue(), cy.intValue(), w, h);
-                                boolean blocked = false;
-                                for (android.graphics.Rect obstacle : accepted) {
-                                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-                                if (!blocked) {
-                                    bestX = cx.intValue();
-                                    bestY = cy.intValue();
-                                    break outerAppRetry;
-                                }
-                            }
-                        }
-                    }
-                }
-                if (bestX < 0 && tryMoveWorkspaceItemToOtherPage(page, item, w, h)) continue;
-                if (bestX < 0) {
-                    // No legal grid slot exists on either page. Do not pretend an
-                    // overlapping rectangle has been resolved; retain this icon's
-                    // real visible bounds for the remaining safety pass.
-                    int[] retainedGeometry = itemGeometry(item);
-                    accepted.add(collisionRect(item, retainedGeometry));
-                    acceptedViews.add(item);
-                    continue;
-                }
-            }
-
-            // Last-resort protection for non-icon workspace items only: if both pages
-            // are crowded, reduce visual scale in small steps to find a legal position.
+            // Last-resort protection for non-icon workspace items: if this page is crowded,
+            // reduce visual scale in small steps to find a legal position.
             if (bestX < 0) {
                 float originalScaleX = item.getScaleX();
                 float originalScaleY = item.getScaleY();
@@ -7292,20 +7257,13 @@ public class MainActivity extends Activity {
                             item.getTranslationX(), item.getTranslationY());
                     setClampedClockTranslationForPanel(item, pageIndex,
                             bounded[0], bounded[1], true);
-                    // Do not accept the clock's rectangle here: if it still overlaps,
-                    // the next layout pass must continue resolving rather than masking it.
-                } else if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
-                    // No free rectangle on this page: move the item to the other
-                    // workspace page instead of accepting an overlapping placement.
-                    continue;
-                } else {
-                    // The page is physically full for this item's dimensions. Keep
-                    // the item visible rather than silently deleting it; normal
-                    // placement paths must reject new drops when no free slot exists.
-                    // No legal rectangle exists on either page. Do not treat the
-                    // overlapping location as accepted; the next pass must retry it.
-                    continue;
                 }
+                // No legal local rectangle was found. Do not send the item to another
+                // page as a side effect of rearranging this one. Protect the item's current
+                // visible bounds from attracting additional items into the same region.
+                int[] retainedGeometry = itemGeometry(item);
+                accepted.add(collisionRect(item, retainedGeometry));
+                acceptedViews.add(item);
                 continue;
             }
             if (isClockWorkspaceItem(item)) {
@@ -7321,128 +7279,6 @@ public class MainActivity extends Activity {
             acceptedViews.add(item);
             persistWorkspaceItemPosition(page, item, bestX, bestY, w, h);
         }
-    }
-
-    private boolean tryMoveWorkspaceItemToOtherPage(FrameLayout sourcePage, View item, int width, int height) {
-        if (pagesStrip == null || item == null || isClockWorkspaceItem(item)) return false;
-        for (int p = 0; p < pagesStrip.getChildCount(); p++) {
-            View candidatePage = pagesStrip.getChildAt(p);
-            if (!(candidatePage instanceof FrameLayout) || candidatePage == sourcePage) continue;
-            FrameLayout target = (FrameLayout) candidatePage;
-            if (target.getWidth() <= 0 || target.getHeight() <= 0
-                    || width > target.getWidth() || height > target.getHeight()) continue;
-            java.util.ArrayList<android.graphics.Rect> obstacles = new java.util.ArrayList<android.graphics.Rect>();
-            for (int i = 0; i < target.getChildCount(); i++) {
-                View other = target.getChildAt(i);
-                if (!isWorkspaceItem(other)) continue;
-                int[] og = itemGeometry(other);
-                obstacles.add(collisionRect(other, og));
-            }
-            if (isWorkspaceAppIcon(item)) {
-                int[] current = itemGeometry(item);
-                int[] slot = findFreeHomeAppSlot(target, item, obstacles, current[0], current[1]);
-                if (slot == null) continue;
-                ViewGroup oldParent = (ViewGroup) item.getParent();
-                ViewGroup.LayoutParams raw = item.getLayoutParams();
-                FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
-                        ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) raw)
-                        : new FrameLayout.LayoutParams(slot[2], slot[3]);
-                lp.width = slot[2];
-                lp.height = slot[3];
-                lp.gravity = Gravity.TOP | Gravity.LEFT;
-                lp.leftMargin = slot[0];
-                lp.topMargin = slot[1];
-                item.animate().cancel();
-                item.setScaleX(1f);
-                item.setScaleY(1f);
-                item.setTranslationX(0f);
-                item.setTranslationY(0f);
-                oldParent.removeView(item);
-                target.addView(item, lp);
-                persistWorkspaceItemPosition(target, item, slot[0], slot[1], slot[2], slot[3]);
-                return true;
-            }
-            int[] sourceGeometry = itemGeometry(item);
-            int preferredX = Math.max(0, Math.min(target.getWidth() - width, sourceGeometry[0]));
-            int preferredY = Math.max(0, Math.min(target.getHeight() - height, sourceGeometry[1]));
-            java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
-            java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
-            xs.add(preferredX); ys.add(preferredY);
-            xs.add(0); ys.add(0);
-            xs.add(Math.max(0, target.getWidth() - width));
-            ys.add(Math.max(0, target.getHeight() - height));
-            for (android.graphics.Rect obstacle : obstacles) {
-                int margin = workspaceCollisionMargin(item);
-                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.left - width - margin)));
-                xs.add(Math.max(0, Math.min(target.getWidth() - width, obstacle.right + margin)));
-                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.top - height - margin)));
-                ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.bottom + margin)));
-            }
-            int bestX = -1, bestY = -1;
-            long bestDistance = Long.MAX_VALUE;
-            for (Integer y : ys) for (Integer x : xs) {
-                android.graphics.Rect rect = collisionRectAt(item, x, y, width, height);
-                boolean blocked = false;
-                for (android.graphics.Rect obstacle : obstacles) {
-                    if (android.graphics.Rect.intersects(rect, obstacle)) {
-                        blocked = true;
-                        break;
-                    }
-                }
-                if (blocked) continue;
-                long distance = Math.abs((long) x.intValue() - preferredX)
-                        + Math.abs((long) y.intValue() - preferredY);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestX = x.intValue();
-                    bestY = y.intValue();
-                }
-            }
-            if (bestX < 0) {
-                int maxX = Math.max(0, target.getWidth() - width);
-                int maxY = Math.max(0, target.getHeight() - height);
-                int scanStep = Math.max(1, LauncherUiUtils.dp(this, 6));
-                for (int y = 0; y <= maxY; y += scanStep) {
-                    int candidateY = Math.min(maxY, y);
-                    for (int x = 0; x <= maxX; x += scanStep) {
-                        int candidateX = Math.min(maxX, x);
-                        android.graphics.Rect candidate = collisionRectAt(
-                                item, candidateX, candidateY, width, height);
-                        boolean blocked = false;
-                        for (android.graphics.Rect obstacle : obstacles) {
-                            if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                blocked = true;
-                                break;
-                            }
-                        }
-                        if (blocked) continue;
-                        long distance = Math.abs((long) candidateX - preferredX)
-                                + Math.abs((long) candidateY - preferredY);
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestX = candidateX;
-                            bestY = candidateY;
-                        }
-                    }
-                }
-            }
-            if (bestX < 0) continue;
-            ViewGroup oldParent = (ViewGroup) item.getParent();
-            ViewGroup.LayoutParams raw = item.getLayoutParams();
-            FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
-                    ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) raw)
-                    : new FrameLayout.LayoutParams(width, height);
-            lp.leftMargin = bestX;
-            lp.topMargin = bestY;
-            item.setTranslationX(0f);
-            item.setTranslationY(0f);
-            oldParent.removeView(item);
-            target.addView(item, lp);
-            int[] placed = itemGeometry(item);
-            persistWorkspaceItemPosition(target, item, placed[0], placed[1], placed[2], placed[3]);
-            return true;
-        }
-        return false;
     }
 
     private void persistWorkspaceItemPosition(FrameLayout page, View item, int x, int y, int width, int height) {
@@ -7925,7 +7761,6 @@ public class MainActivity extends Activity {
             currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
             renderHomePages(false);
-            validateWorkspacePagesAfterLayout();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large"}, value -> {
@@ -7950,9 +7785,7 @@ public class MainActivity extends Activity {
                 prefs.getBoolean("icon_rounded_square_background", false) ? "On" : "Off", () -> {
             prefs.edit().putBoolean("icon_rounded_square_background",
                     !prefs.getBoolean("icon_rounded_square_background", false)).apply();
-            renderHomePages(false);
-            if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
-            renderDock();
+            refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App icon background color",
@@ -7960,33 +7793,13 @@ public class MainActivity extends Activity {
                 new String[]{"Black", "White", "Grey"}, value -> {
             prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR, value)
                     .putBoolean("icon_rounded_square_background", true).apply();
-            renderHomePages(false);
-            if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
-            renderDock();
-            // Rebuilding workspace pages reattaches the existing clock panels. Reapply
-            // each panel's inset background after the new layout pass so the old measured
-            // height cannot leave the translucent clock background clipped to half-height.
-            final int restorePage = Math.max(0, Math.min(1, currentPage));
-            for (int page = 0; page < clockPanelsByPage.length; page++) {
-                activateClockForPage(page);
-                final int pageIndex = page;
-                LinearLayout clockPanelForPage = clockPanel;
-                if (clockPanelForPage != null) clockPanelForPage.post(() -> {
-                    if (clockPanelForPage.getParent() == null) return;
-                    int previousPage = Math.max(0, Math.min(1, activeClockPage));
-                    activateClockForPage(pageIndex);
-                    applyClockPanelColor(false);
-                    activateClockForPage(previousPage);
-                });
-            }
-            activateClockForPage(restorePage);
+            refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "App icon shape", prefs.getInt("app_icon_shape", 0),
                 new String[]{"Original", "Triangle", "Pear"}, value -> {
             prefs.edit().putInt("app_icon_shape", value).apply();
-            renderHomePages(false);
-            if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
+            refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addChoiceRow(content, "Home app font size", Math.min(3, prefs.getInt(KEY_HOME_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
