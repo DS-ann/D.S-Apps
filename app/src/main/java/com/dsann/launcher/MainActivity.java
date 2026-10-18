@@ -117,6 +117,8 @@ public class MainActivity extends Activity {
     private int pendingWidgetTargetPage = 0;
     private static final int COLUMNS = 4;
     private static final int HOME_ROWS = 5;
+    private static final long ICON_EDGE_SWITCH_DELAY_MS = 200L;
+    private static final int ICON_EDGE_SWITCH_ZONE_DP = 24;
     private interface IntAction { void onSelect(int value); }
     private final int BG = Color.rgb(10, 13, 24);
     private final Handler handler = new Handler();
@@ -223,6 +225,37 @@ public class MainActivity extends Activity {
     private int iconDragPageIndex = -1;
     private int iconOriginalPageIndex = -1;
     private int iconEdgeLatch = 0;
+    private int iconEdgeHoverTargetPage = -1;
+    private float iconDragLastRawX;
+    private final Runnable iconEdgeSwitchRunnable = new Runnable() {
+        @Override public void run() {
+            View dragged = activeDragView;
+            int targetPage = iconEdgeHoverTargetPage;
+            if (!iconDragging || dragged == null || pageViewport == null || pagesStrip == null
+                    || targetPage < 0 || targetPage >= pagesStrip.getChildCount()) {
+                iconEdgeHoverTargetPage = -1;
+                return;
+            }
+            int currentDragPage = iconDragPageIndex;
+            if (Math.abs(targetPage - currentDragPage) != 1
+                    || pageViewport.getWidth() <= 0) {
+                iconEdgeHoverTargetPage = -1;
+                return;
+            }
+            int[] viewportLocation = new int[2];
+            pageViewport.getLocationOnScreen(viewportLocation);
+            int edge = LauncherUiUtils.dp(MainActivity.this, ICON_EDGE_SWITCH_ZONE_DP);
+            boolean stillAtRequestedEdge = targetPage > currentDragPage
+                    ? iconDragLastRawX >= viewportLocation[0] + pageViewport.getWidth() - edge
+                    : iconDragLastRawX <= viewportLocation[0] + edge;
+            if (!stillAtRequestedEdge) {
+                iconEdgeHoverTargetPage = -1;
+                return;
+            }
+            iconEdgeHoverTargetPage = -1;
+            switchIconDragPage(targetPage);
+        }
+    };
     private View activeDragView;
     private String activeDragPackage;
     private Runnable iconArmDrag;
@@ -2577,6 +2610,99 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void clearIconEdgeHover() {
+        handler.removeCallbacks(iconEdgeSwitchRunnable);
+        iconEdgeHoverTargetPage = -1;
+    }
+
+    private void updateIconEdgeHover(float rawX) {
+        iconDragLastRawX = rawX;
+        if (!iconDragging || pageViewport == null || pagesStrip == null
+                || pageViewport.getWidth() <= 0) {
+            clearIconEdgeHover();
+            return;
+        }
+        int visiblePage = iconDragPageIndex;
+        int pageCount = pagesStrip.getChildCount();
+        int[] viewportLocation = new int[2];
+        pageViewport.getLocationOnScreen(viewportLocation);
+        int edge = LauncherUiUtils.dp(this, ICON_EDGE_SWITCH_ZONE_DP);
+        int targetPage = -1;
+        if (visiblePage + 1 < pageCount
+                && rawX >= viewportLocation[0] + pageViewport.getWidth() - edge) {
+            targetPage = visiblePage + 1;
+        } else if (visiblePage > 0 && rawX <= viewportLocation[0] + edge) {
+            targetPage = visiblePage - 1;
+        }
+        if (targetPage < 0) {
+            clearIconEdgeHover();
+            return;
+        }
+        if (targetPage == iconEdgeHoverTargetPage) return;
+        handler.removeCallbacks(iconEdgeSwitchRunnable);
+        iconEdgeHoverTargetPage = targetPage;
+        handler.postDelayed(iconEdgeSwitchRunnable, ICON_EDGE_SWITCH_DELAY_MS);
+    }
+
+    /**
+     * Reveal the adjacent screen during an icon drag without reparenting the actively
+     * touched view (reparenting would cancel Android's touch target). The source page
+     * temporarily draws above its neighbour and allows the dragged cell to overflow.
+     * The view remains owned by its source page until the finger is released.
+     */
+    private void switchIconDragPage(int targetPage) {
+        View dragged = activeDragView;
+        if (!iconDragging || dragged == null || !(dragged.getParent() instanceof FrameLayout)
+                || pagesStrip == null || targetPage < 0
+                || targetPage >= pagesStrip.getChildCount() || targetPage == iconDragPageIndex) {
+            return;
+        }
+        FrameLayout sourcePage = (FrameLayout) dragged.getParent();
+        int sourcePageIndex = pagesStrip.indexOfChild(sourcePage);
+        if (sourcePageIndex < 0) return;
+        int deltaPage = targetPage - iconDragPageIndex;
+        int pageWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth() : sourcePage.getWidth());
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) dragged.getLayoutParams();
+
+        // Snap the viewport to the adjacent page, then compensate the dragged view's
+        // local X so it does not jump away from the finger during the page change.
+        showPage(targetPage, false);
+        lp.leftMargin += deltaPage * pageWidth;
+        if (targetPage == sourcePageIndex) {
+            int maxX = Math.max(0, sourcePage.getWidth() - dragged.getWidth());
+            lp.leftMargin = Math.max(0, Math.min(maxX, lp.leftMargin));
+        }
+        dragged.setLayoutParams(lp);
+        iconDragPageIndex = targetPage;
+
+        if (targetPage != sourcePageIndex) {
+            pagesStrip.setClipChildren(false);
+            pagesStrip.setClipToPadding(false);
+            sourcePage.setClipChildren(false);
+            sourcePage.setClipToPadding(false);
+            sourcePage.setElevation(LauncherUiUtils.dp(this, 30));
+        } else {
+            restoreIconDragPageVisuals();
+        }
+        dragged.bringToFront();
+        setWorkspaceGridVisible(true, dragged);
+        refreshWorkspaceGrid();
+        if (pageViewport != null) pageViewport.invalidate();
+    }
+
+    private void restoreIconDragPageVisuals() {
+        if (pagesStrip == null) return;
+        pagesStrip.setClipChildren(true);
+        pagesStrip.setClipToPadding(true);
+        if (iconOriginalPageIndex >= 0 && iconOriginalPageIndex < pagesStrip.getChildCount()) {
+            ViewGroup source = (ViewGroup) pagesStrip.getChildAt(iconOriginalPageIndex);
+            source.setClipChildren(true);
+            source.setClipToPadding(true);
+            source.setElevation(0f);
+        }
+    }
+
     private void installHomeIconTouch(View cell, String packageName) {
         cell.setOnClickListener(v -> {
             ResolveInfo app = findApp(packageName);
@@ -2586,8 +2712,10 @@ public class MainActivity extends Activity {
         cell.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
+                clearIconEdgeHover();
                 iconTouchRawX = event.getRawX();
                 iconTouchRawY = event.getRawY();
+                iconDragLastRawX = event.getRawX();
                 iconDragArmed = false;
                 iconDragging = false;
                 iconMovedTooEarly = false;
@@ -2638,20 +2766,25 @@ public class MainActivity extends Activity {
                     view.bringToFront();
                 }
                 if (iconDragging) {
-                    // Fixed workspace: dragging never changes screens or creates pages.
-                    iconEdgeLatch = 0;
+                    // A sustained drag at the extreme edge reveals the adjacent existing
+                    // page after 200 ms. The finger stays down and continues controlling
+                    // the same view throughout the page switch.
+                    updateIconEdgeHover(event.getRawX());
                     FrameLayout page = (FrameLayout) view.getParent();
-                    int pageWidth = Math.max(1, page.getWidth());
+                    int sourcePageIndex = pagesStrip.indexOfChild(page);
                     int[] pageLocation = new int[2];
                     page.getLocationOnScreen(pageLocation);
                     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
                     int maxX = Math.max(0, page.getWidth() - view.getWidth());
                     int maxY = Math.max(0, page.getHeight() - view.getHeight());
                     // Convert screen coordinates into the source page's own coordinate space.
-                    // Compensate for the temporary translation used to preview a cross-page drag.
+                    // When the visible target is the other page, the source cell deliberately
+                    // extends beyond its own bounds so it can remain under the finger.
                     float pageOffsetX = view.getTranslationX();
-                    lp.leftMargin = Math.max(0, Math.min(maxX,
-                            Math.round(event.getRawX() - pageLocation[0] - view.getWidth() / 2f - pageOffsetX)));
+                    int desiredLeft = Math.round(event.getRawX() - pageLocation[0]
+                            - view.getWidth() / 2f - pageOffsetX);
+                    lp.leftMargin = iconDragPageIndex == sourcePageIndex
+                            ? Math.max(0, Math.min(maxX, desiredLeft)) : desiredLeft;
                     int slotHeight = LauncherUiUtils.dp(this,
                             homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                     int gridRows = Math.max(1, page.getHeight() / slotHeight);
@@ -2666,6 +2799,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            clearIconEdgeHover();
             LauncherUiUtils.stopMoveHint(view);
             // Finish resize gestures here before they can fall through to launcher
             // gesture handling. Without this reset, the resize flag stayed armed
@@ -2705,6 +2839,7 @@ public class MainActivity extends Activity {
                             view.setTranslationX(0f);
                             view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(100)).start();
                             setWorkspaceGridVisible(false, null);
+                            restoreIconDragPageVisuals();
                             iconDragging = false;
                             iconDragArmed = false;
                             activeDragView = null;
@@ -2718,7 +2853,8 @@ public class MainActivity extends Activity {
                     }
                     FrameLayout sourceView = (FrameLayout) view.getParent();
                     int sourcePage = pagesStrip.indexOfChild(sourceView);
-                    int destinationPage = Math.max(0, Math.min(1, sourcePage));
+                    int destinationPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1,
+                            iconDragPageIndex >= 0 ? iconDragPageIndex : sourcePage));
                     boolean movedAcrossPage = destinationPage != sourcePage;
                     FrameLayout targetPage = destinationPage < pagesStrip.getChildCount()
                             ? (FrameLayout) pagesStrip.getChildAt(destinationPage) : sourceView;
@@ -2795,6 +2931,7 @@ public class MainActivity extends Activity {
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
                     ensurePageExists(committedPage);
                     currentPage = committedPage;
+                    restoreIconDragPageVisuals();
                     view.setTranslationX(0f);
                     view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(140)).start();
                     setWorkspaceGridVisible(false, null);
