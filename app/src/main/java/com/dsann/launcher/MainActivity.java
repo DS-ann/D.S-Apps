@@ -1648,6 +1648,9 @@ public class MainActivity extends Activity {
                     @Override public int getHomeCellHeightDp(int iconSize) {
                         return MainActivity.this.homeCellHeightDp(iconSize);
                     }
+                    @Override public int getHomeGridRowsForHeight(int pageHeightPx, int cellHeightPx) {
+                        return MainActivity.this.homeGridRowsForHeight(pageHeightPx, cellHeightPx);
+                    }
                     @Override public int getHomeGridRowTop(
                             int row, int rowCount, int pageHeightPx, int cellHeightPx) {
                         return MainActivity.this.homeGridRowTop(
@@ -1777,7 +1780,7 @@ public class MainActivity extends Activity {
                     top = lp.topMargin;
                     if (tag.startsWith("launcher_app:")) {
                         left = Math.max(0, Math.round(left / (float) cellW) * cellW);
-                        int rows = Math.max(1, getHeight() / Math.max(1, cellH));
+                        int rows = homeGridRowsForHeight(getHeight(), cellH);
                         int row = homeGridRowFromTop(top, rows, getHeight(), cellH);
                         top = homeGridRowTop(row, rows, getHeight(), cellH);
                         right = Math.min(getWidth(), left + cellW);
@@ -1968,13 +1971,27 @@ public class MainActivity extends Activity {
         return prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
     }
 
+    /**
+     * Keep a 25dp breathing space between the label-enabled home grid and the dock.
+     * With labels disabled, preserve the previous workspace capacity exactly.
+     */
+    private int homeGridBottomGapPx() {
+        return isHomeGridBottomAligned() ? LauncherUiUtils.dp(this, 25) : 0;
+    }
+
+    /** Returns the row capacity after reserving any label-enabled dock clearance. */
+    private int homeGridRowsForHeight(int pageHeightPx, int cellHeightPx) {
+        int usableHeight = Math.max(1, pageHeightPx - homeGridBottomGapPx());
+        return Math.max(1, usableHeight / Math.max(1, cellHeightPx));
+    }
+
     /** Returns a legal app-row top in page pixels, bottom-anchored only with labels on. */
     private int homeGridRowTop(int row, int rowCount, int pageHeightPx, int cellHeightPx) {
         int rows = Math.max(1, rowCount);
         int cellHeight = Math.max(1, cellHeightPx);
         int safeRow = Math.max(0, Math.min(rows - 1, row));
         int topInset = isHomeGridBottomAligned()
-                ? Math.max(0, pageHeightPx - rows * cellHeight) : 0;
+                ? Math.max(0, pageHeightPx - rows * cellHeight - homeGridBottomGapPx()) : 0;
         return topInset + safeRow * cellHeight;
     }
 
@@ -1983,7 +2000,7 @@ public class MainActivity extends Activity {
         int rows = Math.max(1, rowCount);
         int cellHeight = Math.max(1, cellHeightPx);
         int topInset = isHomeGridBottomAligned()
-                ? Math.max(0, pageHeightPx - rows * cellHeight) : 0;
+                ? Math.max(0, pageHeightPx - rows * cellHeight - homeGridBottomGapPx()) : 0;
         return Math.max(0, Math.min(rows - 1,
                 Math.round((topPx - topInset) / (float) cellHeight)));
     }
@@ -6394,7 +6411,7 @@ public class MainActivity extends Activity {
         int cellWidth = Math.max(1, page.getWidth() / columns);
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-        int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
         int[] seedSlot = appIconGridSlot(page, seed, cellWidth, cellHeight, rows);
         if (seedSlot == null) return false;
 
@@ -6794,7 +6811,7 @@ public class MainActivity extends Activity {
         int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-        int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
         int bestX = -1;
         int bestY = -1;
         long bestDistance = Long.MAX_VALUE;
@@ -7148,7 +7165,7 @@ public class MainActivity extends Activity {
                 int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-                int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+                int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
                 xCandidates.clear();
                 yCandidates.clear();
                 for (int col = 0; col < columns; col++) {
@@ -7398,7 +7415,7 @@ public class MainActivity extends Activity {
             int cellWidth = Math.max(1, page.getWidth() / columns);
             int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-            int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+            int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             xs.clear(); ys.clear();
             for (int col = 0; col < columns; col++) {
                 int x = col * cellWidth;
@@ -7624,7 +7641,7 @@ public class MainActivity extends Activity {
                 int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-                int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+                int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
                 w = cellWidth;
                 h = cellHeight;
                 maxX = Math.max(0, page.getWidth() - w);
@@ -7848,7 +7865,7 @@ public class MainActivity extends Activity {
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
             String pkg = tag.substring("launcher_app:".length());
             int col = Math.max(0, Math.min(columns - 1, Math.round((float) x / cellWidth)));
-            int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+            int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             int row = homeGridRowFromTop(y, rows, page.getHeight(), cellHeight);
             saveIconSlot(pkg, col, row, columns);
             prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
@@ -8023,7 +8040,7 @@ public class MainActivity extends Activity {
                         getResources().getDisplayMetrics().heightPixels - LauncherUiUtils.dp(this, 260));
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-        return Math.max(1, pageHeight / Math.max(1, cellHeight));
+        return homeGridRowsForHeight(pageHeight, cellHeight);
     }
 
     private int pageCapacity() { return getHomeColumns() * getHomeGridRows(); }

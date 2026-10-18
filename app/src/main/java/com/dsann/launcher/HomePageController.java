@@ -27,6 +27,7 @@ final class HomePageController {
         void rebuildPages();
         int getHomeColumns();
         int getHomeCellHeightDp(int iconSize);
+        int getHomeGridRowsForHeight(int pageHeightPx, int cellHeightPx);
         int getHomeGridRowTop(int row, int rowCount, int pageHeightPx, int cellHeightPx);
         ResolveInfo findApp(String packageName);
         void installHomeIconTouch(View cell, String packageName);
@@ -172,9 +173,9 @@ final class HomePageController {
             // and collision checks. Added label height extends only below the icon.
             int cellHeight = LauncherUiUtils.dp(activity,
                     host.getHomeCellHeightDp(configuredIconSize));
-            // Each app owns one fixed-height grid slot. Compute the number of rows
-            // from the usable workspace height so no slot extends into the dock.
-            final int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
+            // Each app owns one fixed-height grid slot. Row capacity reserves the
+            // label-enabled 25dp clearance above the dock through the shared host rule.
+            final int rows = host.getHomeGridRowsForHeight(pageHeight, cellHeight);
             boolean[][] occupiedSlots = new boolean[rows][columns];
             LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
@@ -237,7 +238,7 @@ final class HomePageController {
                 // Keep post-layout correction aligned with the same font-aware grid metric.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         host.getHomeCellHeightDp(configuredIconSize));
-                int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
+                int actualRows = host.getHomeGridRowsForHeight(page.getHeight(), actualCellHeight);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
