@@ -22,7 +22,6 @@ final class LauncherScreenTransitions {
     static boolean isDrawerTransitionRunning(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect) {
         return effect == 0 && activeParallaxAnimator != null
-                && activeParallaxAnimator.isRunning()
                 && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen;
     }
 
