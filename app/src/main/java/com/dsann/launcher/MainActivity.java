@@ -3591,6 +3591,15 @@ public class MainActivity extends Activity {
             clearIconEdgeHover();
             if (iconDragPageAnimator != null) finishIconDragPageAnimation();
             LauncherUiUtils.stopMoveHint(view);
+            if (iconDragging) {
+                // The 10% move scale is a drag affordance, not the drop footprint.
+                // Cancel its property animator and restore canonical geometry BEFORE
+                // collision planning, otherwise a free drop can trigger a false shuffle.
+                view.animate().cancel();
+                view.setScaleX(1f);
+                view.setScaleY(1f);
+                view.setAlpha(1f);
+            }
             // Finish resize gestures here before they can fall through to launcher
             // gesture handling. Without this reset, the resize flag stayed armed
             // after finger-up and later swipes could keep changing clock dimensions.
@@ -3786,17 +3795,19 @@ public class MainActivity extends Activity {
                     }
                     hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
                     finishWorkspaceTransferDrag(view, true);
-                    // Always validate the exact destination before rebuilding the page.
-                    // This is a no-op when the live displacement plan is already clear.
-                    finishLiveDisplacements(true, view);
-                    saveIconSlot(packageName, targetCol, targetRow, columns);
                     int committedPage = destinationPage;
+                    // Save the intended slot first. If the final visual collision check
+                    // must move this item, its corrected slot is persisted afterward.
+                    saveIconSlot(packageName, targetCol, targetRow, columns);
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
+                    finishLiveDisplacements(true, view);
                     ensurePageExists(committedPage);
                     currentPage = committedPage;
                     restoreIconDragPageVisuals();
                     view.setTranslationX(0f);
-                    view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(animationDuration(140)).start();
+                    view.setScaleX(1f);
+                    view.setScaleY(1f);
+                    view.setAlpha(1f);
                     setWorkspaceGridVisible(false, null);
                     iconDragging = false;
                     iconDragArmed = false;
@@ -5855,6 +5866,7 @@ public class MainActivity extends Activity {
             item.animate().translationX(bounded[0]).translationY(bounded[1])
                     .setDuration(animationDuration(140L))
                     .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(() -> refreshDragDisplacementsAfterAnimation(item, left, top))
                     .start();
             return;
         }
@@ -5871,6 +5883,7 @@ public class MainActivity extends Activity {
         item.animate().translationX(0f).translationY(0f)
                 .setDuration(animationDuration(140L))
                 .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> refreshDragDisplacementsAfterAnimation(item, left, top))
                 .start();
     }
 
@@ -6184,6 +6197,94 @@ public class MainActivity extends Activity {
     }
 
     /** Live push-aside behavior for workspace items while a widget or shortcut is dragged. */
+
+    /**
+     * Reverse temporary displacement as the finger moves back out of occupied space.
+     * Keep the transaction's original position, but retarget the neighbour to that
+     * position when it is no longer blocked by the mover or another item's current/
+     * reserved bounds. The entry remains in the transaction so release can commit the
+     * returned position and a renewed collision can push it away again.
+     */
+    private void restoreDisplacedItemsWhenDragReverses(FrameLayout page, View movingView,
+            android.graphics.Rect movingRect) {
+        if (page == null || movingView == null || movingRect == null) return;
+        java.util.ArrayList<View> candidates =
+                new java.util.ArrayList<View>(liveDisplacedItems.keySet());
+        for (View displaced : candidates) {
+            if (displaced == movingView || displaced.getParent() != page) continue;
+            int[] original = liveDisplacedItems.get(displaced);
+            int[] target = liveDisplacementTargets.get(displaced);
+            if (original == null || target == null
+                    || (target[0] == original[0] && target[1] == original[1])) continue;
+
+            int[] geometry = itemGeometry(displaced);
+            int width = Math.max(1, geometry[2]);
+            int height = Math.max(1, geometry[3]);
+            android.graphics.Rect originalBounds = collisionRectAt(
+                    displaced, original[0], original[1], width, height);
+            // Don't return an item while the mover still occupies its old slot.
+            if (android.graphics.Rect.intersects(movingRect, originalBounds)) continue;
+            if (originalBounds.left < 0 || originalBounds.top < 0
+                    || originalBounds.right > page.getWidth()
+                    || originalBounds.bottom > page.getHeight()) continue;
+
+            boolean blocked = false;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View blocker = page.getChildAt(i);
+                if (blocker == displaced || blocker == movingView
+                        || blocker.getVisibility() != View.VISIBLE
+                        || !isWorkspaceItem(blocker)) continue;
+                int[] blockerGeometry = itemGeometry(blocker);
+                if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
+                if (android.graphics.Rect.intersects(originalBounds,
+                        collisionRect(blocker, blockerGeometry))) {
+                    blocked = true;
+                    break;
+                }
+                int[] blockerTarget = liveDisplacementTargets.get(blocker);
+                if (blockerTarget != null
+                        && android.graphics.Rect.intersects(originalBounds,
+                                collisionRectAt(blocker, blockerTarget[0], blockerTarget[1],
+                                        blockerGeometry[2], blockerGeometry[3]))) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (blocked) continue;
+
+            // The origin is clear now. Retargeting rather than deleting the record makes
+            // the return animated and allows a reversed finger movement to push it again.
+            liveDisplacementTargets.put(displaced,
+                    new int[]{original[0], original[1]});
+            animateDisplacedItemTo(displaced, original[0], original[1]);
+        }
+    }
+
+    /** Refresh the active drag after a neighbour finishes moving, so push chains can
+     * reverse back in order even when the finger pauses while an animation completes. */
+    private void refreshDragDisplacementsAfterAnimation(View movedNeighbour,
+            int targetX, int targetY) {
+        int[] currentTarget = liveDisplacementTargets.get(movedNeighbour);
+        if (currentTarget == null || currentTarget[0] != targetX || currentTarget[1] != targetY
+                || !(movedNeighbour.getParent() instanceof FrameLayout)
+                || pagesStrip == null) return;
+        FrameLayout page = (FrameLayout) movedNeighbour.getParent();
+        int pageIndex = pagesStrip.indexOfChild(page);
+        if (workspaceTransferItem != null && workspaceTransferTargetPage == pageIndex) {
+            if (workspaceTransferTargetPage != workspaceTransferOriginPage) {
+                updateWorkspaceTransferDisplacements(workspaceTransferItem,
+                        workspaceTransferLastRawX, workspaceTransferLastRawY,
+                        workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
+            } else if (workspaceTransferItem.getParent() == page) {
+                updateLiveDisplacements(page, workspaceTransferItem);
+            }
+            return;
+        }
+        if (clockWidgetDragging && clockPanel != null && clockPanel.getParent() == page) {
+            updateLiveDisplacements(page, clockPanel);
+        }
+    }
+
     private void updateLiveDisplacements(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
@@ -6197,9 +6298,11 @@ public class MainActivity extends Activity {
         // A large approach gap makes nearby items jump before the drop is real.
         int gap = 0;
 
-        // Keep a displaced neighbour in its reserved slot until finger-up/cancel.
-        // Restoring it during MOVE lets the same drag collide with it again on the next
-        // frame, repeatedly reversing its position. Finalization below handles rollback.
+        // Displacement is a live preview, not a permanent one-way shuffle. When the
+        // mover leaves a neighbour's original footprint, animate that neighbour back
+        // if its original rectangle is free. If the finger reverses again, the same
+        // reserved target is eligible to be pushed away once more.
+        restoreDisplacedItemsWhenDragReverses(page, movingView, movingRect);
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
             if (other == movingView || !isWorkspaceItem(other)) continue;
