@@ -135,6 +135,20 @@ public class MainActivity extends Activity {
     private TextView brandText;
     private LinearLayout pagesStrip;
     private final View[] workspaceGridOverlays = new View[2];
+    // Cross-screen drag emits touch updates faster than the display can redraw.
+    // Coalesce grid-overlay invalidation to one request per rendered frame.
+    private boolean workspaceGridRefreshScheduled = false;
+    private final Runnable workspaceGridRefreshFrame = new Runnable() {
+        @Override public void run() {
+            workspaceGridRefreshScheduled = false;
+            for (View overlay : workspaceGridOverlays) {
+                if (overlay != null && overlay.getVisibility() == View.VISIBLE
+                        && overlay.getParent() instanceof ViewGroup) {
+                    overlay.invalidate();
+                }
+            }
+        }
+    };
     // Items temporarily displaced during a drag are restored as soon as the
     // moving item leaves their original occupied area.
     private final java.util.IdentityHashMap<View, int[]> liveDisplacedItems = new java.util.IdentityHashMap<>();
@@ -1674,9 +1688,15 @@ public class MainActivity extends Activity {
     }
 
     private void refreshWorkspaceGrid() {
-        for (View overlay : workspaceGridOverlays) {
-            if (overlay != null && overlay.getVisibility() == View.VISIBLE) overlay.invalidate();
+        if (workspaceGridRefreshScheduled) return;
+        if (pageViewport == null) {
+            for (View overlay : workspaceGridOverlays) {
+                if (overlay != null && overlay.getVisibility() == View.VISIBLE) overlay.invalidate();
+            }
+            return;
         }
+        workspaceGridRefreshScheduled = true;
+        pageViewport.postOnAnimation(workspaceGridRefreshFrame);
     }
 
     private final class WorkspaceGridOverlay extends View {
