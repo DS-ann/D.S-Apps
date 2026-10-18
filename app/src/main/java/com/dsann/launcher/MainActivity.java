@@ -68,7 +68,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
-remove obsolete setting key    private static final String KEY_ANIMATION_SPEED = "animation_speed";
+    private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final String KEY_PAGE_TRANSITION = "page_transition";
     private static final String KEY_DRAWER_TRANSITION = "drawer_transition";
     private static final String KEY_DRAWER_OPACITY = "drawer_background_opacity";
@@ -8778,7 +8778,7 @@ remove obsolete setting key    private static final String KEY_ANIMATION_SPEED =
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
-remove Cube angle slider        addSliderRowWithHint(content, "Animation speed", 40, 200,
+        addSliderRowWithHint(content, "Animation speed", 40, 200,
                 LauncherMotion.speedPercent(this), "%",
                 "Applies to timed launcher animations. Left = slower; 100% = normal; right = faster.",
                 value -> prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply());
@@ -8924,7 +8924,7 @@ remove Cube angle slider        addSliderRowWithHint(content, "Animation speed",
         }
     }
 
-remove obsolete getter    private int getPageRotationDegrees() {
+    private int getPageRotationDegrees() {
         return Math.max(50, Math.min(180, prefs == null ? 90 : prefs.getInt(KEY_PAGE_ROTATION, 90)));
     }
 
