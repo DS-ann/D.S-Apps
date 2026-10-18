@@ -113,10 +113,10 @@ final class HomePageModel {
                 try {
                     int id = Integer.parseInt(parts[0].trim());
                     int page = clampPage(Integer.parseInt(parts[1].trim()));
-                    if (widgetManager == null || widgetManager.getAppWidgetInfo(id) == null) {
-                        WidgetController.removeWidget(prefs, widgetIdsKey, id);
-                        continue;
-                    }
+                    // AppWidgetManager may briefly return null while the provider package
+                    // is being replaced or the system is rebuilding widget state. Preserve the
+                    // host ID and its saved page; restoreWidgetsOnPages retries after the update.
+                    // Removing it here made a transient update look like the user deleted a widget.
                     if (!widgetIds.contains(id)) {
                         widgetIds.add(id);
                         widgetPages.add(page);
