@@ -6852,8 +6852,12 @@ public class MainActivity extends Activity {
                 } else if (displaced.getLayoutParams() instanceof FrameLayout.LayoutParams) {
                     FrameLayout.LayoutParams lp =
                             (FrameLayout.LayoutParams) displaced.getLayoutParams();
-                    lp.leftMargin = destination[0];
-                    lp.topMargin = destination[1];
+                    float sx = Math.max(0.01f, displaced.getScaleX());
+                    float sy = Math.max(0.01f, displaced.getScaleY());
+                    lp.leftMargin = destination[0]
+                            - Math.round(displaced.getPivotX() * (1f - sx));
+                    lp.topMargin = destination[1]
+                            - Math.round(displaced.getPivotY() * (1f - sy));
                     displaced.setTranslationX(0f);
                     displaced.setTranslationY(0f);
                     displaced.setLayoutParams(lp);
@@ -6868,8 +6872,12 @@ public class MainActivity extends Activity {
                 } else if (displaced.getLayoutParams() instanceof FrameLayout.LayoutParams) {
                     FrameLayout.LayoutParams lp =
                             (FrameLayout.LayoutParams) displaced.getLayoutParams();
-                    lp.leftMargin = original[0];
-                    lp.topMargin = original[1];
+                    float sx = Math.max(0.01f, displaced.getScaleX());
+                    float sy = Math.max(0.01f, displaced.getScaleY());
+                    lp.leftMargin = original[0]
+                            - Math.round(displaced.getPivotX() * (1f - sx));
+                    lp.topMargin = original[1]
+                            - Math.round(displaced.getPivotY() * (1f - sy));
                     displaced.setTranslationX(0f);
                     displaced.setTranslationY(0f);
                     displaced.setLayoutParams(lp);
