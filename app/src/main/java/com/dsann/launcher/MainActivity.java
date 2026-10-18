@@ -2463,7 +2463,15 @@ public class MainActivity extends Activity {
                     tile.setPressed(false);
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(true);
                     if (firstDragFrame) {
+                        float baseScaleX = tile.getScaleX();
+                        float baseScaleY = tile.getScaleY();
                         LauncherUiUtils.startScaleHint(tile, 1.10f);
+                        float targetScaleX = tile.getScaleX();
+                        float targetScaleY = tile.getScaleY();
+                        tile.setScaleX(baseScaleX);
+                        tile.setScaleY(baseScaleY);
+                        tile.animate().scaleX(targetScaleX).scaleY(targetScaleY)
+                                .setDuration(animationDuration(120L)).start();
                         beginWorkspaceTransferDrag(tile, shortcutOriginalPage[0],
                                 event.getRawX(), event.getRawY(),
                                 shortcutFingerOffset[0], shortcutFingerOffset[1]);
@@ -2477,9 +2485,11 @@ public class MainActivity extends Activity {
                         page.getLocationOnScreen(pageLocation);
                         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
                         int left = Math.round(event.getRawX() - pageLocation[0]
-                                - shortcutFingerOffset[0] - tile.getTranslationX());
+                                - shortcutFingerOffset[0] - tile.getTranslationX()
+                                - tile.getPivotX() * (1f - Math.max(0.01f, tile.getScaleX())));
                         int top = Math.round(event.getRawY() - pageLocation[1]
-                                - shortcutFingerOffset[1] - tile.getTranslationY());
+                                - shortcutFingerOffset[1] - tile.getTranslationY()
+                                - tile.getPivotY() * (1f - Math.max(0.01f, tile.getScaleY())));
                         left = Math.max(0, Math.min(Math.max(0, page.getWidth() - tile.getWidth()), left));
                         top = Math.max(0, Math.min(Math.max(0, page.getHeight() - tile.getHeight()), top));
                         lp.leftMargin = left;
@@ -2516,6 +2526,7 @@ public class MainActivity extends Activity {
                                 && pagesStrip.getChildAt(transferPage) instanceof FrameLayout) {
                             targetPage = (FrameLayout) pagesStrip.getChildAt(transferPage);
                         }
+                        tile.animate().cancel();
                         LauncherUiUtils.stopMoveHint(tile);
                         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
                         int[] targetLocation = new int[2];
