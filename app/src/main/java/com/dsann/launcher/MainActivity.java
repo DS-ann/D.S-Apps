@@ -8619,24 +8619,6 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
             titleParams.gravity = Gravity.CENTER_HORIZONTAL;
             panel.addView(title, titleParams);
-            TextView subtitle = LauncherUiUtils.text(this,
-                    "Personalize your home screen and app drawer", 13,
-                    Color.rgb(183, 197, 225), false);
-            subtitle.setPadding(LauncherUiUtils.dp(this, 4), 0, LauncherUiUtils.dp(this, 4),
-                    LauncherUiUtils.dp(this, 10));
-            panel.addView(subtitle);
-
-            TextView usageTip = LauncherUiUtils.text(this,
-                    "TAP A ROW TO CHANGE IT  ·  SLIDE TO ADJUST",
-                    11, Color.rgb(176, 222, 255), true);
-            usageTip.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9),
-                    LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9));
-            usageTip.setBackground(LauncherUiUtils.roundRect(this,
-                    new int[]{Color.rgb(23, 43, 63), Color.rgb(18, 29, 48)},
-                    LauncherUiUtils.dp(this, 11)));
-            LinearLayout.LayoutParams tipParams = new LinearLayout.LayoutParams(-1, -2);
-            tipParams.bottomMargin = LauncherUiUtils.dp(this, 5);
-            panel.addView(usageTip, tipParams);
             scroll = new android.widget.ScrollView(this);
             scroll.setTag("home_studio_scroll");
             content = new LinearLayout(this);
@@ -9493,12 +9475,13 @@ public class MainActivity extends Activity {
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(max - min);
         seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
+        // Keep slider controls visually distinct from their dark setting cards.
         android.content.res.ColorStateList tint =
-                android.content.res.ColorStateList.valueOf(homeStudioAccentColor);
+                android.content.res.ColorStateList.valueOf(Color.rgb(116, 199, 245));
         seekBar.setProgressTintList(tint);
         seekBar.setThumbTintList(tint);
         seekBar.setProgressBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(Color.rgb(66, 74, 95)));
+                android.content.res.ColorStateList.valueOf(Color.rgb(82, 96, 122)));
         block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 42)));
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -9564,12 +9547,13 @@ public class MainActivity extends Activity {
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(max - min);
         seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
+        // Keep slider controls visually distinct from their dark setting cards.
         android.content.res.ColorStateList tint =
-                android.content.res.ColorStateList.valueOf(homeStudioAccentColor);
+                android.content.res.ColorStateList.valueOf(Color.rgb(116, 199, 245));
         seekBar.setProgressTintList(tint);
         seekBar.setThumbTintList(tint);
         seekBar.setProgressBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(Color.rgb(66, 74, 95)));
+                android.content.res.ColorStateList.valueOf(Color.rgb(82, 96, 122)));
         block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 42)));
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
