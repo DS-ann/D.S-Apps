@@ -2727,18 +2727,24 @@ public class MainActivity extends Activity {
         pagesStrip.setTranslationX(-fromPage * (float) pageWidth);
         preparePageLayersForSwipe(fromPage);
         iconDragParallaxChildAlphas.clear();
-        for (int i = 0; i < outgoing.getChildCount(); i++) {
-            View child = ((ViewGroup) outgoing).getChildAt(i);
-            if (child == dragged) continue;
-            iconDragParallaxChildAlphas.put(child, child.getAlpha());
-        }
-        for (int i = 0; i < incoming.getChildCount(); i++) {
-            View child = ((ViewGroup) incoming).getChildAt(i);
-            if (child == dragged) continue;
-            if (!iconDragParallaxChildAlphas.containsKey(child)) {
+        if (outgoing instanceof ViewGroup) {
+            ViewGroup outgoingGroup = (ViewGroup) outgoing;
+            for (int i = 0; i < outgoingGroup.getChildCount(); i++) {
+                View child = outgoingGroup.getChildAt(i);
+                if (child == dragged) continue;
                 iconDragParallaxChildAlphas.put(child, child.getAlpha());
             }
-            child.setAlpha(0f);
+        }
+        if (incoming instanceof ViewGroup) {
+            ViewGroup incomingGroup = (ViewGroup) incoming;
+            for (int i = 0; i < incomingGroup.getChildCount(); i++) {
+                View child = incomingGroup.getChildAt(i);
+                if (child == dragged) continue;
+                if (!iconDragParallaxChildAlphas.containsKey(child)) {
+                    iconDragParallaxChildAlphas.put(child, child.getAlpha());
+                }
+                child.setAlpha(0f);
+            }
         }
 
         outgoing.setPivotX(direction > 0 ? outgoing.getWidth() : 0f);
