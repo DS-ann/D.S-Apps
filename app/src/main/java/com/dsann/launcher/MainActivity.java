@@ -2416,6 +2416,7 @@ public class MainActivity extends Activity {
         final boolean[] shortcutMoved = new boolean[1];
         final boolean[] shortcutMoveArmed = new boolean[1];
         final boolean[] shortcutPopupShown = new boolean[1];
+        final boolean[] shortcutReparenting = new boolean[1];
         final android.os.Handler shortcutTouchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
         final Runnable armShortcutMove = () -> shortcutMoveArmed[0] = true;
         final Runnable showShortcutPopup = () -> {
@@ -2425,6 +2426,7 @@ public class MainActivity extends Activity {
             }
         };
         tile.setOnTouchListener((view, event) -> {
+            if (shortcutReparenting[0]) return true;
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 shortcutTouchStart[0] = event.getRawX();
@@ -2533,24 +2535,30 @@ public class MainActivity extends Activity {
                         if (commit && targetPage != sourcePage) {
                             updateWorkspaceTransferDisplacements(tile, event.getRawX(), event.getRawY(),
                                     shortcutFingerOffset[0], shortcutFingerOffset[1]);
+                            shortcutReparenting[0] = true;
                             ((ViewGroup) sourcePage).removeView(tile);
                             targetPage.addView(tile, lp);
+                            shortcutReparenting[0] = false;
                         }
                         finishWorkspaceTransferDrag(tile, commit);
                         finishLiveDisplacements(commit, tile);
                         float density = getResources().getDisplayMetrics().density;
                         int pageIndex = pagesStrip == null ? currentPage : pagesStrip.indexOfChild(targetPage);
+                        FrameLayout.LayoutParams finalShortcutLp =
+                                (FrameLayout.LayoutParams) tile.getLayoutParams();
+                        int finalLeft = finalShortcutLp.leftMargin;
+                        int finalTop = finalShortcutLp.topMargin;
                         if (commit) {
                             prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
                                             pageIndex >= 0 ? pageIndex : currentPage)
                                     .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
-                                            left / (float) Math.max(1, targetPage.getWidth() - tile.getWidth()))
+                                            finalLeft / (float) Math.max(1, targetPage.getWidth() - tile.getWidth()))
                                     .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                                            top / (float) Math.max(1, targetPage.getHeight() - tile.getHeight()))
+                                            finalTop / (float) Math.max(1, targetPage.getHeight() - tile.getHeight()))
                                     .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
-                                            Math.max(1, Math.round(lp.width / density)))
+                                            Math.max(1, Math.round(finalShortcutLp.width / density)))
                                     .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
-                                            Math.max(1, Math.round(lp.height / density)))
+                                            Math.max(1, Math.round(finalShortcutLp.height / density)))
                                     .apply();
                         }
                     } else {
