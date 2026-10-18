@@ -3539,11 +3539,11 @@ public class MainActivity extends Activity {
                             prefs.edit().putInt(KEY_ICON_PAGE + otherPackage, sourcePage).apply();
                         }
                     }
-                    // Persist the destination page before rebuilding the view hierarchy.
-                    // If same-page collisions were previewed, settle their reservations against
-                    // the snapped release slot before the page renderer recreates app cells.
-                    boolean hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
-                    if (hadLiveDisplacementPlan && !movedAcrossPage) {
+                    // Commit against the exact snapped release slot, not the last
+                    // intermediate pointer frame. This prevents a final grid snap from
+                    // creating a collision that only the slow post-render resolver would see.
+                    boolean hadLiveDisplacementPlan;
+                    if (!movedAcrossPage) {
                         FrameLayout.LayoutParams finalIconParams =
                                 (FrameLayout.LayoutParams) view.getLayoutParams();
                         finalIconParams.leftMargin = targetCol * cellWidth;
@@ -3552,9 +3552,11 @@ public class MainActivity extends Activity {
                         view.setTranslationY(0f);
                         view.setLayoutParams(finalIconParams);
                         updateLiveDisplacements(sourceView, view);
-                        finishLiveDisplacements(true, view);
-                    } else if (hadLiveDisplacementPlan) {
-                        finishLiveDisplacements(false, view);
+                        hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
+                        if (hadLiveDisplacementPlan) finishLiveDisplacements(true, view);
+                    } else {
+                        hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
+                        if (hadLiveDisplacementPlan) finishLiveDisplacements(false, view);
                     }
                     // The dragged view intentionally stays attached to its source page until UP;
                     // reparenting during MOVE cancels Android's active touch target.
