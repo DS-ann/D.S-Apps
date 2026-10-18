@@ -6398,15 +6398,8 @@ public class MainActivity extends Activity {
             }
         }
     
-        enforceLiveDragCollisionSafety(page, movingView);}
-
-
-    /**
-     * Recursively plans a short push chain when every direct destination is occupied.
-     * The moving item and all planned destinations are reserved, while blockers may be
-     * assigned another slot in the same transaction. A bounded search keeps this safe
-     * for older devices when a workspace is densely populated.
-     */
+        enforceLiveDragCollisionSafety(page, movingView);
+    }
 
 
     /**
@@ -6461,6 +6454,14 @@ public class MainActivity extends Activity {
             movingView.setLayoutParams(lp);
         }
     }
+    /**
+     * Recursively plans a short push chain when every direct destination is occupied.
+     * The moving item and all planned destinations are reserved, while blockers may be
+     * assigned another slot in the same transaction. A bounded search keeps this safe
+     * for older devices when a workspace is densely populated.
+     */
+
+
     private boolean findCascadeDisplacementPlan(FrameLayout page, View item, View movingView,
             android.graphics.Rect movingRect, int preferredX, int preferredY,
             java.util.IdentityHashMap<View, int[]> plan,
