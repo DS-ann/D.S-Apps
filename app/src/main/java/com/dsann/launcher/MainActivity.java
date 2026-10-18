@@ -227,6 +227,16 @@ public class MainActivity extends Activity {
     private int iconEdgeLatch = 0;
     private int iconEdgeHoverTargetPage = -1;
     private float iconDragLastRawX;
+    private android.animation.ValueAnimator iconDragPageAnimator;
+    private View iconDragParallaxView;
+    private View iconDragParallaxOutgoing;
+    private View iconDragParallaxIncoming;
+    private int iconDragParallaxTargetPage = -1;
+    private int iconDragParallaxDirection;
+    private int iconDragParallaxPageWidth;
+    private float iconDragParallaxStartTranslationX;
+    private final java.util.IdentityHashMap<View, Float> iconDragParallaxChildAlphas =
+            new java.util.IdentityHashMap<View, Float>();
     private final Runnable iconEdgeSwitchRunnable = new Runnable() {
         @Override public void run() {
             View dragged = activeDragView;
@@ -2658,45 +2668,182 @@ public class MainActivity extends Activity {
      * temporarily draws above its neighbour and allows the dragged cell to overflow.
      * The view remains owned by its source page until the finger is released.
      */
+    /**
+     * Edge-triggered page changes always use the Parallax treatment, independent of
+     * the user's normal page-transition preference. The dragged icon is compensated
+     * against the strip translation on every frame so it stays under the finger while
+     * the workspace moves underneath it.
+     */
     private void switchIconDragPage(int targetPage) {
+        if (iconDragPageAnimator != null) finishIconDragPageAnimation();
         View dragged = activeDragView;
         if (!iconDragging || dragged == null || !(dragged.getParent() instanceof FrameLayout)
                 || pagesStrip == null || targetPage < 0
                 || targetPage >= pagesStrip.getChildCount() || targetPage == iconDragPageIndex) {
             return;
         }
+        int fromPage = currentPage;
+        if (Math.abs(targetPage - fromPage) != 1) return;
         FrameLayout sourcePage = (FrameLayout) dragged.getParent();
         int sourcePageIndex = pagesStrip.indexOfChild(sourcePage);
         if (sourcePageIndex < 0) return;
-        int deltaPage = targetPage - iconDragPageIndex;
+
+        int direction = targetPage > fromPage ? 1 : -1;
         int pageWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
                 ? pageViewport.getWidth() : sourcePage.getWidth());
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) dragged.getLayoutParams();
+        View outgoing = pagesStrip.getChildAt(fromPage);
+        View incoming = pagesStrip.getChildAt(targetPage);
+        if (outgoing == null || incoming == null) return;
 
-        // Snap the viewport to the adjacent page, then compensate the dragged view's
-        // local X so it does not jump away from the finger during the page change.
-        showPage(targetPage, false);
-        lp.leftMargin += deltaPage * pageWidth;
-        if (targetPage == sourcePageIndex) {
-            int maxX = Math.max(0, sourcePage.getWidth() - dragged.getWidth());
-            lp.leftMargin = Math.max(0, Math.min(maxX, lp.leftMargin));
+        if (targetPage != currentPage) {
+            if (clockWidgetEditing) exitClockWidgetEditMode();
+            dismissShortcutEditMode();
         }
-        dragged.setLayoutParams(lp);
+        pagesStrip.animate().cancel();
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            View face = pagesStrip.getChildAt(i);
+            face.animate().cancel();
+            face.setPivotX(face.getWidth() / 2f);
+            face.setPivotY(face.getHeight() / 2f);
+            face.setRotationX(0f);
+            face.setRotationY(0f);
+            face.setScaleX(1f);
+            face.setScaleY(1f);
+            face.setAlpha(1f);
+            face.setTranslationX(0f);
+            face.setTranslationZ(0f);
+        }
+
+        // Keep page state and indicators synchronized with the page being revealed.
+        currentPage = targetPage;
         iconDragPageIndex = targetPage;
-
-        if (targetPage != sourcePageIndex) {
-            pagesStrip.setClipChildren(false);
-            pagesStrip.setClipToPadding(false);
-            sourcePage.setClipChildren(false);
-            sourcePage.setClipToPadding(false);
-            sourcePage.setElevation(LauncherUiUtils.dp(this, 30));
-        } else {
-            restoreIconDragPageVisuals();
+        activateClockForPage(targetPage);
+        if (pageIndicator != null) {
+            pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)
+                    ? View.VISIBLE : View.GONE);
+            pageIndicator.setText((targetPage + 1) + "  /  " + pagesStrip.getChildCount());
         }
+
+        pagesStrip.setTranslationX(-fromPage * (float) pageWidth);
+        preparePageLayersForSwipe(fromPage);
+        iconDragParallaxChildAlphas.clear();
+        for (int i = 0; i < outgoing.getChildCount(); i++) {
+            View child = ((ViewGroup) outgoing).getChildAt(i);
+            if (child == dragged) continue;
+            iconDragParallaxChildAlphas.put(child, child.getAlpha());
+        }
+        for (int i = 0; i < incoming.getChildCount(); i++) {
+            View child = ((ViewGroup) incoming).getChildAt(i);
+            if (child == dragged) continue;
+            if (!iconDragParallaxChildAlphas.containsKey(child)) {
+                iconDragParallaxChildAlphas.put(child, child.getAlpha());
+            }
+            child.setAlpha(0f);
+        }
+
+        outgoing.setPivotX(direction > 0 ? outgoing.getWidth() : 0f);
+        outgoing.setPivotY(outgoing.getHeight() * 0.5f);
+        incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
+        incoming.setPivotY(incoming.getHeight() * 0.5f);
+
+        iconDragParallaxView = dragged;
+        iconDragParallaxOutgoing = outgoing;
+        iconDragParallaxIncoming = incoming;
+        iconDragParallaxTargetPage = targetPage;
+        iconDragParallaxDirection = direction;
+        iconDragParallaxPageWidth = pageWidth;
+        iconDragParallaxStartTranslationX = dragged.getTranslationX();
+
+        final android.animation.ValueAnimator animator =
+                android.animation.ValueAnimator.ofFloat(0f, 1f);
+        iconDragPageAnimator = animator;
+        animator.setDuration(animationDuration(220L));
+        animator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        animator.addUpdateListener(valueAnimator -> {
+            if (iconDragPageAnimator != animator || pagesStrip == null) return;
+            float progress = ((Float) valueAnimator.getAnimatedValue()).floatValue();
+            pagesStrip.setTranslationX(-fromPage * (float) pageWidth
+                    - direction * pageWidth * progress);
+            if (iconDragParallaxView != null) {
+                iconDragParallaxView.setTranslationX(iconDragParallaxStartTranslationX
+                        + direction * pageWidth * progress);
+            }
+            outgoing.setScaleX(1f - 0.045f * progress);
+            outgoing.setScaleY(1f - 0.025f * progress);
+            incoming.setScaleX(0.955f + 0.045f * progress);
+            incoming.setScaleY(0.975f + 0.025f * progress);
+            for (java.util.Map.Entry<View, Float> entry : iconDragParallaxChildAlphas.entrySet()) {
+                View child = entry.getKey();
+                float baseAlpha = entry.getValue().floatValue();
+                if (child.getParent() == outgoing) child.setAlpha(baseAlpha * (1f - progress));
+                else if (child.getParent() == incoming) child.setAlpha(baseAlpha * progress);
+            }
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (iconDragPageAnimator == animator) finishIconDragPageAnimation();
+            }
+        });
+        // Allow the dragged cell to cross the page seam without clipping while it
+        // remains attached to its original touch target.
+        pagesStrip.setClipChildren(false);
+        pagesStrip.setClipToPadding(false);
+        sourcePage.setClipChildren(false);
+        sourcePage.setClipToPadding(false);
+        sourcePage.setElevation(LauncherUiUtils.dp(this, 30));
         dragged.bringToFront();
         setWorkspaceGridVisible(true, dragged);
         refreshWorkspaceGrid();
-        if (pageViewport != null) pageViewport.invalidate();
+        animator.start();
+    }
+
+    /** Finish a partially-running parallax transition without losing the drag offset. */
+    private void finishIconDragPageAnimation() {
+        android.animation.ValueAnimator animator = iconDragPageAnimator;
+        if (animator == null) return;
+        iconDragPageAnimator = null;
+        animator.removeAllUpdateListeners();
+        animator.removeAllListeners();
+        animator.cancel();
+
+        View dragged = iconDragParallaxView;
+        int targetPage = iconDragParallaxTargetPage;
+        int direction = iconDragParallaxDirection;
+        int pageWidth = iconDragParallaxPageWidth;
+        if (dragged != null && dragged.getParent() instanceof FrameLayout) {
+            ViewGroup.LayoutParams raw = dragged.getLayoutParams();
+            if (raw instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                // Finish from the latest pointer-updated position, not a stale
+                // animation-start margin; the finger can still move during the animation.
+                lp.leftMargin += direction * pageWidth;
+                dragged.setLayoutParams(lp);
+            }
+            dragged.setTranslationX(iconDragParallaxStartTranslationX);
+        }
+        if (pagesStrip != null && targetPage >= 0) {
+            pagesStrip.setTranslationX(-targetPage * (float) pageWidth);
+            for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+                View face = pagesStrip.getChildAt(i);
+                face.setAlpha(1f);
+                face.setRotationX(0f);
+                face.setRotationY(0f);
+                face.setScaleX(1f);
+                face.setScaleY(1f);
+                face.setTranslationX(0f);
+                face.setTranslationZ(0f);
+            }
+        }
+        for (java.util.Map.Entry<View, Float> entry : iconDragParallaxChildAlphas.entrySet()) {
+            View child = entry.getKey();
+            if (child.getParent() != null) child.setAlpha(entry.getValue().floatValue());
+        }
+        iconDragParallaxChildAlphas.clear();
+        iconDragParallaxView = null;
+        iconDragParallaxOutgoing = null;
+        iconDragParallaxIncoming = null;
+        iconDragParallaxTargetPage = -1;
+        releasePageLayers();
     }
 
     private void restoreIconDragPageVisuals() {
@@ -2721,6 +2868,7 @@ public class MainActivity extends Activity {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 clearIconEdgeHover();
+                if (iconDragPageAnimator != null) finishIconDragPageAnimation();
                 iconTouchRawX = event.getRawX();
                 iconTouchRawY = event.getRawY();
                 iconDragLastRawX = event.getRawX();
@@ -2808,6 +2956,7 @@ public class MainActivity extends Activity {
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             clearIconEdgeHover();
+            if (iconDragPageAnimator != null) finishIconDragPageAnimation();
             LauncherUiUtils.stopMoveHint(view);
             // Finish resize gestures here before they can fall through to launcher
             // gesture handling. Without this reset, the resize flag stayed armed
