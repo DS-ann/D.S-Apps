@@ -26,6 +26,7 @@ final class HomePageController {
         int getCurrentPage();
         void rebuildPages();
         int getHomeColumns();
+        int getHomeCellHeightDp(int iconSize);
         ResolveInfo findApp(String packageName);
         void installHomeIconTouch(View cell, String packageName);
         void restoreWidgetsOnPages();
@@ -166,10 +167,10 @@ final class HomePageController {
                     && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
                     ? host.getPageViewport().getHeight() : fallbackHeight;
             int configuredIconSize = prefs.getInt(iconSizeKey, 48);
-            // Keep the home grid tied to its no-label cell height. Labels are rendered
-            // into the existing gap below each icon and must not change row coordinates.
+            // Use the same label-aware slot height as dragging, snapping, capacity,
+            // and collision checks. Added label height extends only below the icon.
             int cellHeight = LauncherUiUtils.dp(activity,
-                    Math.max(56, configuredIconSize + 28));
+                    host.getHomeCellHeightDp(configuredIconSize));
             // Each app owns one fixed-height grid slot. Compute the number of rows
             // from the usable workspace height so no slot extends into the dock.
             final int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
@@ -232,10 +233,9 @@ final class HomePageController {
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
                 int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                // Use the same fixed slot height in the post-layout correction too;
-                // otherwise labels would still move rows after the first layout pass.
+                // Keep post-layout correction aligned with the same font-aware grid metric.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
-                        Math.max(56, configuredIconSize + 28));
+                        host.getHomeCellHeightDp(configuredIconSize));
                 int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);

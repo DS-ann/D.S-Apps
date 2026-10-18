@@ -1621,6 +1621,9 @@ public class MainActivity extends Activity {
                     @Override public int getCurrentPage() { return currentPage; }
                     @Override public void rebuildPages() { MainActivity.this.rebuildPages(); }
                     @Override public int getHomeColumns() { return MainActivity.this.getHomeColumns(); }
+                    @Override public int getHomeCellHeightDp(int iconSize) {
+                        return MainActivity.this.homeCellHeightDp(iconSize);
+                    }
                     @Override public ResolveInfo findApp(String packageName) { return MainActivity.this.findApp(packageName); }
                     @Override public void installHomeIconTouch(View cell, String packageName) { MainActivity.this.installHomeIconTouch(cell, packageName); }
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
@@ -1891,10 +1894,37 @@ public class MainActivity extends Activity {
         restoreDockApps();
     }
 
-    /** One shared row metric for rendering, capacity, snapping, and collision placement.
-     * Home labels use the gap below the icon and never change the grid coordinates. */
+    /**
+     * Height of the home label including a small clearance above and below the text.
+     * This mirrors LauncherAppAdapter's font-size presets and uses scaled density so
+     * accessibility font scaling is respected on Android 6 as well.
+     */
+    private int homeLabelHeightDp() {
+        int fontChoice = prefs == null ? 1 : prefs.getInt(KEY_HOME_FONT_SIZE, 1);
+        float targetTextSize = new float[]{9f, 9f, 10f, 12f, 14f}[
+                Math.max(0, Math.min(4, fontChoice))];
+        android.graphics.Paint labelPaint = new android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG);
+        labelPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        labelPaint.setTextSize(targetTextSize * getResources().getDisplayMetrics().scaledDensity);
+        android.graphics.Paint.FontMetrics metrics = labelPaint.getFontMetrics();
+        float density = Math.max(0.1f, getResources().getDisplayMetrics().density);
+        int textHeightDp = (int) Math.ceil((metrics.descent - metrics.ascent) / density);
+        return Math.max(12, textHeightDp + 2);
+    }
+
+    /**
+     * One shared row metric for rendering, capacity, snapping, and collision placement.
+     * With home labels enabled, extra height is added below the icon to contain the
+     * selected font's full line height; the top inset and icon anchor stay unchanged.
+     */
     private int homeCellHeightDp(int iconSize) {
-        return Math.max(56, iconSize + 28);
+        int baseHeight = Math.max(56, iconSize + 28);
+        if (prefs == null || !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)) {
+            return baseHeight;
+        }
+        int requiredHeight = 14 + iconSize + 1 + homeLabelHeightDp() + 7;
+        return Math.max(baseHeight, requiredHeight);
     }
 
     private String clockPrefKey(String key, int page) {

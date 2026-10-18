@@ -161,10 +161,9 @@ public final class LauncherAppAdapter extends BaseAdapter {
             iconParams.gravity = Gravity.CENTER;
             cell.addView(icon, iconParams);
             label = makeLabel();
-            // Give home labels enough vertical room for the full font metrics. The home
-            // cell's grid-slot height stays fixed, and clipChildren is disabled below so
-            // the label can draw into the gap beneath its icon without moving that icon.
-            cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
+            // The exact home-label height is updated from the selected font's metrics
+            // after the TextView is configured below; keep drawer sizing unchanged.
+            cell.addView(label, new LinearLayout.LayoutParams(-1, dp(drawer ? 32 : 14)));
         }
         int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
@@ -210,12 +209,30 @@ public final class LauncherAppAdapter extends BaseAdapter {
         // Native ellipsizing avoids posting a measurement task for every recycled cell.
         int targetVisibility = preferences == null || preferences.getBoolean(showLabelsKey, true)
                 ? View.VISIBLE : View.GONE;
+        if (!drawer) {
+            // Fit the label itself to its selected font metrics, with only a 1 dp
+            // separation from the icon. The home grid slot is enlarged downward to
+            // contain this measured height, so text no longer relies on overflow.
+            android.graphics.Paint.FontMetrics metrics = label.getPaint().getFontMetrics();
+            int textHeightPx = (int) Math.ceil(metrics.descent - metrics.ascent);
+            int targetLabelHeight = Math.max(dp(12), textHeightPx + dp(2));
+            ViewGroup.LayoutParams labelParams = label.getLayoutParams();
+            if (labelParams instanceof LinearLayout.LayoutParams) {
+                LinearLayout.LayoutParams linearParams = (LinearLayout.LayoutParams) labelParams;
+                boolean changed = linearParams.height != targetLabelHeight
+                        || linearParams.topMargin != dp(1);
+                linearParams.height = targetLabelHeight;
+                linearParams.topMargin = dp(1);
+                if (changed) label.setLayoutParams(linearParams);
+            }
+            label.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
+        }
         if (label.getVisibility() != targetVisibility) {
             label.setVisibility(targetVisibility);
         }
-        // Labeled home cells can be clipped at the top on older Android versions
-        // when icon bounds exactly fill the cell's measured height. Keep overflow
-        // clipping disabled only for labeled home cells; unlabeled layout is unchanged.
+        // Keep a safety margin against font rasterization differences on Android 6.
+        // The slot now includes the label and its small top margin, rather than relying
+        // on this overflow setting to reveal clipped text.
         if (!drawer && targetVisibility == View.VISIBLE) {
             cell.setClipChildren(false);
             cell.setClipToPadding(false);
