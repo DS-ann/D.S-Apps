@@ -474,6 +474,9 @@ public class MainActivity extends Activity {
                     @Override public void updateLiveDisplacements(FrameLayout page, View movingView) {
                         MainActivity.this.updateLiveDisplacements(page, movingView);
                     }
+                    @Override public void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView) {
+                        MainActivity.this.scheduleLiveDisplacementUpdate(page, movingView);
+                    }
                     @Override public void finishLiveDisplacements(boolean commit, View movingView) {
                         MainActivity.this.finishLiveDisplacements(commit, movingView);
                     }
@@ -689,7 +692,7 @@ public class MainActivity extends Activity {
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
-                        updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
+                        scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
                     }
                 }
                 return true;
@@ -2653,7 +2656,7 @@ public class MainActivity extends Activity {
                             updateWorkspaceTransferDisplacements(tile, event.getRawX(), event.getRawY(),
                                     shortcutFingerOffset[0], shortcutFingerOffset[1]);
                         } else {
-                            updateLiveDisplacements(page, tile);
+                            scheduleLiveDisplacementUpdate(page, tile);
                         }
                     }
                     return true;
@@ -3634,7 +3637,7 @@ public class MainActivity extends Activity {
                     // page. When the edge switch starts, that page's preview is rolled back
                     // and the destination page gets its own independent placement transaction.
                     if (iconDragPageIndex == sourcePageIndex && iconDragPageAnimator == null) {
-                        updateLiveDisplacements(page, view);
+                        scheduleLiveDisplacementUpdate(page, view);
                     } else if (workspaceTransferTargetPage >= 0
                             && workspaceTransferTargetPage != workspaceTransferOriginPage) {
                         updateWorkspaceTransferDisplacements(view, event.getRawX(), event.getRawY(),
@@ -5699,7 +5702,7 @@ public class MainActivity extends Activity {
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
-                        updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
+                        scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
                     }
                 } else if (!clockWidgetMoving && !clockWidgetEditing
                         && (Math.abs(dx) > LauncherUiUtils.dp(this, 8)
