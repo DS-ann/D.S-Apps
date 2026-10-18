@@ -110,6 +110,69 @@ final class WidgetInteractionController {
         top = Math.round(top + view.getTranslationY() + view.getPivotY() * (1f - sy));
         width = Math.max(1, Math.round(Math.max(1, width) * sx));
         height = Math.max(1, Math.round(Math.max(1, height) * sy));
+
+        // App cells fill their invisible home-grid slot. Only the artwork and painted
+        // label are visible collision surfaces; treating the whole cell as occupied
+        // rejected valid widget placements in the open padding around an icon.
+        if (view.getTag() instanceof String
+                && ((String) view.getTag()).startsWith("launcher_app:")
+                && view instanceof ViewGroup) {
+            ViewGroup cell = (ViewGroup) view;
+            android.graphics.Rect cellBounds =
+                    new android.graphics.Rect(left, top, left + width, top + height);
+            float parentScaleX = Math.max(0.01f, view.getScaleX());
+            float parentScaleY = Math.max(0.01f, view.getScaleY());
+            android.graphics.Rect visual = null;
+            int visibleChildCount = Math.min(2, cell.getChildCount());
+            for (int i = 0; i < visibleChildCount; i++) {
+                View child = cell.getChildAt(i);
+                if (child == null || child.getVisibility() != View.VISIBLE
+                        || child.getWidth() <= 0 || child.getHeight() <= 0) continue;
+                float childLeft = child.getLeft() + child.getTranslationX()
+                        + child.getPivotX() * (1f - child.getScaleX());
+                float childTop = child.getTop() + child.getTranslationY()
+                        + child.getPivotY() * (1f - child.getScaleY());
+                float childWidth = child.getWidth() * Math.max(0.01f, child.getScaleX());
+                float childHeight = child.getHeight() * Math.max(0.01f, child.getScaleY());
+
+                // TextViews occupy the whole cell width, but only the centered glyph
+                // run is painted. Do not make the invisible label padding a blocker.
+                if (i == 1 && child instanceof android.widget.TextView) {
+                    android.widget.TextView label = (android.widget.TextView) child;
+                    CharSequence text = label.getText();
+                    if (text == null || text.length() == 0) continue;
+                    android.graphics.Paint paint = label.getPaint();
+                    android.graphics.Paint.FontMetrics metrics = paint.getFontMetrics();
+                    float paintedWidth = Math.min(
+                            Math.max(0, label.getWidth() - label.getCompoundPaddingLeft()
+                                    - label.getCompoundPaddingRight()),
+                            paint.measureText(text.toString()));
+                    float paintedHeight = Math.max(1f, metrics.descent - metrics.ascent);
+                    childLeft += label.getCompoundPaddingLeft()
+                            + Math.max(0f, (label.getWidth()
+                                    - label.getCompoundPaddingLeft()
+                                    - label.getCompoundPaddingRight() - paintedWidth) / 2f);
+                    childTop += label.getCompoundPaddingTop()
+                            + Math.max(0f, (label.getHeight()
+                                    - label.getCompoundPaddingTop()
+                                    - label.getCompoundPaddingBottom() - paintedHeight) / 2f);
+                    childWidth = paintedWidth;
+                    childHeight = paintedHeight;
+                }
+
+                int childX = left + Math.round(childLeft * parentScaleX);
+                int childY = top + Math.round(childTop * parentScaleY);
+                android.graphics.Rect childBounds = new android.graphics.Rect(
+                        childX, childY,
+                        childX + Math.max(1, Math.round(childWidth * parentScaleX)),
+                        childY + Math.max(1, Math.round(childHeight * parentScaleY)));
+                if (cell.getClipChildren()) childBounds.intersect(cellBounds);
+                if (childBounds.isEmpty()) continue;
+                if (visual == null) visual = childBounds;
+                else visual.union(childBounds);
+            }
+            if (visual != null && !visual.isEmpty()) return visual;
+        }
         return new android.graphics.Rect(left, top, left + width, top + height);
     }
 
