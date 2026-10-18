@@ -5382,11 +5382,6 @@ public class MainActivity extends Activity {
             // If the dragged item reaches a neighbour's planned destination, cancel
             // that motion and assign a new destination rather than letting the two
             // items overlap until release.
-            if (alreadyDisplaced) {
-                other.animate().cancel();
-                g = itemGeometry(other);
-                otherRect = collisionRect(other, g);
-            }
 
             int maxX = page.getWidth() - g[2] - gap;
             int maxY = page.getHeight() - g[3] - gap;
@@ -5537,7 +5532,7 @@ public class MainActivity extends Activity {
                         liveDisplacementTargets.put(participant,
                                 new int[]{destination[0], destination[1]});
                         long ordinal = Math.max(0, liveDisplacedItems.size() - 1);
-                        long startDelay = Math.min(72L, ordinal * 18L);
+                        long startDelay = Math.min(24L, ordinal * 6L);
                         if (participant == clockPanel) {
                             float tx = clockPanel.getTranslationX()
                                     + destination[0] - currentGeometry[0];
@@ -5562,6 +5557,10 @@ public class MainActivity extends Activity {
             }
 
             if (bestX >= 0) {
+                // Recompute the visual origin after cancelling any old motion so the
+                // next translation starts from the exact frame that was on screen.
+                other.animate().cancel();
+                g = itemGeometry(other);
                 if (!liveDisplacedItems.containsKey(other)) {
                     liveDisplacedItems.put(other, new int[]{g[0], g[1]});
                 }
@@ -5576,7 +5575,7 @@ public class MainActivity extends Activity {
                 // reservations this prevents several items from racing through the same
                 // visual corridor and appearing to overlap during a dense push-aside.
                 long displacementOrdinal = Math.max(0, liveDisplacedItems.size() - 1);
-                long startDelay = Math.min(72L, displacementOrdinal * 18L);
+                long startDelay = Math.min(24L, displacementOrdinal * 6L);
                 if (other == clockPanel) {
                     float targetX = clockPanel.getTranslationX() + bestX - g[0];
                     float targetY = clockPanel.getTranslationY() + bestY - g[1];
