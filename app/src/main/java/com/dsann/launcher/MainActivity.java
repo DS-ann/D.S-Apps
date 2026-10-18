@@ -3031,9 +3031,9 @@ public class MainActivity extends Activity {
             pagesStrip.setClipToPadding(true);
             for (int p = 0; p < pagesStrip.getChildCount(); p++) {
                 View child = pagesStrip.getChildAt(p);
-                if (child instanceof FrameLayout) {
-                    child.setClipChildren(true);
-                    child.setClipToPadding(true);
+                if (child instanceof ViewGroup) {
+                    ((ViewGroup) child).setClipChildren(true);
+                    ((ViewGroup) child).setClipToPadding(true);
                     child.setElevation(0f);
                 }
             }
