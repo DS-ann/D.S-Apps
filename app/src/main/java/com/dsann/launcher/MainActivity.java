@@ -5025,7 +5025,7 @@ public class MainActivity extends Activity {
             int originalHeight = height;
             int selectedScalePercent = 0;
             int[] freeWidgetPosition = null;
-            for (int scalePercent = 100; scalePercent >= 80; scalePercent -= 5) {
+            for (int scalePercent = 100; scalePercent >= 20; scalePercent -= 20) {
                 int candidateWidth = Math.max(1, Math.round(originalWidth * scalePercent / 100f));
                 int candidateHeight = Math.max(1, Math.round(originalHeight * scalePercent / 100f));
                 int[] candidatePosition =
@@ -5113,7 +5113,7 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams widgetParams = (FrameLayout.LayoutParams) raw;
         int preferredX = widgetParams.leftMargin;
         int preferredY = widgetParams.topMargin;
-        for (int scalePercent = 100; scalePercent >= 80; scalePercent -= 5) {
+        for (int scalePercent = 100; scalePercent >= 20; scalePercent -= 20) {
             int candidateWidth = Math.max(1, Math.round(width * scalePercent / 100f));
             int candidateHeight = Math.max(1, Math.round(height * scalePercent / 100f));
             int[] position = findFreeWidgetPosition(targetPage, candidateWidth, candidateHeight,
