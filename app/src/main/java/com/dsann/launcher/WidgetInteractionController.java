@@ -283,7 +283,6 @@ final class WidgetInteractionController {
             // interval as a fallback for irregular/rounded widget footprints.
             if (bestX < 0) {
                 int step = Math.max(1, LauncherUiUtils.dp(activity, 6));
-                outerScan:
                 for (int cy = 0; cy <= maxY; cy += step) {
                     int candidateY = Math.min(maxY, cy);
                     for (int cx = 0; cx <= maxX; cx += step) {
@@ -298,10 +297,13 @@ final class WidgetInteractionController {
                                 break;
                             }
                         }
-                        if (!blocked) {
+                        if (blocked) continue;
+                        long distance = Math.abs((long) candidateX - desiredX)
+                                + Math.abs((long) candidateY - desiredY);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
                             bestX = candidateX;
                             bestY = candidateY;
-                            break outerScan;
                         }
                     }
                     if (candidateY == maxY) break;
