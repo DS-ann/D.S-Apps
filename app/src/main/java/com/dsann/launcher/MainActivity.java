@@ -8568,7 +8568,7 @@ public class MainActivity extends Activity {
 
         addSection(content, "App drawer");
         addChoiceRow(content, "Drawer opening animation", getDrawerTransition(),
-                new String[]{"Current", "3D Card Flip", "Depth Slide", "Rotating Carousel"}, value -> {
+                new String[]{"Parallex", "3D Card Flip", "Depth Slide", "Rotating Carousel"}, value -> {
             prefs.edit().putInt(KEY_DRAWER_TRANSITION, value).apply();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });

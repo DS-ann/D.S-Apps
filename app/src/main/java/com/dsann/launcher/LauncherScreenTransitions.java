@@ -8,7 +8,7 @@ import android.widget.LinearLayout;
 final class LauncherScreenTransitions {
     private LauncherScreenTransitions() {}
 
-    // 0 = original transition, 1 = 3D Card Flip, 2 = Depth Slide, 3 = Rotating Carousel.
+    // 0 = Parallex, 1 = 3D Card Flip, 2 = Depth Slide, 3 = Rotating Carousel.
     private static void prepareTransitionLayers(LinearLayout homeScreen, LinearLayout drawerScreen) {
         // Cache both surfaces during transforms to avoid display-list rebuild flashes.
         if (homeScreen != null) homeScreen.setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -17,6 +17,18 @@ final class LauncherScreenTransitions {
 
     private static void releaseTransitionLayer(View view) {
         if (view != null) view.setLayerType(View.LAYER_TYPE_NONE, null);
+    }
+
+    /** Travel distance is the actual layout height, not the physical display height. */
+    private static float transitionHeight(Activity activity, LinearLayout homeScreen,
+            LinearLayout drawerScreen) {
+        int homeHeight = homeScreen == null ? 0 : homeScreen.getHeight();
+        int drawerHeight = drawerScreen == null ? 0 : drawerScreen.getHeight();
+        int measuredHeight = Math.max(homeHeight, drawerHeight);
+        if (measuredHeight <= 0) {
+            measuredHeight = activity.getResources().getDisplayMetrics().heightPixels;
+        }
+        return Math.max(1, measuredHeight);
     }
 
     static void showHome(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
@@ -42,7 +54,48 @@ final class LauncherScreenTransitions {
         drawerScreen.setTranslationX(0f);
         drawerScreen.setTranslationZ(0f);
 
-        if (effect == 1) {
+        if (effect == 0) {
+            // Reverse of the Parallex entrance: home drops in from above while the
+            // drawer moves down and fades away, with both surfaces on the same plane.
+            float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
+            long duration = LauncherMotion.duration(activity, 380L);
+            drawerScreen.setVisibility(View.VISIBLE);
+            drawerScreen.setAlpha(1f);
+            drawerScreen.setScaleX(1f);
+            drawerScreen.setScaleY(1f);
+            drawerScreen.setRotationX(0f);
+            drawerScreen.setRotationY(0f);
+            drawerScreen.setTranslationX(0f);
+            drawerScreen.setTranslationY(0f);
+            drawerScreen.setTranslationZ(0f);
+            homeScreen.setAlpha(0f);
+            homeScreen.setScaleX(1f);
+            homeScreen.setScaleY(1f);
+            homeScreen.setRotationX(0f);
+            homeScreen.setRotationY(0f);
+            homeScreen.setTranslationX(0f);
+            homeScreen.setTranslationY(-travelDistance);
+            homeScreen.setTranslationZ(0f);
+            drawerScreen.animate().alpha(0f).translationY(travelDistance)
+                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
+                    .scaleX(1f).scaleY(1f).setDuration(duration)
+                    .withEndAction(() -> {
+                        drawerScreen.setVisibility(View.GONE);
+                        drawerScreen.setAlpha(1f);
+                        drawerScreen.setTranslationX(0f);
+                        drawerScreen.setTranslationY(0f);
+                        drawerScreen.setTranslationZ(0f);
+                        drawerScreen.setRotationX(0f);
+                        drawerScreen.setRotationY(0f);
+                        drawerScreen.setScaleX(1f);
+                        drawerScreen.setScaleY(1f);
+                        releaseTransitionLayer(drawerScreen);
+                    }).start();
+            homeScreen.animate().alpha(1f).translationY(0f).translationX(0f)
+                    .translationZ(0f).rotationX(0f).rotationY(0f)
+                    .scaleX(1f).scaleY(1f).setDuration(duration)
+                    .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+        } else if (effect == 1) {
             drawerScreen.setAlpha(1f);
             drawerScreen.setScaleX(1f);
             drawerScreen.setScaleY(1f);
@@ -136,7 +189,27 @@ final class LauncherScreenTransitions {
         // These poses are updated on every ACTION_MOVE: the drawer and home
         // surface now track the finger rather than merely inheriting progress
         // after release. Each selectable effect has a matching interactive pose.
-        if (effect == 1) {
+        if (effect == 0) {
+            // Finger progress is shared by the two surfaces: the workspace travels
+            // upward, the drawer travels upward from below, and their alpha values cross.
+            float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
+            homeScreen.setAlpha(1f - progress);
+            homeScreen.setTranslationY(-travelDistance * progress);
+            homeScreen.setTranslationX(0f);
+            homeScreen.setTranslationZ(0f);
+            homeScreen.setRotationX(0f);
+            homeScreen.setRotationY(0f);
+            homeScreen.setScaleX(1f);
+            homeScreen.setScaleY(1f);
+            drawerScreen.setAlpha(progress);
+            drawerScreen.setTranslationY(travelDistance * (1f - progress));
+            drawerScreen.setTranslationX(0f);
+            drawerScreen.setTranslationZ(0f);
+            drawerScreen.setRotationX(0f);
+            drawerScreen.setRotationY(0f);
+            drawerScreen.setScaleX(1f);
+            drawerScreen.setScaleY(1f);
+        } else if (effect == 1) {
             homeScreen.setPivotX(width * 0.5f);
             homeScreen.setPivotY(height * 0.5f);
             drawerScreen.setPivotX(0f);
@@ -211,12 +284,34 @@ final class LauncherScreenTransitions {
         prepareTransitionLayers(homeScreen, drawerScreen);
         updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
         float remaining = 1f - progress;
-        long duration = LauncherMotion.duration(activity, Math.max(100L, (long) (420L * remaining)));
+        long duration = LauncherMotion.duration(activity,
+                Math.max(100L, (long) ((effect == 0 ? 380L : 420L) * remaining)));
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
 
-        if (effect == 1) {
+        if (effect == 0) {
+            float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
+            homeScreen.animate().alpha(0f).translationY(-travelDistance)
+                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
+                    .scaleX(1f).scaleY(1f).setDuration(duration)
+                    .withEndAction(() -> {
+                        homeScreen.setVisibility(View.GONE);
+                        homeScreen.setAlpha(1f);
+                        homeScreen.setTranslationX(0f);
+                        homeScreen.setTranslationY(0f);
+                        homeScreen.setTranslationZ(0f);
+                        homeScreen.setRotationX(0f);
+                        homeScreen.setRotationY(0f);
+                        homeScreen.setScaleX(1f);
+                        homeScreen.setScaleY(1f);
+                        releaseTransitionLayer(homeScreen);
+                    }).start();
+            drawerScreen.animate().alpha(1f).translationY(0f)
+                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
+                    .scaleX(1f).scaleY(1f).setDuration(duration)
+                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
+        } else if (effect == 1) {
             homeScreen.animate().alpha(0f).rotationY(13f).scaleX(0.94f).scaleY(0.94f)
                     .setDuration(duration)
                     .withEndAction(() -> {
@@ -366,18 +461,25 @@ final class LauncherScreenTransitions {
         prepareTransitionLayers(homeScreen, drawerScreen);
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
+        float drawerExitY = effect == 0
+                ? transitionHeight(activity, homeScreen, drawerScreen) : 0f;
         homeScreen.animate().alpha(1f).rotationX(0f).rotationY(0f).translationX(0f)
                 .translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
                 .setDuration(LauncherMotion.duration(activity, 180L))
                 .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
         drawerScreen.animate().alpha(0f).rotationX(0f).rotationY(0f).translationX(0f)
-                .translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
+                .translationY(drawerExitY).translationZ(0f).scaleX(1f).scaleY(1f)
                 .setDuration(LauncherMotion.duration(activity, 180L))
                 .withEndAction(() -> {
                     drawerScreen.setVisibility(View.GONE);
                     drawerScreen.setAlpha(1f);
                     drawerScreen.setScaleX(1f);
                     drawerScreen.setScaleY(1f);
+                    drawerScreen.setRotationX(0f);
+                    drawerScreen.setRotationY(0f);
+                    drawerScreen.setTranslationX(0f);
+                    drawerScreen.setTranslationY(0f);
+                    drawerScreen.setTranslationZ(0f);
                     releaseTransitionLayer(drawerScreen);
                 }).start();
     }
