@@ -362,7 +362,7 @@ final class WidgetInteractionController {
         container.addView(gestureGrip, gripLp);
         for (View handle : resizeHandles) { handle.bringToFront(); handle.setClickable(true); }
 
-        final int[] editMode = {0}; // 0 idle, 1 moving
+        final int[] editMode = {0}; // 0 idle, 1 move-ready / moving
         final float[] down = {0f, 0f};
         final float[] fingerOffset = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
@@ -374,6 +374,7 @@ final class WidgetInteractionController {
         final Runnable[] clearEditChrome = new Runnable[1];
         final boolean[] childCanceled = {false};
         final boolean[] menuShown = {false};
+        final boolean[] dragging = {false};
         // Removing a touched widget synchronously dispatches ACTION_CANCEL on some Android
         // versions. Guard reparenting so that cancellation cannot recursively remove it.
         final boolean[] reparenting = {false};
@@ -396,23 +397,28 @@ final class WidgetInteractionController {
         };
         editChrome.add(new EditChrome(container, resizeHandles, () -> {
             clearEditChrome[0].run();
+            if (editMode[0] == 1) LauncherUiUtils.stopMoveHint(container);
             editMode[0] = 0;
+            dragging[0] = false;
         }));
+
+        // Long press arms movement with a steady 10% enlargement. It deliberately does
+        // not expose resize handles or run any wobble/bobbing animation.
         movePress[0] = () -> {
+            if (menuShown[0] || dragging[0] || reparenting[0]) return;
             editMode[0] = 1;
-            LauncherUiUtils.startMoveHint(container, activity);
-            listener.setWorkspaceGridVisible(false, null);
-            for (View handle : resizeHandles) handle.setVisibility(View.VISIBLE);
-            container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
-            gestureGrip.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(20, 80, 128, 245), Color.argb(10, 54, 92, 196)}, LauncherUiUtils.dp(activity, 8)));
-            Toast.makeText(activity, "Move widget", Toast.LENGTH_SHORT).show();
+            LauncherUiUtils.startScaleHint(container, 1.10f);
+            cancelWidgetTouch.run();
         };
+        // The two-second stationary hold remains the explicit widget-options gesture.
+        // Once a real drag starts, its timer is canceled and can never open a menu mid-drag.
         menuPress[0] = () -> {
-            LauncherUiUtils.stopMoveHint(container);
+            if (dragging[0] || menuShown[0] || reparenting[0]) return;
+            handler.removeCallbacks(movePress[0]);
+            if (editMode[0] == 1) LauncherUiUtils.stopMoveHint(container);
+            editMode[0] = 0;
             menuShown[0] = true;
             cancelWidgetTouch.run();
-            editMode[0] = 0;
-            handler.removeCallbacks(movePress[0]);
             clearEditChrome[0].run();
             String[] actions = {"Remove widget", "Resize widget"};
             String[] icons = {"×", "↘"};
@@ -437,6 +443,7 @@ final class WidgetInteractionController {
             int action = event.getActionMasked();
             lastTouch[0] = event.getX();
             lastTouch[1] = event.getY();
+
             if (action == MotionEvent.ACTION_DOWN) {
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
@@ -452,19 +459,22 @@ final class WidgetInteractionController {
                 origin[3] = current.height;
                 LinearLayout currentStrip = listener.getPagesStrip();
                 ViewParent parent = container.getParent();
-                int actualPage = parent instanceof View ? (currentStrip == null ? -1 : currentStrip.indexOfChild((View) parent)) : -1;
+                int actualPage = parent instanceof View
+                        ? (currentStrip == null ? -1 : currentStrip.indexOfChild((View) parent)) : -1;
                 originalPageAtDown[0] = actualPage >= 0 ? actualPage : 0;
                 widgetPage[0] = originalPageAtDown[0];
                 editMode[0] = 0;
+                dragging[0] = false;
                 childCanceled[0] = false;
                 menuShown[0] = false;
                 handler.removeCallbacks(movePress[0]);
                 handler.removeCallbacks(menuPress[0]);
                 widget.dispatchTouchEvent(event);
-                handler.postDelayed(movePress[0], 550L);
+                handler.postDelayed(movePress[0], 1000L);
                 handler.postDelayed(menuPress[0], 2000L);
                 return true;
             }
+
             if (menuShown[0]) {
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     handler.removeCallbacks(movePress[0]);
@@ -472,68 +482,110 @@ final class WidgetInteractionController {
                 }
                 return true;
             }
+
             if (action == MotionEvent.ACTION_MOVE) {
                 float dx = event.getRawX() - down[0];
                 float dy = event.getRawY() - down[1];
-                if (editMode[0] == 0 && (Math.abs(dx) > LauncherUiUtils.dp(activity, 10) || Math.abs(dy) > LauncherUiUtils.dp(activity, 10))) {
-                    handler.removeCallbacks(movePress[0]);
-                    handler.removeCallbacks(menuPress[0]);
-                    if (!childCanceled[0]) widget.dispatchTouchEvent(event);
+                boolean pastSlop = Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
+                        || Math.abs(dy) > LauncherUiUtils.dp(activity, 10);
+
+                // Until long-press arms movement, preserve normal widget taps and scrolling.
+                if (editMode[0] == 0) {
+                    if (pastSlop) {
+                        handler.removeCallbacks(movePress[0]);
+                        handler.removeCallbacks(menuPress[0]);
+                        if (!childCanceled[0]) widget.dispatchTouchEvent(event);
+                    }
                     return true;
                 }
+
+                // Ignore tiny touch jitter after arming. Only a real finger displacement
+                // starts a drag; after that, keep moving mode alive through every MOVE event.
+                if (!dragging[0]) {
+                    if (!pastSlop) return true;
+                    dragging[0] = true;
+                    handler.removeCallbacks(menuPress[0]);
+                }
+                cancelWidgetTouch.run();
+                ViewParent gestureParent = gestureGrip.getParent();
+                if (gestureParent instanceof ViewGroup) {
+                    ((ViewGroup) gestureParent).requestDisallowInterceptTouchEvent(true);
+                }
+
+                LinearLayout strip = listener.getPagesStrip();
+                FrameLayout sourcePage = container.getParent() instanceof FrameLayout
+                        ? (FrameLayout) container.getParent() : page;
+                // Widgets stay on their original page; use that page's coordinates even
+                // if the launcher viewport or current page changes during the gesture.
+                int destinationPage = originalPageAtDown[0];
+                listener.ensurePageExists(destinationPage);
+                FrameLayout targetPage = strip != null && destinationPage < strip.getChildCount()
+                        && strip.getChildAt(destinationPage) instanceof FrameLayout
+                        ? (FrameLayout) strip.getChildAt(destinationPage) : sourcePage;
+                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                int[] targetPageLocation = new int[2];
+                targetPage.getLocationOnScreen(targetPageLocation);
+                int dropWidth = Math.max(1, current.width > 0 ? current.width : container.getWidth());
+                int dropHeight = Math.max(1, current.height > 0 ? current.height : container.getHeight());
+                int maxX = Math.max(0, targetPage.getWidth() - dropWidth);
+                int maxY = Math.max(0, targetPage.getHeight() - dropHeight);
+                current.leftMargin = Math.max(0, Math.min(maxX,
+                        Math.round(event.getRawX() - targetPageLocation[0] - fingerOffset[0])));
+                current.topMargin = Math.max(0, Math.min(maxY,
+                        Math.round(event.getRawY() - targetPageLocation[1] - fingerOffset[1])));
+                container.setTranslationX(0f);
+                container.setTranslationY(0f);
+                container.setLayoutParams(current);
+                if (sourcePage != targetPage) {
+                    reparenting[0] = true;
+                    sourcePage.removeView(container);
+                    targetPage.addView(container, current);
+                    reparenting[0] = false;
+                }
+                widgetPage[0] = destinationPage;
+                // Move neighbouring items live, but do not commit/rollback that
+                // collision transaction until the actual release/cancel event.
+                listener.updateLiveDisplacements(targetPage, container);
+                return true;
+            }
+
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(movePress[0]);
+                handler.removeCallbacks(menuPress[0]);
+                boolean didDrag = dragging[0];
+
                 if (editMode[0] == 1) {
-                    cancelWidgetTouch.run();
-                    LinearLayout strip = listener.getPagesStrip();
-                    FrameLayout sourcePage = container.getParent() instanceof FrameLayout
-                            ? (FrameLayout) container.getParent() : page;
-                    // Widgets stay on their original page. Finish geometry against the
-                    // page that actually owns the widget rather than the moving viewport.
-                    int destinationPage = originalPageAtDown[0];
-                    listener.ensurePageExists(destinationPage);
-                    FrameLayout targetPage = strip != null && destinationPage < strip.getChildCount()
-                            && strip.getChildAt(destinationPage) instanceof FrameLayout
-                            ? (FrameLayout) strip.getChildAt(destinationPage) : sourcePage;
-                    FrameLayout.LayoutParams current =
-                            (FrameLayout.LayoutParams) container.getLayoutParams();
+                    LauncherUiUtils.stopMoveHint(container);
+                    editMode[0] = 0;
+                }
+
+                if (didDrag) {
+                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                     if (action == MotionEvent.ACTION_CANCEL) {
-                        // Restore the moving widget before rolling the neighbours back.
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
-                    } else {
-                        int[] targetPageLocation = new int[2];
-                        targetPage.getLocationOnScreen(targetPageLocation);
-                        int dropWidth = Math.max(1, current.width > 0 ? current.width : container.getWidth());
-                        int dropHeight = Math.max(1, current.height > 0 ? current.height : container.getHeight());
-                        int maxX = Math.max(0, targetPage.getWidth() - dropWidth);
-                        int maxY = Math.max(0, targetPage.getHeight() - dropHeight);
-                        current.leftMargin = Math.max(0, Math.min(maxX,
-                                Math.round(event.getRawX() - targetPageLocation[0] - fingerOffset[0])));
-                        current.topMargin = Math.max(0, Math.min(maxY,
-                                Math.round(event.getRawY() - targetPageLocation[1] - fingerOffset[1])));
                     }
                     container.setTranslationX(0f);
                     container.setTranslationY(0f);
                     container.setLayoutParams(current);
-                    clearEditChrome[0].run();
-                    if (sourcePage != targetPage) {
-                        reparenting[0] = true;
-                        sourcePage.removeView(container);
-                        targetPage.addView(container, current);
-                        reparenting[0] = false;
-                    }
-                    widgetPage[0] = destinationPage;
-                    listener.saveWidgetGeometry(widgetId, destinationPage, container);
-
-                    // One authoritative collision transaction owns release placement.
-                    // The old second solver checked neighbours at their mid-animation
-                    // positions and could falsely show "No free space" after a valid drop.
-                    // finishLiveDisplacements commits/rolls back its whole cascade, then
-                    // runs the final rectangle resolver exactly once.
+                    listener.setWorkspaceGridVisible(false, null);
+                    // Exactly one final transaction: commit on release, roll back on cancel.
                     listener.finishLiveDisplacements(action == MotionEvent.ACTION_UP, container);
+                    listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
+                } else {
+                    listener.setWorkspaceGridVisible(false, null);
+                    if (!childCanceled[0]) widget.dispatchTouchEvent(event);
+                }
+
+                ViewParent gestureParent = gestureGrip.getParent();
+                if (gestureParent instanceof ViewGroup) {
+                    ((ViewGroup) gestureParent).requestDisallowInterceptTouchEvent(false);
                 }
                 editMode[0] = 0;
+                dragging[0] = false;
                 return true;
             }
+
             if (!childCanceled[0]) widget.dispatchTouchEvent(event);
             return true;
         });
