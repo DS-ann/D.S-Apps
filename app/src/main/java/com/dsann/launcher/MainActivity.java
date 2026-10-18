@@ -59,6 +59,8 @@ public class MainActivity extends Activity {
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
     private static final String KEY_ICON_BACKGROUND_COLOR = "icon_background_color";
+    private static final String KEY_ICON_BACKGROUND_COLOR_POSITION = "icon_background_color_position";
+    private static final String KEY_ICON_INNER_COLOR_POSITION = "icon_inner_shape_color_position";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
@@ -237,6 +239,8 @@ public class MainActivity extends Activity {
     private final FrameLayout[] clockRowsByPage = new FrameLayout[2];
     private final FrameLayout[] clockGroupsByPage = new FrameLayout[2];
     private int activeClockPage = 0;
+    // Each clock panel has its own drawable; remember the last applied five-minute colour phase.
+    private int lastClockPanelColorPhase = -1;
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
@@ -1845,8 +1849,17 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView brand = LauncherUiUtils.text(this, "D.Sannigrahi", 12, Color.rgb(210, 220, 255), true);
         brandText = brand;
-        brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.ITALIC));
+        // Handwritten launcher signature, with a lime-to-mint-to-teal gradient distinct
+        // from the blue/violet Home Studio accent.
+        brand.setTypeface(Typeface.create("cursive", Typeface.NORMAL));
         brand.setLetterSpacing(0.035f);
+        brand.post(() -> {
+            float textWidth = Math.max(1f, brand.getPaint().measureText(brand.getText().toString()));
+            brand.getPaint().setShader(new android.graphics.LinearGradient(0f, 0f, textWidth, 0f,
+                    new int[] {Color.rgb(190, 255, 92), Color.rgb(64, 232, 179),
+                            Color.rgb(22, 135, 145)}, null, android.graphics.Shader.TileMode.CLAMP));
+            brand.invalidate();
+        });
         header.addView(brand, new LinearLayout.LayoutParams(0, LauncherUiUtils.dp(this, 32), 1f));
         homeScreen.addView(header);
 
@@ -2972,15 +2985,32 @@ public class MainActivity extends Activity {
      * entire workspace here detached every shortcut and re-ran placement/capacity logic,
      * which caused visible flicker and could make icons appear to move or vanish briefly.
      */
+    private void updateIconAppearance(ImageView icon, ResolveInfo app, boolean showBackground,
+            int shape, int backgroundColor, int innerShapeColor) {
+        if (icon == null) return;
+        Drawable current = icon.getDrawable();
+        if (current instanceof LauncherIconDrawable) {
+            ((LauncherIconDrawable) current).updateAppearance(
+                    showBackground, shape, backgroundColor, innerShapeColor);
+            return;
+        }
+        // A package-manager icon is only loaded when the view has not yet received
+        // our wrapper. Continuous colour dragging reuses the existing drawable.
+        if (app == null) return;
+        Drawable source = app.loadIcon(packageManager);
+        icon.setImageDrawable(source == null ? null : new LauncherIconDrawable(
+                source, showBackground, shape, backgroundColor, innerShapeColor));
+    }
+
     private void refreshWorkspaceIconAppearance() {
+        if (prefs == null) return;
+        boolean showBackground = prefs.getBoolean("icon_rounded_square_background", false);
+        int shape = LauncherIconDrawable.clampShape(
+                prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL));
+        int backgroundColor = LauncherIconDrawable.backgroundColorFromPreferences(prefs);
+        int innerShapeColor = LauncherIconDrawable.innerShapeColorFromPreferences(prefs);
+
         if (pagesStrip != null) {
-            boolean showBackground = prefs.getBoolean("icon_rounded_square_background", false);
-            int shape = Math.max(LauncherIconDrawable.SHAPE_ORIGINAL,
-                    Math.min(LauncherIconDrawable.SHAPE_PEAR,
-                            prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL)));
-            int backgroundChoice = prefs.getInt(KEY_ICON_BACKGROUND_COLOR,
-                    LauncherIconDrawable.BACKGROUND_BLACK);
-            int backgroundColor = LauncherIconDrawable.backgroundColorForChoice(backgroundChoice);
             for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
                 View pageView = pagesStrip.getChildAt(pageIndex);
                 if (!(pageView instanceof FrameLayout)) continue;
@@ -2995,17 +3025,43 @@ public class MainActivity extends Activity {
                     if (app == null || !(child instanceof ViewGroup)
                             || ((ViewGroup) child).getChildCount() == 0) continue;
                     View iconView = ((ViewGroup) child).getChildAt(0);
-                    if (!(iconView instanceof android.widget.ImageView)) continue;
-                    android.graphics.drawable.Drawable source = app.loadIcon(packageManager);
-                    android.widget.ImageView icon = (android.widget.ImageView) iconView;
-                    icon.setImageDrawable(source == null ? null : new LauncherIconDrawable(
-                            source, showBackground, shape, backgroundColor));
-                    icon.invalidate();
+                    if (iconView instanceof ImageView) {
+                        updateIconAppearance((ImageView) iconView, app, showBackground, shape,
+                                backgroundColor, innerShapeColor);
+                    }
                 }
             }
         }
-        if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
-        renderDock();
+
+        // Update dock icons in place instead of rebuilding its views during a slider drag.
+        if (dockContainer != null) {
+            for (int i = 0; i < dockContainer.getChildCount(); i++) {
+                View slot = dockContainer.getChildAt(i);
+                if (!(slot instanceof ViewGroup)) continue;
+                ViewGroup group = (ViewGroup) slot;
+                for (int j = 0; j < group.getChildCount(); j++) {
+                    View child = group.getChildAt(j);
+                    if (child instanceof ImageView) {
+                        updateIconAppearance((ImageView) child, null, showBackground, shape,
+                                backgroundColor, innerShapeColor);
+                    }
+                }
+            }
+        }
+
+        // Only visible drawer cells need immediate invalidation; off-screen cells
+        // pick up the saved colours naturally when GridView next binds them.
+        if (drawerGrid != null) {
+            for (int i = 0; i < drawerGrid.getChildCount(); i++) {
+                View cell = drawerGrid.getChildAt(i);
+                if (!(cell instanceof ViewGroup)) continue;
+                ViewGroup group = (ViewGroup) cell;
+                if (group.getChildCount() > 0 && group.getChildAt(0) instanceof ImageView) {
+                    updateIconAppearance((ImageView) group.getChildAt(0), null, showBackground,
+                            shape, backgroundColor, innerShapeColor);
+                }
+            }
+        }
     }
 
     private void renderDock() {
@@ -3044,9 +3100,10 @@ public class MainActivity extends Activity {
                     android.graphics.drawable.Drawable dockIcon = app.loadIcon(packageManager);
                     icon.setImageDrawable(dockIcon == null ? null : new LauncherIconDrawable(
                             dockIcon, prefs.getBoolean("icon_rounded_square_background", false),
-                            prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL),
-                            LauncherIconDrawable.backgroundColorForChoice(
-                                    prefs.getInt(KEY_ICON_BACKGROUND_COLOR, LauncherIconDrawable.BACKGROUND_BLACK))));
+                            LauncherIconDrawable.clampShape(prefs.getInt("app_icon_shape",
+                                    LauncherIconDrawable.SHAPE_ORIGINAL)),
+                            LauncherIconDrawable.backgroundColorFromPreferences(prefs),
+                            LauncherIconDrawable.innerShapeColorFromPreferences(prefs)));
                     icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                             LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
@@ -5718,6 +5775,8 @@ public class MainActivity extends Activity {
     private void updateClock() {
         if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
         Date now = new Date();
+        int currentColourPhase = (now.getMinutes() / 5) % 4;
+        if (currentColourPhase != lastClockPanelColorPhase) applyClockPanelColor(false);
         boolean use24Hour = DateFormat.is24HourFormat(this);
         String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
         android.text.SpannableStringBuilder dateLine =
@@ -6027,25 +6086,36 @@ public class MainActivity extends Activity {
 
     private void applyClockPanelColor(boolean animate) {
         if (homeScreen == null) return;
-        View hero = clockPanel;
+        int phase = (new Date().getMinutes() / 5) % 4;
+        boolean foundPagePanel = false;
+        for (int page = 0; page < clockPanelsByPage.length; page++) {
+            LinearLayout panel = clockPanelsByPage[page];
+            if (panel == null) continue;
+            applyClockPanelColorToPanel(panel, phase, animate);
+            foundPagePanel = true;
+        }
+        // During initial home-chrome construction the first panel exists before it is
+        // registered in clockPanelsByPage. Preserve that first draw as well.
+        if (!foundPagePanel && clockPanel != null) {
+            applyClockPanelColorToPanel(clockPanel, phase, animate);
+        }
+        lastClockPanelColorPhase = phase;
+    }
+
+    private void applyClockPanelColorToPanel(View hero, int phase, boolean animate) {
         if (hero == null) return;
-        int minute = new Date().getMinutes();
-        int phase = (minute / 5) % 4;
         int[][] tones = new int[][] {
                 {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
-        int[] tone = tones[phase];
+        int[] tone = tones[Math.max(0, Math.min(tones.length - 1, phase))];
         // Two complementary colour fields meet at the centre: cool teal/blue on
         // the left and the existing phase-driven violet/blue on the right.
         int leftR = Math.max(55, Math.min(220, tone[0] * 2 / 3));
         int leftG = Math.max(150, Math.min(225, tone[1] + 28));
         int leftB = Math.max(170, Math.min(240, tone[2] + 18));
-        // Preserve the time-driven colour cycling while applying the user's
-        // saved opacity uniformly to every stop in the gradient.
         int opacity = Math.max(0, Math.min(100,
                 prefs == null ? 50 : prefs.getInt(KEY_CLOCK_BG_OPACITY, 50)));
         // 50% reproduces the original background alpha; 100% doubles it.
-        // Clamp each channel at 255 so stronger settings remain valid ARGB.
         int opacityScale = opacity * 2;
         int leftEdge = Color.argb(Math.min(255, 125 * opacityScale / 100), leftR, leftG, leftB);
         int rightEdge = Color.argb(Math.min(255, 149 * opacityScale / 100), tone[0], tone[1], tone[2]);
@@ -6056,16 +6126,9 @@ public class MainActivity extends Activity {
                         Color.argb(Math.min(255, 22 * opacityScale / 100), 125, 155, 235),
                         rightMid, rightEdge});
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
-        // Draw the shorter colour panel inside a zero-padding drawable. InsetDrawable
-        // reports its insets as background padding on some Android versions, which
-        // changes the LinearLayout's measured position when edit mode is dismissed.
-        // Drawing the inset internally keeps clock geometry independent from its background.
-        boolean sevenSegmentBackground = clockText instanceof SevenSegmentClockTextView
-                && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         // Keep the coloured clock background at the full container height for both styles.
-        float totalHeightReduction = 0f;
         ClockPanelBackgroundDrawable centeredBackground =
-                new ClockPanelBackgroundDrawable(next, totalHeightReduction);
+                new ClockPanelBackgroundDrawable(next, 0f);
         if (animate) {
             hero.setBackground(centeredBackground);
             next.setAlpha(0);
@@ -6077,7 +6140,6 @@ public class MainActivity extends Activity {
             hero.setBackground(centeredBackground);
         }
     }
-
 
     private boolean isClockWorkspaceItem(View view) {
         if (view == null) return false;
@@ -8664,17 +8726,22 @@ public class MainActivity extends Activity {
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "App icon background color",
-                Math.max(0, Math.min(2, prefs.getInt(KEY_ICON_BACKGROUND_COLOR, 0))),
-                new String[]{"Black", "White", "Grey"}, value -> {
-            prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR, value)
+        addColorSliderRow(content, "App icon background colour",
+                LauncherIconDrawable.backgroundPositionFromPreferences(prefs), value -> {
+            prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR_POSITION, value)
                     .putBoolean("icon_rounded_square_background", true).apply();
             refreshWorkspaceIconAppearance();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "App icon shape", prefs.getInt("app_icon_shape", 0),
-                new String[]{"Original", "Triangle", "Pear"}, value -> {
-            prefs.edit().putInt("app_icon_shape", value).apply();
+        addColorSliderRow(content, "App icon inner shape colour",
+                LauncherIconDrawable.innerShapePositionFromPreferences(prefs), value -> {
+            prefs.edit().putInt(KEY_ICON_INNER_COLOR_POSITION, value).apply();
+            refreshWorkspaceIconAppearance();
+        });
+        addChoiceRow(content, "App icon shape",
+                LauncherIconDrawable.clampShape(prefs.getInt("app_icon_shape", 0)),
+                new String[]{"Original", "Triangle", "Pear", "Rounded hexagon"}, value -> {
+            prefs.edit().putInt("app_icon_shape",
+                    LauncherIconDrawable.clampShape(value)).apply();
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -9453,6 +9520,63 @@ public class MainActivity extends Activity {
     }
 
     private interface IntSliderAction { void onChange(int value); }
+
+    private void addColorSliderRow(LinearLayout panel, String title, int current,
+            IntSliderAction action) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
+        LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
+        blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+
+        TextView label = LauncherUiUtils.text(this, title, 15, Color.WHITE, true);
+        TextView valueLabel = LauncherUiUtils.text(this,
+                colorValueLabel(LauncherIconDrawable.spectrumColorForPosition(current)),
+                13, homeStudioAccentColor, true);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
+        heading.addView(valueLabel);
+        block.addView(heading);
+
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(1000);
+        int initial = Math.max(0, Math.min(1000, current));
+        seekBar.setProgress(initial);
+        seekBar.setSplitTrack(false);
+        GradientDrawable spectrumTrack = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                LauncherIconDrawable.spectrumTrackColors());
+        spectrumTrack.setCornerRadius(LauncherUiUtils.dp(this, 4));
+        // Keep the multicolour spectrum visible along the entire track, independent
+        // of the thumb position, just like a colour picker in an image editor.
+        seekBar.setProgressDrawable(new android.graphics.drawable.InsetDrawable(
+                spectrumTrack, 0, LauncherUiUtils.dp(this, 16), 0, LauncherUiUtils.dp(this, 16)));
+        seekBar.setProgressTintList(null);
+        seekBar.setProgressBackgroundTintList(null);
+        seekBar.setThumbTintList(android.content.res.ColorStateList.valueOf(
+                LauncherIconDrawable.spectrumColorForPosition(initial)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(
+                -1, LauncherUiUtils.dp(this, 42)));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int color = LauncherIconDrawable.spectrumColorForPosition(progress);
+                valueLabel.setText(colorValueLabel(color));
+                bar.setThumbTintList(android.content.res.ColorStateList.valueOf(color));
+                if (fromUser) action.onChange(progress);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        panel.addView(block, blockParams);
+    }
+
+    private String colorValueLabel(int color) {
+        return String.format(Locale.US, "#%06X", color & 0x00FFFFFF);
+    }
 
     private void addMappedSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {

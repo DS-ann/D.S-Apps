@@ -176,12 +176,13 @@ public final class LauncherAppAdapter extends BaseAdapter {
         if (appIcon != null) {
             boolean roundedSquareBackground = preferences != null
                     && preferences.getBoolean("icon_rounded_square_background", false);
-            int iconShape = preferences == null ? LauncherIconDrawable.SHAPE_ORIGINAL
-                    : preferences.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL);
-            int backgroundChoice = preferences == null ? LauncherIconDrawable.BACKGROUND_BLACK
-                    : preferences.getInt("icon_background_color", LauncherIconDrawable.BACKGROUND_BLACK);
+            int iconShape = LauncherIconDrawable.clampShape(preferences == null
+                    ? LauncherIconDrawable.SHAPE_ORIGINAL
+                    : preferences.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL));
+            int backgroundColor = LauncherIconDrawable.backgroundColorFromPreferences(preferences);
+            int innerShapeColor = LauncherIconDrawable.innerShapeColorFromPreferences(preferences);
             icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground, iconShape,
-                    LauncherIconDrawable.backgroundColorForChoice(backgroundChoice)));
+                    backgroundColor, innerShapeColor));
         } else {
             icon.setImageDrawable(null);
         }

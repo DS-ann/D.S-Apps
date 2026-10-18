@@ -1,5 +1,6 @@
 package com.dsann.launcher;
 
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -9,14 +10,101 @@ import android.graphics.PixelFormat;
 import android.graphics.ColorFilter;
 import android.graphics.drawable.Drawable;
 
-/** Draws an app icon with optional rounded-square backing and a selectable silhouette. */
+/** Draws app icons with optional backing and selectable silhouettes. */
 final class LauncherIconDrawable extends Drawable {
     static final int SHAPE_ORIGINAL = 0;
     static final int SHAPE_TRIANGLE = 1;
     static final int SHAPE_PEAR = 2;
+    static final int SHAPE_ROUNDED_HEXAGON = 3;
+
     static final int BACKGROUND_BLACK = 0;
     static final int BACKGROUND_WHITE = 1;
     static final int BACKGROUND_GREY = 2;
+
+    private static final int SPECTRUM_STEPS = 1000;
+    private static final int[] SPECTRUM_COLORS = new int[] {
+            Color.WHITE, Color.BLACK,
+            Color.rgb(148, 0, 211),  // Violet
+            Color.rgb(75, 0, 130),   // Indigo
+            Color.BLUE,               // Blue
+            Color.GREEN,              // Green
+            Color.YELLOW,             // Yellow
+            Color.rgb(255, 127, 0),   // Orange
+            Color.RED                 // Red
+    };
+
+    private final Drawable source;
+    private boolean showBackground;
+    private int shape;
+    private int backgroundColor;
+    private int innerShapeColor;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF rect = new RectF();
+    private final Path path = new Path();
+    private final android.graphics.Rect bounds = new android.graphics.Rect();
+
+    LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
+            int innerShapeColor) {
+        this.source = source;
+        this.showBackground = showBackground;
+        this.shape = clampShape(shape);
+        this.backgroundColor = backgroundColor;
+        this.innerShapeColor = innerShapeColor;
+        if (source != null) setBounds(source.getBounds());
+    }
+
+    static int clampShape(int shape) {
+        return Math.max(SHAPE_ORIGINAL, Math.min(SHAPE_ROUNDED_HEXAGON, shape));
+    }
+
+    static int[] spectrumTrackColors() {
+        return SPECTRUM_COLORS.clone();
+    }
+
+    static int spectrumColorForPosition(int position) {
+        int bounded = Math.max(0, Math.min(SPECTRUM_STEPS, position));
+        float scaled = bounded * (SPECTRUM_COLORS.length - 1f) / SPECTRUM_STEPS;
+        int first = Math.min(SPECTRUM_COLORS.length - 2, (int) scaled);
+        float fraction = scaled - first;
+        int from = SPECTRUM_COLORS[first];
+        int to = SPECTRUM_COLORS[first + 1];
+        int red = Math.round(Color.red(from) + (Color.red(to) - Color.red(from)) * fraction);
+        int green = Math.round(Color.green(from) + (Color.green(to) - Color.green(from)) * fraction);
+        int blue = Math.round(Color.blue(from) + (Color.blue(to) - Color.blue(from)) * fraction);
+        return Color.rgb(red, green, blue);
+    }
+
+    static int backgroundPositionFromPreferences(SharedPreferences preferences) {
+        if (preferences == null) return 125;
+        int saved = preferences.getInt("icon_background_color_position", -1);
+        if (saved >= 0) return Math.max(0, Math.min(SPECTRUM_STEPS, saved));
+        int legacyChoice = preferences.getInt("icon_background_color", BACKGROUND_BLACK);
+        switch (legacyChoice) {
+            case BACKGROUND_WHITE: return 0;
+            case BACKGROUND_GREY: return 63;
+            case BACKGROUND_BLACK:
+            default: return 125;
+        }
+    }
+
+    static int innerShapePositionFromPreferences(SharedPreferences preferences) {
+        if (preferences == null) return 108;
+        int saved = preferences.getInt("icon_inner_shape_color_position", -1);
+        if (saved >= 0) return Math.max(0, Math.min(SPECTRUM_STEPS, saved));
+        // Preserve the previous contrasting inner fill as closely as possible on upgrade.
+        int legacyChoice = preferences.getInt("icon_background_color", BACKGROUND_BLACK);
+        if (legacyChoice == BACKGROUND_WHITE) return 125;
+        if (legacyChoice == BACKGROUND_GREY) return 90;
+        return 108;
+    }
+
+    static int backgroundColorFromPreferences(SharedPreferences preferences) {
+        return spectrumColorForPosition(backgroundPositionFromPreferences(preferences));
+    }
+
+    static int innerShapeColorFromPreferences(SharedPreferences preferences) {
+        return spectrumColorForPosition(innerShapePositionFromPreferences(preferences));
+    }
 
     static int backgroundColorForChoice(int choice) {
         switch (choice) {
@@ -27,24 +115,16 @@ final class LauncherIconDrawable extends Drawable {
         }
     }
 
-    private final Drawable source;
-    private final boolean showBackground;
-    private final int shape;
-    private final int backgroundColor;
-    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF rect = new RectF();
-    private final Path path = new Path();
-    private final android.graphics.Rect bounds = new android.graphics.Rect();
-
-    LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor) {
-        this.source = source;
+    void updateAppearance(boolean showBackground, int shape, int backgroundColor, int innerShapeColor) {
         this.showBackground = showBackground;
-        this.shape = shape;
+        this.shape = clampShape(shape);
         this.backgroundColor = backgroundColor;
-        setBounds(source.getBounds());
+        this.innerShapeColor = innerShapeColor;
+        invalidateSelf();
     }
 
     @Override public void draw(Canvas canvas) {
+        if (source == null) return;
         bounds.set(getBounds());
         float left = bounds.left;
         float top = bounds.top;
@@ -65,17 +145,15 @@ final class LauncherIconDrawable extends Drawable {
         rect.set(left, top, right, bottom);
         if (rect.width() <= 0 || rect.height() <= 0) return;
 
-        if (shape == SHAPE_TRIANGLE || shape == SHAPE_PEAR) {
-            // Fill the selected silhouette with a contrasting color so it stands
-            // apart from the rounded-square tile even when the app icon is opaque.
+        if (shape == SHAPE_TRIANGLE || shape == SHAPE_PEAR
+                || shape == SHAPE_ROUNDED_HEXAGON) {
             setShapePath(rect);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(contrastingShapeColor());
+            paint.setColor(innerShapeColor);
             canvas.drawPath(path, paint);
 
-            // Draw the app artwork across the full silhouette. The contrasting
-            // fill remains visible only wherever the source artwork is transparent;
-            // do not inset the artwork or create a rim.
+            // The app artwork follows the selected silhouette. The independent inner
+            // colour remains visible only where the source artwork is transparent.
             int save = canvas.save();
             setShapePath(rect);
             canvas.clipPath(path);
@@ -90,20 +168,12 @@ final class LauncherIconDrawable extends Drawable {
         }
     }
 
-    private int contrastingShapeColor() {
-        if (backgroundColor == Color.WHITE) return Color.BLACK;
-        if (backgroundColor == Color.GRAY) return Color.rgb(72, 72, 72);
-        return Color.rgb(62, 62, 62);
-    }
-
     private void setShapePath(RectF target) {
         path.reset();
         if (shape == SHAPE_TRIANGLE) {
             path.moveTo(target.centerX(), target.top);
             if (showBackground) {
-                // Keep the triangle's overall base as wide as the rounded-square tile.
-                // Round only the two lower corners; don't inset both base vertices by
-                // the corner radius (that made the base look too short).
+                // Round only the lower triangle corners; retain its full-width base.
                 float corner = Math.min(target.width(), target.height()) * 0.23f;
                 path.lineTo(target.right, target.bottom - corner);
                 path.quadTo(target.right, target.bottom,
@@ -132,16 +202,51 @@ final class LauncherIconDrawable extends Drawable {
                     target.right - target.width() * 0.20f, target.top,
                     target.centerX(), target.top);
             path.close();
+        } else if (shape == SHAPE_ROUNDED_HEXAGON) {
+            setRoundedHexagonPath(target);
         }
     }
 
+    private void setRoundedHexagonPath(RectF target) {
+        float inset = target.width() * 0.25f;
+        float[][] vertices = new float[][] {
+                {target.left + inset, target.top},
+                {target.right - inset, target.top},
+                {target.right, target.centerY()},
+                {target.right - inset, target.bottom},
+                {target.left + inset, target.bottom},
+                {target.left, target.centerY()}
+        };
+        float cornerDistance = Math.min(target.width(), target.height()) * 0.085f;
+        for (int i = 0; i < vertices.length; i++) {
+            float[] current = vertices[i];
+            float[] previous = vertices[(i + vertices.length - 1) % vertices.length];
+            float[] next = vertices[(i + 1) % vertices.length];
+            float previousLength = (float) Math.hypot(previous[0] - current[0],
+                    previous[1] - current[1]);
+            float nextLength = (float) Math.hypot(next[0] - current[0], next[1] - current[1]);
+            float beforeFraction = previousLength <= 0f ? 0f
+                    : Math.min(0.18f, cornerDistance / previousLength);
+            float afterFraction = nextLength <= 0f ? 0f
+                    : Math.min(0.18f, cornerDistance / nextLength);
+            float beforeX = current[0] + (previous[0] - current[0]) * beforeFraction;
+            float beforeY = current[1] + (previous[1] - current[1]) * beforeFraction;
+            float afterX = current[0] + (next[0] - current[0]) * afterFraction;
+            float afterY = current[1] + (next[1] - current[1]) * afterFraction;
+            if (i == 0) path.moveTo(beforeX, beforeY);
+            else path.lineTo(beforeX, beforeY);
+            path.quadTo(current[0], current[1], afterX, afterY);
+        }
+        path.close();
+    }
+
     @Override public void setAlpha(int alpha) {
-        source.setAlpha(alpha);
+        if (source != null) source.setAlpha(alpha);
         invalidateSelf();
     }
 
     @Override public void setColorFilter(ColorFilter colorFilter) {
-        source.setColorFilter(colorFilter);
+        if (source != null) source.setColorFilter(colorFilter);
         invalidateSelf();
     }
 
@@ -150,6 +255,6 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     @Override protected void onBoundsChange(android.graphics.Rect bounds) {
-        source.setBounds(bounds);
+        if (source != null) source.setBounds(bounds);
     }
 }
