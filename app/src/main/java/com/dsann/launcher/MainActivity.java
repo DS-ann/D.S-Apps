@@ -1879,10 +1879,16 @@ public class MainActivity extends Activity {
         pagesStrip.setClipToPadding(true);
         pageViewport.addView(pagesStrip, new FrameLayout.LayoutParams(-2, -1, Gravity.TOP | Gravity.LEFT));
 
+        // Keep the page indicator available without reserving a 28dp band between
+        // the workspace and dock. The home grid can now anchor its last row directly
+        // to the bottom of the workspace; the indicator lives in the existing header.
         pageIndicator = LauncherUiUtils.text(this, "", 11, Color.rgb(210, 220, 255), false);
         pageIndicator.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 28));
-        homeScreen.addView(pageIndicator, ip);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 28));
+        ip.leftMargin = LauncherUiUtils.dp(this, 8);
+        ip.rightMargin = LauncherUiUtils.dp(this, 8);
+        header.addView(pageIndicator, ip);
         dockContainer = new LinearLayout(this);
         dockContainer.setOrientation(LinearLayout.HORIZONTAL);
         dockContainer.setGravity(Gravity.CENTER_VERTICAL);
