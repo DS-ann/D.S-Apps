@@ -542,9 +542,11 @@ final class WidgetInteractionController {
                 int maxX = Math.max(0, sourcePage.getWidth() - dropWidth);
                 int maxY = Math.max(0, sourcePage.getHeight() - dropHeight);
                 int left = Math.round(event.getRawX() - sourcePageLocation[0]
-                        - fingerOffset[0] - container.getTranslationX());
+                        - fingerOffset[0] - container.getTranslationX()
+                        - container.getPivotX() * (1f - Math.max(0.01f, container.getScaleX())));
                 int top = Math.round(event.getRawY() - sourcePageLocation[1]
-                        - fingerOffset[1] - container.getTranslationY());
+                        - fingerOffset[1] - container.getTranslationY()
+                        - container.getPivotY() * (1f - Math.max(0.01f, container.getScaleY())));
                 current.leftMargin = Math.max(0, Math.min(maxX, left));
                 current.topMargin = Math.max(0, Math.min(maxY, top));
                 container.setLayoutParams(current);
