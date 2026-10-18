@@ -2608,8 +2608,8 @@ public class MainActivity extends Activity {
                         if (commit) {
                             int cellHeight = LauncherUiUtils.dp(this,
                                     homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-                            int rows = homeGridRowsForHeight(targetPage.getHeight(), cellHeight);
-                            int[] slot = homeGridIconSlot(targetPage, tile, cellHeight, rows);
+                            int shortcutRows = homeGridRowsForHeight(targetPage.getHeight(), cellHeight);
+                            int[] slot = homeGridIconSlot(targetPage, tile, cellHeight, shortcutRows);
                             if (slot != null) {
                                 prefs.edit()
                                         .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
@@ -2617,7 +2617,7 @@ public class MainActivity extends Activity {
                                         .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
                                                 slot[0] / (float) Math.max(1, 4 - 1))
                                         .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                                                slot[1] / (float) Math.max(1, rows - 1))
+                                                slot[1] / (float) Math.max(1, shortcutRows - 1))
                                         .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
                                         .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
                                                 Math.max(1, Math.round(finalShortcutLp.width / density)))
@@ -2800,23 +2800,24 @@ public class MainActivity extends Activity {
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             for (int i = 0; i < page.getChildCount(); i++) {
                 View child = page.getChildAt(i);
-                if (!isWorkspaceContactShortcut(child) || !(child instanceof ViewGroup)
-                        || child.getChildCount() < 2) continue;
-                ImageView icon = child.getChildAt(0) instanceof ImageView
-                        ? (ImageView) child.getChildAt(0) : null;
-                TextView label = child.getChildAt(1) instanceof TextView
-                        ? (TextView) child.getChildAt(1) : null;
+                if (!isWorkspaceContactShortcut(child) || !(child instanceof ViewGroup)) continue;
+                ViewGroup shortcut = (ViewGroup) child;
+                if (shortcut.getChildCount() < 2) continue;
+                ImageView icon = shortcut.getChildAt(0) instanceof ImageView
+                        ? (ImageView) shortcut.getChildAt(0) : null;
+                TextView label = shortcut.getChildAt(1) instanceof TextView
+                        ? (TextView) shortcut.getChildAt(1) : null;
                 if (icon == null) continue;
-                int[] slot = homeGridIconSlot(page, child, cellHeight, rows);
+                int[] slot = homeGridIconSlot(page, shortcut, cellHeight, rows);
                 if (slot == null) continue;
                 int target = shortcutIconSizePx(cellWidth, cellHeight);
-                FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) child.getLayoutParams();
+                FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) shortcut.getLayoutParams();
                 tileParams.width = target;
                 tileParams.height = target;
                 tileParams.leftMargin = homeGridIconLeftAt(null, slot[0], cellWidth, target);
                 tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight)
                         + LauncherUiUtils.dp(this, 14);
-                child.setLayoutParams(tileParams);
+                shortcut.setLayoutParams(tileParams);
 
                 ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
                 if (iconParams != null && (iconParams.width != target || iconParams.height != target)) {
