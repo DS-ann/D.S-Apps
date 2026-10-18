@@ -188,6 +188,7 @@ final class WidgetPickerDialog {
                     - LauncherUiUtils.dp(activity,28),Math.min(h-LauncherUiUtils.dp(activity,48),LauncherUiUtils.dp(activity,570)));
         }
         panel.setAlpha(0f); panel.setScaleX(0.96f); panel.setScaleY(0.96f);
-        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start();
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(LauncherMotion.duration(activity, 180L)).start();
     }
 }

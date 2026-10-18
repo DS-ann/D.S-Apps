@@ -128,6 +128,7 @@ public class MainActivity extends Activity {
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
+    private int homeStudioAccentColor = Color.rgb(119, 205, 255);
     private AppWidgetManager widgetManager;
     private AppWidgetHost widgetHost;
     private WidgetInteractionController widgetInteractionController;
@@ -8300,31 +8301,93 @@ public class MainActivity extends Activity {
         return Math.max(0, Math.min(3, prefs == null ? 0 : prefs.getInt(KEY_DRAWER_TRANSITION, 0)));
     }
 
+    private int studioTint(int color, int alpha) {
+        return Color.argb(Math.max(0, Math.min(255, alpha)),
+                Color.red(color), Color.green(color), Color.blue(color));
+    }
+
+    private int studioDarken(int color) {
+        return Color.rgb(Color.red(color) * 3 / 4,
+                Color.green(color) * 3 / 4,
+                Color.blue(color) * 3 / 4);
+    }
+
+    private GradientDrawable studioControlBackground() {
+        return LauncherUiUtils.roundRect(this,
+                new int[]{Color.rgb(35, 43, 65), Color.rgb(22, 28, 45)},
+                LauncherUiUtils.dp(this, 14));
+    }
+
+    private void addStudioAccentLine(LinearLayout container) {
+        View line = new View(this);
+        line.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{homeStudioAccentColor}, LauncherUiUtils.dp(this, 2)));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, 3));
+        params.bottomMargin = LauncherUiUtils.dp(this, 8);
+        container.addView(line, params);
+    }
+
+    private String studioSectionDescription(String title) {
+        String key = title.toLowerCase(Locale.ROOT);
+        if (key.contains("home")) return "Grid, icon size, shortcuts and labels";
+        if (key.contains("clock")) return "Clock design, background and date typography";
+        if (key.contains("animation")) return "Home page swipes and overall animation speed";
+        if (key.contains("drawer")) return "App list layout, labels and opening motion";
+        if (key.contains("appearance")) return "Wallpaper, colors and time format";
+        if (key.contains("manage")) return "Add widgets or restore your layout";
+        return "Launcher preferences";
+    }
+
     private void addSection(LinearLayout panel, String title) {
-        // Give each category its own visual header so the settings don't read as
-        // one long list of identical controls.
-        LinearLayout headerRow = new LinearLayout(this);
-        headerRow.setGravity(Gravity.CENTER_VERTICAL);
-        headerRow.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9),
-                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9));
-        headerRow.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{Color.rgb(43, 58, 94), Color.rgb(28, 38, 66)}, LauncherUiUtils.dp(this, 12)));
+        String key = title.toLowerCase(Locale.ROOT);
         String glyphText = "⚙";
         int accent = Color.rgb(146, 171, 239);
-        if (title.toLowerCase(Locale.ROOT).contains("home")) { glyphText = "⌂"; accent = Color.rgb(119, 205, 255); }
-        else if (title.toLowerCase(Locale.ROOT).contains("clock")) { glyphText = "◷"; accent = Color.rgb(255, 196, 112); }
-        else if (title.toLowerCase(Locale.ROOT).contains("animation")) { glyphText = "↔"; accent = Color.rgb(196, 154, 255); }
-        else if (title.toLowerCase(Locale.ROOT).contains("drawer")) { glyphText = "▦"; accent = Color.rgb(111, 225, 190); }
-        else if (title.toLowerCase(Locale.ROOT).contains("appearance")) { glyphText = "◐"; accent = Color.rgb(255, 145, 185); }
-        else if (title.toLowerCase(Locale.ROOT).contains("manage")) { glyphText = "☷"; accent = Color.rgb(255, 186, 115); }
+        if (key.contains("home")) { glyphText = "⌂"; accent = Color.rgb(98, 211, 255); }
+        else if (key.contains("clock")) { glyphText = "◷"; accent = Color.rgb(255, 190, 95); }
+        else if (key.contains("animation")) { glyphText = "↔"; accent = Color.rgb(198, 151, 255); }
+        else if (key.contains("drawer")) { glyphText = "▦"; accent = Color.rgb(99, 229, 190); }
+        else if (key.contains("appearance")) { glyphText = "◐"; accent = Color.rgb(255, 135, 184); }
+        else if (key.contains("manage")) { glyphText = "☷"; accent = Color.rgb(255, 177, 111); }
+        homeStudioAccentColor = accent;
+
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10));
+        headerRow.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{studioTint(accent, 44), Color.rgb(25, 31, 50)},
+                LauncherUiUtils.dp(this, 14)));
+
+        View rail = new View(this);
+        rail.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{accent}, LauncherUiUtils.dp(this, 3)));
+        headerRow.addView(rail, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 4),
+                LauncherUiUtils.dp(this, 44)));
+
         TextView glyph = LauncherUiUtils.text(this, glyphText, 20, accent, true);
         glyph.setGravity(Gravity.CENTER);
-        headerRow.addView(glyph, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 30)));
-        TextView header = LauncherUiUtils.text(this, title, 15, Color.WHITE, true);
-        header.setPadding(LauncherUiUtils.dp(this, 8), 0, 0, 0);
-        headerRow.addView(header, new LinearLayout.LayoutParams(0, -2, 1f));
+        glyph.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{studioTint(accent, 52), studioTint(accent, 22)},
+                LauncherUiUtils.dp(this, 11)));
+        LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38));
+        glyphParams.leftMargin = LauncherUiUtils.dp(this, 9);
+        glyphParams.rightMargin = LauncherUiUtils.dp(this, 10);
+        headerRow.addView(glyph, glyphParams);
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        TextView header = LauncherUiUtils.text(this, title, 16, Color.WHITE, true);
+        copy.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        TextView subtitle = LauncherUiUtils.text(this, studioSectionDescription(title),
+                12, Color.rgb(190, 202, 226), false);
+        subtitle.setPadding(0, LauncherUiUtils.dp(this, 3), 0, 0);
+        copy.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
+        headerRow.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = LauncherUiUtils.dp(this, 14);
+        params.topMargin = LauncherUiUtils.dp(this, 15);
         params.bottomMargin = LauncherUiUtils.dp(this, 9);
         panel.addView(headerRow, params);
     }
@@ -8332,33 +8395,61 @@ public class MainActivity extends Activity {
     private void addSettingRow(LinearLayout panel, String icon, String title, String detail, Runnable action) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
-        row.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, LauncherUiUtils.dp(this, 15)));
+        row.setPadding(LauncherUiUtils.dp(this, 9), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 9), LauncherUiUtils.dp(this, 8));
+        row.setBackground(studioControlBackground());
         LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
-        rp.bottomMargin = LauncherUiUtils.dp(this, 6);
-        TextView glyph = LauncherUiUtils.text(this, icon, 19, Color.rgb(177, 198, 255), true);
+        rp.bottomMargin = LauncherUiUtils.dp(this, 7);
+
+        View rail = new View(this);
+        rail.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{homeStudioAccentColor}, LauncherUiUtils.dp(this, 2)));
+        row.addView(rail, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 3),
+                LauncherUiUtils.dp(this, 42)));
+
+        TextView glyph = LauncherUiUtils.text(this, icon, 18, homeStudioAccentColor, true);
         glyph.setGravity(Gravity.CENTER);
-        row.addView(glyph, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 34), LauncherUiUtils.dp(this, 38)));
+        glyph.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{studioTint(homeStudioAccentColor, 48), studioTint(homeStudioAccentColor, 22)},
+                LauncherUiUtils.dp(this, 11)));
+        LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 36), LauncherUiUtils.dp(this, 36));
+        glyphParams.leftMargin = LauncherUiUtils.dp(this, 9);
+        glyphParams.rightMargin = LauncherUiUtils.dp(this, 9);
+        row.addView(glyph, glyphParams);
+
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(LauncherUiUtils.dp(this, 9), 0, 0, 0);
-        copy.addView(LauncherUiUtils.text(this, title, 14, Color.WHITE, true));
-        TextView sub = LauncherUiUtils.text(this, detail, 11, Color.rgb(176, 187, 213), false);
-        sub.setPadding(0, LauncherUiUtils.dp(this, 2), 0, 0);
+        TextView name = LauncherUiUtils.text(this, title, 15, Color.rgb(247, 249, 255), true);
+        copy.addView(name);
+        TextView sub = LauncherUiUtils.text(this, detail, 12, Color.rgb(183, 194, 217), false);
+        sub.setPadding(0, LauncherUiUtils.dp(this, 3), 0, 0);
+        sub.setMaxLines(2);
         copy.addView(sub);
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView chevron = LauncherUiUtils.text(this, "›", 25, homeStudioAccentColor, false);
+        chevron.setGravity(Gravity.CENTER);
+        row.addView(chevron, new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 24), LauncherUiUtils.dp(this, 38)));
         row.setOnClickListener(v -> action.run());
         panel.addView(row, rp);
     }
 
     private void addChoiceRow(LinearLayout panel, String title, int selected, String[] choices, IntAction onSelect) {
-        TextView heading = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
-        heading.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 7));
-        heading.setSingleLine(false);
-        panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
 
-        // Keep every option readable. Long labels (for example, animation names)
-        // must use their natural width instead of being squeezed into equal slots.
+        TextView heading = LauncherUiUtils.text(this, title, 15, Color.WHITE, true);
+        heading.setPadding(LauncherUiUtils.dp(this, 1), 0, LauncherUiUtils.dp(this, 2),
+                LauncherUiUtils.dp(this, 8));
+        block.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+
+        // Use accent-colored chips with a clear active state; long option names remain scrollable.
         android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
         horizontal.setHorizontalScrollBarEnabled(false);
         horizontal.setFillViewport(false);
@@ -8366,23 +8457,29 @@ public class MainActivity extends Activity {
         choicesRow.setGravity(Gravity.CENTER_VERTICAL);
         for (int i = 0; i < choices.length; i++) {
             final int value = i;
-            TextView chip = LauncherUiUtils.text(this, choices[i], 12,
-                    i == selected ? Color.WHITE : Color.rgb(196, 205, 228), i == selected);
+            boolean isSelected = i == selected;
+            TextView chip = LauncherUiUtils.text(this, choices[i], 13,
+                    isSelected ? Color.rgb(10, 15, 27) : Color.rgb(205, 214, 233), isSelected);
             chip.setGravity(Gravity.CENTER);
             chip.setSingleLine(true);
-            chip.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 10),
-                    LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 10));
+            chip.setPadding(LauncherUiUtils.dp(this, 13), LauncherUiUtils.dp(this, 10),
+                    LauncherUiUtils.dp(this, 13), LauncherUiUtils.dp(this, 10));
             chip.setBackground(LauncherUiUtils.roundRect(this,
-                    i == selected ? new int[]{Color.rgb(73, 99, 177), Color.rgb(73, 74, 157)}
-                            : new int[]{Color.rgb(34, 41, 62), Color.rgb(28, 34, 51)},
+                    isSelected
+                            ? new int[]{homeStudioAccentColor, studioDarken(homeStudioAccentColor)}
+                            : new int[]{Color.rgb(39, 47, 68), Color.rgb(29, 36, 54)},
                     LauncherUiUtils.dp(this, 12)));
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, LauncherUiUtils.dp(this, 40));
-            cp.setMargins(LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 8));
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2,
+                    LauncherUiUtils.dp(this, 42));
+            cp.setMargins(LauncherUiUtils.dp(this, 2), 0, LauncherUiUtils.dp(this, 5), 0);
             choicesRow.addView(chip, cp);
             chip.setOnClickListener(v -> onSelect.onSelect(value));
         }
         horizontal.addView(choicesRow, new android.widget.HorizontalScrollView.LayoutParams(-2, -2));
-        panel.addView(horizontal, new LinearLayout.LayoutParams(-1, -2));
+        block.addView(horizontal, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
+        blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+        panel.addView(block, blockParams);
     }
 
     private void showCustomizationMenu() {
@@ -8411,14 +8508,34 @@ public class MainActivity extends Activity {
             panel = new LinearLayout(this);
             panel.setTag("home_studio_panel");
             panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setPadding(LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14));
-            panel.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(24, 31, 53), Color.rgb(12, 16, 29)}, LauncherUiUtils.dp(this, 24)));
-            TextView title = LauncherUiUtils.text(this, "Home Studio", 23, Color.WHITE, true);
-            title.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 3));
+            panel.setPadding(LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14),
+                    LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14));
+            panel.setBackground(LauncherUiUtils.roundRect(this,
+                    new int[]{Color.rgb(28, 33, 57), Color.rgb(10, 14, 27)},
+                    LauncherUiUtils.dp(this, 26)));
+            TextView title = LauncherUiUtils.text(this, "Home Studio", 25,
+                    Color.rgb(247, 249, 255), true);
+            title.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5),
+                    LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4));
             panel.addView(title);
-            TextView subtitle = LauncherUiUtils.text(this, "Personalize your home and app drawer", 12, Color.rgb(179, 191, 221), false);
-            subtitle.setPadding(LauncherUiUtils.dp(this, 4), 0, LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 7));
+            TextView subtitle = LauncherUiUtils.text(this,
+                    "Personalize your home screen and app drawer", 13,
+                    Color.rgb(183, 197, 225), false);
+            subtitle.setPadding(LauncherUiUtils.dp(this, 4), 0, LauncherUiUtils.dp(this, 4),
+                    LauncherUiUtils.dp(this, 10));
             panel.addView(subtitle);
+
+            TextView usageTip = LauncherUiUtils.text(this,
+                    "TAP A ROW TO CHANGE IT  ·  SLIDE TO ADJUST  ·  COLOURED HEADERS GROUP SETTINGS",
+                    11, Color.rgb(176, 222, 255), true);
+            usageTip.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9),
+                    LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9));
+            usageTip.setBackground(LauncherUiUtils.roundRect(this,
+                    new int[]{Color.rgb(23, 43, 63), Color.rgb(18, 29, 48)},
+                    LauncherUiUtils.dp(this, 11)));
+            LinearLayout.LayoutParams tipParams = new LinearLayout.LayoutParams(-1, -2);
+            tipParams.bottomMargin = LauncherUiUtils.dp(this, 5);
+            panel.addView(usageTip, tipParams);
             scroll = new android.widget.ScrollView(this);
             scroll.setTag("home_studio_scroll");
             content = new LinearLayout(this);
@@ -8561,10 +8678,10 @@ public class MainActivity extends Activity {
                 Math.max(0, Math.min(140, getCubeRotationDegrees() - 40)), "°", value -> {
                     prefs.edit().putInt(KEY_CUBE_ROTATION, value + 40).apply();
                 });
-        addChoiceRow(content, "Animation speed", prefs.getInt(KEY_ANIMATION_SPEED, 1), new String[]{"Slow", "Medium", "Fast"}, value -> {
-            prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
-        });
+        addSliderRowWithHint(content, "Animation speed", 40, 200,
+                LauncherMotion.speedPercent(this), "%",
+                "Applies to timed launcher animations. Left = slower; 100% = normal; right = faster.",
+                value -> prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply());
 
         addSection(content, "App drawer");
         addChoiceRow(content, "Drawer opening animation", getDrawerTransition(),
@@ -9259,13 +9376,14 @@ public class MainActivity extends Activity {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
-                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7));
-        block.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, LauncherUiUtils.dp(this, 14)));
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
         LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
         blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
-        TextView label = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
-        TextView valueLabel = LauncherUiUtils.text(this, current + suffix, 12, Color.rgb(177, 198, 255), true);
+        TextView label = LauncherUiUtils.text(this, title, 15, Color.WHITE, true);
+        TextView valueLabel = LauncherUiUtils.text(this, current + suffix, 13,
+                homeStudioAccentColor, true);
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -9274,7 +9392,13 @@ public class MainActivity extends Activity {
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(max - min);
         seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
-        block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 38)));
+        android.content.res.ColorStateList tint =
+                android.content.res.ColorStateList.valueOf(homeStudioAccentColor);
+        seekBar.setProgressTintList(tint);
+        seekBar.setThumbTintList(tint);
+        seekBar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(66, 74, 95)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 42)));
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 int value = min + progress;
@@ -9289,35 +9413,63 @@ public class MainActivity extends Activity {
 
     private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
-        addSliderRowInternal(panel, title, min, max, current, suffix, action, false);
+        addSliderRowInternal(panel, title, min, max, current, suffix, action, false, null);
+    }
+
+    private void addSliderRowWithHint(LinearLayout panel, String title, int min, int max,
+            int current, String suffix, String hint, IntSliderAction action) {
+        addSliderRowInternal(panel, title, min, max, current, suffix, action, false, hint);
     }
 
     private void addSliderRowOnStop(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
-        addSliderRowInternal(panel, title, min, max, current, suffix, action, true);
+        addSliderRowInternal(panel, title, min, max, current, suffix, action, true, null);
     }
 
-    private void addSliderRowInternal(LinearLayout panel, String title, int min, int max, int current,
-            String suffix, IntSliderAction action, boolean applyOnStop) {
+    private void addSliderRowInternal(LinearLayout panel, String title, int min, int max,
+            int current, String suffix, IntSliderAction action, boolean applyOnStop) {
+        addSliderRowInternal(panel, title, min, max, current, suffix, action, applyOnStop, null);
+    }
+
+    private void addSliderRowInternal(LinearLayout panel, String title, int min, int max,
+            int current, String suffix, IntSliderAction action, boolean applyOnStop, String hint) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
-                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7));
-        block.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{Color.rgb(36, 44, 68), Color.rgb(25, 31, 50)}, LauncherUiUtils.dp(this, 14)));
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
         LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
         blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
-        TextView label = LauncherUiUtils.text(this, title, 14, Color.WHITE, true);
-        TextView valueLabel = LauncherUiUtils.text(this, current + suffix, 12, Color.rgb(177, 198, 255), true);
+
+        TextView label = LauncherUiUtils.text(this, title, 15,
+                Color.rgb(247, 249, 255), true);
+        TextView valueLabel = LauncherUiUtils.text(this, current + suffix, 13,
+                homeStudioAccentColor, true);
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
         heading.addView(valueLabel);
         block.addView(heading);
+
+        if (hint != null && !hint.isEmpty()) {
+            TextView hintView = LauncherUiUtils.text(this, hint, 11.5f,
+                    Color.rgb(184, 198, 223), false);
+            hintView.setPadding(0, LauncherUiUtils.dp(this, 4), 0,
+                    LauncherUiUtils.dp(this, 2));
+            block.addView(hintView, new LinearLayout.LayoutParams(-1, -2));
+        }
+
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(max - min);
         seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
-        block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 38)));
+        android.content.res.ColorStateList tint =
+                android.content.res.ColorStateList.valueOf(homeStudioAccentColor);
+        seekBar.setProgressTintList(tint);
+        seekBar.setThumbTintList(tint);
+        seekBar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(66, 74, 95)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 42)));
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 int value = min + progress;
