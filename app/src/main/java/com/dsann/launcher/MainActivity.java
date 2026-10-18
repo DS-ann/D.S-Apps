@@ -6420,6 +6420,28 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Preserve any item that is already inside the page and clear of higher-
+            // priority items. Only colliding items enter the nearest-free search below.
+            // Besides avoiding needless repositioning, this removes most resolver work
+            // when one item overlaps but the rest of the workspace is already correct.
+            boolean currentInsidePage = g[0] >= 0 && g[1] >= 0
+                    && g[0] + w <= page.getWidth() && g[1] + h <= page.getHeight();
+            if (currentInsidePage) {
+                android.graphics.Rect currentCandidate = collisionRectAt(item, g[0], g[1], w, h);
+                boolean currentBlocked = false;
+                for (android.graphics.Rect prior : accepted) {
+                    if (android.graphics.Rect.intersects(currentCandidate, prior)) {
+                        currentBlocked = true;
+                        break;
+                    }
+                }
+                if (!currentBlocked) {
+                    accepted.add(currentCandidate);
+                    acceptedViews.add(item);
+                    continue;
+                }
+            }
+
             int bestX = -1, bestY = -1;
             long bestDistance = Long.MAX_VALUE;
             for (Integer cy : ys) for (Integer cx : xs) {
