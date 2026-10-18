@@ -2678,7 +2678,7 @@ public class MainActivity extends Activity {
     }
 
     private int getShortcutIconSizeDp() {
-        int homeSize = Math.max(32, Math.min(84,
+        int homeSize = Math.max(32, Math.min(74,
                 prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
         int configured = homeSize;
         if (prefs != null && prefs.contains(KEY_SHORTCUT_ICON_SIZE_DP)) {
@@ -7999,12 +7999,12 @@ public class MainActivity extends Activity {
             edit.putBoolean(KEY_FONT_SIZE_SLIDER_VALUES, true);
         }
 
-        if (homeSize < 32 || homeSize > 84) {
-            homeSize = Math.max(32, Math.min(84, homeSize));
+        if (homeSize < 32 || homeSize > 74) {
+            homeSize = Math.max(32, Math.min(74, homeSize));
             edit.putInt(KEY_ICON_SIZE, homeSize);
         }
-        if (drawerSize < 32 || drawerSize > 84) {
-            drawerSize = Math.max(32, Math.min(84, drawerSize));
+        if (drawerSize < 32 || drawerSize > 74) {
+            drawerSize = Math.max(32, Math.min(74, drawerSize));
             edit.putInt(KEY_DRAWER_ICON_SIZE, drawerSize);
         }
         int[] legacyFontSizes = {9, 9, 10, 12, 14};
@@ -8360,8 +8360,8 @@ public class MainActivity extends Activity {
             renderHomePages(false);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSliderRowOnStop(content, "Home icon size", 32, 84,
-                Math.max(32, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
+        addSliderRowOnStop(content, "Home icon size", 32, 74,
+                Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
             int oldColumns = getHomeColumns();
             boolean reduceColumns = newSize > 64 && oldColumns > 5;
             int newColumns = reduceColumns ? 5 : oldColumns;
@@ -8404,7 +8404,7 @@ public class MainActivity extends Activity {
             rebuildContactShortcutViews();
             validateWorkspacePagesAfterLayout();
         });
-        int shortcutSizeMax = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
+        int shortcutSizeMax = Math.max(24, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
         addSliderRowOnStop(content, "Contact shortcut icon size", 24, shortcutSizeMax,
                 Math.max(24, Math.min(shortcutSizeMax, getShortcutIconSizeDp())), " dp", value -> {
             prefs.edit().putInt(KEY_SHORTCUT_ICON_SIZE_DP, value).apply();
@@ -8506,8 +8506,8 @@ public class MainActivity extends Activity {
             drawerGrid.requestLayout();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSliderRowOnStop(content, "Drawer icon size", 32, 84,
-                Math.max(32, Math.min(84, prefs.getInt(KEY_DRAWER_ICON_SIZE, 48))), " dp", newSize -> {
+        addSliderRowOnStop(content, "Drawer icon size", 32, 74,
+                Math.max(32, Math.min(74, prefs.getInt(KEY_DRAWER_ICON_SIZE, 48))), " dp", newSize -> {
             boolean reduceColumns = newSize > 64 && prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS) > 5;
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, newSize);
             if (reduceColumns) edit.putInt(KEY_DRAWER_COLUMNS, 5);
