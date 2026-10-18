@@ -3546,6 +3546,7 @@ public class MainActivity extends Activity {
                         view.setTranslationX(0f);
                         view.setTranslationY(0f);
                         view.setLayoutParams(finalIconParams);
+                        updateLiveDisplacements(sourceView, view);
                         finishLiveDisplacements(true, view);
                     } else if (hadLiveDisplacementPlan) {
                         finishLiveDisplacements(false, view);
@@ -6096,7 +6097,7 @@ public class MainActivity extends Activity {
                         new java.util.IdentityHashMap<View, int[]>();
                 java.util.IdentityHashMap<View, Boolean> recursionStack =
                         new java.util.IdentityHashMap<View, Boolean>();
-                int[] searchBudget = new int[]{2400};
+                int[] searchBudget = new int[]{240};
                 int preferredX = existingTarget == null ? g[0] : existingTarget[0];
                 int preferredY = existingTarget == null ? g[1] : existingTarget[1];
                 if (findCascadeDisplacementPlan(page, other, movingView, movingRect,
@@ -6155,7 +6156,7 @@ public class MainActivity extends Activity {
             java.util.IdentityHashMap<View, Boolean> recursionStack,
             int depth, int[] searchBudget) {
         if (page == null || item == null || movingView == null
-                || depth > 8 || searchBudget[0] <= 0
+                || depth > 6 || searchBudget[0] <= 0
                 || item == movingView || item.getParent() != page
                 || recursionStack.containsKey(item)) return false;
 
@@ -6311,8 +6312,40 @@ public class MainActivity extends Activity {
      * clock as a rectangle and place each item into a genuinely free pixel position.
      * App icons keep their existing size; non-app items use their visual dimensions.
      */
+    private boolean hasWorkspaceVisualOverlaps(FrameLayout page) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+        java.util.ArrayList<View> items = new java.util.ArrayList<View>();
+        java.util.ArrayList<android.graphics.Rect> visualBounds =
+                new java.util.ArrayList<android.graphics.Rect>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View item = page.getChildAt(i);
+            if (!isWorkspaceItem(item) || item.getVisibility() != View.VISIBLE) continue;
+            int[] g = itemGeometry(item);
+            if (g[2] <= 0 || g[3] <= 0) continue;
+            android.graphics.Rect bounds = isWorkspaceAppIcon(item)
+                    ? appIconVisualRectAt(item, g[0], g[1], g[2], g[3])
+                    : new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
+            // Out-of-page content still needs the safety resolver even when it
+            // does not overlap another item.
+            if (bounds.left < 0 || bounds.top < 0
+                    || bounds.right > page.getWidth() || bounds.bottom > page.getHeight()) {
+                return true;
+            }
+            for (android.graphics.Rect prior : visualBounds) {
+                if (android.graphics.Rect.intersects(prior, bounds)) return true;
+            }
+            items.add(item);
+            visualBounds.add(bounds);
+        }
+        return false;
+    }
+
     private void resolveAllWorkspaceOverlaps(FrameLayout page, View priorityView) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        // The legacy resolver always rebuilt a nearest-free plan for every item,
+        // even when the page was already visually collision-free. That caused needless
+        // position changes and a costly post-drop pause. Make it a true no-op in that case.
+        if (!hasWorkspaceVisualOverlaps(page)) return;
         java.util.ArrayList<View> items = new java.util.ArrayList<View>();
         // Preserve already-placed workspace items first. The moving item is placed
         // last, after the resolver knows which visible regions are actually free.
@@ -6808,39 +6841,14 @@ public class MainActivity extends Activity {
             if (original == null || !(displaced.getParent() instanceof FrameLayout)) continue;
 
             FrameLayout page = (FrameLayout) displaced.getParent();
-            boolean keepDisplacement = commit && movingView != null
-                    && movingView.getParent() == page;
             int[] target = liveDisplacementTargets.get(displaced);
-            if (keepDisplacement && target == null) keepDisplacement = false;
-
-            if (keepDisplacement) {
-                int[] movingGeometry = itemGeometry(movingView);
-                int[] targetGeometry = target;
-                android.graphics.Rect movingRect = collisionRect(movingView, movingGeometry);
-                int[] oldGeometry = itemGeometry(displaced);
-                android.graphics.Rect originalRect = collisionRectAt(displaced,
-                        original[0], original[1],
-                        Math.max(1, oldGeometry[2]), Math.max(1, oldGeometry[3]));
-                // Keep a cascade member displaced when another planned destination
-                // occupies its former slot, even if the dragged widget itself does not
-                // cover that slot. Otherwise finger-up would restore into a live target.
-                keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
-                if (!keepDisplacement) {
-                    for (java.util.Map.Entry<View, int[]> targetEntry : liveDisplacementTargets.entrySet()) {
-                        View targetOwner = targetEntry.getKey();
-                        if (targetOwner == displaced || targetOwner.getParent() != page) continue;
-                        int[] destination = targetEntry.getValue();
-                        int[] destinationGeometry = itemGeometry(targetOwner);
-                        android.graphics.Rect targetRect = collisionRectAt(targetOwner,
-                                destination[0], destination[1],
-                                destinationGeometry[2], destinationGeometry[3]);
-                        if (android.graphics.Rect.intersects(originalRect, targetRect)) {
-                            keepDisplacement = true;
-                            break;
-                        }
-                    }
-                }
-            }
+            // A successful drop commits the complete live displacement plan. Never
+            // send a neighbor back to its old slot merely because the dropped item no
+            // longer overlaps that old slot; that was the post-drop "second shuffle".
+            // Cancellation still restores originals, and items without a reserved target
+            // are not considered part of the committed plan.
+            boolean keepDisplacement = commit && movingView != null
+                    && movingView.getParent() == page && target != null;
 
             // Stop any in-flight animation before applying the final geometry;
             // otherwise its last frame could overwrite the committed position.
