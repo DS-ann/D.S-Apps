@@ -267,8 +267,49 @@ public class MainActivity extends Activity {
     };
     private View activeDragView;
     private String activeDragPackage;
+    private View workspaceTransferItem;
+    private FrameLayout workspaceTransferSourcePage;
+    private View workspaceTransferProxy;
+    private int workspaceTransferOriginPage = -1;
+    private int workspaceTransferTargetPage = -1;
+    private int workspaceTransferProxyPage = -1;
+    private int workspaceTransferEdgeHoverTargetPage = -1;
+    private float workspaceTransferLastRawX;
+    private float workspaceTransferLastRawY;
+    private float workspaceTransferFingerOffsetX;
+    private float workspaceTransferFingerOffsetY;
+    private android.animation.ValueAnimator workspaceTransferPageAnimator;
+    private float workspaceTransferAnimationStartStripX;
+    private float workspaceTransferAnimationEndStripX;
+    private float workspaceTransferAnimationStartItemX;
+    private int workspaceTransferAnimationTargetPage = -1;
     private Runnable iconArmDrag;
     private Runnable iconShowOptions;
+    private final Runnable workspaceTransferEdgeSwitchRunnable = new Runnable() {
+        @Override public void run() {
+            View item = workspaceTransferItem;
+            int targetPage = workspaceTransferEdgeHoverTargetPage;
+            if (item == null || targetPage < 0 || pagesStrip == null || pageViewport == null
+                    || workspaceTransferTargetPage < 0
+                    || Math.abs(targetPage - workspaceTransferTargetPage) != 1
+                    || targetPage >= pagesStrip.getChildCount()) {
+                clearWorkspaceTransferEdgeHover();
+                return;
+            }
+            int[] viewportLocation = new int[2];
+            pageViewport.getLocationOnScreen(viewportLocation);
+            int edge = LauncherUiUtils.dp(MainActivity.this, ICON_EDGE_SWITCH_ZONE_DP);
+            boolean stillAtEdge = targetPage > workspaceTransferTargetPage
+                    ? workspaceTransferLastRawX >= viewportLocation[0] + pageViewport.getWidth() - edge
+                    : workspaceTransferLastRawX <= viewportLocation[0] + edge;
+            if (!stillAtEdge) {
+                clearWorkspaceTransferEdgeHover();
+                return;
+            }
+            workspaceTransferEdgeHoverTargetPage = -1;
+            switchWorkspaceTransferPage(targetPage);
+        }
+    };
     private final Runnable homeLongPress = new Runnable() {
         @Override public void run() {
             if (!drawerOpen && root != null) {
@@ -285,6 +326,13 @@ public class MainActivity extends Activity {
         @Override public void onReceive(android.content.Context context, Intent intent) {
             if (intent == null) return;
             String action = intent.getAction();
+            if (Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
+                // Package replacement can leave pre-update TextView measurements cached.
+                // Recompute both independent clock panels without changing saved geometry.
+                handler.removeCallbacks(refreshClockGeometryAfterPackageChange);
+                handler.postDelayed(refreshClockGeometryAfterPackageChange, 180L);
+                return;
+            }
             if (!Intent.ACTION_PACKAGE_ADDED.equals(action)
                     && !Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
                 return;
@@ -302,6 +350,22 @@ public class MainActivity extends Activity {
     };
     private final Runnable refreshAppsAfterPackageChange = new Runnable() {
         @Override public void run() { loadApps(); }
+    };
+    private final Runnable refreshClockGeometryAfterPackageChange = new Runnable() {
+        @Override public void run() {
+            if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
+            int restorePage = Math.max(0, Math.min(1, currentPage));
+            updateClock();
+            for (int page = 0; page < clockPanelsByPage.length; page++) {
+                if (clockPanelsByPage[page] == null) continue;
+                activateClockForPage(page);
+                applyClockStyle();
+                applyClockPositionAndSize();
+                applyClockPanelColor(false);
+            }
+            activateClockForPage(restorePage);
+            updateClockResizeHandles();
+        }
     };
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
@@ -331,6 +395,7 @@ public class MainActivity extends Activity {
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
         packageFilter.addDataScheme("package");
         registerReceiver(packageChangesReceiver, packageFilter);
         packageReceiverRegistered = true;
@@ -368,6 +433,28 @@ public class MainActivity extends Activity {
                     }
                     @Override public void setWorkspaceGridVisible(boolean visible, View movingView) {
                         MainActivity.this.setWorkspaceGridVisible(visible, movingView);
+                    }
+                    @Override public void beginWorkspaceTransferDrag(View item, int sourcePage,
+                            float rawX, float rawY, float fingerOffsetX, float fingerOffsetY) {
+                        MainActivity.this.beginWorkspaceTransferDrag(item, sourcePage, rawX, rawY,
+                                fingerOffsetX, fingerOffsetY);
+                    }
+                    @Override public void updateWorkspaceTransferEdge(float rawX, float rawY) {
+                        MainActivity.this.updateWorkspaceTransferEdge(rawX, rawY);
+                    }
+                    @Override public int getWorkspaceTransferTargetPage() {
+                        return MainActivity.this.getWorkspaceTransferTargetPage();
+                    }
+                    @Override public void updateWorkspaceTransferDisplacements(View item, float rawX,
+                            float rawY, float fingerOffsetX, float fingerOffsetY) {
+                        MainActivity.this.updateWorkspaceTransferDisplacements(item, rawX, rawY,
+                                fingerOffsetX, fingerOffsetY);
+                    }
+                    @Override public int finishWorkspaceTransferAnimation() {
+                        return MainActivity.this.finishWorkspaceTransferAnimation();
+                    }
+                    @Override public void finishWorkspaceTransferDrag(View item, boolean commit) {
+                        MainActivity.this.finishWorkspaceTransferDrag(item, commit);
                     }
                 });
         // Let the wallpaper flow behind the status bar so it feels like launcher chrome,
@@ -1772,16 +1859,19 @@ public class MainActivity extends Activity {
         }
         activateClockForPage(currentPage);
         applyClockPositionAndSize();
-        // Page rebuilds are used by icon-shape, icon-background, size, font and
-        // label settings. Refresh both clock backgrounds after layout without moving them.
+        // A page rebuild can occur while the inactive clock still has stale measured
+        // bounds. Recompute style, width and height for each panel after its page lays out.
         for (int pageIndex = 0; pageIndex < clockPanelsByPage.length; pageIndex++) {
             final int targetPage = pageIndex;
             final LinearLayout targetPanel = clockPanelsByPage[pageIndex];
             if (targetPanel == null) continue;
             targetPanel.post(() -> {
-                if (targetPanel.getParent() == null || clockPanelsByPage[targetPage] != targetPanel) return;
+                if (targetPanel.getParent() == null
+                        || clockPanelsByPage[targetPage] != targetPanel) return;
                 int previousPage = Math.max(0, Math.min(1, activeClockPage));
                 activateClockForPage(targetPage);
+                applyClockStyle();
+                applyClockPositionAndSize();
                 applyClockPanelColor(false);
                 activateClockForPage(previousPage);
             });
@@ -2319,7 +2409,9 @@ public class MainActivity extends Activity {
         // long press still opens the options popup. Keep the drag stream on the tile
         // so workspace swipes and click handling cannot steal it.
         final float[] shortcutTouchStart = new float[2];
+        final float[] shortcutFingerOffset = new float[2];
         final int[] shortcutOrigin = new int[2];
+        final int[] shortcutOriginalPage = {-1};
         final boolean[] shortcutDragging = new boolean[1];
         final boolean[] shortcutMoved = new boolean[1];
         final boolean[] shortcutMoveArmed = new boolean[1];
@@ -2337,6 +2429,12 @@ public class MainActivity extends Activity {
             if (action == MotionEvent.ACTION_DOWN) {
                 shortcutTouchStart[0] = event.getRawX();
                 shortcutTouchStart[1] = event.getRawY();
+                int[] shortcutLocation = new int[2];
+                tile.getLocationOnScreen(shortcutLocation);
+                shortcutFingerOffset[0] = event.getRawX() - shortcutLocation[0];
+                shortcutFingerOffset[1] = event.getRawY() - shortcutLocation[1];
+                shortcutOriginalPage[0] = tile.getParent() instanceof View
+                        && pagesStrip != null ? pagesStrip.indexOfChild((View) tile.getParent()) : currentPage;
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
                 shortcutOrigin[0] = lp.leftMargin;
                 shortcutOrigin[1] = lp.topMargin;
@@ -2356,41 +2454,42 @@ public class MainActivity extends Activity {
                 boolean pastSlop = Math.abs(dx) > LauncherUiUtils.dp(this, 8)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
                 if (pastSlop && shortcutMoveArmed[0] && !shortcutPopupShown[0]) {
+                    boolean firstDragFrame = !shortcutDragging[0];
                     shortcutMoved[0] = true;
                     shortcutDragging[0] = true;
                     shortcutTouchHandler.removeCallbacks(showShortcutPopup);
                     tile.setPressed(false);
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(true);
+                    if (firstDragFrame) {
+                        LauncherUiUtils.startScaleHint(tile, 1.10f);
+                        beginWorkspaceTransferDrag(tile, shortcutOriginalPage[0],
+                                event.getRawX(), event.getRawY(),
+                                shortcutFingerOffset[0], shortcutFingerOffset[1]);
+                    }
+                    updateWorkspaceTransferEdge(event.getRawX(), event.getRawY());
                     setWorkspaceGridVisible(true, tile);
                     FrameLayout page = tile.getParent() instanceof FrameLayout
                             ? (FrameLayout) tile.getParent() : null;
                     if (page != null) {
+                        int[] pageLocation = new int[2];
+                        page.getLocationOnScreen(pageLocation);
                         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                        int left = Math.max(0, Math.min(shortcutOrigin[0] + Math.round(dx),
-                                page.getWidth() - tile.getWidth()));
-                        int top = Math.max(0, Math.min(shortcutOrigin[1] + Math.round(dy),
-                                page.getHeight() - tile.getHeight()));
-                        android.graphics.Rect candidate = new android.graphics.Rect(left, top,
-                                left + tile.getWidth(), top + tile.getHeight());
-                        boolean blocked = false;
-                        for (int n = 0; n < page.getChildCount(); n++) {
-                            View other = page.getChildAt(n);
-                            if (other == tile || other.getVisibility() != View.VISIBLE
-                                    || !isWorkspaceItem(other)) continue;
-                            int[] g = itemGeometry(other);
-                            if (g[2] > 0 && g[3] > 0 && android.graphics.Rect.intersects(candidate,
-                                    new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]))) {
-                                blocked = true;
-                                break;
-                            }
-                        }
-                        // Use the same live displacement behavior as widgets so
-                        // each shortcut remains independently movable even when
-                        // another shortcut currently occupies the candidate area.
+                        int left = Math.round(event.getRawX() - pageLocation[0]
+                                - shortcutFingerOffset[0] - tile.getTranslationX());
+                        int top = Math.round(event.getRawY() - pageLocation[1]
+                                - shortcutFingerOffset[1] - tile.getTranslationY());
+                        left = Math.max(0, Math.min(Math.max(0, page.getWidth() - tile.getWidth()), left));
+                        top = Math.max(0, Math.min(Math.max(0, page.getHeight() - tile.getHeight()), top));
                         lp.leftMargin = left;
                         lp.topMargin = top;
                         tile.setLayoutParams(lp);
-                        updateLiveDisplacements(page, tile);
+                        int transferPage = getWorkspaceTransferTargetPage();
+                        if (transferPage >= 0 && transferPage != shortcutOriginalPage[0]) {
+                            updateWorkspaceTransferDisplacements(tile, event.getRawX(), event.getRawY(),
+                                    shortcutFingerOffset[0], shortcutFingerOffset[1]);
+                        } else {
+                            updateLiveDisplacements(page, tile);
+                        }
                     }
                     return true;
                 }
@@ -2402,30 +2501,63 @@ public class MainActivity extends Activity {
                 shortcutTouchHandler.removeCallbacks(armShortcutMove);
                 shortcutTouchHandler.removeCallbacks(showShortcutPopup);
                 if (shortcutDragging[0]) {
-                    shortcutDragging[0] = false;
+                    boolean commit = action == MotionEvent.ACTION_UP;
+                    int transferPage = finishWorkspaceTransferAnimation();
+                    if (!commit) transferPage = shortcutOriginalPage[0];
+                    if (transferPage < 0) transferPage = shortcutOriginalPage[0];
                     if (tile.getParent() instanceof FrameLayout) {
-                        FrameLayout page = (FrameLayout) tile.getParent();
+                        FrameLayout sourcePage = (FrameLayout) tile.getParent();
+                        int sourcePageIndex = pagesStrip == null ? currentPage : pagesStrip.indexOfChild(sourcePage);
+                        FrameLayout targetPage = sourcePage;
+                        if (commit && pagesStrip != null && transferPage >= 0
+                                && transferPage < pagesStrip.getChildCount()
+                                && pagesStrip.getChildAt(transferPage) instanceof FrameLayout) {
+                            targetPage = (FrameLayout) pagesStrip.getChildAt(transferPage);
+                        }
+                        LauncherUiUtils.stopMoveHint(tile);
                         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                        int left = Math.max(0, Math.min(lp.leftMargin, page.getWidth() - tile.getWidth()));
-                        int top = Math.max(0, Math.min(lp.topMargin, page.getHeight() - tile.getHeight()));
+                        int[] targetLocation = new int[2];
+                        targetPage.getLocationOnScreen(targetLocation);
+                        int left = commit ? Math.round(event.getRawX() - targetLocation[0]
+                                - shortcutFingerOffset[0]) : shortcutOrigin[0];
+                        int top = commit ? Math.round(event.getRawY() - targetLocation[1]
+                                - shortcutFingerOffset[1]) : shortcutOrigin[1];
+                        left = Math.max(0, Math.min(Math.max(0, targetPage.getWidth() - tile.getWidth()), left));
+                        top = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - tile.getHeight()), top));
                         lp.leftMargin = left;
                         lp.topMargin = top;
+                        tile.setTranslationX(0f);
+                        tile.setTranslationY(0f);
                         tile.setLayoutParams(lp);
+
+                        if (commit && targetPage != sourcePage) {
+                            updateWorkspaceTransferDisplacements(tile, event.getRawX(), event.getRawY(),
+                                    shortcutFingerOffset[0], shortcutFingerOffset[1]);
+                            ((ViewGroup) sourcePage).removeView(tile);
+                            targetPage.addView(tile, lp);
+                        }
+                        finishWorkspaceTransferDrag(tile, commit);
+                        finishLiveDisplacements(commit, tile);
                         float density = getResources().getDisplayMetrics().density;
-                        int pageIndex = pagesStrip == null ? currentPage : pagesStrip.indexOfChild(page);
-                        finishLiveDisplacements(true, tile);
-                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
-                                        pageIndex >= 0 ? pageIndex : currentPage)
-                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
-                                        left / (float) Math.max(1, page.getWidth() - tile.getWidth()))
-                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                                        top / (float) Math.max(1, page.getHeight() - tile.getHeight()))
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
-                                        Math.max(1, Math.round(lp.width / density)))
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
-                                        Math.max(1, Math.round(lp.height / density)))
-                                .apply();
+                        int pageIndex = pagesStrip == null ? currentPage : pagesStrip.indexOfChild(targetPage);
+                        if (commit) {
+                            prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
+                                            pageIndex >= 0 ? pageIndex : currentPage)
+                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
+                                            left / (float) Math.max(1, targetPage.getWidth() - tile.getWidth()))
+                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                                            top / (float) Math.max(1, targetPage.getHeight() - tile.getHeight()))
+                                    .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
+                                            Math.max(1, Math.round(lp.width / density)))
+                                    .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
+                                            Math.max(1, Math.round(lp.height / density)))
+                                    .apply();
+                        }
+                    } else {
+                        LauncherUiUtils.stopMoveHint(tile);
+                        finishWorkspaceTransferDrag(tile, commit);
                     }
+                    shortcutDragging[0] = false;
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                     setWorkspaceGridVisible(false, null);
                     refreshWorkspaceGrid();
@@ -2630,6 +2762,288 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void clearWorkspaceTransferEdgeHover() {
+        handler.removeCallbacks(workspaceTransferEdgeSwitchRunnable);
+        workspaceTransferEdgeHoverTargetPage = -1;
+    }
+
+    private void beginWorkspaceTransferDrag(View item, int sourcePage, float rawX, float rawY,
+            float fingerOffsetX, float fingerOffsetY) {
+        if (item == null || pagesStrip == null || sourcePage < 0
+                || sourcePage >= pagesStrip.getChildCount()) return;
+        if (workspaceTransferItem != null && workspaceTransferItem != item) {
+            finishWorkspaceTransferDrag(workspaceTransferItem, false);
+        }
+        clearWorkspaceTransferEdgeHover();
+        workspaceTransferItem = item;
+        workspaceTransferSourcePage = pagesStrip.getChildAt(sourcePage) instanceof FrameLayout
+                ? (FrameLayout) pagesStrip.getChildAt(sourcePage) : null;
+        workspaceTransferOriginPage = sourcePage;
+        workspaceTransferTargetPage = sourcePage;
+        workspaceTransferLastRawX = rawX;
+        workspaceTransferLastRawY = rawY;
+        workspaceTransferFingerOffsetX = fingerOffsetX;
+        workspaceTransferFingerOffsetY = fingerOffsetY;
+        workspaceTransferProxy = null;
+        workspaceTransferProxyPage = -1;
+    }
+
+    private void updateWorkspaceTransferEdge(float rawX, float rawY) {
+        workspaceTransferLastRawX = rawX;
+        workspaceTransferLastRawY = rawY;
+        if (workspaceTransferItem == null || pageViewport == null || pagesStrip == null
+                || pageViewport.getWidth() <= 0 || workspaceTransferTargetPage < 0) {
+            clearWorkspaceTransferEdgeHover();
+            return;
+        }
+        int[] viewportLocation = new int[2];
+        pageViewport.getLocationOnScreen(viewportLocation);
+        int edge = LauncherUiUtils.dp(this, ICON_EDGE_SWITCH_ZONE_DP);
+        int targetPage = -1;
+        if (workspaceTransferTargetPage + 1 < pagesStrip.getChildCount()
+                && rawX >= viewportLocation[0] + pageViewport.getWidth() - edge) {
+            targetPage = workspaceTransferTargetPage + 1;
+        } else if (workspaceTransferTargetPage > 0
+                && rawX <= viewportLocation[0] + edge) {
+            targetPage = workspaceTransferTargetPage - 1;
+        }
+        if (targetPage < 0) {
+            clearWorkspaceTransferEdgeHover();
+            return;
+        }
+        if (targetPage == workspaceTransferEdgeHoverTargetPage) return;
+        handler.removeCallbacks(workspaceTransferEdgeSwitchRunnable);
+        workspaceTransferEdgeHoverTargetPage = targetPage;
+        handler.postDelayed(workspaceTransferEdgeSwitchRunnable, ICON_EDGE_SWITCH_DELAY_MS);
+    }
+
+    private int getWorkspaceTransferTargetPage() {
+        return workspaceTransferItem == null ? -1 : workspaceTransferTargetPage;
+    }
+
+    private void switchWorkspaceTransferPage(int requestedTargetPage) {
+        if (workspaceTransferItem == null || pagesStrip == null || pageViewport == null) return;
+        if (workspaceTransferPageAnimator != null) finishWorkspaceTransferAnimation();
+        int fromPage = workspaceTransferTargetPage;
+        if (requestedTargetPage == fromPage || requestedTargetPage < 0
+                || requestedTargetPage >= pagesStrip.getChildCount()
+                || Math.abs(requestedTargetPage - fromPage) != 1) return;
+
+        // Each preview page owns its own temporary displacement transaction. Roll it
+        // back before revealing the next page so source-page items never remain displaced.
+        if (workspaceTransferProxy != null) {
+            finishLiveDisplacements(false, workspaceTransferProxy);
+            if (workspaceTransferProxy.getParent() instanceof ViewGroup) {
+                ((ViewGroup) workspaceTransferProxy.getParent()).removeView(workspaceTransferProxy);
+            }
+            workspaceTransferProxy = null;
+            workspaceTransferProxyPage = -1;
+        } else if (!liveDisplacedItems.isEmpty() && workspaceTransferItem != null) {
+            finishLiveDisplacements(false, workspaceTransferItem);
+        }
+
+        int pageWidth = Math.max(1, pageViewport.getWidth());
+        float startStripX = pagesStrip.getTranslationX();
+        float endStripX = -requestedTargetPage * (float) pageWidth;
+        if (Math.abs(startStripX + fromPage * (float) pageWidth) > pageWidth * 0.5f) {
+            startStripX = -fromPage * (float) pageWidth;
+            pagesStrip.setTranslationX(startStripX);
+        }
+        workspaceTransferTargetPage = requestedTargetPage;
+        currentPage = requestedTargetPage;
+        activateClockForPage(requestedTargetPage);
+        if (pageIndicator != null) {
+            pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)
+                    ? View.VISIBLE : View.GONE);
+            pageIndicator.setText((requestedTargetPage + 1) + "  /  " + pagesStrip.getChildCount());
+        }
+
+        pagesStrip.setClipChildren(false);
+        pagesStrip.setClipToPadding(false);
+        if (workspaceTransferSourcePage != null) {
+            workspaceTransferSourcePage.setClipChildren(false);
+            workspaceTransferSourcePage.setClipToPadding(false);
+            workspaceTransferSourcePage.setElevation(LauncherUiUtils.dp(this, 30));
+        }
+        workspaceTransferAnimationStartStripX = startStripX;
+        workspaceTransferAnimationEndStripX = endStripX;
+        workspaceTransferAnimationStartItemX = workspaceTransferItem.getTranslationX();
+        workspaceTransferAnimationTargetPage = requestedTargetPage;
+        final android.animation.ValueAnimator animator =
+                android.animation.ValueAnimator.ofFloat(startStripX, endStripX);
+        workspaceTransferPageAnimator = animator;
+        animator.setDuration(animationDuration(220L));
+        animator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        animator.addUpdateListener(animation -> {
+            if (workspaceTransferPageAnimator != animator || pagesStrip == null) return;
+            float stripX = ((Float) animation.getAnimatedValue()).floatValue();
+            pagesStrip.setTranslationX(stripX);
+            View dragged = workspaceTransferItem;
+            if (dragged != null && dragged.getParent() == workspaceTransferSourcePage) {
+                dragged.setTranslationX(workspaceTransferAnimationStartItemX
+                        + (workspaceTransferAnimationStartStripX - stripX));
+            }
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (workspaceTransferPageAnimator != animator) return;
+                workspaceTransferPageAnimator = null;
+                if (pagesStrip != null) pagesStrip.setTranslationX(workspaceTransferAnimationEndStripX);
+                View dragged = workspaceTransferItem;
+                if (dragged != null && dragged.getParent() == workspaceTransferSourcePage) {
+                    dragged.setTranslationX(workspaceTransferAnimationStartItemX
+                            + (workspaceTransferAnimationStartStripX
+                            - workspaceTransferAnimationEndStripX));
+                }
+            }
+        });
+        animator.start();
+
+        createWorkspaceTransferProxy(requestedTargetPage);
+        updateWorkspaceTransferDisplacements(workspaceTransferItem,
+                workspaceTransferLastRawX, workspaceTransferLastRawY,
+                workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
+    }
+
+    private void createWorkspaceTransferProxy(int pageIndex) {
+        if (pagesStrip == null || workspaceTransferItem == null || pageIndex < 0
+                || pageIndex >= pagesStrip.getChildCount()
+                || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) return;
+        FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+        View moving = workspaceTransferItem;
+        ViewGroup.LayoutParams raw = moving.getLayoutParams();
+        int width = raw instanceof FrameLayout.LayoutParams
+                && ((FrameLayout.LayoutParams) raw).width > 0
+                ? ((FrameLayout.LayoutParams) raw).width : moving.getWidth();
+        int height = raw instanceof FrameLayout.LayoutParams
+                && ((FrameLayout.LayoutParams) raw).height > 0
+                ? ((FrameLayout.LayoutParams) raw).height : moving.getHeight();
+        if (width <= 0 || height <= 0) return;
+        View proxy = new View(this);
+        proxy.setTag("workspace_transfer_proxy");
+        proxy.setVisibility(View.INVISIBLE);
+        proxy.setClickable(false);
+        proxy.setFocusable(false);
+        proxy.setScaleX(moving.getScaleX());
+        proxy.setScaleY(moving.getScaleY());
+        proxy.setPivotX(moving.getPivotX());
+        proxy.setPivotY(moving.getPivotY());
+        FrameLayout.LayoutParams proxyParams = new FrameLayout.LayoutParams(
+                width, height, Gravity.TOP | Gravity.LEFT);
+        page.addView(proxy, proxyParams);
+        workspaceTransferProxy = proxy;
+        workspaceTransferProxyPage = pageIndex;
+    }
+
+    private void updateWorkspaceTransferDisplacements(View item, float rawX, float rawY,
+            float fingerOffsetX, float fingerOffsetY) {
+        if (item == null || item != workspaceTransferItem || workspaceTransferTargetPage < 0
+                || workspaceTransferTargetPage == workspaceTransferOriginPage
+                || pagesStrip == null || workspaceTransferTargetPage >= pagesStrip.getChildCount()) return;
+        if (!(pagesStrip.getChildAt(workspaceTransferTargetPage) instanceof FrameLayout)) return;
+        FrameLayout page = (FrameLayout) pagesStrip.getChildAt(workspaceTransferTargetPage);
+        if (workspaceTransferProxy == null || workspaceTransferProxyPage != workspaceTransferTargetPage
+                || workspaceTransferProxy.getParent() != page) {
+            if (workspaceTransferProxy != null && workspaceTransferProxy.getParent() instanceof ViewGroup) {
+                ((ViewGroup) workspaceTransferProxy.getParent()).removeView(workspaceTransferProxy);
+            }
+            workspaceTransferProxy = null;
+            workspaceTransferProxyPage = -1;
+            createWorkspaceTransferProxy(workspaceTransferTargetPage);
+        }
+        View proxy = workspaceTransferProxy;
+        if (proxy == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        proxy.setScaleX(item.getScaleX());
+        proxy.setScaleY(item.getScaleY());
+        int[] pageLocation = new int[2];
+        page.getLocationOnScreen(pageLocation);
+        int width = Math.max(1, proxy.getWidth());
+        int height = Math.max(1, proxy.getHeight());
+        if (proxy.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) proxy.getLayoutParams();
+            if (lp.width > 0) width = lp.width;
+            if (lp.height > 0) height = lp.height;
+            float sx = Math.max(0.01f, proxy.getScaleX());
+            float sy = Math.max(0.01f, proxy.getScaleY());
+            int visibleWidth = Math.max(1, Math.round(width * sx));
+            int visibleHeight = Math.max(1, Math.round(height * sy));
+            int left = Math.max(0, Math.min(page.getWidth() - visibleWidth,
+                    Math.round(rawX - pageLocation[0] - fingerOffsetX)));
+            int top = Math.max(0, Math.min(page.getHeight() - visibleHeight,
+                    Math.round(rawY - pageLocation[1] - fingerOffsetY)));
+            lp.leftMargin = left - Math.round(proxy.getPivotX() * (1f - sx));
+            lp.topMargin = top - Math.round(proxy.getPivotY() * (1f - sy));
+            proxy.setLayoutParams(lp);
+            updateLiveDisplacements(page, proxy);
+        }
+    }
+
+    private int finishWorkspaceTransferAnimation() {
+        clearWorkspaceTransferEdgeHover();
+        android.animation.ValueAnimator animator = workspaceTransferPageAnimator;
+        if (animator != null) {
+            int target = workspaceTransferAnimationTargetPage;
+            animator.removeAllUpdateListeners();
+            animator.removeAllListeners();
+            animator.cancel();
+            workspaceTransferPageAnimator = null;
+            if (pagesStrip != null && target >= 0) {
+                pagesStrip.setTranslationX(workspaceTransferAnimationEndStripX);
+            }
+            View dragged = workspaceTransferItem;
+            if (dragged != null && dragged.getParent() == workspaceTransferSourcePage) {
+                dragged.setTranslationX(workspaceTransferAnimationStartItemX
+                        + (workspaceTransferAnimationStartStripX
+                        - workspaceTransferAnimationEndStripX));
+            }
+            workspaceTransferTargetPage = target;
+        }
+        return workspaceTransferItem == null ? -1 : workspaceTransferTargetPage;
+    }
+
+    private void finishWorkspaceTransferDrag(View item, boolean commit) {
+        if (item == null || item != workspaceTransferItem) return;
+        finishWorkspaceTransferAnimation();
+        clearWorkspaceTransferEdgeHover();
+        if (!commit && workspaceTransferProxy != null && !liveDisplacedItems.isEmpty()) {
+            finishLiveDisplacements(false, workspaceTransferProxy);
+        }
+        if (workspaceTransferProxy != null && workspaceTransferProxy.getParent() instanceof ViewGroup) {
+            ((ViewGroup) workspaceTransferProxy.getParent()).removeView(workspaceTransferProxy);
+        }
+        workspaceTransferProxy = null;
+        workspaceTransferProxyPage = -1;
+        int restorePage = commit ? workspaceTransferTargetPage : workspaceTransferOriginPage;
+        if (restorePage < 0) restorePage = 0;
+        if (pagesStrip != null && pageViewport != null) {
+            currentPage = Math.max(0, Math.min(restorePage, pagesStrip.getChildCount() - 1));
+            int width = Math.max(1, pageViewport.getWidth());
+            pagesStrip.setTranslationX(-currentPage * (float) width);
+            pagesStrip.setClipChildren(true);
+            pagesStrip.setClipToPadding(true);
+            for (int p = 0; p < pagesStrip.getChildCount(); p++) {
+                View child = pagesStrip.getChildAt(p);
+                if (child instanceof FrameLayout) {
+                    child.setClipChildren(true);
+                    child.setClipToPadding(true);
+                    child.setElevation(0f);
+                }
+            }
+            activateClockForPage(currentPage);
+            if (pageIndicator != null) {
+                pageIndicator.setVisibility(prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true)
+                        ? View.VISIBLE : View.GONE);
+                pageIndicator.setText((currentPage + 1) + "  /  " + pagesStrip.getChildCount());
+            }
+        }
+        workspaceTransferItem = null;
+        workspaceTransferSourcePage = null;
+        workspaceTransferOriginPage = -1;
+        workspaceTransferTargetPage = -1;
+        workspaceTransferEdgeHoverTargetPage = -1;
+        workspaceTransferAnimationTargetPage = -1;
+    }
+
     private void clearIconEdgeHover() {
         handler.removeCallbacks(iconEdgeSwitchRunnable);
         iconEdgeHoverTargetPage = -1;
@@ -2726,6 +3140,7 @@ public class MainActivity extends Activity {
             pageIndicator.setText((targetPage + 1) + "  /  " + pagesStrip.getChildCount());
         }
 
+        if (!liveDisplacedItems.isEmpty()) finishLiveDisplacements(false, dragged);
         pagesStrip.setTranslationX(-fromPage * (float) pageWidth);
         preparePageLayersForSwipe(fromPage);
         iconDragParallaxChildAlphas.clear();
@@ -2958,6 +3373,12 @@ public class MainActivity extends Activity {
                     // Keep drag snapping identical to the fixed row positions used by the renderer.
                     lp.topMargin = snappedRow * slotHeight;
                     view.setLayoutParams(lp);
+                    // Preview collision displacement during an app drag on its current
+                    // page. When the edge switch starts, that page's preview is rolled back
+                    // and the destination page gets its own independent placement transaction.
+                    if (iconDragPageIndex == sourcePageIndex && iconDragPageAnimator == null) {
+                        updateLiveDisplacements(page, view);
+                    }
                     refreshWorkspaceGrid();
                 }
                 return true;
@@ -3089,6 +3510,21 @@ public class MainActivity extends Activity {
                         }
                     }
                     // Persist the destination page before rebuilding the view hierarchy.
+                    // If same-page collisions were previewed, settle their reservations against
+                    // the snapped release slot before the page renderer recreates app cells.
+                    boolean hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
+                    if (hadLiveDisplacementPlan && !movedAcrossPage) {
+                        FrameLayout.LayoutParams finalIconParams =
+                                (FrameLayout.LayoutParams) view.getLayoutParams();
+                        finalIconParams.leftMargin = targetCol * cellWidth;
+                        finalIconParams.topMargin = targetRow * cellHeight;
+                        view.setTranslationX(0f);
+                        view.setTranslationY(0f);
+                        view.setLayoutParams(finalIconParams);
+                        finishLiveDisplacements(true, view);
+                    } else if (hadLiveDisplacementPlan) {
+                        finishLiveDisplacements(false, view);
+                    }
                     // The dragged view intentionally stays attached to its source page until UP;
                     // reparenting during MOVE cancels Android's active touch target.
                     saveIconSlot(packageName, targetCol, targetRow, columns);
@@ -3118,10 +3554,12 @@ public class MainActivity extends Activity {
                         FrameLayout collisionPage = (FrameLayout) pageView;
                         collisionPage.post(() -> {
                             if (collisionPage.getParent() != pagesStrip) return;
-                            // Always validate the whole page after an app drop, even
-                            // if the page contains no widgets. The clock and shortcuts
-                            // are workspace collision surfaces as well.
-                            resolveAllWorkspaceOverlaps(collisionPage, null);
+                            // A committed live displacement plan already reserved and
+                            // persisted every affected rectangle. Do not shuffle that layout
+                            // a second time after the newly rendered app cells appear.
+                            if (!hadLiveDisplacementPlan) {
+                                resolveAllWorkspaceOverlaps(collisionPage, null);
+                            }
                         });
                     });
                     return true;
@@ -4728,6 +5166,8 @@ public class MainActivity extends Activity {
             // bold-italic treatment without a separate size override.
             dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0, period.length(),
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
+                    0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             dateLine.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(192, 192, 198)),
                     0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             dateLine.setSpan(new android.text.style.RelativeSizeSpan(1f), 0, period.length(),
@@ -5109,12 +5549,45 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams raw = item.getLayoutParams();
         if (raw instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-            lp.leftMargin = left;
-            lp.topMargin = top;
+            float sx = Math.max(0.01f, item.getScaleX());
+            float sy = Math.max(0.01f, item.getScaleY());
+            lp.leftMargin = left - Math.round(item.getPivotX() * (1f - sx));
+            lp.topMargin = top - Math.round(item.getPivotY() * (1f - sy));
             item.setTranslationX(0f);
             item.setTranslationY(0f);
             item.setLayoutParams(lp);
         }
+    }
+
+    private void animateDisplacedItemTo(View item, int left, int top) {
+        if (item == null) return;
+        int[] current = itemGeometry(item);
+        item.animate().cancel();
+        if (isClockWorkspaceItem(item)) {
+            int pageIndex = workspacePageIndex(item);
+            float targetX = item.getTranslationX() + left - current[0];
+            float targetY = item.getTranslationY() + top - current[1];
+            float[] bounded = clampClockTranslation(item, targetX, targetY);
+            item.animate().translationX(bounded[0]).translationY(bounded[1])
+                    .setDuration(animationDuration(140L))
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+            return;
+        }
+        ViewGroup.LayoutParams raw = item.getLayoutParams();
+        if (!(raw instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+        float sx = Math.max(0.01f, item.getScaleX());
+        float sy = Math.max(0.01f, item.getScaleY());
+        lp.leftMargin = left - Math.round(item.getPivotX() * (1f - sx));
+        lp.topMargin = top - Math.round(item.getPivotY() * (1f - sy));
+        item.setTranslationX(current[0] - left);
+        item.setTranslationY(current[1] - top);
+        item.setLayoutParams(lp);
+        item.animate().translationX(0f).translationY(0f)
+                .setDuration(animationDuration(140L))
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
     }
 
     private boolean isWorkspaceItem(View view) {
@@ -5606,6 +6079,9 @@ public class MainActivity extends Activity {
                     for (java.util.Map.Entry<View, int[]> planned : cascadePlan.entrySet()) {
                         View participant = planned.getKey();
                         int[] destination = planned.getValue();
+                        int[] oldTarget = liveDisplacementTargets.get(participant);
+                        if (oldTarget != null && oldTarget[0] == destination[0]
+                                && oldTarget[1] == destination[1]) continue;
                         participant.animate().cancel();
                         int[] currentGeometry = itemGeometry(participant);
                         if (!liveDisplacedItems.containsKey(participant)) {
@@ -5614,15 +6090,17 @@ public class MainActivity extends Activity {
                         }
                         liveDisplacementTargets.put(participant,
                                 new int[]{destination[0], destination[1]});
-                        // Commit every member of the cascade in the same MOVE pass.
-                        // No stagger: all reservations become actual geometry immediately.
-                        placeDisplacedItemNow(participant, destination[0], destination[1]);
+                        // All neighbors share the same short animation. Their target
+                        // rectangles are reserved immediately, preventing re-plans every frame.
+                        animateDisplacedItemTo(participant, destination[0], destination[1]);
                     }
                     continue;
                 }
             }
 
             if (bestX >= 0) {
+                if (alreadyDisplaced && existingTarget != null
+                        && existingTarget[0] == bestX && existingTarget[1] == bestY) continue;
                 // Recompute the visual origin after cancelling any old motion so the
                 // next translation starts from the exact frame that was on screen.
                 other.animate().cancel();
@@ -5632,8 +6110,9 @@ public class MainActivity extends Activity {
                 }
                 liveDisplacementTargets.put(other, new int[]{bestX, bestY});
 
-                // Move the neighbour to its reserved free rectangle immediately.
-                placeDisplacedItemNow(other, bestX, bestY);
+                // Move the neighbour to its reserved free rectangle with a short
+                // synchronized animation; the reservation is recorded before motion starts.
+                animateDisplacedItemTo(other, bestX, bestY);
             }
         }
     }
@@ -6375,8 +6854,9 @@ public class MainActivity extends Activity {
 
         liveDisplacedItems.clear();
         liveDisplacementTargets.clear();
-        if (!committedDisplacementPlan
-                && movingView != null && movingView.getParent() instanceof FrameLayout) {
+        if (!committedDisplacementPlan && commit
+                && movingView != null && movingView.getParent() instanceof FrameLayout
+                && isWorkspaceItem(movingView)) {
             FrameLayout page = (FrameLayout) movingView.getParent();
             // Keep the legacy safety pass for gestures without a displacement plan.
             // For a committed plan, its exact destinations are authoritative: do not
@@ -7293,7 +7773,7 @@ public class MainActivity extends Activity {
 
         if (amPmText != null) {
             amPmText.setTextColor(clockText.getCurrentTextColor());
-            amPmText.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            amPmText.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
             // Keep the marker's font size independent of workspace resizing.
             // 13.5sp is 50% taller than the previous 9sp setting.
             amPmText.setTextSize(13.5f);
