@@ -2899,14 +2899,17 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    private boolean hasRenderedContactShortcut() {
-        if (pagesStrip == null) return false;
+    private boolean hasRenderedContactShortcut(String shortcutId) {
+        if (pagesStrip == null || shortcutId == null) return false;
+        String expectedDescription = "launcher_shortcut_id:" + shortcutId;
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View page = pagesStrip.getChildAt(i);
             if (!(page instanceof ViewGroup)) continue;
             ViewGroup group = (ViewGroup) page;
             for (int j = 0; j < group.getChildCount(); j++) {
-                if ("launcher_contact_shortcut".equals(group.getChildAt(j).getTag())) return true;
+                View child = group.getChildAt(j);
+                if ("launcher_contact_shortcut".equals(child.getTag())
+                        && expectedDescription.contentEquals(child.getContentDescription())) return true;
             }
         }
         return false;
@@ -4925,7 +4928,7 @@ public class MainActivity extends Activity {
                 }
                 handler.post(() -> {
                     renderSavedContactShortcut();
-                    if (!hasRenderedContactShortcut()) {
+                    if (!hasRenderedContactShortcut(shortcutId)) {
                         removeSavedShortcut(shortcutId);
                         Toast.makeText(this, "No free space for the shortcut. Move or remove an item first.",
                                 Toast.LENGTH_LONG).show();
