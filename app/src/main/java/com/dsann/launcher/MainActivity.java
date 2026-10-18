@@ -3192,7 +3192,19 @@ public class MainActivity extends Activity {
             pageIndicator.setText((targetPage + 1) + "  /  " + pagesStrip.getChildCount());
         }
 
+        // Roll back the prior page's preview before creating reservations on the
+        // newly revealed page. Keep the transfer session alive until finger-up.
         if (!liveDisplacedItems.isEmpty()) finishLiveDisplacements(false, dragged);
+        if (workspaceTransferProxy != null
+                && workspaceTransferProxy.getParent() instanceof ViewGroup) {
+            ((ViewGroup) workspaceTransferProxy.getParent()).removeView(workspaceTransferProxy);
+        }
+        workspaceTransferProxy = null;
+        workspaceTransferProxyPage = -1;
+        workspaceTransferTargetPage = targetPage;
+        if (targetPage != workspaceTransferOriginPage) {
+            createWorkspaceTransferProxy(targetPage);
+        }
         pagesStrip.setTranslationX(-fromPage * (float) pageWidth);
         preparePageLayersForSwipe(fromPage);
         iconDragParallaxChildAlphas.clear();
@@ -3339,7 +3351,9 @@ public class MainActivity extends Activity {
             if (!iconDragging && !longPressTriggered && app != null) launchApp(app, cell);
         });
         cell.setOnLongClickListener(null);
+        final boolean[] iconReparenting = new boolean[1];
         cell.setOnTouchListener((view, event) -> {
+            if (iconReparenting[0]) return true;
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
                 clearIconEdgeHover();
@@ -3395,6 +3409,12 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(true, view);
                     view.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(animationDuration(100)).start();
                     view.bringToFront();
+                    // App icons use a dedicated parallax page-slide gesture, but share
+                    // the destination collision transaction used by widgets/shortcuts.
+                    beginWorkspaceTransferDrag(view, iconOriginalPageIndex,
+                            event.getRawX(), event.getRawY(),
+                            Math.max(1, view.getWidth()) / 2f,
+                            Math.max(1, view.getHeight()) / 2f);
                 }
                 if (iconDragging) {
                     // A sustained drag at the extreme edge reveals the adjacent existing
@@ -3430,6 +3450,11 @@ public class MainActivity extends Activity {
                     // and the destination page gets its own independent placement transaction.
                     if (iconDragPageIndex == sourcePageIndex && iconDragPageAnimator == null) {
                         updateLiveDisplacements(page, view);
+                    } else if (workspaceTransferTargetPage >= 0
+                            && workspaceTransferTargetPage != workspaceTransferOriginPage
+                            && iconDragPageAnimator == null) {
+                        updateWorkspaceTransferDisplacements(view, event.getRawX(), event.getRawY(),
+                                workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
                     }
                     refreshWorkspaceGrid();
                 }
@@ -3462,6 +3487,8 @@ public class MainActivity extends Activity {
                                 && event.getRawX() >= dockLocation[0]
                                 && event.getRawX() <= dockLocation[0] + dockContainer.getWidth();
                         if (releasedOnDock && !dockPackages.contains(packageName)) {
+                            finishWorkspaceTransferDrag(view, false);
+                            if (!liveDisplacedItems.isEmpty()) finishLiveDisplacements(false, view);
                             if (dockPackages.size() < DOCK_CAPACITY) {
                                 dockPackages.add(packageName);
                                 homePackages.remove(packageName);
