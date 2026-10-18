@@ -457,6 +457,14 @@ public class MainActivity extends Activity {
             return super.dispatchTouchEvent(event);
         }
 
+        // Once a drawer gesture starts while the list is already scrolled, keep the
+        // entire touch stream with GridView. Running launcher-level clock/page/drawer
+        // recognizers over those MOVE events could steal downward scrolls from the list.
+        // The top-of-list pull-to-close gesture is intentionally handled separately below.
+        if (drawerOpen && gestureStartedOnDrawerGrid && !drawerAtTopOnGestureDown) {
+            return super.dispatchTouchEvent(event);
+        }
+
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
         if (action == MotionEvent.ACTION_MOVE) {
