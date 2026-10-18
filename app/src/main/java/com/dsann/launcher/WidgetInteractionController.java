@@ -226,14 +226,15 @@ final class WidgetInteractionController {
             final int resizeEdge = edge;
             View handle = new View(activity);
             handle.setTag("launcher_widget_resize_handle");
-            final int touchSide = LauncherUiUtils.dp(activity, 56);
+            final int touchLength = LauncherUiUtils.dp(activity, 56);
+            final int touchThickness = LauncherUiUtils.dp(activity, 32);
             final int visualLength = LauncherUiUtils.dp(activity, 32);
             final int visualThickness = LauncherUiUtils.dp(activity, 4);
             GradientDrawable handleBg = new GradientDrawable();
             handleBg.setColor(Color.rgb(115, 159, 255));
             handleBg.setCornerRadius(visualThickness / 2f);
-            int centeredInset = Math.max(0, (touchSide - visualLength) / 2);
-            int thinInset = Math.max(0, touchSide - visualThickness);
+            int centeredInset = Math.max(0, (touchLength - visualLength) / 2);
+            int thinInset = Math.max(0, touchThickness - visualThickness);
             int insetLeft = resizeEdge == 0 ? 0 : resizeEdge == 1 ? thinInset : centeredInset;
             int insetTop = resizeEdge == 2 ? 0 : resizeEdge == 3 ? thinInset : centeredInset;
             int insetRight = resizeEdge == 1 ? 0 : resizeEdge == 0 ? thinInset : centeredInset;
@@ -242,10 +243,10 @@ final class WidgetInteractionController {
                     handleBg, insetLeft, insetTop, insetRight, insetBottom));
             handle.setVisibility(View.GONE);
             FrameLayout.LayoutParams handleLp = edge < 2
-                    ? new FrameLayout.LayoutParams(touchSide, touchSide,
+                    ? new FrameLayout.LayoutParams(touchThickness, touchLength,
                             edge == 0 ? Gravity.LEFT | Gravity.CENTER_VERTICAL
                                     : Gravity.RIGHT | Gravity.CENTER_VERTICAL)
-                    : new FrameLayout.LayoutParams(touchSide, touchSide,
+                    : new FrameLayout.LayoutParams(touchLength, touchThickness,
                             edge == 2 ? Gravity.TOP | Gravity.CENTER_HORIZONTAL
                                     : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
             container.addView(handle, handleLp);
