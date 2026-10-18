@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
     private static final String KEY_DRAWER_FONT_SIZE = "drawer_font_size";
+    private static final String KEY_FONT_SIZE_SLIDER_VALUES = "font_size_slider_values_v1";
     private static final String KEY_CLOCK_STYLE = "clock_style";
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
@@ -105,6 +106,7 @@ public class MainActivity extends Activity {
     private static final String KEY_SHORTCUT_ICON_SIZE_DP = "contact_shortcut_icon_size_dp";
     private static final String KEY_SHORTCUT_X = "contact_shortcut_x";
     private static final String KEY_SHORTCUT_Y = "contact_shortcut_y";
+    private static final String KEY_SHORTCUT_GRID_POSITION = "contact_shortcut_grid_position_v1";
     private static final int REQUEST_WALLPAPER = 7301;
     private static final int REQUEST_WIDGET_PICK = 7302;
     private static final int REQUEST_WIDGET_BIND = 7303;
@@ -587,8 +589,6 @@ public class MainActivity extends Activity {
                 dismissedResizeMode |= widgetInteractionController.clearEditChromeOutsideTouch(
                         event.getRawX(), event.getRawY());
             }
-            dismissedResizeMode |= clearShortcutResizeModeOutsideTouch(
-                    event.getRawX(), event.getRawY());
             if (dismissedResizeMode) {
                 suppressResizeOutsideTouchStream = true;
                 return true;
@@ -1368,54 +1368,12 @@ public class MainActivity extends Activity {
         while (target != null) {
             Object tag = target.getTag();
             if ("launcher_widget_resize_handle".equals(tag)
-                    || "launcher_shortcut_resize_handle".equals(tag)
                     || "launcher_clock_resize_handle".equals(tag)) return true;
             if (target == root) break;
             android.view.ViewParent parent = target.getParent();
             target = parent instanceof View ? (View) parent : null;
         }
         return false;
-    }
-
-    /** Exit shortcut-resize mode only for a tap outside its tile. */
-    private boolean clearShortcutResizeModeOutsideTouch(float rawX, float rawY) {
-        if (pagesStrip == null) return false;
-        boolean dismissed = false;
-        for (int p = 0; p < pagesStrip.getChildCount(); p++) {
-            View page = pagesStrip.getChildAt(p);
-            if (!(page instanceof ViewGroup)) continue;
-            ViewGroup pageGroup = (ViewGroup) page;
-            for (int i = 0; i < pageGroup.getChildCount(); i++) {
-                View tile = pageGroup.getChildAt(i);
-                if (!"launcher_contact_shortcut".equals(tile.getTag())
-                        || !(tile instanceof ViewGroup)) continue;
-                ViewGroup shortcutGroup = (ViewGroup) tile;
-                boolean resizeMode = false;
-                for (int h = 0; h < shortcutGroup.getChildCount(); h++) {
-                    View child = shortcutGroup.getChildAt(h);
-                    if ("launcher_shortcut_resize_handle".equals(child.getTag())
-                            && child.getVisibility() == View.VISIBLE) {
-                        resizeMode = true;
-                        break;
-                    }
-                }
-                if (!resizeMode) continue;
-                int[] location = new int[2];
-                tile.getLocationOnScreen(location);
-                boolean inside = rawX >= location[0] && rawX < location[0] + tile.getWidth()
-                        && rawY >= location[1] && rawY < location[1] + tile.getHeight();
-                if (inside) continue;
-                for (int h = 0; h < shortcutGroup.getChildCount(); h++) {
-                    View child = shortcutGroup.getChildAt(h);
-                    if ("launcher_shortcut_resize_handle".equals(child.getTag())) {
-                        child.setVisibility(View.GONE);
-                    }
-                }
-                tile.setBackground(null);
-                dismissed = true;
-            }
-        }
-        return dismissed;
     }
 
     private boolean touchStartedOnContactShortcut(float rawX, float rawY) {
@@ -1944,10 +1902,13 @@ public class MainActivity extends Activity {
      * This mirrors LauncherAppAdapter's font-size presets and uses scaled density so
      * accessibility font scaling is respected on Android 6 as well.
      */
+    private int homeFontSizeSp() {
+        return Math.max(8, Math.min(20,
+                prefs == null ? 9 : prefs.getInt(KEY_HOME_FONT_SIZE, 9)));
+    }
+
     private int homeLabelHeightDp() {
-        int fontChoice = prefs == null ? 1 : prefs.getInt(KEY_HOME_FONT_SIZE, 1);
-        float targetTextSize = new float[]{9f, 9f, 10f, 12f, 14f}[
-                Math.max(0, Math.min(4, fontChoice))];
+        float targetTextSize = homeFontSizeSp();
         android.graphics.Paint labelPaint = new android.graphics.Paint(
                 android.graphics.Paint.ANTI_ALIAS_FLAG);
         labelPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
@@ -2200,7 +2161,7 @@ public class MainActivity extends Activity {
                 String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
                         KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
                         KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_ICON_SIZE_DP,
-                        KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
+                        KEY_SHORTCUT_X, KEY_SHORTCUT_Y, KEY_SHORTCUT_GRID_POSITION};
                 android.content.SharedPreferences.Editor edit = prefs.edit();
                 for (String key : keys) {
                     if (!prefs.contains(key)) continue;
@@ -2225,7 +2186,7 @@ public class MainActivity extends Activity {
         String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
                 KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
                 KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_ICON_SIZE_DP,
-                KEY_SHORTCUT_X, KEY_SHORTCUT_Y};
+                KEY_SHORTCUT_X, KEY_SHORTCUT_Y, KEY_SHORTCUT_GRID_POSITION};
         android.content.SharedPreferences.Editor edit = prefs.edit();
         for (String key : keys) edit.remove(shortcutPrefKey(key, id));
         java.util.ArrayList<String> ids = getSavedShortcutIds();
@@ -2286,7 +2247,9 @@ public class MainActivity extends Activity {
         if (savedUri == null || savedUri.isEmpty() || pagesStrip.getChildCount() == 0) return;
         int desiredPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1,
                 prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), 0)));
-        int columns = Math.max(1, getHomeColumns());
+        // Contact shortcuts use four columns, but the real tile is exactly icon-sized.
+        // Grid-slot coordinates are separate from the actual icon bounds.
+        int columns = 4;
         int rows = getHomeGridRows();
         int cellW = Math.max(1, pageViewport.getWidth() / columns);
         int cellH = LauncherUiUtils.dp(this,
@@ -2294,192 +2257,103 @@ public class MainActivity extends Activity {
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) return;
 
         FrameLayout chosenPage = null;
-        int chosenLeft = 0, chosenTop = 0;
-        int savedWidthDp = prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), 0);
-        int savedHeightDp = prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), 0);
-        // Old span-only values could have been written by the broken resize logic.
-        // Start compact unless a real pixel-size resize has been saved by this version.
-        int shortcutSpanX = savedWidthDp > 0
-                ? Math.max(1, Math.min(columns, prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), 1))) : 1;
-        int shortcutSpanY = savedHeightDp > 0
-                ? Math.max(1, Math.min(rows, prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), 1))) : 1;
-        // Check the complete resized shortcut footprint, not only its first grid cell.
-        // Default contact shortcuts use a compact visual footprint, not a full
-        // invisible grid cell. Explicitly resized shortcuts retain their saved size.
-        int compactShortcutSize = LauncherUiUtils.dp(this, 48);
-        // Preserve user-resized dimensions across page changes and workspace re-renders.
-        // Dimensions are bounded to the current page below, not reset at an arbitrary 96dp.
-        // A direct-call shortcut is an app-like icon, not a miniature widget tile.
-        // Its default footprint is the same compact size as the app icon cell.
-        // Match the shortcut's default footprint to one normal home-app grid cell.
-        int defaultShortcutWidth = cellW;
-        int defaultShortcutHeight = cellH;
-        int desiredTileWidth = Math.max(1, Math.min(pageViewport.getWidth(),
-                savedWidthDp > 0 ? LauncherUiUtils.dp(this, savedWidthDp)
-                        : Math.min(cellW, defaultShortcutWidth)));
-        int desiredTileHeight = Math.max(1, Math.min(pageViewport.getHeight(),
-                savedHeightDp > 0 ? LauncherUiUtils.dp(this, savedHeightDp)
-                        : Math.min(cellH, defaultShortcutHeight)));
-        // Restore a user-dragged position first, provided it is still visible and collision-free.
+        int chosenLeft = 0, chosenTop = 0; // Logical grid-cell origin.
         float savedX = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
         float savedY = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
+        boolean savedAsGrid = prefs.getBoolean(
+                shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), false);
         int lastSavedLeft = -1;
         int lastSavedTop = -1;
+
         if (savedX >= 0f && savedY >= 0f && desiredPage < pagesStrip.getChildCount()) {
             View savedPageView = pagesStrip.getChildAt(desiredPage);
             if (savedPageView instanceof FrameLayout) {
                 FrameLayout savedPage = (FrameLayout) savedPageView;
-                int maxLeft = Math.max(0, pageViewport.getWidth() - desiredTileWidth);
-                int maxTop = Math.max(0, pageViewport.getHeight() - desiredTileHeight);
-                int savedLeft = Math.round(Math.min(1f, savedX) * maxLeft);
-                int savedTop = Math.round(Math.min(1f, savedY) * maxTop);
+                int savedCol;
+                int savedRow;
+                if (savedAsGrid) {
+                    savedCol = Math.round(Math.min(1f, savedX) * Math.max(1, columns - 1));
+                    savedRow = Math.round(Math.min(1f, savedY) * Math.max(1, rows - 1));
+                } else {
+                    // Convert the previous free-form normalized pixels using saved dimensions,
+                    // then snap the old tile's center into the new four-column grid.
+                    int legacyWidthDp = prefs.getInt(
+                            shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), 0);
+                    int legacyHeightDp = prefs.getInt(
+                            shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), 0);
+                    int legacyWidth = legacyWidthDp > 0
+                            ? LauncherUiUtils.dp(this, legacyWidthDp) : cellW;
+                    int legacyHeight = legacyHeightDp > 0
+                            ? LauncherUiUtils.dp(this, legacyHeightDp) : cellH;
+                    int legacyLeft = Math.round(Math.min(1f, savedX)
+                            * Math.max(1, pageViewport.getWidth() - legacyWidth));
+                    int legacyTop = Math.round(Math.min(1f, savedY)
+                            * Math.max(1, pageViewport.getHeight() - legacyHeight));
+                    savedCol = Math.round((legacyLeft + legacyWidth / 2f) / cellW - 0.5f);
+                    int estimatedRowTop = legacyTop + legacyHeight / 2 - cellH / 2;
+                    savedRow = homeGridRowFromTop(estimatedRowTop, rows,
+                            pageViewport.getHeight(), cellH);
+                }
+                savedCol = Math.max(0, Math.min(columns - 1, savedCol));
+                savedRow = Math.max(0, Math.min(rows - 1, savedRow));
+                int savedLeft = savedCol * cellW;
+                int savedTop = homeGridRowTop(savedRow, rows, pageViewport.getHeight(), cellH);
                 lastSavedLeft = savedLeft;
                 lastSavedTop = savedTop;
                 if (isContactShortcutPositionFree(savedPage, null, savedLeft, savedTop,
-                        desiredTileWidth, desiredTileHeight)) {
+                        cellW, cellH, shortcutId)) {
                     chosenPage = savedPage;
                     chosenLeft = savedLeft;
                     chosenTop = savedTop;
                 }
             }
         }
-        // The app-slot finder accounts for app cells separately from widget bounds.
-        // Use it before geometric fallback so the shortcut can occupy a genuinely free cell.
-        for (int attempt = 0; attempt < 1 && chosenPage == null; attempt++) {
-            int pageIndex = desiredPage;
-            View pageView = pagesStrip.getChildAt(pageIndex);
-            if (!(pageView instanceof FrameLayout)) continue;
-            int[] freeSlot = findFreeHomeAppSlot(pageIndex);
-            if (freeSlot == null) continue;
-            int left = freeSlot[0] * cellW + Math.max(0, (cellW - desiredTileWidth) / 2);
-            int top = homeGridRowTop(freeSlot[1], rows, pageViewport.getHeight(), cellH)
-                    + Math.max(0, (cellH - desiredTileHeight) / 2);
-            if (left + desiredTileWidth <= pageViewport.getWidth()
-                    && top + desiredTileHeight <= pageViewport.getHeight()) {
-                chosenPage = (FrameLayout) pageView;
-                chosenLeft = left;
-                chosenTop = top;
-            }
-        }
-        for (int attempt = 0; attempt < 1 && chosenPage == null; attempt++) {
-            int pageIndex = desiredPage;
-            View pageView = pagesStrip.getChildAt(pageIndex);
-            if (!(pageView instanceof FrameLayout)) continue;
-            FrameLayout page = (FrameLayout) pageView;
-            for (int row = 0; row < rows && chosenPage == null; row++) {
-                for (int col = 0; col < columns && chosenPage == null; col++) {
-                    int candidateLeft = col * cellW + Math.max(0, (cellW - desiredTileWidth) / 2);
-                    int candidateTop = homeGridRowTop(row, rows, pageViewport.getHeight(), cellH)
-                            + Math.max(0, (cellH - desiredTileHeight) / 2);
-                    if (candidateLeft + desiredTileWidth > pageViewport.getWidth()
-                            || candidateTop + desiredTileHeight > pageViewport.getHeight()) continue;
-                    android.graphics.Rect candidate = new android.graphics.Rect(candidateLeft, candidateTop,
-                            candidateLeft + desiredTileWidth, candidateTop + desiredTileHeight);
-                    boolean occupied = false;
-                    for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
-                        View child = page.getChildAt(childIndex);
-                        // Hidden full-page grid overlays are visual helpers, not occupied
-                        // home items. Counting their bounds made first-time shortcut
-                        // placement think the whole workspace was full.
-                        if (child.getVisibility() != View.VISIBLE
-                                || child == workspaceGridOverlays[0] || child == workspaceGridOverlays[1]) continue;
-                        android.graphics.Rect bounds;
-                        ViewGroup.LayoutParams rawParams = child.getLayoutParams();
-                        if (rawParams instanceof FrameLayout.LayoutParams) {
-                            FrameLayout.LayoutParams childParams = (FrameLayout.LayoutParams) rawParams;
-                            int left = childParams.leftMargin;
-                            int top = childParams.topMargin;
-                            int width = childParams.width > 0 ? childParams.width : child.getWidth();
-                            int height = childParams.height > 0 ? childParams.height : child.getHeight();
-                            bounds = new android.graphics.Rect(left, top, left + Math.max(0, width), top + Math.max(0, height));
-                        } else {
-                            bounds = new android.graphics.Rect(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
-                        }
-                        if (android.graphics.Rect.intersects(candidate, bounds)) { occupied = true; break; }
-                    }
-                    if (!occupied) {
-                        chosenPage = page;
-                        chosenLeft = candidateLeft;
-                        chosenTop = candidateTop;
-                    }
-                }
-            }
-        }
-        // Never report success while silently dropping the shortcut. If every
-        // full-size tile collides, retry with a compact one-cell tile on either page.
-        if (chosenPage == null) {
-            desiredTileWidth = Math.max(1, cellW);
-            desiredTileHeight = Math.max(1, Math.min(cellH, pageViewport.getHeight()));
-            for (int attempt = 0; attempt < 1 && chosenPage == null; attempt++) {
-                int pageIndex = desiredPage;
-                View pageView = pagesStrip.getChildAt(pageIndex);
-                if (!(pageView instanceof FrameLayout)) continue;
-                FrameLayout page = (FrameLayout) pageView;
-                for (int row = 0; row < rows && chosenPage == null; row++) {
-                    for (int col = 0; col < columns && chosenPage == null; col++) {
-                        int left = col * cellW;
-                        int top = homeGridRowTop(row, rows, pageViewport.getHeight(), cellH);
-                        if (left + desiredTileWidth > pageViewport.getWidth()
-                                || top + desiredTileHeight > pageViewport.getHeight()) continue;
-                        android.graphics.Rect candidate = new android.graphics.Rect(left, top,
-                                left + desiredTileWidth, top + desiredTileHeight);
-                        boolean occupied = false;
-                        for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
-                            View child = page.getChildAt(childIndex);
-                            // Other shortcut tiles occupy real space and must not be ignored here.
-                            FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
-                                    ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
-                            int childLeft = p != null ? p.leftMargin : child.getLeft();
-                            int childTop = p != null ? p.topMargin : child.getTop();
-                            int childWidth = p != null && p.width > 0 ? p.width : child.getWidth();
-                            int childHeight = p != null && p.height > 0 ? p.height : child.getHeight();
-                            if (android.graphics.Rect.intersects(candidate, new android.graphics.Rect(
-                                    childLeft, childTop, childLeft + Math.max(0, childWidth),
-                                    childTop + Math.max(0, childHeight)))) { occupied = true; break; }
-                        }
-                        if (!occupied) {
-                            chosenPage = page;
-                            chosenLeft = left;
-                            chosenTop = top;
-                        }
-                    }
-                }
-            }
-        }
-        if (chosenPage == null && savedX >= 0f && savedY >= 0f
-                && lastSavedLeft >= 0 && lastSavedTop >= 0
-                && desiredPage < pagesStrip.getChildCount()
+
+        if (chosenPage == null && desiredPage < pagesStrip.getChildCount()
                 && pagesStrip.getChildAt(desiredPage) instanceof FrameLayout) {
-            // A restored shortcut is never discarded because its former location is
-            // temporarily occupied. Preserve its saved page/position for local repair.
-            chosenPage = (FrameLayout) pagesStrip.getChildAt(desiredPage);
-            chosenLeft = Math.max(0, Math.min(
-                    pageViewport.getWidth() - desiredTileWidth, lastSavedLeft));
-            chosenTop = Math.max(0, Math.min(
-                    pageViewport.getHeight() - desiredTileHeight, lastSavedTop));
-        }
-        if (chosenPage == null) {
-            // A newly-created shortcut has no saved position and must not be placed
-            // on another page as an implicit fallback.
-            return;
+            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(desiredPage);
+            int[] free = findFreeContactShortcutGridPosition(page, shortcutId,
+                    lastSavedLeft >= 0 ? lastSavedLeft : 0,
+                    lastSavedTop >= 0 ? lastSavedTop : 0, null);
+            if (free != null) {
+                chosenPage = page;
+                chosenLeft = free[0];
+                chosenTop = free[1];
+            }
         }
 
-        // Page identity is fixed here. Only the edge-drag drop path may change it.
-        if (pagesStrip.indexOfChild(chosenPage) != desiredPage) return;
-        float normalizedX = chosenLeft / (float) Math.max(1, pageViewport.getWidth() - desiredTileWidth);
-        float normalizedY = chosenTop / (float) Math.max(1, pageViewport.getHeight() - desiredTileHeight);
+        if (chosenPage == null && lastSavedLeft >= 0 && lastSavedTop >= 0
+                && desiredPage < pagesStrip.getChildCount()
+                && pagesStrip.getChildAt(desiredPage) instanceof FrameLayout) {
+            // Never discard a saved shortcut because its old position is temporarily blocked.
+            chosenPage = (FrameLayout) pagesStrip.getChildAt(desiredPage);
+            chosenLeft = Math.max(0, Math.min(pageViewport.getWidth() - cellW, lastSavedLeft));
+            chosenTop = Math.max(0, Math.min(pageViewport.getHeight() - cellH, lastSavedTop));
+        }
+        if (chosenPage == null || pagesStrip.indexOfChild(chosenPage) != desiredPage) return;
+
+        int chosenCol = Math.max(0, Math.min(columns - 1,
+                Math.round(chosenLeft / (float) cellW)));
+        int chosenRow = homeGridRowFromTop(chosenTop, rows, pageViewport.getHeight(), cellH);
+        int initialIconSize = shortcutIconSizePx(cellW, cellH);
+        int tileLeft = homeGridIconLeftAt(null, chosenCol, cellW, initialIconSize);
+        int tileTop = homeGridRowTop(chosenRow, rows, pageViewport.getHeight(), cellH)
+                + LauncherUiUtils.dp(this, 14);
+        float normalizedX = chosenCol / (float) Math.max(1, columns - 1);
+        float normalizedY = chosenRow / (float) Math.max(1, rows - 1);
         prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), desiredPage)
-                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), normalizedX).putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), normalizedY).apply();
+                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), normalizedX)
+                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), normalizedY)
+                .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
+                .apply();
+
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
         tile.setContentDescription("launcher_shortcut_id:" + shortcutId);
         tile.setClipChildren(false);
+        tile.setClipToPadding(false);
         chosenPage.setClipChildren(false);
-        LinearLayout tileContent = new LinearLayout(this);
-        tileContent.setOrientation(LinearLayout.VERTICAL);
-        tileContent.setGravity(Gravity.CENTER);
-        tileContent.setPadding(0, 0, 0, 0);
-        tile.addView(tileContent, new FrameLayout.LayoutParams(-1, -1));
+
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         boolean iconLoaded = false;
@@ -2503,204 +2377,33 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
-        // Keep the shortcut icon's own size independent from the invisible
-        // collision/resize footprint. The previous render-time scale recomputed
-        // from tile bounds and made the icon shrink whenever another item triggered
-        // a workspace rebuild.
-        int configuredShortcutIconDp = Math.max(24, prefs.getInt(
-                shortcutPrefKey(KEY_SHORTCUT_ICON_SIZE_DP, shortcutId),
-                Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48))));
-        int initialIconSize = Math.max(LauncherUiUtils.dp(this, 24),
-                Math.min(LauncherUiUtils.dp(this, 120),
-                        Math.min(Math.min(desiredTileWidth, desiredTileHeight),
-                                LauncherUiUtils.dp(this, configuredShortcutIconDp))));
-        tileContent.addView(icon, new LinearLayout.LayoutParams(initialIconSize, initialIconSize));
-        tileContent.setGravity(Gravity.CENTER);
-        tileContent.setOrientation(LinearLayout.VERTICAL);
+
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
+                initialIconSize, initialIconSize, Gravity.TOP | Gravity.LEFT);
+        tile.addView(icon, iconParams);
+
         TextView label = LauncherUiUtils.text(this,
-                prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"), 12, Color.WHITE, true);
+                prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
+                homeFontSizeSp(), Color.WHITE, true);
         label.setGravity(Gravity.CENTER);
-        label.setMaxLines(2);
+        label.setSingleLine(true);
+        label.setMaxLines(1);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        // The movable/collision tile is exactly the icon bounds. Keep the label
-        // visually below it without enlarging the shortcut tile itself.
+        label.setIncludeFontPadding(false);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
-                Math.max(1, desiredTileWidth + LauncherUiUtils.dp(this, 24)),
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        labelParams.topMargin = desiredTileHeight + LauncherUiUtils.dp(this, 3);
+                cellW, LauncherUiUtils.dp(this, homeLabelHeightDp()), Gravity.TOP | Gravity.LEFT);
+        labelParams.leftMargin = -Math.max(0, (cellW - initialIconSize) / 2);
+        labelParams.topMargin = initialIconSize + LauncherUiUtils.dp(this, 1);
         tile.addView(label, labelParams);
-        int tileWidth = Math.min(pageViewport.getWidth() - chosenLeft, desiredTileWidth);
-        int tileHeight = Math.min(pageViewport.getHeight() - chosenTop, desiredTileHeight);
-        // Keep the real layout bounds equal to the resized tile; do not inflate it to a grid cell.
+        label.setVisibility(prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
+                ? View.VISIBLE : View.GONE);
+
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
-                Math.max(1, tileWidth), Math.max(1, tileHeight), Gravity.TOP | Gravity.LEFT);
-        tileParams.leftMargin = chosenLeft;
-        tileParams.topMargin = chosenTop;
+                initialIconSize, initialIconSize, Gravity.TOP | Gravity.LEFT);
+        tileParams.leftMargin = tileLeft;
+        tileParams.topMargin = tileTop;
         chosenPage.addView(tile, tileParams);
-        // Four edge grips give shortcuts the same independent edge-resize behavior as widgets.
-        final View[] shortcutResizeHandles = new View[4];
-        final boolean[] resizingShortcut = {false};
-        final float[] resizeStart = {0f, 0f};
-        final int[] resizeOrigin = {chosenLeft, chosenTop, tileWidth, tileHeight};
-        final FrameLayout shortcutResizePage = chosenPage;
-        for (int edge = 0; edge < shortcutResizeHandles.length; edge++) {
-            final int resizeEdge = edge; // 0 left, 1 right, 2 top, 3 bottom
-            View grip = new View(this);
-            final int visualThickness = LauncherUiUtils.dp(this, 3);
-            GradientDrawable gripBackground = new GradientDrawable();
-            gripBackground.setColor(Color.rgb(115, 159, 255));
-            gripBackground.setCornerRadius(visualThickness / 2f);
-            grip.setVisibility(View.GONE);
-            grip.setTag("launcher_shortcut_resize_handle");
-            // Transparent hit strips are wider than the visible blue edge marker.
-            int thick = Math.max(LauncherUiUtils.dp(this, 18),
-                    Math.min(LauncherUiUtils.dp(this, 32),
-                            Math.min(tileWidth, tileHeight) / 2));
-            int edgeInset = Math.max(0, Math.min(LauncherUiUtils.dp(this, 10),
-                    Math.min(tileWidth, tileHeight) / 4));
-            int visualInset = Math.max(0, thick - visualThickness);
-            int insetLeft = resizeEdge == 0 ? 0 : resizeEdge == 1 ? visualInset : edgeInset;
-            int insetTop = resizeEdge == 2 ? 0 : resizeEdge == 3 ? visualInset : edgeInset;
-            int insetRight = resizeEdge == 1 ? 0 : resizeEdge == 0 ? visualInset : edgeInset;
-            int insetBottom = resizeEdge == 3 ? 0 : resizeEdge == 2 ? visualInset : edgeInset;
-            grip.setBackground(new android.graphics.drawable.InsetDrawable(
-                    gripBackground, insetLeft, insetTop, insetRight, insetBottom));
-            FrameLayout.LayoutParams gripParams;
-            if (edge < 2) {
-                gripParams = new FrameLayout.LayoutParams(thick,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        edge == 0 ? Gravity.LEFT : Gravity.RIGHT);
-            } else {
-                gripParams = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, thick,
-                        edge == 2 ? Gravity.TOP : Gravity.BOTTOM);
-            }
-            tile.addView(grip, gripParams);
-            grip.bringToFront();
-            shortcutResizeHandles[edge] = grip;
-            grip.setOnTouchListener((view, event) -> {
-                int action = event.getActionMasked();
-                if (action == MotionEvent.ACTION_DOWN) {
-                    resizingShortcut[0] = true;
-                    setWorkspaceGridVisible(true, tile);
-                    resizeStart[0] = event.getRawX();
-                    resizeStart[1] = event.getRawY();
-                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                    resizeOrigin[0] = p.leftMargin;
-                    resizeOrigin[1] = p.topMargin;
-                    resizeOrigin[2] = p.width > 0 ? p.width : tile.getWidth();
-                    resizeOrigin[3] = p.height > 0 ? p.height : tile.getHeight();
-                    tile.getParent().requestDisallowInterceptTouchEvent(true);
-                    return true;
-                }
-                if (action == MotionEvent.ACTION_MOVE && resizingShortcut[0]) {
-                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                    int dx = Math.round(event.getRawX() - resizeStart[0]);
-                    int dy = Math.round(event.getRawY() - resizeStart[1]);
-                    int minW = Math.min(cellW, Math.max(1, shortcutResizePage.getWidth()));
-                    int minH = Math.min(cellH, Math.max(1, shortcutResizePage.getHeight()));
-                    int left = resizeOrigin[0], top = resizeOrigin[1];
-                    int width = resizeOrigin[2], height = resizeOrigin[3];
-                    if (resizeEdge == 0) {
-                        left = Math.max(0, Math.min(resizeOrigin[0] + dx,
-                                resizeOrigin[0] + resizeOrigin[2] - minW));
-                        width = resizeOrigin[0] + resizeOrigin[2] - left;
-                    } else if (resizeEdge == 1) {
-                        width = Math.max(minW, resizeOrigin[2] + dx);
-                    } else if (resizeEdge == 2) {
-                        top = Math.max(0, Math.min(resizeOrigin[1] + dy,
-                                resizeOrigin[1] + resizeOrigin[3] - minH));
-                        height = resizeOrigin[1] + resizeOrigin[3] - top;
-                    } else {
-                        height = Math.max(minH, resizeOrigin[3] + dy);
-                    }
-                    width = Math.max(minW, Math.min(width, shortcutResizePage.getWidth() - left));
-                    height = Math.max(minH, Math.min(height, shortcutResizePage.getHeight() - top));
-                    android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + width, top + height);
-                    boolean overlap = false;
-                    for (int i = 0; i < shortcutResizePage.getChildCount(); i++) {
-                        View other = shortcutResizePage.getChildAt(i);
-                        if (other == tile || other.getVisibility() != View.VISIBLE
-                                || !(other.getTag() instanceof String)) continue;
-                        String tag = (String) other.getTag();
-                        if (!(tag.startsWith("launcher_app:") || tag.startsWith("launcher_widget:")
-                                || "launcher_contact_shortcut".equals(tag)
-                                || "launcher_clock_widget".equals(tag))) continue;
-                        // Use the shared visual geometry helper so scaled/translated
-                        // clock bounds and pending layout changes are checked correctly.
-                        int[] otherGeometry = itemGeometry(other);
-                        if (otherGeometry[2] > 0 && otherGeometry[3] > 0
-                                && android.graphics.Rect.intersects(candidate,
-                                        collisionRect(other, otherGeometry))) {
-                            overlap = true;
-                            break;
-                        }
-                    }
-                    if (!overlap) {
-                        p.leftMargin = left; p.topMargin = top; p.width = width; p.height = height;
-                        tile.setLayoutParams(p);
-                        ViewGroup.LayoutParams rawLabel = label.getLayoutParams();
-                        if (rawLabel instanceof FrameLayout.LayoutParams) {
-                            FrameLayout.LayoutParams labelLp = (FrameLayout.LayoutParams) rawLabel;
-                            labelLp.topMargin = height + LauncherUiUtils.dp(this, 3);
-                            label.setLayoutParams(labelLp);
-                        }
-                        float scale = Math.min(width / (float) Math.max(1, cellW), height / (float) Math.max(1, cellH));
-                        int configuredIconDp = Math.max(24, prefs.getInt(KEY_ICON_SIZE, 48));
-                        int iconSize = Math.max(LauncherUiUtils.dp(this, 24),
-                                Math.min(LauncherUiUtils.dp(this, 120),
-                                        Math.round(LauncherUiUtils.dp(this, configuredIconDp) * scale)));
-                        ViewGroup.LayoutParams iconLp = icon.getLayoutParams();
-                        if (iconLp != null) {
-                            iconLp.width = iconSize; iconLp.height = iconSize;
-                            icon.setLayoutParams(iconLp);
-                        }
-                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_ICON_SIZE_DP, shortcutId),
-                                Math.max(24, Math.round(iconSize / getResources().getDisplayMetrics().density)))
-                                .apply();
-                        refreshWorkspaceGrid();
-                    }
-                    return true;
-                }
-                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                    if (resizingShortcut[0]) {
-                        resizingShortcut[0] = false;
-                        if (action == MotionEvent.ACTION_CANCEL) {
-                            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                            p.leftMargin = resizeOrigin[0]; p.topMargin = resizeOrigin[1];
-                            p.width = resizeOrigin[2]; p.height = resizeOrigin[3];
-                            tile.setLayoutParams(p);
-                        }
-                        FrameLayout.LayoutParams finalLp = (FrameLayout.LayoutParams) tile.getLayoutParams();
-                        float density = getResources().getDisplayMetrics().density;
-                        int spanX = Math.max(1, (int) Math.ceil(finalLp.width / (float) cellW));
-                        int spanY = Math.max(1, (int) Math.ceil(finalLp.height / (float) cellH));
-                        int savedPageWidth = Math.max(1, shortcutResizePage.getWidth());
-                        int savedPageHeight = Math.max(1, shortcutResizePage.getHeight());
-                        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_X, shortcutId), spanX)
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_SPAN_Y, shortcutId), spanY)
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId), Math.max(1, Math.round(finalLp.width / density)))
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId), Math.max(1, Math.round(finalLp.height / density)))
-                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
-                                        finalLp.leftMargin / (float) Math.max(1, savedPageWidth - finalLp.width))
-                                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                                        finalLp.topMargin / (float) Math.max(1, savedPageHeight - finalLp.height))
-                                .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
-                                        pagesStrip == null ? 0 : pagesStrip.indexOfChild(shortcutResizePage))
-                                .apply();
-                        if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
-                        setWorkspaceGridVisible(false, null);
-                    }
-                    return true;
-                }
-                return true;
-            });
-        }
         tile.setOnClickListener(v -> {
-            if (shortcutResizeHandles[0].getVisibility() == View.VISIBLE) {
-                // Outside taps are the only way to exit resize mode.
-                return;
-            }
             try {
                 Intent target = Intent.parseUri(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_INTENT, shortcutId), ""),
                         Intent.URI_INTENT_SCHEME);
@@ -2730,20 +2433,18 @@ public class MainActivity extends Activity {
         final boolean[] shortcutMoveArmed = new boolean[1];
         final boolean[] shortcutPopupShown = new boolean[1];
         final boolean[] shortcutReparenting = new boolean[1];
-        final boolean[] shortcutResizeModeTouch = {false};
         final android.os.Handler shortcutTouchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
         final Runnable armShortcutMove = () -> {
             if (shortcutPopupShown[0] || shortcutDragging[0]) return;
-            for (View handle : shortcutResizeHandles) {
-                if (handle != null && handle.getVisibility() == View.VISIBLE) return;
-            }
             shortcutMoveArmed[0] = true;
+            setWorkspaceGridVisible(true, tile);
             // Match widgets: steady 10% enlargement after the move-ready hold.
             LauncherUiUtils.startScaleHint(tile, 1.10f);
         };
         final Runnable showShortcutPopup = () -> {
             if (!shortcutMoved[0] && !shortcutDragging[0]) {
                 LauncherUiUtils.stopMoveHint(tile);
+                setWorkspaceGridVisible(false, null);
                 shortcutPopupShown[0] = true;
                 tile.performLongClick();
             }
@@ -2751,20 +2452,6 @@ public class MainActivity extends Activity {
         tile.setOnTouchListener((view, event) -> {
             if (shortcutReparenting[0]) return true;
             int action = event.getActionMasked();
-            if (shortcutResizeModeTouch[0]) {
-                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                    shortcutResizeModeTouch[0] = false;
-                }
-                return true;
-            }
-            if (action == MotionEvent.ACTION_DOWN) {
-                for (View handle : shortcutResizeHandles) {
-                    if (handle != null && handle.getVisibility() == View.VISIBLE) {
-                        shortcutResizeModeTouch[0] = true;
-                        return true;
-                    }
-                }
-            }
             if (action == MotionEvent.ACTION_DOWN) {
                 shortcutTouchStart[0] = event.getRawX();
                 shortcutTouchStart[1] = event.getRawY();
@@ -2879,6 +2566,21 @@ public class MainActivity extends Activity {
                                 - shortcutFingerOffset[1]) : shortcutOrigin[1];
                         left = Math.max(0, Math.min(Math.max(0, targetPage.getWidth() - tile.getWidth()), left));
                         top = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - tile.getHeight()), top));
+                        if (commit && targetPage.getWidth() > 0 && targetPage.getHeight() > 0) {
+                            int shortcutCellWidth = Math.max(1, targetPage.getWidth() / 4);
+                            int shortcutCellHeight = LauncherUiUtils.dp(this,
+                                    homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+                            int shortcutRows = homeGridRowsForHeight(targetPage.getHeight(), shortcutCellHeight);
+                            int shortcutCol = Math.max(0, Math.min(3,
+                                    Math.round((left + tile.getWidth() / 2f) / shortcutCellWidth - 0.5f)));
+                            int shortcutRow = homeGridRowFromTop(
+                                    top - LauncherUiUtils.dp(this, 14), shortcutRows,
+                                    targetPage.getHeight(), shortcutCellHeight);
+                            left = homeGridIconLeftAt(null, shortcutCol, shortcutCellWidth, tile.getWidth());
+                            top = homeGridRowTop(shortcutRow, shortcutRows,
+                                    targetPage.getHeight(), shortcutCellHeight)
+                                    + LauncherUiUtils.dp(this, 14);
+                        }
                         lp.leftMargin = left;
                         lp.topMargin = top;
                         tile.setTranslationX(0f);
@@ -2904,17 +2606,25 @@ public class MainActivity extends Activity {
                         int finalLeft = finalShortcutLp.leftMargin;
                         int finalTop = finalShortcutLp.topMargin;
                         if (commit) {
-                            prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
-                                            pageIndex >= 0 ? pageIndex : currentPage)
-                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
-                                            finalLeft / (float) Math.max(1, targetPage.getWidth() - tile.getWidth()))
-                                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                                            finalTop / (float) Math.max(1, targetPage.getHeight() - tile.getHeight()))
-                                    .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
-                                            Math.max(1, Math.round(finalShortcutLp.width / density)))
-                                    .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
-                                            Math.max(1, Math.round(finalShortcutLp.height / density)))
-                                    .apply();
+                            int cellHeight = LauncherUiUtils.dp(this,
+                                    homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+                            int rows = homeGridRowsForHeight(targetPage.getHeight(), cellHeight);
+                            int[] slot = homeGridIconSlot(targetPage, tile, cellHeight, rows);
+                            if (slot != null) {
+                                prefs.edit()
+                                        .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId),
+                                                pageIndex >= 0 ? pageIndex : currentPage)
+                                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
+                                                slot[0] / (float) Math.max(1, 4 - 1))
+                                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                                                slot[1] / (float) Math.max(1, rows - 1))
+                                        .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
+                                        .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
+                                                Math.max(1, Math.round(finalShortcutLp.width / density)))
+                                        .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
+                                                Math.max(1, Math.round(finalShortcutLp.height / density)))
+                                        .apply();
+                            }
                         }
                     } else {
                         LauncherUiUtils.stopMoveHint(tile);
@@ -2929,9 +2639,13 @@ public class MainActivity extends Activity {
                     return true;
                 }
                 LauncherUiUtils.stopMoveHint(tile);
-                if (!shortcutPopupShown[0] && !shortcutMoved[0] && action == MotionEvent.ACTION_UP) {
+                // A one-second hold enters move/edit mode; releasing without moving
+                // must not accidentally launch the contact/application shortcut.
+                if (!shortcutPopupShown[0] && !shortcutMoved[0] && action == MotionEvent.ACTION_UP
+                        && !shortcutMoveArmed[0]) {
                     tile.performClick();
                 }
+                if (shortcutMoveArmed[0]) setWorkspaceGridVisible(false, null);
                 return true;
             }
             return true;
@@ -2941,8 +2655,8 @@ public class MainActivity extends Activity {
         tile.setOnLongClickListener(v -> {
             if (shortcutMoved[0]) return true;
             showActionDialog(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
-                    new String[]{"↔", "−", "×", "↻"},
-                    new String[]{"Move to other page", "Resize shortcut", "Remove shortcut", "Recreate contact shortcut"},
+                    new String[]{"↔", "×", "↻"},
+                    new String[]{"Move to other page", "Remove shortcut", "Recreate contact shortcut"},
                     (dialog, which) -> {
                 if (which == 0) {
                     int pageCount = pagesStrip == null ? 1 : Math.max(1, pagesStrip.getChildCount());
@@ -2952,15 +2666,9 @@ public class MainActivity extends Activity {
                     renderHomePages(false);
                     showPage(targetPage, true);
                 } else if (which == 1) {
-                    for (View handle : shortcutResizeHandles) handle.setVisibility(View.VISIBLE);
-                    tile.setBackground(LauncherUiUtils.roundRect(this,
-                            new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)},
-                            LauncherUiUtils.dp(this, 8)));
-                    Toast.makeText(this, "Drag any blue edge to resize", Toast.LENGTH_LONG).show();
-                } else if (which == 2) {
                     removeSavedShortcut(shortcutId);
                     renderHomePages(false);
-                } else if (which == 3) {
+                } else if (which == 2) {
                     removeSavedShortcut(shortcutId);
                     beginWidgetPicker(currentPage);
                 }
@@ -2969,51 +2677,182 @@ public class MainActivity extends Activity {
         });
     }
 
+    private int getShortcutIconSizeDp() {
+        int homeSize = Math.max(32, Math.min(84,
+                prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+        int configured = homeSize;
+        if (prefs != null && prefs.contains(KEY_SHORTCUT_ICON_SIZE_DP)) {
+            configured = prefs.getInt(KEY_SHORTCUT_ICON_SIZE_DP, homeSize);
+        } else if (prefs != null) {
+            for (String id : getSavedShortcutIds()) {
+                String legacyKey = shortcutPrefKey(KEY_SHORTCUT_ICON_SIZE_DP, id);
+                if (prefs.contains(legacyKey)) {
+                    configured = prefs.getInt(legacyKey, homeSize);
+                    break;
+                }
+            }
+        }
+        return Math.max(24, Math.min(homeSize, configured));
+    }
+
+    private int shortcutIconSizePx(int cellWidth, int cellHeight) {
+        int requested = LauncherUiUtils.dp(this, getShortcutIconSizeDp());
+        int widthLimit = Math.max(1, cellWidth - LauncherUiUtils.dp(this, 4));
+        int labelHeight = prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
+                ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
+        int heightLimit = Math.max(1, cellHeight - LauncherUiUtils.dp(this, 14 + 7) - labelHeight);
+        return Math.max(1, Math.min(requested, Math.min(widthLimit, heightLimit)));
+    }
+
+    private android.graphics.Rect contactShortcutVisualRectAt(
+            String shortcutId, int x, int y, int cellWidth, int cellHeight) {
+        int iconSize = shortcutIconSizePx(cellWidth, cellHeight);
+        int left = x + Math.max(0, (cellWidth - iconSize) / 2);
+        int top = y + LauncherUiUtils.dp(this, 14);
+        android.graphics.Rect visual = new android.graphics.Rect(left, top, left + iconSize, top + iconSize);
+        if (prefs == null || !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)) return visual;
+        String text = prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut");
+        android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        paint.setTextSize(homeFontSizeSp() * getResources().getDisplayMetrics().scaledDensity);
+        android.graphics.Paint.FontMetrics metrics = paint.getFontMetrics();
+        int textHeight = Math.max(1, (int) Math.ceil(metrics.descent - metrics.ascent));
+        int labelHeight = LauncherUiUtils.dp(this, homeLabelHeightDp());
+        float availableWidth = Math.max(1, cellWidth - LauncherUiUtils.dp(this, 4));
+        int textWidth = Math.max(1, (int) Math.ceil(Math.min(availableWidth, paint.measureText(text))));
+        int labelLeft = x + (cellWidth - textWidth) / 2;
+        int labelTop = y + LauncherUiUtils.dp(this, 14) + iconSize
+                + LauncherUiUtils.dp(this, 1) + Math.max(0, (labelHeight - textHeight) / 2);
+        visual.union(new android.graphics.Rect(labelLeft, labelTop, labelLeft + textWidth, labelTop + textHeight));
+        return visual;
+    }
+
+    private int[] findFreeContactShortcutGridPosition(
+            FrameLayout page, String shortcutId, int preferredX, int preferredY, View ignore) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
+        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        int bestX = -1, bestY = -1;
+        long bestDistance = Long.MAX_VALUE;
+        for (int row = 0; row < rows; row++) {
+            int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            if (y + cellHeight > page.getHeight()) continue;
+            for (int col = 0; col < 4; col++) {
+                int x = col * cellWidth;
+                if (x + cellWidth > page.getWidth()) continue;
+                if (!isContactShortcutPositionFree(page, ignore, x, y,
+                        cellWidth, cellHeight, shortcutId)) continue;
+                long distance = Math.abs((long) x - preferredX) + Math.abs((long) y - preferredY);
+                if (distance < bestDistance) { bestDistance = distance; bestX = x; bestY = y; }
+            }
+        }
+        return bestX < 0 ? null : new int[]{bestX, bestY, cellWidth, cellHeight};
+    }
+
     private boolean isContactShortcutPositionFree(FrameLayout page, View ignore, int left, int top,
-            int width, int height) {
-        if (page == null || width <= 0 || height <= 0 || pageViewport == null) return false;
-        int columns = getHomeColumns();
-        int cellW = Math.max(1, pageViewport.getWidth() / columns);
-        int cellH = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-        int rows = Math.max(1, pageViewport.getHeight() / cellH);
-        // Test the snapped one-cell target, exactly as the app icon placer does.
-        int col = Math.max(0, Math.min(columns - 1,
-                Math.round((left + width / 2f - cellW / 2f) / cellW)));
-        int row = homeGridRowFromTop(
-                top + height / 2f - cellH / 2f, rows, pageViewport.getHeight(), cellH);
-        int snappedLeft = col * cellW;
-        int snappedTop = homeGridRowTop(row, rows, pageViewport.getHeight(), cellH);
-        android.graphics.Rect candidate = new android.graphics.Rect(snappedLeft, snappedTop,
-                snappedLeft + cellW, snappedTop + cellH);
-        if (candidate.right > pageViewport.getWidth() || candidate.bottom > pageViewport.getHeight()) return false;
+            int width, int height, String shortcutId) {
+        if (page == null || width <= 0 || height <= 0) return false;
+        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        int col = Math.max(0, Math.min(3, Math.round(left / (float) cellWidth)));
+        int row = homeGridRowFromTop(top, rows, page.getHeight(), cellHeight);
+        int snappedLeft = col * cellWidth;
+        int snappedTop = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+        if (snappedLeft < 0 || snappedTop < 0
+                || snappedLeft + cellWidth > page.getWidth()
+                || snappedTop + cellHeight > page.getHeight()) return false;
+        android.graphics.Rect candidate = contactShortcutVisualRectAt(
+                shortcutId, snappedLeft, snappedTop, cellWidth, cellHeight);
+        android.graphics.Rect candidateWithGap = new android.graphics.Rect(candidate);
+        int gap = LauncherUiUtils.dp(this, 2);
+        candidateWithGap.inset(-gap, -gap);
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
-            if (child == ignore || child == workspaceGridOverlays[0]
-                    || child == workspaceGridOverlays[1] || child.getVisibility() != View.VISIBLE) continue;
-            Object rawTag = child.getTag();
-            String tag = rawTag instanceof String ? (String) rawTag : "";
-            if (tag.startsWith("launcher_app:")) {
-                FrameLayout.LayoutParams appLp = child.getLayoutParams() instanceof FrameLayout.LayoutParams
-                        ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
-                int appLeft = appLp != null ? appLp.leftMargin : child.getLeft();
-                int appTop = appLp != null ? appLp.topMargin : child.getTop();
-                int appCol = Math.max(0, Math.min(columns - 1, Math.round(appLeft / (float) cellW)));
-                int appRow = homeGridRowFromTop(
-                        appTop, rows, pageViewport.getHeight(), cellH);
-                if (appCol == col && appRow == row) return false;
-                continue;
+            if (child == ignore || child == workspaceGridOverlays[0] || child == workspaceGridOverlays[1]
+                    || child.getVisibility() != View.VISIBLE || !isWorkspaceItem(child)) continue;
+            int[] geometry = itemGeometry(child);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            if (isHomeGridIcon(child)) {
+                android.graphics.Rect other = appIconVisualRectAt(
+                        child, geometry[0], geometry[1], geometry[2], geometry[3]);
+                if (android.graphics.Rect.intersects(candidate, other)) return false;
+            } else {
+                android.graphics.Rect other = collisionRect(child, geometry);
+                if (android.graphics.Rect.intersects(candidateWithGap, other)) return false;
             }
-            // Count other shortcuts as occupied space; only the explicitly ignored view is skipped.
-            FrameLayout.LayoutParams p = child.getLayoutParams() instanceof FrameLayout.LayoutParams
-                    ? (FrameLayout.LayoutParams) child.getLayoutParams() : null;
-            int childLeft = p != null ? p.leftMargin : child.getLeft();
-            int childTop = p != null ? p.topMargin : child.getTop();
-            int childWidth = p != null && p.width > 0 ? p.width : child.getWidth();
-            int childHeight = p != null && p.height > 0 ? p.height : child.getHeight();
-            if (childWidth > 0 && childHeight > 0 && android.graphics.Rect.intersects(candidate,
-                    new android.graphics.Rect(childLeft, childTop, childLeft + childWidth, childTop + childHeight))) return false;
         }
         return true;
+    }
+
+    private void applyShortcutIconSizeToWorkspace() {
+        if (pagesStrip == null) return;
+        for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            int cellWidth = Math.max(1, page.getWidth() / 4);
+            int cellHeight = LauncherUiUtils.dp(this,
+                    homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+            int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                if (!isWorkspaceContactShortcut(child) || !(child instanceof ViewGroup)
+                        || child.getChildCount() < 2) continue;
+                ImageView icon = child.getChildAt(0) instanceof ImageView
+                        ? (ImageView) child.getChildAt(0) : null;
+                TextView label = child.getChildAt(1) instanceof TextView
+                        ? (TextView) child.getChildAt(1) : null;
+                if (icon == null) continue;
+                int[] slot = homeGridIconSlot(page, child, cellHeight, rows);
+                if (slot == null) continue;
+                int target = shortcutIconSizePx(cellWidth, cellHeight);
+                FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) child.getLayoutParams();
+                tileParams.width = target;
+                tileParams.height = target;
+                tileParams.leftMargin = homeGridIconLeftAt(null, slot[0], cellWidth, target);
+                tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight)
+                        + LauncherUiUtils.dp(this, 14);
+                child.setLayoutParams(tileParams);
+
+                ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
+                if (iconParams != null && (iconParams.width != target || iconParams.height != target)) {
+                    iconParams.width = target;
+                    iconParams.height = target;
+                    icon.setLayoutParams(iconParams);
+                }
+                if (label != null && label.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams labelParams =
+                            (FrameLayout.LayoutParams) label.getLayoutParams();
+                    labelParams.width = cellWidth;
+                    labelParams.leftMargin = -Math.max(0, (cellWidth - target) / 2);
+                    labelParams.topMargin = target + LauncherUiUtils.dp(this, 1);
+                    label.setLayoutParams(labelParams);
+                }
+            }
+            resolveAllWorkspaceOverlaps(page, null);
+        }
+        refreshWorkspaceGrid();
+    }
+
+    private void rebuildContactShortcutViews() {
+        if (pagesStrip == null) return;
+        for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            for (int i = page.getChildCount() - 1; i >= 0; i--) {
+                View child = page.getChildAt(i);
+                if (isWorkspaceContactShortcut(child)) {
+                    child.animate().cancel();
+                    page.removeViewAt(i);
+                }
+            }
+        }
+        renderSavedContactShortcut();
     }
 
     private boolean hasRenderedContactShortcut(String shortcutId) {
@@ -4186,25 +4025,6 @@ public class MainActivity extends Activity {
      * crashes. Page membership is rebuilt only after a real content change.
      */
     private void dismissShortcutEditMode() {
-        if (pagesStrip != null) {
-            for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
-                View pageView = pagesStrip.getChildAt(pageIndex);
-                if (!(pageView instanceof ViewGroup)) continue;
-                ViewGroup page = (ViewGroup) pageView;
-                for (int i = 0; i < page.getChildCount(); i++) {
-                    View child = page.getChildAt(i);
-                    if (!"launcher_contact_shortcut".equals(child.getTag())
-                            || !(child instanceof ViewGroup)) continue;
-                    ViewGroup shortcut = (ViewGroup) child;
-                    for (int j = 0; j < shortcut.getChildCount(); j++) {
-                        View handle = shortcut.getChildAt(j);
-                        if ("launcher_shortcut_resize_handle".equals(handle.getTag())) {
-                            handle.setVisibility(View.GONE);
-                        }
-                    }
-                }
-            }
-        }
         setWorkspaceGridVisible(false, null);
     }
 
@@ -6229,7 +6049,7 @@ public class MainActivity extends Activity {
 
     private void animateDisplacedItemTo(View item, int left, int top) {
         if (item == null) return;
-        if (isWorkspaceAppIcon(item)) {
+        if (isHomeGridIcon(item)) {
             // A group animation may be re-targeted mid-drag. Freeze that cohort at its
             // current visual positions and re-queue its unchanged reservations together.
             cancelAppDisplacementAnimator(item, true);
@@ -6405,19 +6225,19 @@ public class MainActivity extends Activity {
      * icon. This is a fast, bounded first choice; the existing collision planner remains
      * the fallback when a safe common shift is unavailable.
      */
-    private boolean tryShiftAppIconCohort(FrameLayout page, View movingView, View seed,
+    private boolean tryShiftHomeIconCohort(FrameLayout page, View movingView, View seed,
             int preferredX, int preferredY) {
         if (page == null || movingView == null || seed == null
-                || !isWorkspaceAppIcon(movingView) || !isWorkspaceAppIcon(seed)
+                || !isHomeGridIcon(movingView) || !isHomeGridIcon(seed)
                 || liveDisplacedItems.containsKey(seed)
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
 
-        int columns = Math.max(1, getHomeColumns());
+        int columns = homeGridColumnsForItem(seed);
         int cellWidth = Math.max(1, page.getWidth() / columns);
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
-        int[] seedSlot = appIconGridSlot(page, seed, cellWidth, cellHeight, rows);
+        int[] seedSlot = homeGridIconSlot(page, seed, cellHeight, rows);
         if (seedSlot == null) return false;
 
         java.util.ArrayList<int[]> directions = new java.util.ArrayList<int[]>();
@@ -6491,12 +6311,14 @@ public class MainActivity extends Activity {
                     blocked = true;
                     break;
                 }
-                int originX = originSlot[0] * cellWidth;
-                int originY = homeGridRowTop(
-                        originSlot[1], rows, page.getHeight(), cellHeight);
-                int targetX = targetCol * cellWidth;
-                int targetY = homeGridRowTop(targetRow, rows, page.getHeight(), cellHeight);
                 int[] memberGeometry = itemGeometry(member);
+                int originX = homeGridIconLeftAt(
+                        member, originSlot[0], cellWidth, memberGeometry[2]);
+                int originY = homeGridIconTopAt(
+                        page, member, originSlot[1], rows, cellHeight);
+                int targetX = homeGridIconLeftAt(
+                        member, targetCol, cellWidth, memberGeometry[2]);
+                int targetY = homeGridIconTopAt(page, member, targetRow, rows, cellHeight);
                 android.graphics.Rect startVisible = appIconVisualRectAt(
                         member, originX, originY, memberGeometry[2], memberGeometry[3]);
                 android.graphics.Rect targetVisible = appIconVisualRectAt(
@@ -6518,13 +6340,15 @@ public class MainActivity extends Activity {
                     int[] blockerGeometry = itemGeometry(blocker);
                     if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
 
-                    boolean appBlocker = isWorkspaceAppIcon(blocker);
-                    int[] blockerSlot = appBlocker
-                            ? appIconGridSlot(page, blocker, cellWidth, cellHeight, rows) : null;
-                    boolean targetSlotOccupied = appBlocker && blockerSlot != null
+                    boolean gridBlocker = isHomeGridIcon(blocker);
+                    boolean sameGridFamily = gridBlocker
+                            && (isWorkspaceContactShortcut(blocker) == isWorkspaceContactShortcut(seed));
+                    int[] blockerSlot = gridBlocker
+                            ? homeGridIconSlot(page, blocker, cellHeight, rows) : null;
+                    boolean targetSlotOccupied = sameGridFamily && blockerSlot != null
                             && blockerSlot[0] == targetCol && blockerSlot[1] == targetRow;
                     android.graphics.Rect sweepForBlocker = new android.graphics.Rect(swept);
-                    if (!appBlocker) {
+                    if (!gridBlocker) {
                         int margin = workspaceCollisionMargin(member);
                         if (margin > 0) sweepForBlocker.inset(-margin, -margin);
                     }
@@ -6542,24 +6366,22 @@ public class MainActivity extends Activity {
                     }
 
                     if (!targetSlotOccupied && !targetPathCollision) continue;
-                    if (!appBlocker) {
+                    if (!gridBlocker) {
                         blocked = true;
                         break;
                     }
-                    // A common shift is permitted only for an uncommitted app in the
-                    // same row/column. The cohort members then keep exactly the same
-                    // relative positions for the entire animation.
-                    boolean sameLane = dxCells != 0
+                    // Do not mix unlike column geometries in one cohort; the generic
+                    // planner handles app/shortcut interactions without mis-snapping.
+                    boolean sameLane = sameGridFamily && (dxCells != 0
                             ? blockerSlot != null && blockerSlot[1] == originSlot[1]
-                            : blockerSlot != null && blockerSlot[0] == originSlot[0];
+                            : blockerSlot != null && blockerSlot[0] == originSlot[0]);
                     if (!sameLane || liveDisplacedItems.containsKey(blocker)
                             || appDisplacementAnimatorByView.containsKey(blocker)) {
                         blocked = true;
                         break;
                     }
                     if (!members.containsKey(blocker)) {
-                        int[] actualSlot = appIconGridSlot(
-                                page, blocker, cellWidth, cellHeight, rows);
+                        int[] actualSlot = homeGridIconSlot(page, blocker, cellHeight, rows);
                         if (actualSlot == null) {
                             blocked = true;
                             break;
@@ -6576,9 +6398,10 @@ public class MainActivity extends Activity {
             for (View member : cohort) {
                 int[] originSlot = slots.get(member);
                 int[] originGeometry = itemGeometry(member);
-                int targetX = (originSlot[0] + dxCells) * cellWidth;
-                int targetY = homeGridRowTop(
-                        originSlot[1] + dyCells, rows, page.getHeight(), cellHeight);
+                int targetX = homeGridIconLeftAt(
+                        member, originSlot[0] + dxCells, cellWidth, originGeometry[2]);
+                int targetY = homeGridIconTopAt(
+                        page, member, originSlot[1] + dyCells, rows, cellHeight);
                 liveDisplacedItems.put(member,
                         new int[]{originGeometry[0], originGeometry[1]});
                 liveDisplacementTargets.put(member, new int[]{targetX, targetY});
@@ -6594,18 +6417,6 @@ public class MainActivity extends Activity {
             java.util.HashSet<String> seen, int dx, int dy) {
         String key = dx + ":" + dy;
         if (seen.add(key)) directions.add(new int[]{dx, dy});
-    }
-
-    private int[] appIconGridSlot(FrameLayout page, View item,
-            int cellWidth, int cellHeight, int rows) {
-        if (page == null || item == null || !(item.getLayoutParams()
-                instanceof FrameLayout.LayoutParams)) return null;
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
-        int col = Math.max(0, Math.min(getHomeColumns() - 1,
-                Math.round(lp.leftMargin / (float) Math.max(1, cellWidth))));
-        int row = homeGridRowFromTop(
-                lp.topMargin, rows, page.getHeight(), cellHeight);
-        return new int[]{col, row};
     }
 
     private boolean isWorkspaceItem(View view) {
@@ -6723,10 +6534,49 @@ public class MainActivity extends Activity {
                 && ((String) view.getTag()).startsWith("launcher_app:");
     }
 
+    private boolean isWorkspaceContactShortcut(View view) {
+        return view != null && "launcher_contact_shortcut".equals(view.getTag());
+    }
+
+    private boolean isHomeGridIcon(View view) {
+        return isWorkspaceAppIcon(view) || isWorkspaceContactShortcut(view);
+    }
+
+    private int homeGridColumnsForItem(View item) {
+        return isWorkspaceContactShortcut(item) ? 4 : Math.max(1, getHomeColumns());
+    }
+
+    private int homeGridIconLeftAt(View item, int col, int cellWidth, int fallbackWidth) {
+        if (isWorkspaceAppIcon(item)) return col * cellWidth;
+        int width = Math.max(1, fallbackWidth);
+        if (item != null && item.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            int configured = ((FrameLayout.LayoutParams) item.getLayoutParams()).width;
+            if (configured > 0) width = configured;
+        }
+        return col * cellWidth + Math.max(0, (cellWidth - width) / 2);
+    }
+
+    private int homeGridIconTopAt(FrameLayout page, View item, int row, int rows, int cellHeight) {
+        int top = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+        return isWorkspaceContactShortcut(item) ? top + LauncherUiUtils.dp(this, 14) : top;
+    }
+
+    private int[] homeGridIconSlot(FrameLayout page, View item, int cellHeight, int rows) {
+        if (page == null || item == null
+                || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return null;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+        int columns = homeGridColumnsForItem(item);
+        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int col = Math.max(0, Math.min(columns - 1,
+                Math.round(lp.leftMargin / (float) cellWidth)));
+        int row = homeGridRowFromTop(lp.topMargin, rows, page.getHeight(), cellHeight);
+        return new int[]{col, row};
+    }
+
     private boolean isAppIconCollisionParticipant(View view) {
-        return isWorkspaceAppIcon(view)
+        return isHomeGridIcon(view)
                 || (view != null && "workspace_transfer_proxy".equals(view.getTag())
-                    && isWorkspaceAppIcon(workspaceTransferItem));
+                    && isHomeGridIcon(workspaceTransferItem));
     }
 
     /**
@@ -6872,12 +6722,12 @@ public class MainActivity extends Activity {
         // Apply only a tiny gap around the visible app artwork/label bounds.
         // collisionRect() has already removed the cell's empty area, so this does
         // not make neighboring grid slots collide merely because their cells touch.
-        return isWorkspaceAppIcon(view) ? LauncherUiUtils.dp(this, 2) : 0;
+        return isHomeGridIcon(view) ? LauncherUiUtils.dp(this, 2) : 0;
     }
 
     private android.graphics.Rect collisionRect(View view, int[] geometry) {
         int margin = workspaceCollisionMargin(view);
-        android.graphics.Rect bounds = isWorkspaceAppIcon(view)
+        android.graphics.Rect bounds = isHomeGridIcon(view)
                 ? appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3])
                 : new android.graphics.Rect(geometry[0], geometry[1],
                         geometry[0] + geometry[2], geometry[1] + geometry[3]);
@@ -6888,7 +6738,7 @@ public class MainActivity extends Activity {
 
     private android.graphics.Rect collisionRectAt(View view, int x, int y, int width, int height) {
         int margin = workspaceCollisionMargin(view);
-        android.graphics.Rect bounds = isWorkspaceAppIcon(view)
+        android.graphics.Rect bounds = isHomeGridIcon(view)
                 ? appIconVisualRectAt(view, x, y, width, height)
                 : new android.graphics.Rect(x, y, x + width, y + height);
         if (margin == 0) return bounds;
@@ -7184,9 +7034,9 @@ public class MainActivity extends Activity {
             }
 
             int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
-            if (isWorkspaceAppIcon(other)) {
+            if (isHomeGridIcon(other)) {
                 // App cells must remain snapped to the home grid during displacement.
-                int columns = getHomeColumns();
+                int columns = homeGridColumnsForItem(other);
                 int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
@@ -7194,12 +7044,12 @@ public class MainActivity extends Activity {
                 xCandidates.clear();
                 yCandidates.clear();
                 for (int col = 0; col < columns; col++) {
-                    int x = col * cellWidth;
-                    if (x + cellWidth <= page.getWidth()) xCandidates.add(x);
+                    int x = homeGridIconLeftAt(other, col, cellWidth, g[2]);
+                    if (x + g[2] <= page.getWidth()) xCandidates.add(x);
                 }
                 for (int row = 0; row < rows; row++) {
-                    int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
-                    if (y + cellHeight <= page.getHeight()) yCandidates.add(y);
+                    int y = homeGridIconTopAt(page, other, row, rows, cellHeight);
+                    if (y + g[3] <= page.getHeight()) yCandidates.add(y);
                 }
             }
             for (Integer candidateY : yCandidates) {
@@ -7210,7 +7060,7 @@ public class MainActivity extends Activity {
                     // candidate creates substantial short-lived garbage during live drag.
                     int candidateRight = x + g[2];
                     int candidateBottom = y + g[3];
-                    android.graphics.Rect candidateVisible = isWorkspaceAppIcon(other)
+                    android.graphics.Rect candidateVisible = isHomeGridIcon(other)
                             ? appIconVisualRectAt(other, x, y, g[2], g[3]) : null;
                     boolean blocked = false;
                     for (int obstacleIndex = 0; obstacleIndex < obstacles.size(); obstacleIndex++) {
@@ -7242,7 +7092,7 @@ public class MainActivity extends Activity {
             // obstacles form irregular shapes. Only when that search fails, scan the
             // page at a modest interval and choose the nearest collision-free position.
             // This makes displacement work consistently near the top as well as below.
-            if (bestX < 0 && !isWorkspaceAppIcon(other)) {
+            if (bestX < 0 && !isHomeGridIcon(other)) {
                 int step = Math.max(1, LauncherUiUtils.dp(this, 6));
                 for (int y = 0; y <= maxY + step; y += step) {
                     int candidateY = Math.min(maxY, y);
@@ -7279,9 +7129,9 @@ public class MainActivity extends Activity {
                 }
             }
 
-            if (!alreadyDisplaced && isWorkspaceAppIcon(movingView)
-                    && isWorkspaceAppIcon(other)
-                    && tryShiftAppIconCohort(page, movingView, other, bestX, bestY)) {
+            if (!alreadyDisplaced && isHomeGridIcon(movingView)
+                    && isHomeGridIcon(other)
+                    && tryShiftHomeIconCohort(page, movingView, other, bestX, bestY)) {
                 continue;
             }
 
@@ -7534,21 +7384,21 @@ public class MainActivity extends Activity {
         java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
         xs.add(preferredX); ys.add(preferredY);
         xs.add(0); ys.add(0); xs.add(maxX); ys.add(maxY);
-        boolean appIcon = isWorkspaceAppIcon(item);
+        boolean appIcon = isHomeGridIcon(item);
         if (appIcon) {
-            int columns = Math.max(1, getHomeColumns());
+            int columns = homeGridColumnsForItem(item);
             int cellWidth = Math.max(1, page.getWidth() / columns);
             int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             xs.clear(); ys.clear();
             for (int col = 0; col < columns; col++) {
-                int x = col * cellWidth;
-                if (x + cellWidth <= page.getWidth()) xs.add(x);
+                int x = homeGridIconLeftAt(item, col, cellWidth, width);
+                if (x + width <= page.getWidth()) xs.add(x);
             }
             for (int row = 0; row < rows; row++) {
-                int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
-                if (y + cellHeight <= page.getHeight()) ys.add(y);
+                int y = homeGridIconTopAt(page, item, row, rows, cellHeight);
+                if (y + height <= page.getHeight()) ys.add(y);
             }
         } else {
             for (int i = 0; i < page.getChildCount(); i++) {
@@ -7676,7 +7526,7 @@ public class MainActivity extends Activity {
             if (!isWorkspaceItem(item) || item.getVisibility() != View.VISIBLE) continue;
             int[] g = itemGeometry(item);
             if (g[2] <= 0 || g[3] <= 0) continue;
-            android.graphics.Rect bounds = isWorkspaceAppIcon(item)
+            android.graphics.Rect bounds = isHomeGridIcon(item)
                     ? appIconVisualRectAt(item, g[0], g[1], g[2], g[3])
                     : new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
             // Out-of-page content still needs the safety resolver even when it
@@ -7744,26 +7594,31 @@ public class MainActivity extends Activity {
                 ys.add(Math.max(0, Math.min(maxY, a.top - h - margin)));
                 ys.add(Math.max(0, Math.min(maxY, a.bottom + margin)));
             }
-            if (isWorkspaceAppIcon(item)) {
+            if (isHomeGridIcon(item)) {
                 // App cells may be collision-tested by their visible content, but
                 // their origins can only be chosen from legal grid slots.
                 xs.clear();
                 ys.clear();
-                int columns = getHomeColumns();
+                int columns = homeGridColumnsForItem(item);
                 int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
-                w = cellWidth;
-                h = cellHeight;
+                if (isWorkspaceContactShortcut(item)) {
+                    w = Math.max(1, g[2]);
+                    h = Math.max(1, g[3]);
+                } else {
+                    w = cellWidth;
+                    h = cellHeight;
+                }
                 maxX = Math.max(0, page.getWidth() - w);
                 maxY = Math.max(0, page.getHeight() - h);
                 for (int col = 0; col < columns; col++) {
-                    int x = col * cellWidth;
+                    int x = homeGridIconLeftAt(item, col, cellWidth, w);
                     if (x <= maxX) xs.add(x);
                 }
                 for (int row = 0; row < rows; row++) {
-                    int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+                    int y = homeGridIconTopAt(page, item, row, rows, cellHeight);
                     if (y <= maxY) ys.add(y);
                 }
             }
@@ -7807,7 +7662,7 @@ public class MainActivity extends Activity {
             // items. Before declaring the page full, perform an exact pixel scan at a
             // coarse step, including the final right/bottom edge. The nearest legal
             // rectangle wins; this is the same rectangle geometry used by drag/resize.
-            if (bestX < 0 && !isWorkspaceAppIcon(item)) {
+            if (bestX < 0 && !isHomeGridIcon(item)) {
                 int step = Math.max(1, LauncherUiUtils.dp(this, 6));
                 outerScan:
                 for (int y = 0; y <= maxY; y += step) {
@@ -7862,7 +7717,7 @@ public class MainActivity extends Activity {
             }
             // Collision repair is strictly page-local. Cross-screen moves are handled only
             // by the explicit edge-drag interaction, never by layout or overlap repair.
-            if (bestX < 0 && isWorkspaceAppIcon(item)) {
+            if (bestX < 0 && isHomeGridIcon(item)) {
                 // If this page has no legal grid slot, keep the shortcut visible here.
                 // Register its actual bounds so later items do not get placed on top of it.
                 int[] retainedGeometry = itemGeometry(item);
@@ -7963,6 +7818,13 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String shortcutIdFromTile(View item) {
+        CharSequence description = item == null ? null : item.getContentDescription();
+        String value = description == null ? "" : description.toString();
+        String prefix = "launcher_shortcut_id:";
+        return value.startsWith(prefix) ? value.substring(prefix.length()) : "";
+    }
+
     private void persistWorkspaceItemPosition(FrameLayout page, View item, int x, int y, int width, int height) {
         Object rawTag = item.getTag();
         if (!(rawTag instanceof String)) return;
@@ -7982,9 +7844,21 @@ public class MainActivity extends Activity {
             saveIconSlot(pkg, col, row, columns);
             prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
         } else if ("launcher_contact_shortcut".equals(tag)) {
-            prefs.edit().putInt(KEY_SHORTCUT_PAGE, pageIndex)
-                    .putFloat(KEY_SHORTCUT_X, x / (float) Math.max(1, page.getWidth() - width))
-                    .putFloat(KEY_SHORTCUT_Y, y / (float) Math.max(1, page.getHeight() - height)).apply();
+            int cellHeight = LauncherUiUtils.dp(this,
+                    homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+            int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+            int[] slot = homeGridIconSlot(page, item, cellHeight, rows);
+            if (slot != null) {
+                String shortcutId = shortcutIdFromTile(item);
+                prefs.edit()
+                        .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), pageIndex)
+                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId),
+                                slot[0] / (float) Math.max(1, 4 - 1))
+                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                                slot[1] / (float) Math.max(1, rows - 1))
+                        .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
+                        .apply();
+            }
         } else if ("launcher_clock_widget".equals(tag)) {
             prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), item.getTranslationX())
                     .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex), item.getTranslationY()).apply();
@@ -8109,15 +7983,45 @@ public class MainActivity extends Activity {
         int homeColumns = Math.max(3, Math.min(6, prefs.getInt(KEY_COLUMNS, COLUMNS)));
         int drawerColumns = Math.max(3, Math.min(6, prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS)));
         SharedPreferences.Editor edit = prefs.edit();
-        // Retire the old XL icon-size preset; migrate existing installs to Large.
-        if (homeSize > 74 || homeSize < 24) {
-            homeSize = homeSize > 74 ? 74 : 48;
+
+        if (!prefs.getBoolean(KEY_FONT_SIZE_SLIDER_VALUES, false)) {
+            int[] legacyFontSizes = {9, 9, 10, 12, 14};
+            if (prefs.contains(KEY_HOME_FONT_SIZE)) {
+                int old = prefs.getInt(KEY_HOME_FONT_SIZE, 1);
+                edit.putInt(KEY_HOME_FONT_SIZE,
+                        old >= 0 && old < legacyFontSizes.length ? legacyFontSizes[old] : 9);
+            }
+            if (prefs.contains(KEY_DRAWER_FONT_SIZE)) {
+                int old = prefs.getInt(KEY_DRAWER_FONT_SIZE, 1);
+                edit.putInt(KEY_DRAWER_FONT_SIZE,
+                        old >= 0 && old < legacyFontSizes.length ? legacyFontSizes[old] : 9);
+            }
+            edit.putBoolean(KEY_FONT_SIZE_SLIDER_VALUES, true);
+        }
+
+        if (homeSize < 32 || homeSize > 84) {
+            homeSize = Math.max(32, Math.min(84, homeSize));
             edit.putInt(KEY_ICON_SIZE, homeSize);
         }
-        if (drawerSize > 74 || drawerSize < 24) {
-            drawerSize = drawerSize > 74 ? 74 : 48;
+        if (drawerSize < 32 || drawerSize > 84) {
+            drawerSize = Math.max(32, Math.min(84, drawerSize));
             edit.putInt(KEY_DRAWER_ICON_SIZE, drawerSize);
         }
+        int[] legacyFontSizes = {9, 9, 10, 12, 14};
+        int homeFont = prefs.getInt(KEY_HOME_FONT_SIZE, 9);
+        int drawerFont = prefs.getInt(KEY_DRAWER_FONT_SIZE, 9);
+        if (!prefs.getBoolean(KEY_FONT_SIZE_SLIDER_VALUES, false)) {
+            if (prefs.contains(KEY_HOME_FONT_SIZE)) {
+                int old = prefs.getInt(KEY_HOME_FONT_SIZE, 1);
+                homeFont = old >= 0 && old < legacyFontSizes.length ? legacyFontSizes[old] : 9;
+            }
+            if (prefs.contains(KEY_DRAWER_FONT_SIZE)) {
+                int old = prefs.getInt(KEY_DRAWER_FONT_SIZE, 1);
+                drawerFont = old >= 0 && old < legacyFontSizes.length ? legacyFontSizes[old] : 9;
+            }
+        }
+        if (homeFont < 8 || homeFont > 20) edit.putInt(KEY_HOME_FONT_SIZE, Math.max(8, Math.min(20, homeFont)));
+        if (drawerFont < 8 || drawerFont > 20) edit.putInt(KEY_DRAWER_FONT_SIZE, Math.max(8, Math.min(20, drawerFont)));
         // Six icons per row are available only for Small and Medium icon sizes.
         if (homeSize > 64 && homeColumns > 5) {
             homeColumns = 5;
@@ -8293,7 +8197,7 @@ public class MainActivity extends Activity {
                 ? pageViewport.getHeight()
                 : Math.max(slotHeight, getResources().getDisplayMetrics().heightPixels
                         - LauncherUiUtils.dp(this, 260));
-        int rows = Math.max(1, usableHeight / slotHeight);
+        int rows = homeGridRowsForHeight(usableHeight, slotHeight);
         int safeRow = Math.max(0, Math.min(rows - 1, row));
         prefs.edit().putFloat(KEY_ICON_X + packageName, col / (float) Math.max(1, columns - 1))
                 .putFloat(KEY_ICON_Y + packageName, safeRow / (float) Math.max(1, rows - 1)).apply();
@@ -8456,23 +8360,21 @@ public class MainActivity extends Activity {
             renderHomePages(false);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Home icon size", sizeChoiceIndex(prefs.getInt(KEY_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large"}, value -> {
-            int oldSize = prefs.getInt(KEY_ICON_SIZE, 48);
-            int newSize = new int[]{54, 64, 74}[value];
+        addSliderRowOnStop(content, "Home icon size", 32, 84,
+                Math.max(32, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
             int oldColumns = getHomeColumns();
             boolean reduceColumns = newSize > 64 && oldColumns > 5;
             int newColumns = reduceColumns ? 5 : oldColumns;
-            if (newColumns != oldColumns) {
-                remapHomeIconSlotsForColumnChange(oldColumns, newColumns, newSize);
-            }
+            if (newColumns != oldColumns) remapHomeIconSlotsForColumnChange(oldColumns, newColumns, newSize);
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_ICON_SIZE, newSize);
             if (reduceColumns) edit.putInt(KEY_COLUMNS, newColumns);
             edit.apply();
             currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
             renderHomePages(false);
+            renderDock();
+            rebuildContactShortcutViews();
             validateWorkspacePagesAfterLayout();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "▣", "Rounded-square icon background",
                 prefs.getBoolean("icon_rounded_square_background", false) ? "On" : "Off", () -> {
@@ -8495,13 +8397,24 @@ public class MainActivity extends Activity {
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Home app font size", Math.min(3, prefs.getInt(KEY_HOME_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+        addSliderRowOnStop(content, "Home app font size", 8, 20,
+                homeFontSizeSp(), " sp", value -> {
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
-            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            renderHomePages(false);
+            rebuildContactShortcutViews();
+            validateWorkspacePagesAfterLayout();
+        });
+        int shortcutSizeMax = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
+        addSliderRowOnStop(content, "Contact shortcut icon size", 24, shortcutSizeMax,
+                Math.max(24, Math.min(shortcutSizeMax, getShortcutIconSizeDp())), " dp", value -> {
+            prefs.edit().putInt(KEY_SHORTCUT_ICON_SIZE_DP, value).apply();
+            applyShortcutIconSizeToWorkspace();
         });
         addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
-            renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            renderHomePages(false);
+            rebuildContactShortcutViews();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◷", "Date under the clock", prefs.getBoolean(KEY_SHOW_DATE, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_DATE, !prefs.getBoolean(KEY_SHOW_DATE, true)).apply();
@@ -8593,8 +8506,8 @@ public class MainActivity extends Activity {
             drawerGrid.requestLayout();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "Drawer icon size", sizeChoiceIndex(prefs.getInt(KEY_DRAWER_ICON_SIZE, 48)), new String[]{"Small", "Medium", "Large"}, value -> {
-            int newSize = new int[]{54, 64, 74}[value];
+        addSliderRowOnStop(content, "Drawer icon size", 32, 84,
+                Math.max(32, Math.min(84, prefs.getInt(KEY_DRAWER_ICON_SIZE, 48))), " dp", newSize -> {
             boolean reduceColumns = newSize > 64 && prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS) > 5;
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_DRAWER_ICON_SIZE, newSize);
             if (reduceColumns) edit.putInt(KEY_DRAWER_COLUMNS, 5);
@@ -8603,11 +8516,12 @@ public class MainActivity extends Activity {
             drawerAdapter.notifyDataSetChanged();
             drawerGrid.setSelection(0);
             drawerGrid.requestLayout();
-            showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addChoiceRow(content, "App drawer font size", Math.min(3, prefs.getInt(KEY_DRAWER_FONT_SIZE, 1)), new String[]{"Small", "Medium", "Large", "XL"}, value -> {
+        addSliderRowOnStop(content, "App drawer font size", 8, 20,
+                Math.max(8, Math.min(20, prefs.getInt(KEY_DRAWER_FONT_SIZE, 9))), " sp", value -> {
             prefs.edit().putInt(KEY_DRAWER_FONT_SIZE, value).apply();
-            drawerAdapter.notifyDataSetChanged(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            drawerAdapter.notifyDataSetChanged();
+            drawerGrid.requestLayout();
         });
         addSettingRow(content, "Aa", "App names in drawer", prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_DRAWER_LABELS, !prefs.getBoolean(KEY_SHOW_DRAWER_LABELS, true)).apply();
@@ -9294,6 +9208,16 @@ public class MainActivity extends Activity {
 
     private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
+        addSliderRowInternal(panel, title, min, max, current, suffix, action, false);
+    }
+
+    private void addSliderRowOnStop(LinearLayout panel, String title, int min, int max, int current,
+            String suffix, IntSliderAction action) {
+        addSliderRowInternal(panel, title, min, max, current, suffix, action, true);
+    }
+
+    private void addSliderRowInternal(LinearLayout panel, String title, int min, int max, int current,
+            String suffix, IntSliderAction action, boolean applyOnStop) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
@@ -9317,29 +9241,14 @@ public class MainActivity extends Activity {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 int value = min + progress;
                 valueLabel.setText(value + suffix);
-                if (fromUser) action.onChange(value);
+                if (fromUser && !applyOnStop) action.onChange(value);
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
-            @Override public void onStopTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {
+                if (applyOnStop) action.onChange(min + bar.getProgress());
+            }
         });
         panel.addView(block, blockParams);
-    }
-
-    private int sizeChoiceIndex(int size) {
-        // Match the nearest actual preset. Threshold-based legacy mapping caused
-        // Large (64 dp) to be highlighted as XL and treated the default 96 dp
-        // fallback as XL even when no size had ever been selected.
-        int[] sizes = {54, 64, 74};
-        int bestIndex = 0;
-        int bestDistance = Math.abs(size - sizes[0]);
-        for (int i = 1; i < sizes.length; i++) {
-            int distance = Math.abs(size - sizes[i]);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestIndex = i;
-            }
-        }
-        return bestIndex;
     }
 
     private void applyBrandVisibility() {
