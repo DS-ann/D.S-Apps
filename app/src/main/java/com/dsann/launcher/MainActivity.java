@@ -1891,10 +1891,10 @@ public class MainActivity extends Activity {
         restoreDockApps();
     }
 
-    /** One shared row metric for rendering, capacity, snapping, and collision placement. */
+    /** One shared row metric for rendering, capacity, snapping, and collision placement.
+     * Home labels use the gap below the icon and never change the grid coordinates. */
     private int homeCellHeightDp(int iconSize) {
-        boolean labelsVisible = prefs == null || prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
-        return Math.max(56, iconSize + (labelsVisible ? 54 : 28));
+        return Math.max(56, iconSize + 28);
     }
 
     private String clockPrefKey(String key, int page) {
