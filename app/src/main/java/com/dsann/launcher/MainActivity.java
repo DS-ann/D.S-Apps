@@ -3846,6 +3846,11 @@ public class MainActivity extends Activity {
                             workspaceTransferProxy.setScaleY(1f);
                             workspaceTransferProxy.setPivotX(0f);
                             workspaceTransferProxy.setPivotY(0f);
+                            // The preview proxy follows the finger with translations;
+                            // clear them before snapping its layout margins to the final
+                            // app-grid slot, otherwise release validation double-offsets it.
+                            workspaceTransferProxy.setTranslationX(0f);
+                            workspaceTransferProxy.setTranslationY(0f);
                             FrameLayout.LayoutParams proxyLp =
                                     (FrameLayout.LayoutParams) workspaceTransferProxy.getLayoutParams();
                             proxyLp.leftMargin = targetCol * cellWidth;
