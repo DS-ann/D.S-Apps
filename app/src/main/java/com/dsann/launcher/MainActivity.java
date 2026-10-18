@@ -4297,14 +4297,14 @@ public class MainActivity extends Activity {
             int[] geometry = itemGeometry(child);
             if (geometry[2] <= 0 || geometry[3] <= 0) continue;
             android.graphics.Rect bounds = collisionRect(child, geometry);
-            // Reserve the requested clearance around the *visual* obstacle, not its
-            // stale layout margins or an app cell's invisible slot.
-            bounds.inset(-gap, -gap);
+            // Keep obstacle bounds raw. The candidate rectangle is expanded by the
+            // 5dp clearance below; expanding both sides here as well counted the gap
+            // twice and incorrectly rejected tight but valid free spaces.
             occupied.add(bounds);
-            xCandidates.add(Math.max(minLeft, Math.min(maxLeft, bounds.left - widgetWidth)));
-            xCandidates.add(Math.max(minLeft, Math.min(maxLeft, bounds.right)));
-            yCandidates.add(Math.max(minTop, Math.min(maxTop, bounds.top - widgetHeight)));
-            yCandidates.add(Math.max(minTop, Math.min(maxTop, bounds.bottom)));
+            xCandidates.add(Math.max(minLeft, Math.min(maxLeft, bounds.left - widgetWidth - gap)));
+            xCandidates.add(Math.max(minLeft, Math.min(maxLeft, bounds.right + gap)));
+            yCandidates.add(Math.max(minTop, Math.min(maxTop, bounds.top - widgetHeight - gap)));
+            yCandidates.add(Math.max(minTop, Math.min(maxTop, bounds.bottom + gap)));
         }
 
         int bestX = -1, bestY = -1;
