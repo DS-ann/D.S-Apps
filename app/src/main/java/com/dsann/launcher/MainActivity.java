@@ -2124,22 +2124,42 @@ public class MainActivity extends Activity {
     }
 
     private void renderSavedContactShortcut() {
-        if (pagesStrip == null || prefs == null) return;
-        if (pageViewport == null) return;
+        if (pagesStrip == null || prefs == null || pageViewport == null) return;
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
             pageViewport.post(this::renderSavedContactShortcut);
             return;
         }
-        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
-            View pageView = pagesStrip.getChildAt(i);
+
+        // Keep already-rendered contact shortcuts attached during ordinary workspace
+        // refreshes. Recreating them on every setting change could make them vanish
+        // briefly, lose their touch/resize state, or silently choose a different page.
+        java.util.List<String> shortcutIds = getSavedShortcutIds();
+        java.util.HashSet<String> savedIds = new java.util.HashSet<String>(shortcutIds);
+        java.util.HashSet<String> renderedIds = new java.util.HashSet<String>();
+        final String prefix = "launcher_shortcut_id:";
+        for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof ViewGroup)) continue;
             ViewGroup page = (ViewGroup) pageView;
-            for (int j = page.getChildCount() - 1; j >= 0; j--) {
-                View child = page.getChildAt(j);
-                if ("launcher_contact_shortcut".equals(child.getTag())) page.removeViewAt(j);
+            for (int childIndex = page.getChildCount() - 1; childIndex >= 0; childIndex--) {
+                View child = page.getChildAt(childIndex);
+                if (!"launcher_contact_shortcut".equals(child.getTag())) continue;
+                CharSequence description = child.getContentDescription();
+                String value = description == null ? "" : description.toString();
+                String id = value.startsWith(prefix) ? value.substring(prefix.length()) : "";
+                // Remove only deleted/invalid duplicate views, not valid saved shortcuts.
+                if (id.isEmpty() || !savedIds.contains(id) || !renderedIds.add(id)) {
+                    child.animate().cancel();
+                    page.removeViewAt(childIndex);
+                }
             }
         }
-        for (String id : getSavedShortcutIds()) renderSavedContactShortcut(id);
+
+        // Create only shortcuts that do not already have a view. Placement of an
+        // existing shortcut is controlled by an explicit drag, not by a redraw.
+        for (String id : shortcutIds) {
+            if (!renderedIds.contains(id)) renderSavedContactShortcut(id);
+        }
     }
 
     private void renderSavedContactShortcut(String shortcutId) {
@@ -2190,6 +2210,8 @@ public class MainActivity extends Activity {
         // Restore a user-dragged position first, provided it is still visible and collision-free.
         float savedX = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
         float savedY = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
+        int lastSavedLeft = -1;
+        int lastSavedTop = -1;
         if (savedX >= 0f && savedY >= 0f && desiredPage < pagesStrip.getChildCount()) {
             View savedPageView = pagesStrip.getChildAt(desiredPage);
             if (savedPageView instanceof FrameLayout) {
@@ -2198,6 +2220,8 @@ public class MainActivity extends Activity {
                 int maxTop = Math.max(0, pageViewport.getHeight() - desiredTileHeight);
                 int savedLeft = Math.round(Math.min(1f, savedX) * maxLeft);
                 int savedTop = Math.round(Math.min(1f, savedY) * maxTop);
+                lastSavedLeft = savedLeft;
+                lastSavedTop = savedTop;
                 if (isContactShortcutPositionFree(savedPage, null, savedLeft, savedTop,
                         desiredTileWidth, desiredTileHeight)) {
                     chosenPage = savedPage;
@@ -2208,8 +2232,8 @@ public class MainActivity extends Activity {
         }
         // The app-slot finder accounts for app cells separately from widget bounds.
         // Use it before geometric fallback so the shortcut can occupy a genuinely free cell.
-        for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
-            int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
+        for (int attempt = 0; attempt < 1 && chosenPage == null; attempt++) {
+            int pageIndex = desiredPage;
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
             int[] freeSlot = findFreeHomeAppSlot(pageIndex);
@@ -2223,8 +2247,8 @@ public class MainActivity extends Activity {
                 chosenTop = top;
             }
         }
-        for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
-            int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
+        for (int attempt = 0; attempt < 1 && chosenPage == null; attempt++) {
+            int pageIndex = desiredPage;
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pageView;
@@ -2271,8 +2295,8 @@ public class MainActivity extends Activity {
         if (chosenPage == null) {
             desiredTileWidth = Math.max(1, cellW);
             desiredTileHeight = Math.max(1, Math.min(cellH, pageViewport.getHeight()));
-            for (int attempt = 0; attempt < pagesStrip.getChildCount() && chosenPage == null; attempt++) {
-                int pageIndex = (desiredPage + attempt) % pagesStrip.getChildCount();
+            for (int attempt = 0; attempt < 1 && chosenPage == null; attempt++) {
+                int pageIndex = desiredPage;
                 View pageView = pagesStrip.getChildAt(pageIndex);
                 if (!(pageView instanceof FrameLayout)) continue;
                 FrameLayout page = (FrameLayout) pageView;
@@ -2307,16 +2331,26 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        if (chosenPage == null && savedX >= 0f && savedY >= 0f
+                && lastSavedLeft >= 0 && lastSavedTop >= 0
+                && desiredPage < pagesStrip.getChildCount()
+                && pagesStrip.getChildAt(desiredPage) instanceof FrameLayout) {
+            // A restored shortcut is never discarded because its former location is
+            // temporarily occupied. Preserve its saved page/position for local repair.
+            chosenPage = (FrameLayout) pagesStrip.getChildAt(desiredPage);
+            chosenLeft = Math.max(0, Math.min(
+                    pageViewport.getWidth() - desiredTileWidth, lastSavedLeft));
+            chosenTop = Math.max(0, Math.min(
+                    pageViewport.getHeight() - desiredTileHeight, lastSavedTop));
+        }
         if (chosenPage == null) {
-            // The caller that creates a shortcut reports failure. Rendering during a
-            // normal refresh must not emit a contradictory toast or claim success.
+            // A newly-created shortcut has no saved position and must not be placed
+            // on another page as an implicit fallback.
             return;
         }
 
-        int actualShortcutPage = pagesStrip.indexOfChild(chosenPage);
-        if (actualShortcutPage >= 0 && actualShortcutPage != desiredPage) {
-            desiredPage = actualShortcutPage;
-        }
+        // Page identity is fixed here. Only the edge-drag drop path may change it.
+        if (pagesStrip.indexOfChild(chosenPage) != desiredPage) return;
         float normalizedX = chosenLeft / (float) Math.max(1, pageViewport.getWidth() - desiredTileWidth);
         float normalizedY = chosenTop / (float) Math.max(1, pageViewport.getHeight() - desiredTileHeight);
         prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), desiredPage)
