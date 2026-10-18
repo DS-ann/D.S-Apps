@@ -833,7 +833,7 @@ public class MainActivity extends Activity {
                             clockPanel.getTranslationX(), clockPanel.getTranslationY());
                     setClampedClockTranslation(bounded[0], bounded[1], true);
                     if (clockPanel.getParent() instanceof FrameLayout) {
-                        updateLiveDisplacements((FrameLayout) clockPanel.getParent(), clockPanel);
+                        scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
                     }
                     updateClockResizeHandles();
                 });
@@ -1479,6 +1479,8 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        cancelPendingLiveDisplacementUpdate();
+        liveDragGeometryCache.clear();
         handler.removeCallbacksAndMessages(null);
         if (packageReceiverRegistered) {
             try { unregisterReceiver(packageChangesReceiver); } catch (IllegalArgumentException ignored) {}
