@@ -2689,9 +2689,8 @@ public class MainActivity extends Activity {
                         finishWorkspaceTransferDrag(tile, commit);
                     }
                     shortcutDragging[0] = false;
-                    LauncherUiUtils.stopMoveHint(tile);
-                    tile.animate().scaleX(1f).scaleY(1f).alpha(1f)
-                            .setDuration(animationDuration(120L)).start();
+                    // stopMoveHint() above restores the shortcut's pre-move scale.
+                    // Do not force 1f here: crowded workspaces may have a saved scale.
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                     setWorkspaceGridVisible(false, null);
                     refreshWorkspaceGrid();
