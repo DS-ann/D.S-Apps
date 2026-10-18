@@ -157,6 +157,29 @@ public class MainActivity extends Activity {
     // intended destination even if the 120 ms push animation has not finished.
     private final java.util.IdentityHashMap<View, int[]> liveDisplacementTargets =
             new java.util.IdentityHashMap<>();
+    private static final class AppDisplacementAnimation {
+        final View view;
+        final int targetX;
+        final int targetY;
+        final int deltaX;
+        final int deltaY;
+
+        AppDisplacementAnimation(View view, int targetX, int targetY, int deltaX, int deltaY) {
+            this.view = view;
+            this.targetX = targetX;
+            this.targetY = targetY;
+            this.deltaX = deltaX;
+            this.deltaY = deltaY;
+        }
+    }
+
+    // App moves are staged for one live collision pass, then compatible shifts are
+    // started as a single shared animation instead of a separate animator per icon.
+    private final java.util.IdentityHashMap<View, int[]> pendingAppDisplacementTargets =
+            new java.util.IdentityHashMap<>();
+    private final java.util.IdentityHashMap<View, android.animation.ValueAnimator> appDisplacementAnimatorByView =
+            new java.util.IdentityHashMap<>();
+
     // Last collision-free visual position for an actively dragged workspace item.
     // Hold the mover while a colliding neighbour animates away instead of letting
     // it visibly pass through the clock or another workspace item.
@@ -6184,10 +6207,18 @@ public class MainActivity extends Activity {
 
     private void animateDisplacedItemTo(View item, int left, int top) {
         if (item == null) return;
+        if (isWorkspaceAppIcon(item)) {
+            // A group animation may be re-targeted mid-drag. Freeze that cohort at its
+            // current visual positions and re-queue its unchanged reservations together.
+            cancelAppDisplacementAnimator(item, true);
+            item.animate().cancel();
+            pendingAppDisplacementTargets.put(item, new int[]{left, top});
+            return;
+        }
+
         int[] current = itemGeometry(item);
         item.animate().cancel();
         if (isClockWorkspaceItem(item)) {
-            int pageIndex = workspacePageIndex(item);
             float targetX = item.getTranslationX() + left - current[0];
             float targetY = item.getTranslationY() + top - current[1];
             float[] bounded = clampClockTranslation(item, targetX, targetY);
@@ -6213,6 +6244,346 @@ public class MainActivity extends Activity {
                 .setInterpolator(new android.view.animation.DecelerateInterpolator())
                 .withEndAction(() -> refreshDragDisplacementsAfterAnimation(item, left, top))
                 .start();
+    }
+
+    /**
+     * Cancels a shared app cohort. If only one member needs a new target, preserve the
+     * other members' reservations and re-queue them so they continue from the same frame.
+     */
+    private void cancelAppDisplacementAnimator(View item, boolean preservePeers) {
+        if (item == null) return;
+        android.animation.ValueAnimator animator = appDisplacementAnimatorByView.get(item);
+        if (animator == null) return;
+
+        java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
+        for (java.util.Map.Entry<View, android.animation.ValueAnimator> entry
+                : new java.util.ArrayList<java.util.Map.Entry<View, android.animation.ValueAnimator>>(
+                        appDisplacementAnimatorByView.entrySet())) {
+            if (entry.getValue() != animator) continue;
+            cohort.add(entry.getKey());
+            appDisplacementAnimatorByView.remove(entry.getKey());
+        }
+        if (preservePeers) {
+            for (View peer : cohort) {
+                if (peer == item || !(peer.getParent() instanceof FrameLayout)) continue;
+                int[] target = liveDisplacementTargets.get(peer);
+                if (target != null) {
+                    pendingAppDisplacementTargets.put(peer, new int[]{target[0], target[1]});
+                }
+            }
+        }
+        animator.cancel();
+    }
+
+    /** Start all queued app shifts together, sharing one animator for identical vectors. */
+    private void flushPendingAppDisplacementAnimations() {
+        if (pendingAppDisplacementTargets.isEmpty()) return;
+        java.util.IdentityHashMap<View, int[]> pending =
+                new java.util.IdentityHashMap<View, int[]>(pendingAppDisplacementTargets);
+        pendingAppDisplacementTargets.clear();
+
+        java.util.HashMap<Long, java.util.ArrayList<AppDisplacementAnimation>> groups =
+                new java.util.HashMap<Long, java.util.ArrayList<AppDisplacementAnimation>>();
+        for (java.util.Map.Entry<View, int[]> entry : pending.entrySet()) {
+            View item = entry.getKey();
+            int[] target = entry.getValue();
+            if (!(item.getParent() instanceof FrameLayout)
+                    || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+
+            cancelAppDisplacementAnimator(item, false);
+            item.animate().cancel();
+            int[] current = itemGeometry(item);
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+            float sx = Math.max(0.01f, item.getScaleX());
+            float sy = Math.max(0.01f, item.getScaleY());
+            lp.leftMargin = target[0]
+                    - Math.round(item.getPivotX() * (1f - sx));
+            lp.topMargin = target[1]
+                    - Math.round(item.getPivotY() * (1f - sy));
+            int dx = current[0] - target[0];
+            int dy = current[1] - target[1];
+            item.setTranslationX(dx);
+            item.setTranslationY(dy);
+            item.setLayoutParams(lp);
+            if (dx == 0 && dy == 0) {
+                item.setTranslationX(0f);
+                item.setTranslationY(0f);
+                continue;
+            }
+
+            // Exact vector equality is deliberate: all members of a cohort translate
+            // by precisely the same amount, so their relative spacing never changes.
+            long key = (((long) dx) << 32) | (dy & 0xffffffffL);
+            java.util.ArrayList<AppDisplacementAnimation> group = groups.get(key);
+            if (group == null) {
+                group = new java.util.ArrayList<AppDisplacementAnimation>();
+                groups.put(key, group);
+            }
+            group.add(new AppDisplacementAnimation(item, target[0], target[1], dx, dy));
+        }
+
+        for (java.util.ArrayList<AppDisplacementAnimation> group : groups.values()) {
+            if (group.size() < 2) {
+                AppDisplacementAnimation single = group.get(0);
+                single.view.animate().translationX(0f).translationY(0f)
+                        .setDuration(animationDuration(140L))
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .withEndAction(() -> refreshDragDisplacementsAfterAnimation(
+                                single.view, single.targetX, single.targetY))
+                        .start();
+                continue;
+            }
+
+            final java.util.ArrayList<AppDisplacementAnimation> cohort =
+                    new java.util.ArrayList<AppDisplacementAnimation>(group);
+            final android.animation.ValueAnimator animator =
+                    android.animation.ValueAnimator.ofFloat(0f, 1f);
+            final boolean[] cancelled = new boolean[]{false};
+            animator.setDuration(animationDuration(140L));
+            animator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            animator.addUpdateListener(valueAnimator -> {
+                float remaining = 1f - (Float) valueAnimator.getAnimatedValue();
+                for (AppDisplacementAnimation movement : cohort) {
+                    movement.view.setTranslationX(movement.deltaX * remaining);
+                    movement.view.setTranslationY(movement.deltaY * remaining);
+                }
+            });
+            animator.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationCancel(android.animation.Animator animation) {
+                    cancelled[0] = true;
+                }
+
+                @Override public void onAnimationEnd(android.animation.Animator animation) {
+                    for (AppDisplacementAnimation movement : cohort) {
+                        if (appDisplacementAnimatorByView.get(movement.view) == animator) {
+                            appDisplacementAnimatorByView.remove(movement.view);
+                        }
+                        if (cancelled[0]) continue;
+                        movement.view.setTranslationX(0f);
+                        movement.view.setTranslationY(0f);
+                    }
+                    if (!cancelled[0]) {
+                        for (AppDisplacementAnimation movement : cohort) {
+                            refreshDragDisplacementsAfterAnimation(
+                                    movement.view, movement.targetX, movement.targetY);
+                        }
+                    }
+                }
+            });
+            for (AppDisplacementAnimation movement : cohort) {
+                appDisplacementAnimatorByView.put(movement.view, animator);
+            }
+            animator.start();
+        }
+    }
+
+    /**
+     * Move a contiguous app-icon chain one grid cell in a shared direction when possible.
+     * The sweep is rejected if it hits a widget/shortcut or would finish over the dragged
+     * icon. This is a fast, bounded first choice; the existing collision planner remains
+     * the fallback when a safe common shift is unavailable.
+     */
+    private boolean tryShiftAppIconCohort(FrameLayout page, View movingView, View seed,
+            int preferredX, int preferredY) {
+        if (page == null || movingView == null || seed == null
+                || !isWorkspaceAppIcon(movingView) || !isWorkspaceAppIcon(seed)
+                || liveDisplacedItems.containsKey(seed)
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+
+        int columns = Math.max(1, getHomeColumns());
+        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+        int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+        int[] seedSlot = appIconGridSlot(page, seed, cellWidth, cellHeight, rows);
+        if (seedSlot == null) return false;
+
+        java.util.ArrayList<int[]> directions = new java.util.ArrayList<int[]>();
+        java.util.HashSet<String> seenDirections = new java.util.HashSet<String>();
+        if (preferredX >= 0 && preferredY >= 0) {
+            int targetCol = Math.max(0, Math.min(columns - 1,
+                    Math.round(preferredX / (float) cellWidth)));
+            int targetRow = homeGridRowFromTop(preferredY, rows, page.getHeight(), cellHeight);
+            int deltaCol = targetCol - seedSlot[0];
+            int deltaRow = targetRow - seedSlot[1];
+            if (Math.abs(deltaCol) >= Math.abs(deltaRow) && deltaCol != 0) {
+                addAppShiftDirection(directions, seenDirections, Integer.signum(deltaCol), 0);
+                if (deltaRow != 0) addAppShiftDirection(
+                        directions, seenDirections, 0, Integer.signum(deltaRow));
+            } else if (deltaRow != 0) {
+                addAppShiftDirection(directions, seenDirections, 0, Integer.signum(deltaRow));
+                if (deltaCol != 0) addAppShiftDirection(
+                        directions, seenDirections, Integer.signum(deltaCol), 0);
+            }
+        }
+        int[] moverGeometry = itemGeometry(movingView);
+        int[] seedGeometry = itemGeometry(seed);
+        int moverCenterX = moverGeometry[0] + moverGeometry[2] / 2;
+        int moverCenterY = moverGeometry[1] + moverGeometry[3] / 2;
+        int seedCenterX = seedGeometry[0] + seedGeometry[2] / 2;
+        int seedCenterY = seedGeometry[1] + seedGeometry[3] / 2;
+        if (Math.abs(seedCenterX - moverCenterX) >= Math.abs(seedCenterY - moverCenterY)) {
+            addAppShiftDirection(directions, seenDirections,
+                    moverCenterX < seedCenterX ? 1 : -1, 0);
+            addAppShiftDirection(directions, seenDirections,
+                    0, moverCenterY < seedCenterY ? 1 : -1);
+        } else {
+            addAppShiftDirection(directions, seenDirections,
+                    0, moverCenterY < seedCenterY ? 1 : -1);
+            addAppShiftDirection(directions, seenDirections,
+                    moverCenterX < seedCenterX ? 1 : -1, 0);
+        }
+        addAppShiftDirection(directions, seenDirections, 1, 0);
+        addAppShiftDirection(directions, seenDirections, -1, 0);
+        addAppShiftDirection(directions, seenDirections, 0, 1);
+        addAppShiftDirection(directions, seenDirections, 0, -1);
+
+        for (int[] direction : directions) {
+            int dxCells = direction[0], dyCells = direction[1];
+            if (seedSlot[0] + dxCells < 0 || seedSlot[0] + dxCells >= columns
+                    || seedSlot[1] + dyCells < 0 || seedSlot[1] + dyCells >= rows) continue;
+
+            java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
+            java.util.IdentityHashMap<View, Boolean> members =
+                    new java.util.IdentityHashMap<View, Boolean>();
+            java.util.IdentityHashMap<View, int[]> slots =
+                    new java.util.IdentityHashMap<View, int[]>();
+            cohort.add(seed);
+            members.put(seed, Boolean.TRUE);
+            slots.put(seed, seedSlot);
+            boolean blocked = false;
+
+            // Expanding only along the shifted row/column groups the whole chain but
+            // avoids unexpectedly dragging unrelated apps from adjacent rows.
+            for (int memberIndex = 0; memberIndex < cohort.size() && !blocked; memberIndex++) {
+                View member = cohort.get(memberIndex);
+                if (liveDisplacedItems.containsKey(member)
+                        || appDisplacementAnimatorByView.containsKey(member)) {
+                    blocked = true;
+                    break;
+                }
+                int[] originSlot = slots.get(member);
+                int targetCol = originSlot[0] + dxCells;
+                int targetRow = originSlot[1] + dyCells;
+                if (targetCol < 0 || targetCol >= columns || targetRow < 0 || targetRow >= rows) {
+                    blocked = true;
+                    break;
+                }
+                int originX = originSlot[0] * cellWidth;
+                int originY = homeGridRowTop(
+                        originSlot[1], rows, page.getHeight(), cellHeight);
+                int targetX = targetCol * cellWidth;
+                int targetY = homeGridRowTop(targetRow, rows, page.getHeight(), cellHeight);
+                int[] memberGeometry = itemGeometry(member);
+                android.graphics.Rect startVisible = appIconVisualRectAt(
+                        member, originX, originY, memberGeometry[2], memberGeometry[3]);
+                android.graphics.Rect targetVisible = appIconVisualRectAt(
+                        member, targetX, targetY, memberGeometry[2], memberGeometry[3]);
+                android.graphics.Rect movingVisible = collisionRectForInteraction(
+                        movingView, moverGeometry, member);
+                if (android.graphics.Rect.intersects(targetVisible, movingVisible)) {
+                    blocked = true;
+                    break;
+                }
+                android.graphics.Rect swept = new android.graphics.Rect(startVisible);
+                swept.union(targetVisible);
+
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View blocker = page.getChildAt(childIndex);
+                    if (blocker == member || blocker == movingView
+                            || blocker.getVisibility() != View.VISIBLE
+                            || !isWorkspaceItem(blocker) || members.containsKey(blocker)) continue;
+                    int[] blockerGeometry = itemGeometry(blocker);
+                    if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
+
+                    boolean appBlocker = isWorkspaceAppIcon(blocker);
+                    int[] blockerSlot = appBlocker
+                            ? appIconGridSlot(page, blocker, cellWidth, cellHeight, rows) : null;
+                    boolean targetSlotOccupied = appBlocker && blockerSlot != null
+                            && blockerSlot[0] == targetCol && blockerSlot[1] == targetRow;
+                    android.graphics.Rect sweepForBlocker = new android.graphics.Rect(swept);
+                    if (!appBlocker) {
+                        int margin = workspaceCollisionMargin(member);
+                        if (margin > 0) sweepForBlocker.inset(-margin, -margin);
+                    }
+                    android.graphics.Rect blockerVisible =
+                            collisionRectForInteraction(blocker, blockerGeometry, member);
+                    int[] blockerTarget = liveDisplacementTargets.get(blocker);
+                    boolean targetPathCollision = android.graphics.Rect.intersects(
+                            sweepForBlocker, blockerVisible);
+                    if (blockerTarget != null) {
+                        android.graphics.Rect plannedBounds = collisionRectAtForInteraction(
+                                blocker, blockerTarget[0], blockerTarget[1],
+                                blockerGeometry[2], blockerGeometry[3], member);
+                        targetPathCollision = targetPathCollision
+                                || android.graphics.Rect.intersects(sweepForBlocker, plannedBounds);
+                    }
+
+                    if (!targetSlotOccupied && !targetPathCollision) continue;
+                    if (!appBlocker) {
+                        blocked = true;
+                        break;
+                    }
+                    // A common shift is permitted only for an uncommitted app in the
+                    // same row/column. The cohort members then keep exactly the same
+                    // relative positions for the entire animation.
+                    boolean sameLane = dxCells != 0
+                            ? blockerSlot != null && blockerSlot[1] == originSlot[1]
+                            : blockerSlot != null && blockerSlot[0] == originSlot[0];
+                    if (!sameLane || liveDisplacedItems.containsKey(blocker)
+                            || appDisplacementAnimatorByView.containsKey(blocker)) {
+                        blocked = true;
+                        break;
+                    }
+                    if (!members.containsKey(blocker)) {
+                        int[] actualSlot = appIconGridSlot(
+                                page, blocker, cellWidth, cellHeight, rows);
+                        if (actualSlot == null) {
+                            blocked = true;
+                            break;
+                        }
+                        members.put(blocker, Boolean.TRUE);
+                        slots.put(blocker, actualSlot);
+                        cohort.add(blocker);
+                    }
+                }
+            }
+
+            if (blocked || cohort.size() < 2) continue;
+            // Commit all reservations first, then enqueue the whole same-vector shift.
+            for (View member : cohort) {
+                int[] originSlot = slots.get(member);
+                int[] originGeometry = itemGeometry(member);
+                int targetX = (originSlot[0] + dxCells) * cellWidth;
+                int targetY = homeGridRowTop(
+                        originSlot[1] + dyCells, rows, page.getHeight(), cellHeight);
+                liveDisplacedItems.put(member,
+                        new int[]{originGeometry[0], originGeometry[1]});
+                liveDisplacementTargets.put(member, new int[]{targetX, targetY});
+                liveDragGeometryCache.remove(member);
+                animateDisplacedItemTo(member, targetX, targetY);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void addAppShiftDirection(java.util.ArrayList<int[]> directions,
+            java.util.HashSet<String> seen, int dx, int dy) {
+        String key = dx + ":" + dy;
+        if (seen.add(key)) directions.add(new int[]{dx, dy});
+    }
+
+    private int[] appIconGridSlot(FrameLayout page, View item,
+            int cellWidth, int cellHeight, int rows) {
+        if (page == null || item == null || !(item.getLayoutParams()
+                instanceof FrameLayout.LayoutParams)) return null;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+        int col = Math.max(0, Math.min(getHomeColumns() - 1,
+                Math.round(lp.leftMargin / (float) Math.max(1, cellWidth))));
+        int row = homeGridRowFromTop(
+                lp.topMargin, rows, page.getHeight(), cellHeight);
+        return new int[]{col, row};
     }
 
     private boolean isWorkspaceItem(View view) {
@@ -6662,6 +7033,7 @@ public class MainActivity extends Activity {
         // This entry point is used at transaction boundaries as well as by animation
         // callbacks. Any older queued pass is now stale; synchronous validation wins.
         cancelPendingLiveDisplacementUpdate();
+        pendingAppDisplacementTargets.clear();
         liveDragGeometryCache.clear();
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
@@ -6865,6 +7237,12 @@ public class MainActivity extends Activity {
                 }
             }
 
+            if (!alreadyDisplaced && isWorkspaceAppIcon(movingView)
+                    && isWorkspaceAppIcon(other)
+                    && tryShiftAppIconCohort(page, movingView, other, bestX, bestY)) {
+                continue;
+            }
+
             if (bestX < 0) {
                 // There may be no immediately empty rectangle even though a short
                 // chain of neighbours can slide into one another's vacated positions.
@@ -6923,6 +7301,7 @@ public class MainActivity extends Activity {
             }
         }
     
+        flushPendingAppDisplacementAnimations();
         liveDragGeometryCache.clear();
         enforceLiveDragCollisionSafety(page, movingView);
     }
@@ -7522,6 +7901,7 @@ public class MainActivity extends Activity {
 
             // Stop any in-flight animation before applying the final geometry;
             // otherwise its last frame could overwrite the committed position.
+            cancelAppDisplacementAnimator(displaced, false);
             displaced.animate().cancel();
             if (keepDisplacement) {
                 int[] destination = liveDisplacementTargets.get(displaced);
