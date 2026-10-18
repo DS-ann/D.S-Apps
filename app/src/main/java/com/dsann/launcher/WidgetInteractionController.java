@@ -189,6 +189,11 @@ final class WidgetInteractionController {
 
     void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
                             int x, int y, int width, int height) {
+        addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height, true);
+    }
+
+    void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
+                            int x, int y, int width, int height, boolean showNoSpaceToast) {
         final FrameLayout container = new FrameLayout(activity);
         container.setTag("launcher_widget:" + widgetId);
         widget.setTag("launcher_widget_content:" + widgetId);
@@ -335,7 +340,9 @@ final class WidgetInteractionController {
                 lp.topMargin = bestY;
             } else {
                 // Do not intentionally place a new widget over existing content.
-                Toast.makeText(activity, "No free space for this widget", Toast.LENGTH_SHORT).show();
+                if (showNoSpaceToast) {
+                    Toast.makeText(activity, "No free space for this widget", Toast.LENGTH_SHORT).show();
+                }
                 return;
             }
         }
@@ -475,176 +482,37 @@ final class WidgetInteractionController {
                     return true;
                 }
                 if (editMode[0] == 1) {
-                    LauncherUiUtils.stopMoveHint(container);
-                    if (Math.abs(dx) > LauncherUiUtils.dp(activity, 10)
-                            || Math.abs(dy) > LauncherUiUtils.dp(activity, 10)) handler.removeCallbacks(menuPress[0]);
-                    listener.setWorkspaceGridVisible(false, null);
-                    cancelWidgetTouch.run();
-                    // Fixed two-screen workspace: widget dragging never changes screens.
-                    edgeLatch[0] = 0;
-                    LinearLayout strip = listener.getPagesStrip();
-                    ViewParent currentParent = container.getParent();
-                    int sourceIndex = strip == null || !(currentParent instanceof View)
-                            ? widgetPage[0] : strip.indexOfChild((View) currentParent);
-                    if (sourceIndex < 0) sourceIndex = widgetPage[0];
-                    FrameLayout activePage = container.getParent() instanceof FrameLayout
-                            ? (FrameLayout) container.getParent() : page;
-                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    int[] pageLocation = new int[2];
-                    activePage.getLocationOnScreen(pageLocation);
-                    int maxX = Math.max(0, activePage.getWidth() - container.getWidth());
-                    int maxY = Math.max(0, activePage.getHeight() - container.getHeight());
-                    // Store coordinates relative to the still-attached source page, not the viewport.
-                    // Remove the temporary cross-page translation before calculating layout margins.
-                    current.leftMargin = Math.max(0, Math.min(maxX,
-                            Math.round(event.getRawX() - pageLocation[0] - fingerOffset[0])));
-                    current.topMargin = Math.max(0, Math.min(maxY,
-                            Math.round(event.getRawY() - pageLocation[1] - fingerOffset[1])));
-                    container.setLayoutParams(current);
-                    listener.updateLiveDisplacements(activePage, container);
-                    return true;
-                }
-                if (!childCanceled[0]) widget.dispatchTouchEvent(event);
-                return true;
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                LauncherUiUtils.stopMoveHint(container);
-                handler.removeCallbacks(movePress[0]);
-                handler.removeCallbacks(menuPress[0]);
-                if (editMode[0] == 1) {
                     cancelWidgetTouch.run();
                     LinearLayout strip = listener.getPagesStrip();
                     FrameLayout sourcePage = container.getParent() instanceof FrameLayout
                             ? (FrameLayout) container.getParent() : page;
-                    // A widget can be repositioned on its own screen, but never transferred
-                    // to the other screen by dragging.
+                    // Widgets stay on their original page. Finish geometry against the
+                    // page that actually owns the widget rather than the moving viewport.
                     int destinationPage = originalPageAtDown[0];
                     listener.ensurePageExists(destinationPage);
                     FrameLayout targetPage = strip != null && destinationPage < strip.getChildCount()
                             && strip.getChildAt(destinationPage) instanceof FrameLayout
                             ? (FrameLayout) strip.getChildAt(destinationPage) : sourcePage;
-                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    FrameLayout.LayoutParams current =
+                            (FrameLayout.LayoutParams) container.getLayoutParams();
                     if (action == MotionEvent.ACTION_CANCEL) {
-                        listener.finishLiveDisplacements(false, container);
+                        // Restore the moving widget before rolling the neighbours back.
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
                     } else {
-                        // Raw touch coordinates must be converted using the destination
-                        // page itself. The viewport origin is not the page origin: on the
-                        // second screen its horizontal offset differs, and using it causes
-                        // drops near the top/edges to resolve against the wrong coordinates.
                         int[] targetPageLocation = new int[2];
                         targetPage.getLocationOnScreen(targetPageLocation);
-                        FrameLayout.LayoutParams dropParams = (FrameLayout.LayoutParams) container.getLayoutParams();
-                        int dropWidth = Math.max(1, dropParams.width > 0 ? dropParams.width : container.getWidth());
-                        int dropHeight = Math.max(1, dropParams.height > 0 ? dropParams.height : container.getHeight());
+                        int dropWidth = Math.max(1, current.width > 0 ? current.width : container.getWidth());
+                        int dropHeight = Math.max(1, current.height > 0 ? current.height : container.getHeight());
                         int maxX = Math.max(0, targetPage.getWidth() - dropWidth);
                         int maxY = Math.max(0, targetPage.getHeight() - dropHeight);
-                        // Preserve the exact finger-to-widget grab offset captured at
-                        // ACTION_DOWN. Centering the widget under the finger on release made
-                        // it jump even though the live drag itself tracked correctly.
-                        // Collision resolution below may move it only when space is occupied.
-                        int requestedX = Math.max(0, Math.min(maxX,
+                        current.leftMargin = Math.max(0, Math.min(maxX,
                                 Math.round(event.getRawX() - targetPageLocation[0] - fingerOffset[0])));
-                        int requestedY = Math.max(0, Math.min(maxY,
+                        current.topMargin = Math.max(0, Math.min(maxY,
                                 Math.round(event.getRawY() - targetPageLocation[1] - fingerOffset[1])));
-                        // Exact obstacle-edge candidates avoid missing narrow free pockets
-                        // and are cheaper than scanning the entire page at a fixed interval.
-                        int bestX = -1, bestY = -1;
-                        long bestDistance = Long.MAX_VALUE;
-                        java.util.ArrayList<android.graphics.Rect> occupied =
-                                new java.util.ArrayList<android.graphics.Rect>();
-                        for (int ci = 0; ci < targetPage.getChildCount(); ci++) {
-                            View other = targetPage.getChildAt(ci);
-                            if (other == container || !(other.getTag() instanceof String)) continue;
-                            String tag = (String) other.getTag();
-                            if (!(tag.startsWith("launcher_widget:")
-                                    || tag.startsWith("launcher_app:")
-                                    || "launcher_contact_shortcut".equals(tag)
-                                    || "launcher_clock_widget".equals(tag))) continue;
-                            android.graphics.Rect bounds = workspaceBounds(other);
-                            if (!bounds.isEmpty()) occupied.add(bounds);
-                        }
-                        java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
-                        java.util.TreeSet<Integer> yCandidates = new java.util.TreeSet<Integer>();
-                        xCandidates.add(requestedX);
-                        yCandidates.add(requestedY);
-                        xCandidates.add(0);
-                        yCandidates.add(0);
-                        xCandidates.add(maxX);
-                        yCandidates.add(maxY);
-                        for (android.graphics.Rect obstacle : occupied) {
-                            xCandidates.add(Math.max(0, Math.min(maxX, obstacle.left - dropWidth)));
-                            xCandidates.add(Math.max(0, Math.min(maxX, obstacle.right)));
-                            yCandidates.add(Math.max(0, Math.min(maxY, obstacle.top - dropHeight)));
-                            yCandidates.add(Math.max(0, Math.min(maxY, obstacle.bottom)));
-                        }
-                        for (Integer yValue : yCandidates) {
-                            int candidateY = yValue.intValue();
-                            for (Integer xValue : xCandidates) {
-                                int candidateX = xValue.intValue();
-                                android.graphics.Rect candidate = new android.graphics.Rect(
-                                        candidateX, candidateY,
-                                        candidateX + dropWidth, candidateY + dropHeight);
-                                boolean blocked = false;
-                                for (android.graphics.Rect obstacle : occupied) {
-                                    if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-                                if (blocked) continue;
-                                long distance = Math.abs((long) candidateX - requestedX)
-                                        + Math.abs((long) candidateY - requestedY);
-                                if (distance < bestDistance) {
-                                    bestDistance = distance;
-                                    bestX = candidateX;
-                                    bestY = candidateY;
-                                }
-                            }
-                        }
-                        if (bestX < 0 || bestY < 0) {
-                            // Boundary candidates handle normal cases. Use a finer scan only
-                            // as a fallback so narrow but valid drop locations are not rejected.
-                            int step = Math.max(1, LauncherUiUtils.dp(activity, 6));
-                            long nearest = Long.MAX_VALUE;
-                            outerDropScan:
-                            for (int cy = 0; cy <= maxY; cy += step) {
-                                int candidateY = Math.min(maxY, cy);
-                                for (int cx = 0; cx <= maxX; cx += step) {
-                                    int candidateX = Math.min(maxX, cx);
-                                    android.graphics.Rect candidate = new android.graphics.Rect(
-                                            candidateX, candidateY,
-                                            candidateX + dropWidth, candidateY + dropHeight);
-                                    boolean blocked = false;
-                                    for (android.graphics.Rect obstacle : occupied) {
-                                        if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                            blocked = true;
-                                            break;
-                                        }
-                                    }
-                                    if (blocked) continue;
-                                    long distance = Math.abs((long) candidateX - requestedX)
-                                            + Math.abs((long) candidateY - requestedY);
-                                    if (distance < nearest) {
-                                        nearest = distance;
-                                        bestX = candidateX;
-                                        bestY = candidateY;
-                                    }
-                                }
-                                if (candidateY == maxY) break outerDropScan;
-                            }
-                        }
-                        if (bestX >= 0 && bestY >= 0) {
-                            current.leftMargin = bestX;
-                            current.topMargin = bestY;
-                        } else {
-                            current.leftMargin = Math.min(maxX, origin[0]);
-                            current.topMargin = Math.min(maxY, origin[1]);
-                            Toast.makeText(activity, "No non-overlapping space for this widget", Toast.LENGTH_SHORT).show();
-                        }
                     }
                     container.setTranslationX(0f);
+                    container.setTranslationY(0f);
                     container.setLayoutParams(current);
                     clearEditChrome[0].run();
                     if (sourcePage != targetPage) {
@@ -655,17 +523,15 @@ final class WidgetInteractionController {
                     }
                     widgetPage[0] = destinationPage;
                     listener.saveWidgetGeometry(widgetId, destinationPage, container);
-                    // Resolve the final widget position first. If collision handling
-                    // relocates it, the displacement transaction can then restore
-                    // neighbours instead of permanently leaving them in temporary slots.
-                    listener.resolveWidgetCollisions(targetPage, container);
-                    if (action == MotionEvent.ACTION_UP) listener.finishLiveDisplacements(true, container);
-                    if (action == MotionEvent.ACTION_UP) listener.renderHomePages(false);
-                } else if (!childCanceled[0]) {
-                    widget.dispatchTouchEvent(event);
+
+                    // One authoritative collision transaction owns release placement.
+                    // The old second solver checked neighbours at their mid-animation
+                    // positions and could falsely show "No free space" after a valid drop.
+                    // finishLiveDisplacements commits/rolls back its whole cascade, then
+                    // runs the final rectangle resolver exactly once.
+                    listener.finishLiveDisplacements(action == MotionEvent.ACTION_UP, container);
                 }
-                editMode[0] = 0;
-                return true;
+
             }
             if (!childCanceled[0]) widget.dispatchTouchEvent(event);
             return true;
