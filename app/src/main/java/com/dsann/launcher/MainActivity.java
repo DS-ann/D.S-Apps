@@ -148,6 +148,22 @@ public class MainActivity extends Activity {
     // it visibly pass through the clock or another workspace item.
     private final java.util.IdentityHashMap<View, int[]> liveDragLastSafeGeometry =
             new java.util.IdentityHashMap<>();
+    // Coalesce dense ACTION_MOVE streams into one collision-planning pass per display
+    // frame. The view's geometry is still updated immediately; only expensive neighbour
+    // planning is deferred. Drop/cancel paths flush or cancel this work synchronously.
+    private FrameLayout pendingLiveDisplacementPage;
+    private View pendingLiveDisplacementMover;
+    private final Runnable liveDisplacementFrame = new Runnable() {
+        @Override public void run() {
+            FrameLayout page = pendingLiveDisplacementPage;
+            View mover = pendingLiveDisplacementMover;
+            pendingLiveDisplacementPage = null;
+            pendingLiveDisplacementMover = null;
+            if (page != null && mover != null && mover.getParent() == page) {
+                updateLiveDisplacements(page, mover);
+            }
+        }
+    };
     private final java.util.WeakHashMap<View, Boolean> workspaceScaleRestored =
             new java.util.WeakHashMap<View, Boolean>();
     private int workspaceGridCellWidth = 1;
@@ -1629,9 +1645,22 @@ public class MainActivity extends Activity {
             }
             WorkspaceGridOverlay overlay = (WorkspaceGridOverlay) workspaceGridOverlays[i];
             overlay.configure(cellWidth, cellHeight);
-            overlay.setVisibility(visible ? View.VISIBLE : View.GONE);
-            overlay.bringToFront();
-            if (movingView != null && movingView.getParent() == page) movingView.bringToFront();
+            int desiredVisibility = visible ? View.VISIBLE : View.GONE;
+            if (overlay.getVisibility() != desiredVisibility) {
+                overlay.setVisibility(desiredVisibility);
+            }
+            // Keep the overlay above workspace items and the active mover above the
+            // overlay, but avoid reordering children when they are already in that order.
+            if (movingView != null && movingView.getParent() == page) {
+                int lastIndex = page.getChildCount() - 1;
+                if (page.indexOfChild(overlay) != lastIndex - 1
+                        || page.indexOfChild(movingView) != lastIndex) {
+                    overlay.bringToFront();
+                    movingView.bringToFront();
+                }
+            } else if (page.indexOfChild(overlay) != page.getChildCount() - 1) {
+                overlay.bringToFront();
+            }
         }
     }
 
@@ -1653,8 +1682,11 @@ public class MainActivity extends Activity {
             gridPaint.setColor(Color.argb(34, 120, 165, 255));
         }
         void configure(int cw, int ch) {
-            cellW = Math.max(1, cw);
-            cellH = Math.max(1, ch);
+            int nextW = Math.max(1, cw);
+            int nextH = Math.max(1, ch);
+            if (cellW == nextW && cellH == nextH) return;
+            cellW = nextW;
+            cellH = nextH;
             invalidate();
         }
         @Override protected void onDraw(Canvas canvas) {
@@ -3101,6 +3133,28 @@ public class MainActivity extends Activity {
         workspaceTransferProxyPage = pageIndex;
     }
 
+    private void cancelPendingLiveDisplacementUpdate() {
+        FrameLayout pendingPage = pendingLiveDisplacementPage;
+        if (pendingPage != null) pendingPage.removeCallbacks(liveDisplacementFrame);
+        pendingLiveDisplacementPage = null;
+        pendingLiveDisplacementMover = null;
+    }
+
+    private void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView) {
+        if (page == null || movingView == null || movingView.getParent() != page
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        if (pendingLiveDisplacementPage == page && pendingLiveDisplacementMover == movingView) {
+            return;
+        }
+        // A launcher workspace has one active drag owner. If ownership changes before
+        // the next frame, keep only the newest owner instead of running stale collision
+        // work against the old item's geometry.
+        cancelPendingLiveDisplacementUpdate();
+        pendingLiveDisplacementPage = page;
+        pendingLiveDisplacementMover = movingView;
+        page.postOnAnimation(liveDisplacementFrame);
+    }
+
     private void updateWorkspaceTransferDisplacements(View item, float rawX, float rawY,
             float fingerOffsetX, float fingerOffsetY) {
         if (item == null || item != workspaceTransferItem || workspaceTransferTargetPage < 0
@@ -3139,10 +3193,17 @@ public class MainActivity extends Activity {
                     Math.round(rawX - pageLocation[0] - fingerOffsetX)));
             int top = Math.max(0, Math.min(page.getHeight() - visibleHeight,
                     Math.round(rawY - pageLocation[1] - fingerOffsetY)));
-            lp.leftMargin = left - Math.round(proxy.getPivotX() * (1f - sx));
-            lp.topMargin = top - Math.round(proxy.getPivotY() * (1f - sy));
-            proxy.setLayoutParams(lp);
-            updateLiveDisplacements(page, proxy);
+            // The proxy is only a collision marker. Translating it keeps its visual
+            // collision bounds current without requesting a child relayout on every
+            // touch event. Match itemGeometry()'s pending-layout origin if first layout
+            // has not completed yet.
+            int baseLeft = proxy.isLayoutRequested()
+                    ? page.getPaddingLeft() + lp.leftMargin : proxy.getLeft();
+            int baseTop = proxy.isLayoutRequested()
+                    ? page.getPaddingTop() + lp.topMargin : proxy.getTop();
+            proxy.setTranslationX(left - baseLeft - proxy.getPivotX() * (1f - sx));
+            proxy.setTranslationY(top - baseTop - proxy.getPivotY() * (1f - sy));
+            scheduleLiveDisplacementUpdate(page, proxy);
         }
     }
 
@@ -6276,16 +6337,19 @@ public class MainActivity extends Activity {
                         workspaceTransferLastRawX, workspaceTransferLastRawY,
                         workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
             } else if (workspaceTransferItem.getParent() == page) {
-                updateLiveDisplacements(page, workspaceTransferItem);
+                scheduleLiveDisplacementUpdate(page, workspaceTransferItem);
             }
             return;
         }
         if (clockWidgetDragging && clockPanel != null && clockPanel.getParent() == page) {
-            updateLiveDisplacements(page, clockPanel);
+            scheduleLiveDisplacementUpdate(page, clockPanel);
         }
     }
 
     private void updateLiveDisplacements(FrameLayout page, View movingView) {
+        // This entry point is used at transaction boundaries as well as by animation
+        // callbacks. Any older queued pass is now stale; synchronous validation wins.
+        cancelPendingLiveDisplacementUpdate();
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
 
@@ -7267,6 +7331,16 @@ public class MainActivity extends Activity {
 
     /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
     private void finishLiveDisplacements(boolean commit, View movingView) {
+        FrameLayout pendingPage = pendingLiveDisplacementPage;
+        View pendingMover = pendingLiveDisplacementMover;
+        cancelPendingLiveDisplacementUpdate();
+        // A same-page drag may finish before the next display frame. Run its latest
+        // collision pass before committing the displacement transaction so quick drops
+        // behave exactly like drops after a rendered frame. Cancellation never flushes.
+        if (commit && pendingPage != null && pendingMover == movingView
+                && pendingMover.getParent() == pendingPage) {
+            updateLiveDisplacements(pendingPage, pendingMover);
+        }
         // Finalize the entire collision group together. A single dragged item may
         // displace any number of neighbours, so each neighbour's original and
         // destination rectangles must be handled independently and consistently.
