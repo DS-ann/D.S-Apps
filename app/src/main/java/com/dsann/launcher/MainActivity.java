@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
     // Invalidates stale layout callbacks when a newer resize frame or gesture starts.
     private int clockResizeGeneration = 0;
     // Invalidates stale post-layout clamps queued by earlier live resize frames.
-    private int clockLayoutGeneration = 0;
+    private final int[] clockLayoutGenerationByPage = new int[2];
     private boolean gestureStartedOnClock = false;
     // Locks the whole touch sequence against launcher swipes if it began while
     // clock move/edit mode was already active.
@@ -4971,6 +4971,30 @@ public class MainActivity extends Activity {
     }
 
 
+    private boolean isClockWorkspaceItem(View view) {
+        if (view == null) return false;
+        return view == clockPanelsByPage[0] || view == clockPanelsByPage[1]
+                || "launcher_clock_widget".equals(view.getTag());
+    }
+
+    private int workspacePageIndex(View view) {
+        if (pagesStrip != null && view != null && view.getParent() instanceof View) {
+            int pageIndex = pagesStrip.indexOfChild((View) view.getParent());
+            if (pageIndex >= 0) return pageIndex;
+        }
+        return Math.max(0, Math.min(1, activeClockPage));
+    }
+
+    private void setClockVisualPosition(View panel, int visualLeft, int visualTop,
+            boolean persist) {
+        if (!isClockWorkspaceItem(panel)) return;
+        int pageIndex = workspacePageIndex(panel);
+        int[] current = itemGeometry(panel);
+        float tx = panel.getTranslationX() + visualLeft - current[0];
+        float ty = panel.getTranslationY() + visualTop - current[1];
+        setClampedClockTranslationForPanel(panel, pageIndex, tx, ty, persist);
+    }
+
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
@@ -5336,14 +5360,8 @@ public class MainActivity extends Activity {
             if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)
                     && !originalNeededByAnotherTarget) {
                 displaced.animate().cancel();
-                if (displaced == clockPanel) {
-                    // Clock geometry is translation/scale based; writing its visual
-                    // coordinates into layout margins corrupts its saved position.
-                    setClampedClockTranslation(
-                            original[0] - clockPanel.getLeft()
-                                    - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
-                            original[1] - clockPanel.getTop()
-                                    - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
+                if (isClockWorkspaceItem(displaced)) {
+                    setClockVisualPosition(displaced, original[0], original[1], true);
                 } else {
                     ViewGroup.LayoutParams raw = displaced.getLayoutParams();
                     if (raw instanceof FrameLayout.LayoutParams) {
@@ -5533,13 +5551,13 @@ public class MainActivity extends Activity {
                                 new int[]{destination[0], destination[1]});
                         long ordinal = Math.max(0, liveDisplacedItems.size() - 1);
                         long startDelay = Math.min(24L, ordinal * 6L);
-                        if (participant == clockPanel) {
-                            float tx = clockPanel.getTranslationX()
+                        if (isClockWorkspaceItem(participant)) {
+                            float tx = participant.getTranslationX()
                                     + destination[0] - currentGeometry[0];
-                            float ty = clockPanel.getTranslationY()
+                            float ty = participant.getTranslationY()
                                     + destination[1] - currentGeometry[1];
-                            float[] bounded = clampClockTranslation(clockPanel, tx, ty);
-                            clockPanel.animate().translationX(bounded[0]).translationY(bounded[1])
+                            float[] bounded = clampClockTranslation(participant, tx, ty);
+                            participant.animate().translationX(bounded[0]).translationY(bounded[1])
                                     .setStartDelay(animationDuration(startDelay))
                                     .setDuration(animationDuration(120L)).start();
                         } else {
@@ -5576,11 +5594,11 @@ public class MainActivity extends Activity {
                 // visual corridor and appearing to overlap during a dense push-aside.
                 long displacementOrdinal = Math.max(0, liveDisplacedItems.size() - 1);
                 long startDelay = Math.min(24L, displacementOrdinal * 6L);
-                if (other == clockPanel) {
-                    float targetX = clockPanel.getTranslationX() + bestX - g[0];
-                    float targetY = clockPanel.getTranslationY() + bestY - g[1];
-                    float[] bounded = clampClockTranslation(clockPanel, targetX, targetY);
-                    clockPanel.animate().translationX(bounded[0]).translationY(bounded[1])
+                if (isClockWorkspaceItem(other)) {
+                    float targetX = other.getTranslationX() + bestX - g[0];
+                    float targetY = other.getTranslationY() + bestY - g[1];
+                    float[] bounded = clampClockTranslation(other, targetX, targetY);
+                    other.animate().translationX(bounded[0]).translationY(bounded[1])
                             .setStartDelay(animationDuration(startDelay))
                             .setDuration(animationDuration(120L)).start();
                 } else {
@@ -5767,7 +5785,9 @@ public class MainActivity extends Activity {
         // this final pass must not accept a mover and leave its neighbors overlapping.
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
-            if (child != priorityView && isWorkspaceItem(child)) items.add(child);
+            if (child == priorityView || !isWorkspaceItem(child)) continue;
+            if (isClockWorkspaceItem(child)) items.add(0, child);
+            else items.add(child);
         }
         if (priorityView != null && priorityView.getParent() == page && isWorkspaceItem(priorityView)) {
             items.add(priorityView);
@@ -5903,7 +5923,7 @@ public class MainActivity extends Activity {
             if (bestX < 0 && !isWorkspaceAppIcon(item) && !acceptedViews.isEmpty()) {
                 for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
                     View movable = acceptedViews.get(j);
-                    if (movable == priorityView || movable == clockPanel) continue;
+                    if (movable == priorityView || isClockWorkspaceItem(movable)) continue;
                     int[] mg = itemGeometry(movable);
                     if (!tryMoveWorkspaceItemToOtherPage(page, movable, mg[2], mg[3])) continue;
                     acceptedViews.remove(j);
@@ -5934,7 +5954,7 @@ public class MainActivity extends Activity {
 
             // Prefer moving the item itself to the other home page before shrinking
             // it. Shrink-to-fit is reserved for cases where neither page has room.
-            if (bestX < 0 && item != clockPanel && !isWorkspaceAppIcon(item)
+            if (bestX < 0 && !isClockWorkspaceItem(item) && !isWorkspaceAppIcon(item)
                     && tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
                 continue;
             }
@@ -5946,7 +5966,7 @@ public class MainActivity extends Activity {
                 if (!acceptedViews.isEmpty()) {
                     for (int j = acceptedViews.size() - 1; j >= 0 && bestX < 0; j--) {
                         View movable = acceptedViews.get(j);
-                        if (movable == priorityView || movable == clockPanel
+                        if (movable == priorityView || isClockWorkspaceItem(movable)
                                 || isWorkspaceAppIcon(movable)) continue;
                         Object movableTag = movable.getTag();
                         if ("launcher_clock_widget".equals(movableTag)) continue;
@@ -6049,10 +6069,12 @@ public class MainActivity extends Activity {
             // rectangle as accepted. The resolver has already tried exact placement,
             // moving a neighbour to the other page, and shrinking its visual bounds.
             if (bestX < 0) {
-                if (item == clockPanel) {
-                    float[] bounded = clampClockTranslation(clockPanel,
-                            clockPanel.getTranslationX(), clockPanel.getTranslationY());
-                    setClampedClockTranslation(bounded[0], bounded[1], true);
+                if (isClockWorkspaceItem(item)) {
+                    int pageIndex = workspacePageIndex(item);
+                    float[] bounded = clampClockTranslation(item,
+                            item.getTranslationX(), item.getTranslationY());
+                    setClampedClockTranslationForPanel(item, pageIndex,
+                            bounded[0], bounded[1], true);
                     // Do not accept the clock's rectangle here: if it still overlaps,
                     // the next layout pass must continue resolving rather than masking it.
                 } else if (tryMoveWorkspaceItemToOtherPage(page, item, w, h)) {
@@ -6069,9 +6091,8 @@ public class MainActivity extends Activity {
                 }
                 continue;
             }
-            if (item == clockPanel) {
-                setClampedClockTranslation(clockPanel.getTranslationX() + bestX - g[0],
-                        clockPanel.getTranslationY() + bestY - g[1], true);
+            if (isClockWorkspaceItem(item)) {
+                setClockVisualPosition(item, bestX, bestY, true);
             } else if (item.getLayoutParams() instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
                 lp.leftMargin += bestX - g[0];
@@ -6086,7 +6107,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean tryMoveWorkspaceItemToOtherPage(FrameLayout sourcePage, View item, int width, int height) {
-        if (pagesStrip == null || item == null || item == clockPanel) return false;
+        if (pagesStrip == null || item == null || isClockWorkspaceItem(item)) return false;
         for (int p = 0; p < pagesStrip.getChildCount(); p++) {
             View candidatePage = pagesStrip.getChildAt(p);
             if (!(candidatePage instanceof FrameLayout) || candidatePage == sourcePage) continue;
@@ -6286,12 +6307,8 @@ public class MainActivity extends Activity {
             displaced.animate().cancel();
             if (keepDisplacement) {
                 int[] destination = liveDisplacementTargets.get(displaced);
-                if (displaced == clockPanel) {
-                    float tx = destination[0] - clockPanel.getLeft()
-                            - clockPanel.getPivotX() * (1f - clockPanel.getScaleX());
-                    float ty = destination[1] - clockPanel.getTop()
-                            - clockPanel.getPivotY() * (1f - clockPanel.getScaleY());
-                    setClampedClockTranslation(tx, ty, true);
+                if (isClockWorkspaceItem(displaced)) {
+                    setClockVisualPosition(displaced, destination[0], destination[1], true);
                 } else if (displaced.getLayoutParams() instanceof FrameLayout.LayoutParams) {
                     FrameLayout.LayoutParams lp =
                             (FrameLayout.LayoutParams) displaced.getLayoutParams();
@@ -6306,12 +6323,8 @@ public class MainActivity extends Activity {
                         finalGeometry[0], finalGeometry[1],
                         finalGeometry[2], finalGeometry[3]);
             } else {
-                if (displaced == clockPanel) {
-                    setClampedClockTranslation(
-                            original[0] - clockPanel.getLeft()
-                                    - clockPanel.getPivotX() * (1f - clockPanel.getScaleX()),
-                            original[1] - clockPanel.getTop()
-                                    - clockPanel.getPivotY() * (1f - clockPanel.getScaleY()), true);
+                if (isClockWorkspaceItem(displaced)) {
+                    setClockVisualPosition(displaced, original[0], original[1], true);
                 } else if (displaced.getLayoutParams() instanceof FrameLayout.LayoutParams) {
                     FrameLayout.LayoutParams lp =
                             (FrameLayout.LayoutParams) displaced.getLayoutParams();
@@ -6898,7 +6911,9 @@ public class MainActivity extends Activity {
 
     private void applyClockPositionAndSize() {
         if (clockPanel == null || clockText == null) return;
-        final int geometryGeneration = ++clockLayoutGeneration;
+        final LinearLayout targetPanel = clockPanel;
+        final int targetPage = Math.max(0, Math.min(1, activeClockPage));
+        final int geometryGeneration = ++clockLayoutGenerationByPage[targetPage];
 
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
@@ -7056,22 +7071,27 @@ public class MainActivity extends Activity {
         clockPanel.setPivotX(alignment == Gravity.RIGHT ? panelParams.width
                 : (alignment == Gravity.CENTER_HORIZONTAL ? panelParams.width / 2f : 0f));
         clockPanel.setScaleX(lengthScale);
-        clockPanel.post(() -> {
-            if (geometryGeneration != clockLayoutGeneration || clockPanel == null
-                    || clockPanel.getParent() == null) return;
-            // While an edge is being resized, the resize transaction itself owns
-            // the position and anchors the opposite edge after layout. A stale
-            // generic clamp here could race the edge calculation on typography clocks.
-            if (clockWidgetEditing && clockWidgetDragging && clockResizeEdge != 0) {
+        targetPanel.post(() -> {
+            // This callback belongs to the specific page panel measured above. Never
+            // consult mutable clockPanel/activeClockPage here: they can point at the
+            // other page by the time Android runs this posted layout task.
+            if (geometryGeneration != clockLayoutGenerationByPage[targetPage]
+                    || targetPanel != clockPanelsByPage[targetPage]
+                    || targetPanel.getParent() == null) return;
+            // While this exact panel is being resized, the resize transaction owns its
+            // position and anchors the opposite edge.
+            if (activeClockPage == targetPage && clockPanel == targetPanel
+                    && clockWidgetEditing && clockWidgetDragging && clockResizeEdge != 0) {
                 updateClockResizeHandles();
                 return;
             }
-            // Re-clamp after measuring/layout so the final scaled visual rectangle,
-            // not the previous frame's dimensions, determines both screen edges.
-            float[] bounded = clampClockTranslation(clockPanel,
-                    clockPanel.getTranslationX(), clockPanel.getTranslationY());
-            setClampedClockTranslation(bounded[0], bounded[1], true);
-            updateClockResizeHandles();
+            float[] bounded = clampClockTranslation(targetPanel,
+                    targetPanel.getTranslationX(), targetPanel.getTranslationY());
+            setClampedClockTranslationForPanel(
+                    targetPanel, targetPage, bounded[0], bounded[1], true);
+            if (activeClockPage == targetPage && clockPanel == targetPanel) {
+                updateClockResizeHandles();
+            }
         });
         clockPanel.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 2));
