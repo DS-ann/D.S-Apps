@@ -531,7 +531,8 @@ final class WidgetInteractionController {
                     // runs the final rectangle resolver exactly once.
                     listener.finishLiveDisplacements(action == MotionEvent.ACTION_UP, container);
                 }
-
+                editMode[0] = 0;
+                return true;
             }
             if (!childCanceled[0]) widget.dispatchTouchEvent(event);
             return true;
