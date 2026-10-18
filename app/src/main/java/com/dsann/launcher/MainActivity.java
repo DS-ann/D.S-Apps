@@ -1625,6 +1625,11 @@ public class MainActivity extends Activity {
                     @Override public int getHomeCellHeightDp(int iconSize) {
                         return MainActivity.this.homeCellHeightDp(iconSize);
                     }
+                    @Override public int getHomeGridRowTop(
+                            int row, int rowCount, int pageHeightPx, int cellHeightPx) {
+                        return MainActivity.this.homeGridRowTop(
+                                row, rowCount, pageHeightPx, cellHeightPx);
+                    }
                     @Override public ResolveInfo findApp(String packageName) { return MainActivity.this.findApp(packageName); }
                     @Override public void installHomeIconTouch(View cell, String packageName) { MainActivity.this.installHomeIconTouch(cell, packageName); }
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
@@ -1749,7 +1754,9 @@ public class MainActivity extends Activity {
                     top = lp.topMargin;
                     if (tag.startsWith("launcher_app:")) {
                         left = Math.max(0, Math.round(left / (float) cellW) * cellW);
-                        top = Math.max(0, Math.round(top / (float) cellH) * cellH);
+                        int rows = Math.max(1, getHeight() / Math.max(1, cellH));
+                        int row = homeGridRowFromTop(top, rows, getHeight(), cellH);
+                        top = homeGridRowTop(row, rows, getHeight(), cellH);
                         right = Math.min(getWidth(), left + cellW);
                         bottom = Math.min(getHeight(), top + cellH);
                     } else {
@@ -1926,6 +1933,30 @@ public class MainActivity extends Activity {
         }
         int requiredHeight = 14 + iconSize + 1 + homeLabelHeightDp() + 7;
         return Math.max(baseHeight, requiredHeight);
+    }
+
+    private boolean isHomeGridBottomAligned() {
+        return prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
+    }
+
+    /** Returns a legal app-row top in page pixels, bottom-anchored only with labels on. */
+    private int homeGridRowTop(int row, int rowCount, int pageHeightPx, int cellHeightPx) {
+        int rows = Math.max(1, rowCount);
+        int cellHeight = Math.max(1, cellHeightPx);
+        int safeRow = Math.max(0, Math.min(rows - 1, row));
+        int topInset = isHomeGridBottomAligned()
+                ? Math.max(0, pageHeightPx - rows * cellHeight) : 0;
+        return topInset + safeRow * cellHeight;
+    }
+
+    /** Maps a pixel top coordinate back to the nearest legal row for the current mode. */
+    private int homeGridRowFromTop(float topPx, int rowCount, int pageHeightPx, int cellHeightPx) {
+        int rows = Math.max(1, rowCount);
+        int cellHeight = Math.max(1, cellHeightPx);
+        int topInset = isHomeGridBottomAligned()
+                ? Math.max(0, pageHeightPx - rows * cellHeight) : 0;
+        return Math.max(0, Math.min(rows - 1,
+                Math.round((topPx - topInset) / (float) cellHeight)));
     }
 
     private String clockPrefKey(String key, int page) {
@@ -2270,7 +2301,8 @@ public class MainActivity extends Activity {
             int[] freeSlot = findFreeHomeAppSlot(pageIndex);
             if (freeSlot == null) continue;
             int left = freeSlot[0] * cellW + Math.max(0, (cellW - desiredTileWidth) / 2);
-            int top = freeSlot[1] * cellH + Math.max(0, (cellH - desiredTileHeight) / 2);
+            int top = homeGridRowTop(freeSlot[1], rows, pageViewport.getHeight(), cellH)
+                    + Math.max(0, (cellH - desiredTileHeight) / 2);
             if (left + desiredTileWidth <= pageViewport.getWidth()
                     && top + desiredTileHeight <= pageViewport.getHeight()) {
                 chosenPage = (FrameLayout) pageView;
@@ -3894,15 +3926,15 @@ public class MainActivity extends Activity {
                             Math.round(desiredLeft / cellWidth)));
                     float desiredTop = event.getRawY()
                             - viewportLocation[1] - iconDragFingerOffsetY;
-                    int targetRow = Math.max(0, Math.min(rows - 1,
-                            Math.round(desiredTop / (float) Math.max(1, cellHeight))));
+                    int targetRow = homeGridRowFromTop(
+                            desiredTop, rows, targetHeight, cellHeight);
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = slotHeight;
                     int sourceRows = Math.max(1, sourceView.getHeight() / sourceCellHeight);
                     int sourceCol = Math.max(0, Math.min(columns - 1,
                             Math.round(iconOriginalLeft / (float) sourceCellWidth)));
-                    int sourceRow = Math.max(0, Math.min(sourceRows - 1,
-                            Math.round(iconOriginalTop / (float) Math.max(1, sourceCellHeight))));
+                    int sourceRow = homeGridRowFromTop(
+                            iconOriginalTop, sourceRows, sourceView.getHeight(), sourceCellHeight);
                     boolean[][] occupied = new boolean[rows][columns];
                     View occupant = null;
                     String otherPackage = null;
@@ -3930,7 +3962,8 @@ public class MainActivity extends Activity {
                         otherLp.height = sourceCellHeight;
                         otherLp.gravity = Gravity.TOP | Gravity.LEFT;
                         otherLp.leftMargin = sourceCol * sourceCellWidth;
-                        otherLp.topMargin = sourceRow * sourceCellHeight;
+                        otherLp.topMargin = homeGridRowTop(
+                                sourceRow, sourceRows, sourceView.getHeight(), sourceCellHeight);
                         if (movedAcrossPage) {
                             // The destination app cell is swapped back to the vacated
                             // source slot before collision validation, rather than leaving
@@ -3955,7 +3988,8 @@ public class MainActivity extends Activity {
                             new FrameLayout.LayoutParams(cellWidth, cellHeight,
                                     Gravity.TOP | Gravity.LEFT);
                     finalIconParams.leftMargin = targetCol * cellWidth;
-                    finalIconParams.topMargin = targetRow * cellHeight;
+                    finalIconParams.topMargin = homeGridRowTop(
+                            targetRow, rows, targetHeight, cellHeight);
                     view.animate().cancel();
                     view.setTranslationX(0f);
                     view.setTranslationY(0f);
@@ -3994,7 +4028,8 @@ public class MainActivity extends Activity {
                             FrameLayout.LayoutParams proxyLp =
                                     (FrameLayout.LayoutParams) workspaceTransferProxy.getLayoutParams();
                             proxyLp.leftMargin = targetCol * cellWidth;
-                            proxyLp.topMargin = targetRow * cellHeight;
+                            proxyLp.topMargin = homeGridRowTop(
+                                    targetRow, rows, targetHeight, cellHeight);
                             workspaceTransferProxy.setLayoutParams(proxyLp);
                             updateLiveDisplacements(targetPage, workspaceTransferProxy);
                         }
@@ -4610,8 +4645,7 @@ public class MainActivity extends Activity {
                 }
                 int col = Math.max(0, Math.min(columns - 1,
                         Math.round(left / (float) cellWidth)));
-                int row = Math.max(0, Math.min(rows - 1,
-                        Math.round(top / (float) cellHeight)));
+                int row = homeGridRowFromTop(top, rows, height, cellHeight);
                 occupied[row][col] = true;
             }
         }
@@ -4632,11 +4666,11 @@ public class MainActivity extends Activity {
             for (int col = 0; col < columns; col++) {
                 if (occupied[row][col]) continue;
                 int cellLeft = col * cellWidth;
-                int cellTop = row * cellHeight;
+                int cellTop = homeGridRowTop(row, rows, height, cellHeight);
                 android.graphics.Rect cell = new android.graphics.Rect(
                         cellLeft, cellTop,
                         Math.min(width, (col + 1) * cellWidth),
-                        Math.min(height, (row + 1) * cellHeight));
+                        Math.min(height, cellTop + cellHeight));
                 // Reserve only the visible app artwork and painted label. For safety on
                 // a workspace with no existing app cell template, fall back to the full
                 // cell rather than guessing typography geometry.
@@ -6385,7 +6419,7 @@ public class MainActivity extends Activity {
         int bestY = -1;
         long bestDistance = Long.MAX_VALUE;
         for (int row = 0; row < rows; row++) {
-            int y = row * cellHeight;
+            int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
             if (y + cellHeight > page.getHeight()) continue;
             for (int col = 0; col < columns; col++) {
                 int x = col * cellWidth;
@@ -6741,7 +6775,7 @@ public class MainActivity extends Activity {
                     if (x + cellWidth <= page.getWidth()) xCandidates.add(x);
                 }
                 for (int row = 0; row < rows; row++) {
-                    int y = row * cellHeight;
+                    int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
                     if (y + cellHeight <= page.getHeight()) yCandidates.add(y);
                 }
             }
@@ -6983,7 +7017,7 @@ public class MainActivity extends Activity {
                 if (x + cellWidth <= page.getWidth()) xs.add(x);
             }
             for (int row = 0; row < rows; row++) {
-                int y = row * cellHeight;
+                int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
                 if (y + cellHeight <= page.getHeight()) ys.add(y);
             }
         } else {
@@ -7212,7 +7246,7 @@ public class MainActivity extends Activity {
                     if (x <= maxX) xs.add(x);
                 }
                 for (int row = 0; row < rows; row++) {
-                    int y = row * cellHeight;
+                    int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
                     if (y <= maxY) ys.add(y);
                 }
             }
@@ -7426,7 +7460,8 @@ public class MainActivity extends Activity {
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
             String pkg = tag.substring("launcher_app:".length());
             int col = Math.max(0, Math.min(columns - 1, Math.round((float) x / cellWidth)));
-            int row = Math.max(0, Math.round((float) y / cellHeight));
+            int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+            int row = homeGridRowFromTop(y, rows, page.getHeight(), cellHeight);
             saveIconSlot(pkg, col, row, columns);
             prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
         } else if ("launcher_contact_shortcut".equals(tag)) {
@@ -7642,6 +7677,7 @@ public class MainActivity extends Activity {
                                     getResources().getDisplayMetrics().heightPixels
                                             - LauncherUiUtils.dp(this, 260)));
             int oldCellWidth = Math.max(1, width / oldColumns);
+            int oldRows = Math.max(1, height / Math.max(1, oldCellHeight));
             int rows = Math.max(1, height / Math.max(1, newCellHeight));
 
             final java.util.ArrayList<String> ordered = new java.util.ArrayList<String>();
@@ -7655,7 +7691,8 @@ public class MainActivity extends Activity {
                 String packageName = ((String) child.getTag()).substring("launcher_app:".length());
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
                 int col = Math.max(0, Math.round(lp.leftMargin / (float) oldCellWidth));
-                int row = Math.max(0, Math.round(lp.topMargin / (float) Math.max(1, oldCellHeight)));
+                int row = homeGridRowFromTop(
+                        lp.topMargin, oldRows, height, oldCellHeight);
                 ordered.add(packageName);
                 oldSlots.put(packageName, new int[]{col, row});
             }

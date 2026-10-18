@@ -27,6 +27,7 @@ final class HomePageController {
         void rebuildPages();
         int getHomeColumns();
         int getHomeCellHeightDp(int iconSize);
+        int getHomeGridRowTop(int row, int rowCount, int pageHeightPx, int cellHeightPx);
         ResolveInfo findApp(String packageName);
         void installHomeIconTouch(View cell, String packageName);
         void restoreWidgetsOnPages();
@@ -226,7 +227,7 @@ final class HomePageController {
                 // Keep rows at their original fixed grid positions. In particular,
                 // the lowest row stays one cell above the workspace edge instead of
                 // being stretched down toward the dock.
-                lp.topMargin = row * cellHeight;
+                lp.topMargin = host.getHomeGridRowTop(row, rows, pageHeight, cellHeight);
                 page.addView(cell, lp);
                 host.installHomeIconTouch(cell, packageName);
             }
@@ -259,7 +260,8 @@ final class HomePageController {
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
                     actual.leftMargin = col * actualCellWidth;
-                    actual.topMargin = row * actualCellHeight;
+                    actual.topMargin = host.getHomeGridRowTop(
+                            row, actualRows, page.getHeight(), actualCellHeight);
                     child.setLayoutParams(actual);
                 }
             });
