@@ -6495,10 +6495,14 @@ public class MainActivity extends Activity {
                 for (Integer candidateX : xCandidates) {
                     int x = candidateX.intValue();
                     int y = candidateY.intValue();
-                    android.graphics.Rect candidateWithGap = collisionRectAt(other, x, y, g[2], g[3]);
+                    // Compare primitive bounds directly: allocating a Rect for every
+                    // candidate creates substantial short-lived garbage during live drag.
+                    int candidateRight = x + g[2];
+                    int candidateBottom = y + g[3];
                     boolean blocked = false;
                     for (android.graphics.Rect obstacle : obstacles) {
-                        if (android.graphics.Rect.intersects(candidateWithGap, obstacle)) {
+                        if (x < obstacle.right && candidateRight > obstacle.left
+                                && y < obstacle.bottom && candidateBottom > obstacle.top) {
                             blocked = true;
                             break;
                         }
@@ -6523,18 +6527,27 @@ public class MainActivity extends Activity {
                     int candidateY = Math.min(maxY, y);
                     for (int x = 0; x <= maxX + step; x += step) {
                         int candidateX = Math.min(maxX, x);
-                        android.graphics.Rect candidate = new android.graphics.Rect(
-                                candidateX, candidateY,
-                                candidateX + g[2], candidateY + g[3]);
+                        // Preserve the exact 6dp fallback search and tie-breaking,
+                        // but avoid testing candidates that cannot beat the best result
+                        // already found. This is especially important on crowded pages.
+                        int verticalDistance = Math.abs(candidateY - g[1]);
+                        if (bestX >= 0 && verticalDistance > bestDistance) {
+                            if (candidateY == maxY) break;
+                            continue;
+                        }
                         boolean blocked = false;
+                        int candidateRight = candidateX + g[2];
+                        int candidateBottom = candidateY + g[3];
                         for (android.graphics.Rect obstacle : obstacles) {
-                            if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                            if (candidateX < obstacle.right && candidateRight > obstacle.left
+                                    && candidateY < obstacle.bottom && candidateBottom > obstacle.top) {
                                 blocked = true;
                                 break;
                             }
                         }
                         if (blocked) continue;
-                        int distance = Math.abs(candidateX - g[0]) + Math.abs(candidateY - g[1]);
+                        int distance = Math.abs(candidateX - g[0]) + verticalDistance;
+                        if (bestX >= 0 && distance > bestDistance) continue;
                         if (distance < bestDistance) {
                             bestDistance = distance;
                             bestX = candidateX;
