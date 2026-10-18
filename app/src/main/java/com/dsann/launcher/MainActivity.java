@@ -2318,7 +2318,8 @@ public class MainActivity extends Activity {
             for (int row = 0; row < rows && chosenPage == null; row++) {
                 for (int col = 0; col < columns && chosenPage == null; col++) {
                     int candidateLeft = col * cellW + Math.max(0, (cellW - desiredTileWidth) / 2);
-                    int candidateTop = row * cellH + Math.max(0, (cellH - desiredTileHeight) / 2);
+                    int candidateTop = homeGridRowTop(row, rows, pageViewport.getHeight(), cellH)
+                            + Math.max(0, (cellH - desiredTileHeight) / 2);
                     if (candidateLeft + desiredTileWidth > pageViewport.getWidth()
                             || candidateTop + desiredTileHeight > pageViewport.getHeight()) continue;
                     android.graphics.Rect candidate = new android.graphics.Rect(candidateLeft, candidateTop,
@@ -2366,7 +2367,7 @@ public class MainActivity extends Activity {
                 for (int row = 0; row < rows && chosenPage == null; row++) {
                     for (int col = 0; col < columns && chosenPage == null; col++) {
                         int left = col * cellW;
-                        int top = row * cellH;
+                        int top = homeGridRowTop(row, rows, pageViewport.getHeight(), cellH);
                         if (left + desiredTileWidth > pageViewport.getWidth()
                                 || top + desiredTileHeight > pageViewport.getHeight()) continue;
                         android.graphics.Rect candidate = new android.graphics.Rect(left, top,
@@ -2927,9 +2928,10 @@ public class MainActivity extends Activity {
         // Test the snapped one-cell target, exactly as the app icon placer does.
         int col = Math.max(0, Math.min(columns - 1,
                 Math.round((left + width / 2f - cellW / 2f) / cellW)));
-        int row = Math.max(0, Math.min(rows - 1,
-                Math.round((top + height / 2f - cellH / 2f) / cellH)));
-        int snappedLeft = col * cellW, snappedTop = row * cellH;
+        int row = homeGridRowFromTop(
+                top + height / 2f - cellH / 2f, rows, pageViewport.getHeight(), cellH);
+        int snappedLeft = col * cellW;
+        int snappedTop = homeGridRowTop(row, rows, pageViewport.getHeight(), cellH);
         android.graphics.Rect candidate = new android.graphics.Rect(snappedLeft, snappedTop,
                 snappedLeft + cellW, snappedTop + cellH);
         if (candidate.right > pageViewport.getWidth() || candidate.bottom > pageViewport.getHeight()) return false;
@@ -2945,7 +2947,8 @@ public class MainActivity extends Activity {
                 int appLeft = appLp != null ? appLp.leftMargin : child.getLeft();
                 int appTop = appLp != null ? appLp.topMargin : child.getTop();
                 int appCol = Math.max(0, Math.min(columns - 1, Math.round(appLeft / (float) cellW)));
-                int appRow = Math.max(0, Math.min(rows - 1, Math.round(appTop / (float) cellH)));
+                int appRow = homeGridRowFromTop(
+                        appTop, rows, pageViewport.getHeight(), cellH);
                 if (appCol == col && appRow == row) return false;
                 continue;
             }
