@@ -8443,7 +8443,7 @@ public class MainActivity extends Activity {
         headerRow.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10),
                 LauncherUiUtils.dp(this, 11), LauncherUiUtils.dp(this, 11));
         headerRow.setBackground(LauncherUiUtils.roundRect(this,
-                new int[]{studioTint(accent, 44), Color.rgb(25, 31, 50)},
+                new int[]{studioTint(accent, 128), studioTint(Color.rgb(25, 31, 50), 128)},
                 LauncherUiUtils.dp(this, 14)));
 
         View rail = new View(this);
@@ -8599,7 +8599,7 @@ public class MainActivity extends Activity {
             panel.setBackground(LauncherUiUtils.roundRect(this,
                     new int[]{Color.rgb(28, 33, 57), Color.rgb(10, 14, 27)},
                     LauncherUiUtils.dp(this, 26)));
-            TextView title = LauncherUiUtils.text(this, "Home Studio", 27,
+            TextView title = LauncherUiUtils.text(this, "Home Studio", 41,
                     Color.WHITE, true);
             title.setTypeface(android.graphics.Typeface.create("cursive",
                     android.graphics.Typeface.BOLD));
@@ -8616,7 +8616,9 @@ public class MainActivity extends Activity {
             });
             title.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5),
                     LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4));
-            panel.addView(title);
+            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
+            titleParams.gravity = Gravity.CENTER_HORIZONTAL;
+            panel.addView(title, titleParams);
             TextView subtitle = LauncherUiUtils.text(this,
                     "Personalize your home screen and app drawer", 13,
                     Color.rgb(183, 197, 225), false);
@@ -8896,7 +8898,7 @@ public class MainActivity extends Activity {
         });
 
         TextView authorCredit = LauncherUiUtils.text(this, "made by debarghya Sannigrahi",
-                11, Color.rgb(167, 180, 207), false);
+                17, Color.rgb(167, 180, 207), false);
         authorCredit.setTypeface(android.graphics.Typeface.create("cursive",
                 android.graphics.Typeface.NORMAL));
         authorCredit.setGravity(Gravity.CENTER);
