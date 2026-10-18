@@ -107,7 +107,20 @@ final class LauncherUiUtils {
     }
 
     static GradientDrawable roundRect(Context context, int[] colors, float radiusPx) {
-        GradientDrawable drawable = new GradientDrawable(GradientDrawable.Orientation.TL_BR, colors);
+        GradientDrawable drawable;
+        if (colors == null || colors.length == 0) {
+            // An empty palette should still draw safely and consistently.
+            drawable = new GradientDrawable();
+            drawable.setColor(Color.TRANSPARENT);
+        } else if (colors.length == 1) {
+            // A one-color palette is a solid fill, not a gradient. Passing it to the
+            // orientation constructor triggers LinearGradient's "needs >= 2 colors"
+            // exception when Android draws the view background.
+            drawable = new GradientDrawable();
+            drawable.setColor(colors[0]);
+        } else {
+            drawable = new GradientDrawable(GradientDrawable.Orientation.TL_BR, colors);
+        }
         drawable.setCornerRadius(radiusPx);
         return drawable;
     }

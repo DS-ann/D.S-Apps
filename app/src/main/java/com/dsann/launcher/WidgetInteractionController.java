@@ -636,7 +636,12 @@ final class WidgetInteractionController {
                         targetPage = (FrameLayout) strip.getChildAt(targetIndex);
                     }
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    if (commit) {
+                    if (commit && targetPage != sourcePage) {
+                        // Cross-page drops are recalculated in the target page's coordinate
+                        // space and then passed through prepareWidgetDrop() for collision-safe
+                        // placement. Same-page drops retain the last collision-safe geometry
+                        // from MOVE handling; otherwise this raw finger coordinate can put a
+                        // widget back under an oversized clock on ACTION_UP.
                         int[] targetLocation = new int[2];
                         targetPage.getLocationOnScreen(targetLocation);
                         int dropWidth = Math.max(1, current.width > 0 ? current.width : container.getWidth());
@@ -645,7 +650,7 @@ final class WidgetInteractionController {
                                 Math.round(event.getRawX() - targetLocation[0] - fingerOffset[0])));
                         current.topMargin = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - dropHeight),
                                 Math.round(event.getRawY() - targetLocation[1] - fingerOffset[1])));
-                    } else {
+                    } else if (!commit) {
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
                     }
