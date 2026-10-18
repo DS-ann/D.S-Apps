@@ -5515,7 +5515,7 @@ public class MainActivity extends Activity {
                         new java.util.IdentityHashMap<View, int[]>();
                 java.util.IdentityHashMap<View, Boolean> recursionStack =
                         new java.util.IdentityHashMap<View, Boolean>();
-                int[] searchBudget = new int[]{320};
+                int[] searchBudget = new int[]{240};
                 int preferredX = existingTarget == null ? g[0] : existingTarget[0];
                 int preferredY = existingTarget == null ? g[1] : existingTarget[1];
                 if (findCascadeDisplacementPlan(page, other, movingView, movingRect,
@@ -5662,10 +5662,9 @@ public class MainActivity extends Activity {
                     ys.add(Math.max(0, Math.min(maxY, targetBounds.bottom)));
                 }
             }
-            // This search is only used after the fast exact-edge placement failed.
-            int step = Math.max(1, LauncherUiUtils.dp(this, 12));
-            for (int y = 0; y <= maxY; y += step) ys.add(Math.min(maxY, y));
-            for (int x = 0; x <= maxX; x += step) xs.add(Math.min(maxX, x));
+            // Exact rectangle-edge positions are sufficient for the cascade planner.
+            // Leave coarse-grid scanning to the non-recursive fallback so this bounded
+            // search does not multiply thousands of scan candidates at every depth.
         }
 
         java.util.ArrayList<int[]> candidates = new java.util.ArrayList<int[]>();
