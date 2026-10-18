@@ -2978,8 +2978,10 @@ public class MainActivity extends Activity {
         if (proxy == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
         proxy.setScaleX(item.getScaleX());
         proxy.setScaleY(item.getScaleY());
+        // Transfer geometry is measured in the destination page's final viewport
+        // coordinates, not its temporarily translated screen location during the slide.
         int[] pageLocation = new int[2];
-        page.getLocationOnScreen(pageLocation);
+        pageViewport.getLocationOnScreen(pageLocation);
         int width = Math.max(1, proxy.getWidth());
         int height = Math.max(1, proxy.getHeight());
         if (proxy.getLayoutParams() instanceof FrameLayout.LayoutParams) {
