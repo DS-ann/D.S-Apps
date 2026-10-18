@@ -5373,7 +5373,10 @@ public class MainActivity extends Activity {
             boolean targetCollides = alreadyDisplaced && existingTarget != null
                     && overlapsWithGap(movingRect, collisionRectAt(other,
                             existingTarget[0], existingTarget[1], g[2], g[3]), gap);
-            if (alreadyDisplaced && !currentCollides && !targetCollides) continue;
+            // An item whose assigned destination is clear must be allowed to finish
+            // moving out of its original collision zone. Replanning from its current
+            // animation frame on every MOVE cancelled its animation repeatedly.
+            if (alreadyDisplaced && !targetCollides) continue;
             if (!alreadyDisplaced && !currentCollides) continue;
 
             // If the dragged item reaches a neighbour's planned destination, cancel
