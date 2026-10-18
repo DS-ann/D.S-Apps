@@ -144,8 +144,16 @@ public final class LauncherAppAdapter extends BaseAdapter {
         } else {
             cell = new LinearLayout(activity);
             cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(Gravity.CENTER);
-            cell.setPadding(dp(2), dp(7), dp(2), dp(7));
+            if (drawer) {
+                // Preserve the drawer's existing icon and label layout.
+                cell.setGravity(Gravity.CENTER);
+                cell.setPadding(dp(2), dp(7), dp(2), dp(7));
+            } else {
+                // Home icons stay at the same vertical coordinate with labels on or off.
+                // The 14 dp top inset matches the centered icon position in the no-label cell.
+                cell.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                cell.setPadding(dp(2), dp(14), dp(2), dp(7));
+            }
             icon = new ImageView(activity);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
@@ -153,7 +161,8 @@ public final class LauncherAppAdapter extends BaseAdapter {
             iconParams.gravity = Gravity.CENTER;
             cell.addView(icon, iconParams);
             label = makeLabel();
-            cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
+            // Home labels occupy the gap before the next row; drawer sizing is unchanged.
+            cell.addView(label, new LinearLayout.LayoutParams(-1, dp(drawer ? 32 : 22)));
         }
         int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();

@@ -166,9 +166,10 @@ final class HomePageController {
                     && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
                     ? host.getPageViewport().getHeight() : fallbackHeight;
             int configuredIconSize = prefs.getInt(iconSizeKey, 48);
-            boolean labelsVisible = prefs.getBoolean(showLabelsKey, true);
+            // Keep the home grid tied to its no-label cell height. Labels are rendered
+            // into the existing gap below each icon and must not change row coordinates.
             int cellHeight = LauncherUiUtils.dp(activity,
-                    Math.max(56, configuredIconSize + (labelsVisible ? 54 : 28)));
+                    Math.max(56, configuredIconSize + 28));
             // Each app owns one fixed-height grid slot. Compute the number of rows
             // from the usable workspace height so no slot extends into the dock.
             final int rows = Math.max(1, pageHeight / Math.max(1, cellHeight));
@@ -231,9 +232,10 @@ final class HomePageController {
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
                 int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                boolean actualLabelsVisible = prefs.getBoolean(showLabelsKey, true);
+                // Use the same fixed slot height in the post-layout correction too;
+                // otherwise labels would still move rows after the first layout pass.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
-                        Math.max(56, configuredIconSize + (actualLabelsVisible ? 54 : 28)));
+                        Math.max(56, configuredIconSize + 28));
                 int actualRows = Math.max(1, page.getHeight() / actualCellHeight);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
