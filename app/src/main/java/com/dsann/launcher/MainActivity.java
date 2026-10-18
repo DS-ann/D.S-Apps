@@ -9477,7 +9477,7 @@ public class MainActivity extends Activity {
         seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
         // Keep slider controls visually distinct from their dark setting cards.
         android.content.res.ColorStateList tint =
-                android.content.res.ColorStateList.valueOf(Color.rgb(116, 199, 245));
+                android.content.res.ColorStateList.valueOf(Color.rgb(222, 255, 112));
         seekBar.setProgressTintList(tint);
         seekBar.setThumbTintList(tint);
         seekBar.setProgressBackgroundTintList(
@@ -9549,7 +9549,7 @@ public class MainActivity extends Activity {
         seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
         // Keep slider controls visually distinct from their dark setting cards.
         android.content.res.ColorStateList tint =
-                android.content.res.ColorStateList.valueOf(Color.rgb(116, 199, 245));
+                android.content.res.ColorStateList.valueOf(Color.rgb(222, 255, 112));
         seekBar.setProgressTintList(tint);
         seekBar.setThumbTintList(tint);
         seekBar.setProgressBackgroundTintList(
