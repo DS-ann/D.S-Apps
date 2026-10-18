@@ -161,8 +161,10 @@ public final class LauncherAppAdapter extends BaseAdapter {
             iconParams.gravity = Gravity.CENTER;
             cell.addView(icon, iconParams);
             label = makeLabel();
-            // Home labels occupy the gap before the next row; drawer sizing is unchanged.
-            cell.addView(label, new LinearLayout.LayoutParams(-1, dp(drawer ? 32 : 22)));
+            // Give home labels enough vertical room for the full font metrics. The home
+            // cell's grid-slot height stays fixed, and clipChildren is disabled below so
+            // the label can draw into the gap beneath its icon without moving that icon.
+            cell.addView(label, new LinearLayout.LayoutParams(-1, dp(32)));
         }
         int iconSize = preferences == null ? 48 : preferences.getInt(iconSizeKey, 48);
         ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
