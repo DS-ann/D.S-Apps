@@ -4,6 +4,9 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Shader;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.widget.TextView;
@@ -17,6 +20,12 @@ public final class SevenSegmentClockTextView extends TextView {
     private boolean sevenSegmentMode;
     private boolean segmentModeInitialized;
     private int segmentColor = Color.rgb(196, 200, 209);
+    private boolean segmentGradientEnabled;
+    private int segmentGradientWidth = -1;
+    private int[] segmentGradientColors;
+    private float segmentGradientPhase;
+    private LinearGradient segmentGradient;
+    private final Matrix segmentGradientMatrix = new Matrix();
     private final float[][] segmentRects = new float[7][4];
 
     public SevenSegmentClockTextView(Context context) {
@@ -47,7 +56,45 @@ public final class SevenSegmentClockTextView extends TextView {
 
     @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (segmentGradientEnabled && w > 0) { segmentGradientWidth = -1; ensureSegmentGradient(); }
         invalidate();
+    }
+
+    public void setSegmentGradientEnabled(boolean enabled, float phase, int[] colors) {
+        if (!enabled) {
+            if (segmentGradientEnabled || segmentPaint.getShader() != null) {
+                segmentGradientEnabled = false;
+                segmentPaint.setShader(null);
+                invalidate();
+            }
+            return;
+        }
+        if (colors == null || colors.length < 2) return;
+        segmentGradientEnabled = true;
+        segmentGradientPhase = phase - (float) Math.floor(phase);
+        if (segmentGradientColors == null || !java.util.Arrays.equals(segmentGradientColors, colors)) {
+            segmentGradientColors = colors.clone();
+            segmentGradientWidth = -1;
+        }
+        ensureSegmentGradient();
+        invalidate();
+    }
+
+    private void ensureSegmentGradient() {
+        int width = Math.max(1, getWidth());
+        if (segmentGradient == null || segmentGradientWidth != width) {
+            int[] colors = segmentGradientColors == null
+                    ? new int[]{Color.rgb(77, 163, 255), Color.rgb(71, 240, 232),
+                            Color.rgb(169, 139, 255), Color.rgb(255, 120, 191),
+                            Color.rgb(217, 247, 255)}
+                    : segmentGradientColors;
+            segmentGradient = new LinearGradient(0f, 0f, width, 0f,
+                    colors, null, Shader.TileMode.MIRROR);
+            segmentGradientWidth = width;
+        }
+        segmentGradientMatrix.setTranslate(-segmentGradientPhase * width * 2f, 0f);
+        segmentGradient.setLocalMatrix(segmentGradientMatrix);
+        segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
     }
 
     public void setSevenSegmentMode(boolean enabled) {
@@ -163,6 +210,7 @@ public final class SevenSegmentClockTextView extends TextView {
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
             if (ch == ':') {
+                segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
                 segmentPaint.setColor(color);
                 float radius = Math.max(2.5f, thickness * 0.38f);
                 // The colon is the fixed anchor between hour and minute.
@@ -192,12 +240,15 @@ public final class SevenSegmentClockTextView extends TextView {
             int litMask = segmentMask(ch);
             for (int j = 0; j < segments.length; j++) {
                 float[] seg = segments[j];
-                segmentPaint.setColor((litMask & (1 << j)) != 0 ? color : unlitColor);
+                boolean lit = (litMask & (1 << j)) != 0;
+                segmentPaint.setShader(segmentGradientEnabled && lit ? segmentGradient : null);
+                segmentPaint.setColor(lit ? color : unlitColor);
                 canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
                         thickness * 0.45f, thickness * 0.45f, segmentPaint);
             }
             x += advance;
         }
+        segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
         canvas.restore();
     }
 
