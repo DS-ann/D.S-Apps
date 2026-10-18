@@ -33,6 +33,7 @@ final class WidgetInteractionController {
         LinearLayout getPagesStrip();
         void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
         void updateLiveDisplacements(FrameLayout page, View movingView);
+        void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView);
         void finishLiveDisplacements(boolean commit, View movingView);
         void setWorkspaceGridVisible(boolean visible, View movingView);
         void beginWorkspaceTransferDrag(View item, int sourcePage, float rawX, float rawY,
@@ -600,7 +601,9 @@ final class WidgetInteractionController {
                             event.getRawY(), fingerOffset[0], fingerOffset[1]);
                 } else {
                     // Same-page placement can displace items directly around the real widget.
-                    listener.updateLiveDisplacements(sourcePage, container);
+                    // Coalesce collision planning to the next display frame while keeping
+                    // the container itself directly responsive to the finger.
+                    listener.scheduleLiveDisplacementUpdate(sourcePage, container);
                 }
                 widgetPage[0] = destinationPage;
                 return true;
