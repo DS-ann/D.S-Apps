@@ -2463,13 +2463,18 @@ public class MainActivity extends Activity {
                     tile.setPressed(false);
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(true);
                     if (firstDragFrame) {
+                        tile.animate().cancel();
+                        LauncherUiUtils.stopMoveHint(tile);
                         float baseScaleX = tile.getScaleX();
                         float baseScaleY = tile.getScaleY();
+                        tile.setPivotX(tile.getWidth() / 2f);
+                        tile.setPivotY(tile.getHeight() / 2f);
                         LauncherUiUtils.startScaleHint(tile, 1.10f);
-                        float targetScaleX = tile.getScaleX();
-                        float targetScaleY = tile.getScaleY();
+                        float targetScaleX = baseScaleX * 1.10f;
+                        float targetScaleY = baseScaleY * 1.10f;
                         tile.setScaleX(baseScaleX);
                         tile.setScaleY(baseScaleY);
+                        tile.bringToFront();
                         tile.animate().scaleX(targetScaleX).scaleY(targetScaleY)
                                 .setDuration(animationDuration(120L)).start();
                         beginWorkspaceTransferDrag(tile, shortcutOriginalPage[0],
@@ -6314,7 +6319,6 @@ public class MainActivity extends Activity {
      */
     private boolean hasWorkspaceVisualOverlaps(FrameLayout page) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
-        java.util.ArrayList<View> items = new java.util.ArrayList<View>();
         java.util.ArrayList<android.graphics.Rect> visualBounds =
                 new java.util.ArrayList<android.graphics.Rect>();
         for (int i = 0; i < page.getChildCount(); i++) {
@@ -6334,7 +6338,6 @@ public class MainActivity extends Activity {
             for (android.graphics.Rect prior : visualBounds) {
                 if (android.graphics.Rect.intersects(prior, bounds)) return true;
             }
-            items.add(item);
             visualBounds.add(bounds);
         }
         return false;
