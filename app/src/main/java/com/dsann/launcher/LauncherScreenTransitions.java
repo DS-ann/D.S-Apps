@@ -8,6 +8,128 @@ import android.widget.LinearLayout;
 final class LauncherScreenTransitions {
     private LauncherScreenTransitions() {}
 
+    // Parallex uses one progress animator for both surfaces. A new swipe can
+    // interrupt a settling animation without leaving two animators fighting.
+    private static android.animation.ValueAnimator activeParallaxAnimator;
+    private static LinearLayout activeParallaxHome;
+    private static LinearLayout activeParallaxDrawer;
+    private static float activeParallaxProgress;
+
+    private static float clampProgress(float progress) {
+        return Math.max(0f, Math.min(1f, progress));
+    }
+
+    static boolean isDrawerTransitionRunning(LinearLayout homeScreen,
+            LinearLayout drawerScreen, int effect) {
+        return effect == 0 && activeParallaxAnimator != null
+                && activeParallaxAnimator.isRunning()
+                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen;
+    }
+
+    static float getDrawerTransitionProgress(LinearLayout homeScreen,
+            LinearLayout drawerScreen, int effect, boolean drawerOpen) {
+        if (isDrawerTransitionRunning(homeScreen, drawerScreen, effect)) {
+            Object value = activeParallaxAnimator.getAnimatedValue();
+            if (value instanceof Number) activeParallaxProgress =
+                    clampProgress(((Number) value).floatValue());
+            return activeParallaxProgress;
+        }
+        if (drawerScreen != null && drawerScreen.getVisibility() == View.GONE) return 0f;
+        if (homeScreen != null && homeScreen.getVisibility() == View.GONE) return 1f;
+        return drawerOpen ? 1f : 0f;
+    }
+
+    /** Stop the settling animator at its current rendered progress for touch takeover. */
+    static float interruptDrawerTransition(Activity activity, LinearLayout homeScreen,
+            LinearLayout drawerScreen, int effect, boolean drawerOpen) {
+        float progress = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, drawerOpen);
+        if (!isDrawerTransitionRunning(homeScreen, drawerScreen, effect)) return progress;
+        android.animation.ValueAnimator old = activeParallaxAnimator;
+        activeParallaxAnimator = null; // a cancelled end callback must not snap to an endpoint.
+        if (old != null) old.cancel();
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        prepareTransitionLayers(homeScreen, drawerScreen);
+        homeScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setVisibility(View.VISIBLE);
+        updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
+        return progress;
+    }
+
+    private static void cancelActiveParallaxAnimator() {
+        android.animation.ValueAnimator old = activeParallaxAnimator;
+        activeParallaxAnimator = null;
+        if (old != null) old.cancel();
+    }
+
+    private static void resetTransitionPose(View view) {
+        if (view == null) return;
+        view.setAlpha(1f);
+        view.setRotationX(0f);
+        view.setRotationY(0f);
+        view.setTranslationX(0f);
+        view.setTranslationY(0f);
+        view.setTranslationZ(0f);
+        view.setScaleX(1f);
+        view.setScaleY(1f);
+    }
+
+    private static void finishParallaxAtHome(LinearLayout homeScreen, LinearLayout drawerScreen) {
+        homeScreen.setVisibility(View.VISIBLE);
+        resetTransitionPose(homeScreen);
+        drawerScreen.setVisibility(View.GONE);
+        resetTransitionPose(drawerScreen);
+        releaseTransitionLayer(homeScreen);
+        releaseTransitionLayer(drawerScreen);
+    }
+
+    private static void finishParallaxAtDrawer(LinearLayout homeScreen, LinearLayout drawerScreen) {
+        homeScreen.setVisibility(View.GONE);
+        resetTransitionPose(homeScreen);
+        drawerScreen.setVisibility(View.VISIBLE);
+        resetTransitionPose(drawerScreen);
+        releaseTransitionLayer(homeScreen);
+        releaseTransitionLayer(drawerScreen);
+    }
+
+    private static void animateParallaxProgress(Activity activity, LinearLayout homeScreen,
+            LinearLayout drawerScreen, float start, float end, long fullDuration,
+            Runnable endAction) {
+        cancelActiveParallaxAnimator();
+        homeScreen.animate().cancel();
+        drawerScreen.animate().cancel();
+        prepareTransitionLayers(homeScreen, drawerScreen);
+        homeScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setVisibility(View.VISIBLE);
+        final float from = clampProgress(start);
+        final float to = clampProgress(end);
+        activeParallaxProgress = from;
+        activeParallaxHome = homeScreen;
+        activeParallaxDrawer = drawerScreen;
+        updateDrawerSwipe(activity, homeScreen, drawerScreen, 0, from);
+
+        final android.animation.ValueAnimator animator =
+                android.animation.ValueAnimator.ofFloat(from, to);
+        long duration = Math.max(110L, Math.round(fullDuration * Math.abs(to - from)));
+        animator.setDuration(LauncherMotion.duration(activity, duration));
+        animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        activeParallaxAnimator = animator;
+        animator.addUpdateListener(value -> {
+            if (activeParallaxAnimator != animator) return;
+            activeParallaxProgress = clampProgress(((Number) value.getAnimatedValue()).floatValue());
+            updateDrawerSwipe(activity, homeScreen, drawerScreen, 0, activeParallaxProgress);
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (activeParallaxAnimator != animator) return;
+                activeParallaxAnimator = null;
+                activeParallaxProgress = to;
+                if (endAction != null) endAction.run();
+            }
+        });
+        animator.start();
+    }
+
     // 0 = Parallex, 1 = 3D Card Flip, 2 = Depth Slide, 3 = Rotating Carousel.
     private static void prepareTransitionLayers(LinearLayout homeScreen, LinearLayout drawerScreen) {
         // Cache both surfaces during transforms to avoid display-list rebuild flashes.
@@ -33,6 +155,13 @@ final class LauncherScreenTransitions {
 
     static void showHome(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
                          Runnable markDrawerClosed, int effect) {
+        if (effect == 0) {
+            float start = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, true);
+            markDrawerClosed.run();
+            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 380L,
+                    () -> finishParallaxAtHome(homeScreen, drawerScreen));
+            return;
+        }
         markDrawerClosed.run();
         drawerScreen.animate().cancel();
         homeScreen.animate().cancel();
@@ -177,7 +306,8 @@ final class LauncherScreenTransitions {
 
     static void updateDrawerSwipe(Activity activity, LinearLayout homeScreen,
                                    LinearLayout drawerScreen, int effect, float swipeProgress) {
-        float progress = Math.max(0f, Math.min(1f, swipeProgress));
+        float progress = clampProgress(swipeProgress);
+        activeParallaxProgress = progress;
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
@@ -277,8 +407,17 @@ final class LauncherScreenTransitions {
 
     static void showDrawer(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
                            Runnable beforeOpen, int effect, float swipeProgress) {
+        float progress = clampProgress(swipeProgress);
+        if (effect == 0) {
+            if (isDrawerTransitionRunning(homeScreen, drawerScreen, effect) && progress <= 0.001f) {
+                progress = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, true);
+            }
+            beforeOpen.run();
+            animateParallaxProgress(activity, homeScreen, drawerScreen, progress, 1f, 380L,
+                    () -> finishParallaxAtDrawer(homeScreen, drawerScreen));
+            return;
+        }
         beforeOpen.run();
-        float progress = Math.max(0f, Math.min(1f, swipeProgress));
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
@@ -368,7 +507,14 @@ final class LauncherScreenTransitions {
     static void finishDrawerSwipeToHome(Activity activity, LinearLayout homeScreen,
                                         LinearLayout drawerScreen, Runnable markDrawerClosed,
                                         int effect, float swipeProgress) {
-        final float start = Math.max(0f, Math.min(1f, swipeProgress));
+        final float start = clampProgress(swipeProgress);
+        if (effect == 0) {
+            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 300L, () -> {
+                markDrawerClosed.run();
+                finishParallaxAtHome(homeScreen, drawerScreen);
+            });
+            return;
+        }
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
@@ -412,7 +558,14 @@ final class LauncherScreenTransitions {
     static void finishDrawerSwipeToDrawer(Activity activity, LinearLayout homeScreen,
                                           LinearLayout drawerScreen, Runnable markDrawerOpen,
                                           int effect, float swipeProgress) {
-        final float start = Math.max(0f, Math.min(1f, swipeProgress));
+        final float start = clampProgress(swipeProgress);
+        if (effect == 0) {
+            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 1f, 300L, () -> {
+                markDrawerOpen.run();
+                finishParallaxAtDrawer(homeScreen, drawerScreen);
+            });
+            return;
+        }
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
@@ -456,6 +609,12 @@ final class LauncherScreenTransitions {
 
     static void cancelDrawerSwipe(Activity activity, LinearLayout homeScreen,
                                  LinearLayout drawerScreen, int effect) {
+        if (effect == 0) {
+            float start = clampProgress(activeParallaxProgress);
+            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 180L,
+                    () -> finishParallaxAtHome(homeScreen, drawerScreen));
+            return;
+        }
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);

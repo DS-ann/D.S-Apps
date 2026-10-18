@@ -49,9 +49,7 @@ final class LauncherDrawerController {
         int side = LauncherUiUtils.dp(activity, 18);
         screen.setPadding(side, side, side, LauncherUiUtils.dp(activity, 8));
         screen.setBackground(background);
-        LinearLayout headerRow = new LinearLayout(activity);
-        headerRow.setGravity(Gravity.CENTER_VERTICAL);
-        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        FrameLayout headerRow = new FrameLayout(activity);
         LinearLayout.LayoutParams headerParams =
                 new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(activity, 48));
         headerParams.bottomMargin = LauncherUiUtils.dp(activity, 4);
@@ -60,15 +58,16 @@ final class LauncherDrawerController {
         title.setGravity(Gravity.CENTER);
         title.setTypeface(android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL));
         title.setLetterSpacing(0.015f);
-        headerRow.addView(title, new LinearLayout.LayoutParams(0, -1, 1f));
+        headerRow.addView(title, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         final TextView searchButton = LauncherUiUtils.text(activity, "⌕", 27,
                 android.graphics.Color.WHITE, true);
         searchButton.setGravity(Gravity.CENTER);
         searchButton.setContentDescription("Search apps");
         searchButton.setBackgroundResource(android.R.drawable.list_selector_background);
         searchButton.setPadding(0, 0, 0, 0);
-        headerRow.addView(searchButton, new LinearLayout.LayoutParams(
-                LauncherUiUtils.dp(activity, 44), LauncherUiUtils.dp(activity, 44)));
+        headerRow.addView(searchButton, new FrameLayout.LayoutParams(
+                LauncherUiUtils.dp(activity, 44), LauncherUiUtils.dp(activity, 44),
+                Gravity.RIGHT | Gravity.CENTER_VERTICAL));
         screen.addView(headerRow, headerParams);
 
         FrameLayout drawerBody = new FrameLayout(activity);

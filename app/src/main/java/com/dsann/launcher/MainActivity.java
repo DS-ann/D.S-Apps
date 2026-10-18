@@ -271,6 +271,9 @@ public class MainActivity extends Activity {
     private int currentPage = 0;
     private float gestureDownX, gestureDownY;
     private float drawerSwipeProgress = 0f;
+    private float drawerSwipeStartProgress = 0f;
+    private float drawerSwipeAnchorY = 0f;
+    private boolean drawerTransitionInterruptedAtDown = false;
     private boolean drawerSwipeVisualActive = false;
     private boolean gestureStartedOnAppCell = false;
     private boolean gestureStartedOnWidget = false;
@@ -604,7 +607,13 @@ public class MainActivity extends Activity {
             pageSwipeChildCancelled = false;
             verticalSwipeClaimed = false;
             drawerCloseSwipeClaimed = false;
-            drawerSwipeProgress = 0f;
+            drawerTransitionInterruptedAtDown =
+                    LauncherScreenTransitions.isDrawerTransitionRunning(
+                            homeScreen, drawerScreen, getDrawerTransition());
+            drawerSwipeStartProgress = LauncherScreenTransitions.getDrawerTransitionProgress(
+                    homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
+            drawerSwipeAnchorY = event.getY();
+            drawerSwipeProgress = drawerSwipeStartProgress;
             drawerSwipeVisualActive = false;
             gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
@@ -672,6 +681,43 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
 
+        // A second gesture during a settling Parallex transition takes over at the
+        // currently rendered progress. A tap does not interrupt the animation.
+        if (action == MotionEvent.ACTION_MOVE && drawerTransitionInterruptedAtDown) {
+            boolean transitionVerticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
+                    && Math.abs(dy) > Math.abs(dx) * 1.15f;
+            if (!drawerSwipeVisualActive
+                    && !LauncherScreenTransitions.isDrawerTransitionRunning(
+                            homeScreen, drawerScreen, getDrawerTransition())) {
+                drawerTransitionInterruptedAtDown = false;
+                drawerSwipeStartProgress = drawerOpen ? 1f : 0f;
+                drawerSwipeProgress = drawerSwipeStartProgress;
+            } else if (!drawerSwipeVisualActive && transitionVerticalSwipe) {
+                drawerSwipeStartProgress = LauncherScreenTransitions.interruptDrawerTransition(
+                        this, homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
+                drawerSwipeAnchorY = event.getY();
+                drawerSwipeProgress = drawerSwipeStartProgress;
+                drawerSwipeVisualActive = true;
+                verticalSwipeClaimed = true;
+                handler.removeCallbacks(homeLongPress);
+                handler.removeCallbacks(clockWidgetLongPress);
+                handler.removeCallbacks(clockWidgetEditLongPress);
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                super.dispatchTouchEvent(cancel);
+                cancel.recycle();
+                return true;
+            } else if (drawerSwipeVisualActive) {
+                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
+                drawerSwipeProgress = Math.max(0f, Math.min(1f,
+                        drawerSwipeStartProgress - (event.getY() - drawerSwipeAnchorY) / swipeHeight));
+                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition(), drawerSwipeProgress);
+                return true;
+            }
+        }
+
         // While the drawer is open, let a qualifying downward pull close it on the
         // first gesture whenever that gesture begins at the top of the app list. Users
         // may start on the "My Apps" header as well as on a grid cell; requiring the
@@ -685,7 +731,7 @@ public class MainActivity extends Activity {
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                         ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
                 drawerSwipeProgress = Math.max(0f,
-                        Math.min(1f, 1f - dy / (float) swipeHeight));
+                        Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
                 homeScreen.animate().cancel();
                 drawerScreen.animate().cancel();
                 LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
@@ -904,7 +950,7 @@ public class MainActivity extends Activity {
             if (drawerCloseSwipeClaimed) {
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                         ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
-                drawerSwipeProgress = Math.max(0f, Math.min(1f, 1f - dy / (float) swipeHeight));
+                drawerSwipeProgress = Math.max(0f, Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
                 LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
                         getDrawerTransition(), drawerSwipeProgress);
                 return true;
@@ -922,7 +968,7 @@ public class MainActivity extends Activity {
                 verticalSwipeClaimed = true;
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                         ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
-                drawerSwipeProgress = Math.max(0f, Math.min(1f, -dy / (float) swipeHeight));
+                drawerSwipeProgress = Math.max(0f, Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
                 if (dy < 0f) {
                     drawerSwipeVisualActive = true;
                     homeScreen.animate().cancel();
@@ -943,7 +989,7 @@ public class MainActivity extends Activity {
                 if (dy < 0f || drawerSwipeVisualActive) {
                     int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                             ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
-                    drawerSwipeProgress = Math.max(0f, Math.min(1f, -dy / (float) swipeHeight));
+                    drawerSwipeProgress = Math.max(0f, Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
                     if (dy < 0f) drawerSwipeVisualActive = true;
                     LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
                             getDrawerTransition(), drawerSwipeProgress);
@@ -1073,8 +1119,19 @@ public class MainActivity extends Activity {
             }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                // A cancelled upward opening settles to the nearest stable screen.
-                if (drawerSwipeProgress >= 0.10f) {
+                boolean interruptedTransition = drawerTransitionInterruptedAtDown;
+                drawerTransitionInterruptedAtDown = false;
+                // Normal gestures keep the existing 10% threshold. A gesture that
+                // takes over a running animation settles at the nearest endpoint.
+                if (interruptedTransition) {
+                    if (drawerSwipeProgress >= 0.50f) {
+                        LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                                () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                    } else {
+                        LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
+                                () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
+                    }
+                } else if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1136,11 +1193,14 @@ public class MainActivity extends Activity {
             }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                // A drawer-opening gesture owns the complete touch sequence. If the
-                // finger reverses or lifts mid-transition, settle to the nearest
-                // endpoint instead of starting control-center navigation or leaving
-                // the two surfaces in an intermediate pose.
-                if (drawerSwipeProgress >= 0.10f) {
+                boolean interruptedTransition = drawerTransitionInterruptedAtDown;
+                drawerTransitionInterruptedAtDown = false;
+                // Interrupted settles choose the nearest endpoint; ordinary short
+                // opening swipes keep their established 10% threshold.
+                if (interruptedTransition && drawerSwipeProgress < 0.50f) {
+                    LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
+                } else if (interruptedTransition || drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -8337,6 +8397,7 @@ public class MainActivity extends Activity {
     private String studioSectionDescription(String title) {
         String key = title.toLowerCase(Locale.ROOT);
         if (key.contains("home")) return "Grid, icon size, shortcuts and labels";
+        if (key.contains("widget")) return "Add calendar, weather and other home-screen widgets";
         if (key.contains("clock")) return "Clock design, background and date typography";
         if (key.contains("animation")) return "Home page swipes and overall animation speed";
         if (key.contains("drawer")) return "App list layout, labels and opening motion";
@@ -8350,6 +8411,7 @@ public class MainActivity extends Activity {
         String glyphText = "⚙";
         int accent = Color.rgb(146, 171, 239);
         if (key.contains("home")) { glyphText = "⌂"; accent = Color.rgb(98, 211, 255); }
+        else if (key.contains("widget")) { glyphText = "▦"; accent = Color.rgb(112, 224, 190); }
         else if (key.contains("clock")) { glyphText = "◷"; accent = Color.rgb(255, 190, 95); }
         else if (key.contains("animation")) { glyphText = "↔"; accent = Color.rgb(198, 151, 255); }
         else if (key.contains("drawer")) { glyphText = "▦"; accent = Color.rgb(99, 229, 190); }
@@ -8360,7 +8422,7 @@ public class MainActivity extends Activity {
         LinearLayout headerRow = new LinearLayout(this);
         headerRow.setGravity(Gravity.CENTER_VERTICAL);
         headerRow.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10),
-                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 10));
+                LauncherUiUtils.dp(this, 11), LauncherUiUtils.dp(this, 11));
         headerRow.setBackground(LauncherUiUtils.roundRect(this,
                 new int[]{studioTint(accent, 44), Color.rgb(25, 31, 50)},
                 LauncherUiUtils.dp(this, 14)));
@@ -8369,25 +8431,25 @@ public class MainActivity extends Activity {
         rail.setBackground(LauncherUiUtils.roundRect(this,
                 new int[]{accent}, LauncherUiUtils.dp(this, 3)));
         headerRow.addView(rail, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 4),
-                LauncherUiUtils.dp(this, 44)));
+                LauncherUiUtils.dp(this, 48)));
 
-        TextView glyph = LauncherUiUtils.text(this, glyphText, 20, accent, true);
+        TextView glyph = LauncherUiUtils.text(this, glyphText, 23, accent, true);
         glyph.setGravity(Gravity.CENTER);
         glyph.setBackground(LauncherUiUtils.roundRect(this,
                 new int[]{studioTint(accent, 52), studioTint(accent, 22)},
                 LauncherUiUtils.dp(this, 11)));
         LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(
-                LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38));
+                LauncherUiUtils.dp(this, 42), LauncherUiUtils.dp(this, 42));
         glyphParams.leftMargin = LauncherUiUtils.dp(this, 9);
         glyphParams.rightMargin = LauncherUiUtils.dp(this, 10);
         headerRow.addView(glyph, glyphParams);
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        TextView header = LauncherUiUtils.text(this, title, 16, Color.WHITE, true);
+        TextView header = LauncherUiUtils.text(this, title, 19, Color.WHITE, true);
         copy.addView(header, new LinearLayout.LayoutParams(-1, -2));
         TextView subtitle = LauncherUiUtils.text(this, studioSectionDescription(title),
-                12, Color.rgb(190, 202, 226), false);
+                13, Color.rgb(190, 202, 226), false);
         subtitle.setPadding(0, LauncherUiUtils.dp(this, 3), 0, 0);
         copy.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
         headerRow.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -8518,8 +8580,21 @@ public class MainActivity extends Activity {
             panel.setBackground(LauncherUiUtils.roundRect(this,
                     new int[]{Color.rgb(28, 33, 57), Color.rgb(10, 14, 27)},
                     LauncherUiUtils.dp(this, 26)));
-            TextView title = LauncherUiUtils.text(this, "Home Studio", 25,
-                    Color.rgb(247, 249, 255), true);
+            TextView title = LauncherUiUtils.text(this, "Home Studio", 27,
+                    Color.WHITE, true);
+            title.setTypeface(android.graphics.Typeface.create("cursive",
+                    android.graphics.Typeface.BOLD));
+            title.addOnLayoutChangeListener((view, left, top, right, bottom,
+                    oldLeft, oldTop, oldRight, oldBottom) -> {
+                int textWidth = right - left;
+                if (textWidth <= 0) return;
+                title.getPaint().setShader(new android.graphics.LinearGradient(
+                        0f, 0f, textWidth, 0f,
+                        new int[]{Color.rgb(96, 231, 255), Color.rgb(143, 143, 255),
+                                Color.rgb(255, 133, 204), Color.rgb(255, 208, 125)},
+                        null, android.graphics.Shader.TileMode.CLAMP));
+                title.invalidate();
+            });
             title.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 5),
                     LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4));
             panel.addView(title);
@@ -8531,7 +8606,7 @@ public class MainActivity extends Activity {
             panel.addView(subtitle);
 
             TextView usageTip = LauncherUiUtils.text(this,
-                    "TAP A ROW TO CHANGE IT  ·  SLIDE TO ADJUST  ·  COLOURED HEADERS GROUP SETTINGS",
+                    "TAP A ROW TO CHANGE IT  ·  SLIDE TO ADJUST",
                     11, Color.rgb(176, 222, 255), true);
             usageTip.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9),
                     LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 9));
@@ -8632,7 +8707,14 @@ public class MainActivity extends Activity {
             applyBrandVisibility(); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
-        addSection(content, "Clock");
+        addSection(content, "Widgets");
+        addSettingRow(content, "▦", "Add widget",
+                "Choose a clock, calendar, weather or other widget", () -> {
+            dialog.dismiss();
+            beginWidgetPicker(currentPage);
+        });
+
+        addSection(content, "Clocks");
         addSliderRow(content, "Clock background opacity", 0, 100,
                 prefs.getInt(KEY_CLOCK_BG_OPACITY, 50), "%", value -> {
             prefs.edit().putInt(KEY_CLOCK_BG_OPACITY, value).apply();
@@ -8783,10 +8865,6 @@ public class MainActivity extends Activity {
         });
 
         addSection(content, "Manage layout");
-        addSettingRow(content, "▦", "Add widget", "Choose a clock, calendar, weather or other widget", () -> {
-            dialog.dismiss();
-            beginWidgetPicker(currentPage);
-        });
         addSettingRow(content, "＋", "Add apps to Home", "Choose shortcuts for the home screen", () -> { dialog.dismiss(); showAddApps(currentPage); });
         addSettingRow(content, "⌂", "Reset Home layout", "Restore default shortcuts and grid", () -> {
             homePackages.clear();
@@ -8803,6 +8881,14 @@ public class MainActivity extends Activity {
             drawerGrid.setNumColumns(getDrawerColumns()); drawerGrid.setVerticalSpacing(LauncherUiUtils.dp(this, 8)); drawerGrid.setHorizontalSpacing(LauncherUiUtils.dp(this, 4));
             applyBrandVisibility(); loadApps(); renderHomePages(false); showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
+
+        TextView authorCredit = LauncherUiUtils.text(this, "made by debarghya Sannigrahi",
+                11, Color.rgb(167, 180, 207), false);
+        authorCredit.setTypeface(android.graphics.Typeface.create("cursive",
+                android.graphics.Typeface.NORMAL));
+        authorCredit.setGravity(Gravity.CENTER);
+        authorCredit.setPadding(0, LauncherUiUtils.dp(this, 16), 0, LauncherUiUtils.dp(this, 7));
+        content.addView(authorCredit, new LinearLayout.LayoutParams(-1, -2));
 
         if (!reuseContent) {
             panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
