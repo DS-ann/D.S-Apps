@@ -207,7 +207,6 @@ public class MainActivity extends Activity {
     private boolean gestureStartedOnContactShortcut = false;
     private boolean gestureStartedOnResizeHandle = false;
     // A first pull at the drawer's top arms closing; the next downward pull closes.
-    private boolean drawerDownSwipeAtTopSeen = false;
     private boolean pageSwipeActive = false;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
@@ -405,7 +404,6 @@ public class MainActivity extends Activity {
             drawerSwipeVisualActive = false;
             gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
-            if (drawerOpen && !drawerAtTopOnGestureDown) drawerDownSwipeAtTopSeen = false;
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
@@ -467,16 +465,38 @@ public class MainActivity extends Activity {
             return super.dispatchTouchEvent(event);
         }
 
-        // Once a drawer gesture starts while the list is already scrolled, keep the
-        // entire touch stream with GridView. Running launcher-level clock/page/drawer
-        // recognizers over those MOVE events could steal downward scrolls from the list.
-        // The top-of-list pull-to-close gesture is intentionally handled separately below.
-        if (drawerOpen && gestureStartedOnDrawerGrid && !drawerAtTopOnGestureDown) {
-            return super.dispatchTouchEvent(event);
-        }
-
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
+
+        // While the drawer is open, GridView owns ordinary scrolling for its entire
+        // gesture. The only gesture the launcher may take over is a downward pull
+        // that starts when the list is already at the top. Do not require a previous
+        // "arming" swipe; that latch caused users to pull twice to close the drawer.
+        if (drawerOpen && gestureStartedOnDrawerGrid && !drawerCloseSwipeClaimed) {
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
+                    && Math.abs(dy) > Math.abs(dx) * 1.15f;
+            if (action == MotionEvent.ACTION_MOVE && drawerAtTopOnGestureDown
+                    && dy > 0f && verticalSwipe) {
+                drawerCloseSwipeClaimed = true;
+                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
+                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
+                drawerSwipeProgress = Math.max(0f,
+                        Math.min(1f, 1f - dy / (float) swipeHeight));
+                homeScreen.animate().cancel();
+                drawerScreen.animate().cancel();
+                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                        getDrawerTransition(), drawerSwipeProgress);
+                handler.removeCallbacks(homeLongPress);
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                super.dispatchTouchEvent(cancel);
+                cancel.recycle();
+                return true;
+            }
+            // This also handles ACTION_UP/CANCEL for unclaimed scrolls, keeping them
+            // inside GridView rather than leaving activity gesture state half-claimed.
+            return super.dispatchTouchEvent(event);
+        }
         if (action == MotionEvent.ACTION_MOVE) {
             // A touch that begins on the clock must still be allowed to become a
             // normal launcher swipe. The clock's child listener consumes ACTION_DOWN,
@@ -678,24 +698,6 @@ public class MainActivity extends Activity {
                 drawerSwipeProgress = Math.max(0f, Math.min(1f, 1f - dy / (float) swipeHeight));
                 LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
                         getDrawerTransition(), drawerSwipeProgress);
-                return true;
-            }
-            if (drawerOpen && gestureStartedOnDrawerGrid && drawerAtTopOnGestureDown
-                    && drawerDownSwipeAtTopSeen && dy > 0 && verticalSwipe) {
-                drawerDownSwipeAtTopSeen = false;
-                drawerCloseSwipeClaimed = true;
-                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
-                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
-                drawerSwipeProgress = Math.max(0f, Math.min(1f, 1f - dy / (float) swipeHeight));
-                homeScreen.animate().cancel();
-                drawerScreen.animate().cancel();
-                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition(), drawerSwipeProgress);
-                handler.removeCallbacks(homeLongPress);
-                MotionEvent cancel = MotionEvent.obtain(event);
-                cancel.setAction(MotionEvent.ACTION_CANCEL);
-                super.dispatchTouchEvent(cancel);
-                cancel.recycle();
                 return true;
             }
             // A held item gesture belongs to its move/resize controller, not workspace navigation.
@@ -909,19 +911,6 @@ public class MainActivity extends Activity {
                 return true;
             }
             handler.removeCallbacks(homeLongPress);
-            // The first downward pull at the drawer top stays with GridView. Arm
-            // closing on release; clear the latch if the list has scrolled away.
-            if (drawerOpen && gestureStartedOnDrawerGrid && !drawerCloseSwipeClaimed) {
-                boolean releaseVertical = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
-                        && Math.abs(dy) > Math.abs(dx) * 1.15f;
-                if (!isDrawerAtTop()) {
-                    drawerDownSwipeAtTopSeen = false;
-                } else if (drawerAtTopOnGestureDown && dy > 0 && releaseVertical) {
-                    drawerDownSwipeAtTopSeen = true;
-                } else if (dy < 0 && releaseVertical) {
-                    drawerDownSwipeAtTopSeen = false;
-                }
-            }
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
                 drawerCloseSwipeClaimed = false;
@@ -1002,15 +991,15 @@ public class MainActivity extends Activity {
     }
 
     private boolean touchStartedOnDrawerGrid(float rawX, float rawY) {
-        if (drawerGrid == null) return false;
-        View target = findViewAt(root, (int) rawX, (int) rawY);
-        while (target != null) {
-            if (target == drawerGrid) return true;
-            if (target == root) break;
-            android.view.ViewParent parent = target.getParent();
-            target = parent instanceof View ? (View) parent : null;
-        }
-        return false;
+        if (drawerGrid == null || drawerGrid.getVisibility() != View.VISIBLE
+                || drawerGrid.getWidth() <= 0 || drawerGrid.getHeight() <= 0) return false;
+        int[] location = new int[2];
+        drawerGrid.getLocationOnScreen(location);
+        // Test the grid's actual screen rectangle. Recursive hit testing can select a
+        // transformed/overlaid child instead, which made some drawer scrolls fall back
+        // to launcher-level gesture recognition.
+        return rawX >= location[0] && rawX < location[0] + drawerGrid.getWidth()
+                && rawY >= location[1] && rawY < location[1] + drawerGrid.getHeight();
     }
 
     private boolean touchStartedOnClock(float rawX, float rawY) {
@@ -3543,7 +3532,6 @@ public class MainActivity extends Activity {
     private void showDrawer(float swipeProgress) {
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
-            drawerDownSwipeAtTopSeen = false;
         }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
     }
 
