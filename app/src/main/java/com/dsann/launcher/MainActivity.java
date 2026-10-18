@@ -5219,7 +5219,16 @@ public class MainActivity extends Activity {
                 if (blocker == other || !isWorkspaceItem(blocker)) continue;
                 int[] bg = itemGeometry(blocker);
                 if (bg[2] <= 0 || bg[3] <= 0) continue;
+                // Reserve both the current visual footprint and any destination already
+                // assigned to an in-flight neighbour. Without target reservations, two
+                // items processed in the same MOVE event can choose the same empty pocket
+                // because the first animation has not moved its view there yet.
                 obstacles.add(collisionRect(blocker, bg));
+                int[] plannedTarget = liveDisplacementTargets.get(blocker);
+                if (plannedTarget != null) {
+                    obstacles.add(collisionRectAt(blocker, plannedTarget[0], plannedTarget[1],
+                            Math.max(1, bg[2]), Math.max(1, bg[3])));
+                }
             }
             for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
                 View reserved = entry.getKey();
@@ -5326,17 +5335,25 @@ public class MainActivity extends Activity {
                 // final destination is committed to layout params on drop. This
                 // avoids the one-frame jump caused by changing margins immediately.
                 other.animate().cancel();
+                // Give each new neighbour a short stagger. Together with destination
+                // reservations this prevents several items from racing through the same
+                // visual corridor and appearing to overlap during a dense push-aside.
+                long displacementOrdinal = Math.max(0, liveDisplacedItems.size() - 1);
+                long startDelay = Math.min(72L, displacementOrdinal * 18L);
                 if (other == clockPanel) {
                     float targetX = clockPanel.getTranslationX() + bestX - g[0];
                     float targetY = clockPanel.getTranslationY() + bestY - g[1];
                     float[] bounded = clampClockTranslation(clockPanel, targetX, targetY);
                     clockPanel.animate().translationX(bounded[0]).translationY(bounded[1])
+                            .setStartDelay(animationDuration(startDelay))
                             .setDuration(animationDuration(120L)).start();
                 } else {
                     float targetTranslationX = other.getTranslationX() + bestX - g[0];
                     float targetTranslationY = other.getTranslationY() + bestY - g[1];
                     other.animate().translationX(targetTranslationX)
-                            .translationY(targetTranslationY).setDuration(animationDuration(120L)).start();
+                            .translationY(targetTranslationY)
+                            .setStartDelay(animationDuration(startDelay))
+                            .setDuration(animationDuration(120L)).start();
                 }
             }
         }
