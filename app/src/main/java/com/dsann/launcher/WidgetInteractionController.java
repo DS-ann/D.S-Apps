@@ -42,6 +42,8 @@ final class WidgetInteractionController {
         int getWorkspaceTransferTargetPage();
         void updateWorkspaceTransferDisplacements(View item, float rawX, float rawY,
                 float fingerOffsetX, float fingerOffsetY);
+        boolean prepareWidgetDrop(FrameLayout targetPage, View widget, float rawX, float rawY,
+                float fingerOffsetX, float fingerOffsetY);
         int finishWorkspaceTransferAnimation();
         void finishWorkspaceTransferDrag(View item, boolean commit);
     }
@@ -649,24 +651,41 @@ final class WidgetInteractionController {
                     container.setTranslationX(0f);
                     container.setTranslationY(0f);
                     container.setLayoutParams(current);
-                    if (commit && targetPage != sourcePage) {
-                        listener.updateWorkspaceTransferDisplacements(container, event.getRawX(),
-                                event.getRawY(), fingerOffset[0], fingerOffset[1]);
-                        reparenting[0] = true;
-                        sourcePage.removeView(container);
-                        targetPage.addView(container, current);
-                        reparenting[0] = false;
-                        widgetPage[0] = targetIndex;
-                        // Recheck the actual widget at its final destination geometry.
-                        listener.updateLiveDisplacements(targetPage, container);
-                    } else {
+                    if (commit && targetPage != sourcePage
+                            && !listener.prepareWidgetDrop(targetPage, container,
+                                    event.getRawX(), event.getRawY(),
+                                    fingerOffset[0], fingerOffset[1])) {
+                        // The destination cannot hold this widget after the preview
+                        // rearrangement. Roll back instead of committing an overlap.
+                        current.leftMargin = origin[0];
+                        current.topMargin = origin[1];
+                        container.setTranslationX(0f);
+                        container.setTranslationY(0f);
+                        container.setLayoutParams(current);
                         widgetPage[0] = originalPageAtDown[0];
+                        listener.finishWorkspaceTransferDrag(container, false);
+                        listener.setWorkspaceGridVisible(false, null);
+                        listener.finishLiveDisplacements(false, container);
+                        Toast.makeText(activity, "No space available, remove first.",
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        if (commit && targetPage != sourcePage) {
+                            reparenting[0] = true;
+                            sourcePage.removeView(container);
+                            targetPage.addView(container, current);
+                            reparenting[0] = false;
+                            widgetPage[0] = targetIndex;
+                            // Recheck the real widget at its final destination geometry.
+                            listener.updateLiveDisplacements(targetPage, container);
+                        } else {
+                            widgetPage[0] = originalPageAtDown[0];
+                        }
+                        listener.finishWorkspaceTransferDrag(container, commit);
+                        listener.setWorkspaceGridVisible(false, null);
+                        // One collision transaction: commit on finger-up, roll back on cancel.
+                        listener.finishLiveDisplacements(commit, container);
+                        if (commit) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     }
-                    listener.finishWorkspaceTransferDrag(container, commit);
-                    listener.setWorkspaceGridVisible(false, null);
-                    // One collision transaction: commit on finger-up, roll back on cancel.
-                    listener.finishLiveDisplacements(commit, container);
-                    if (commit) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                 } else {
                     listener.setWorkspaceGridVisible(false, null);
                     if (!childCanceled[0]) widget.dispatchTouchEvent(event);
