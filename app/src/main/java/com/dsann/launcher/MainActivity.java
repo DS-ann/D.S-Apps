@@ -6124,8 +6124,12 @@ public class MainActivity extends Activity {
                 persistWorkspaceItemPosition(target, item, slot[0], slot[1], slot[2], slot[3]);
                 return true;
             }
+            int[] sourceGeometry = itemGeometry(item);
+            int preferredX = Math.max(0, Math.min(target.getWidth() - width, sourceGeometry[0]));
+            int preferredY = Math.max(0, Math.min(target.getHeight() - height, sourceGeometry[1]));
             java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
             java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
+            xs.add(preferredX); ys.add(preferredY);
             xs.add(0); ys.add(0);
             xs.add(Math.max(0, target.getWidth() - width));
             ys.add(Math.max(0, target.getHeight() - height));
@@ -6137,27 +6141,50 @@ public class MainActivity extends Activity {
                 ys.add(Math.max(0, Math.min(target.getHeight() - height, obstacle.bottom + margin)));
             }
             int bestX = -1, bestY = -1;
-            outer: for (Integer y : ys) for (Integer x : xs) {
+            long bestDistance = Long.MAX_VALUE;
+            for (Integer y : ys) for (Integer x : xs) {
                 android.graphics.Rect rect = collisionRectAt(item, x, y, width, height);
+                boolean blocked = false;
                 for (android.graphics.Rect obstacle : obstacles) {
-                    if (android.graphics.Rect.intersects(rect, obstacle)) continue outer;
+                    if (android.graphics.Rect.intersects(rect, obstacle)) {
+                        blocked = true;
+                        break;
+                    }
                 }
-                bestX = x; bestY = y; break outer;
+                if (blocked) continue;
+                long distance = Math.abs((long) x.intValue() - preferredX)
+                        + Math.abs((long) y.intValue() - preferredY);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestX = x.intValue();
+                    bestY = y.intValue();
+                }
             }
             if (bestX < 0) {
                 int maxX = Math.max(0, target.getWidth() - width);
                 int maxY = Math.max(0, target.getHeight() - height);
                 int scanStep = Math.max(1, LauncherUiUtils.dp(this, 6));
-                outerScan: for (int y = 0; y <= maxY + scanStep; y += scanStep) {
+                for (int y = 0; y <= maxY; y += scanStep) {
                     int candidateY = Math.min(maxY, y);
-                    for (int x = 0; x <= maxX + scanStep; x += scanStep) {
-                    int candidateX = Math.min(maxX, x);
-                    android.graphics.Rect candidate = collisionRectAt(item, candidateX, candidateY, width, height);
-                    boolean blocked = false;
-                    for (android.graphics.Rect obstacle : obstacles) {
-                        if (android.graphics.Rect.intersects(candidate, obstacle)) { blocked = true; break; }
-                    }
-                    if (!blocked) { bestX = candidateX; bestY = candidateY; break outerScan; }
+                    for (int x = 0; x <= maxX; x += scanStep) {
+                        int candidateX = Math.min(maxX, x);
+                        android.graphics.Rect candidate = collisionRectAt(
+                                item, candidateX, candidateY, width, height);
+                        boolean blocked = false;
+                        for (android.graphics.Rect obstacle : obstacles) {
+                            if (android.graphics.Rect.intersects(candidate, obstacle)) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                        if (blocked) continue;
+                        long distance = Math.abs((long) candidateX - preferredX)
+                                + Math.abs((long) candidateY - preferredY);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestX = candidateX;
+                            bestY = candidateY;
+                        }
                     }
                 }
             }
