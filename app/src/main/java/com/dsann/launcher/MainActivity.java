@@ -1186,13 +1186,26 @@ public class MainActivity extends Activity {
 
     private boolean viewAtRawPointIsWidget(View view, float rawX, float rawY) {
         if (view == null || view.getVisibility() != View.VISIBLE) return false;
+        Object tag = view.getTag();
+        boolean widgetContainer = tag instanceof String
+                && ((String) tag).startsWith("launcher_widget:");
         int[] location = new int[2];
         view.getLocationOnScreen(location);
         float localX = rawX - location[0];
         float localY = rawY - location[1];
-        if (localX < 0 || localY < 0 || localX >= view.getWidth() || localY >= view.getHeight())
+        float hitWidth = view.getWidth();
+        float hitHeight = view.getHeight();
+        // Long-press scales a widget by 10%. Include the scaled visual bounds as well
+        // as the ordinary container bounds so edge touches cannot become home long-presses.
+        if (widgetContainer) {
+            hitWidth *= Math.max(1f, Math.abs(view.getScaleX()));
+            hitHeight *= Math.max(1f, Math.abs(view.getScaleY()));
+        }
+        if (localX < 0 || localY < 0 || localX >= hitWidth || localY >= hitHeight)
             return false;
-        if (view instanceof AppWidgetHostView) return true;
+        // The interaction grip covers the full widget container, including any area
+        // that is not part of the provider's AppWidgetHostView child.
+        if (widgetContainer || view instanceof AppWidgetHostView) return true;
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = group.getChildCount() - 1; i >= 0; i--) {
