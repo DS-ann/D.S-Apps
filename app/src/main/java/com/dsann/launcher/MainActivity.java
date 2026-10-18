@@ -468,11 +468,11 @@ public class MainActivity extends Activity {
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
 
-        // While the drawer is open, GridView owns ordinary scrolling for its entire
-        // gesture. The only gesture the launcher may take over is a downward pull
-        // that starts when the list is already at the top. Do not require a previous
-        // "arming" swipe; that latch caused users to pull twice to close the drawer.
-        if (drawerOpen && gestureStartedOnDrawerGrid && !drawerCloseSwipeClaimed) {
+        // While the drawer is open, let a qualifying downward pull close it on the
+        // first gesture whenever that gesture begins at the top of the app list. Users
+        // may start on the "My Apps" header as well as on a grid cell; requiring the
+        // GridView itself as the touch origin made the first pull get ignored.
+        if (drawerOpen && !drawerCloseSwipeClaimed) {
             boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
                     && Math.abs(dy) > Math.abs(dx) * 1.15f;
             if (action == MotionEvent.ACTION_MOVE && drawerAtTopOnGestureDown
@@ -493,9 +493,9 @@ public class MainActivity extends Activity {
                 cancel.recycle();
                 return true;
             }
-            // This also handles ACTION_UP/CANCEL for unclaimed scrolls, keeping them
-            // inside GridView rather than leaving activity gesture state half-claimed.
-            return super.dispatchTouchEvent(event);
+            // Ordinary app-list gestures remain owned by GridView, untouched by the
+            // launcher's page/clock recognizers. This matters most for long scrolls.
+            if (gestureStartedOnDrawerGrid) return super.dispatchTouchEvent(event);
         }
         if (action == MotionEvent.ACTION_MOVE) {
             // A touch that begins on the clock must still be allowed to become a
