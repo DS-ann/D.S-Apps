@@ -3107,6 +3107,10 @@ public class MainActivity extends Activity {
                     icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                             LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
+                    // Move each icon 5dp inward so the gap between the two dock apps
+                    // is reduced by 10dp total without changing either hit target.
+                    if (slot == 0) iconParams.leftMargin = LauncherUiUtils.dp(this, 10);
+                    else if (slot == 2) iconParams.rightMargin = LauncherUiUtils.dp(this, 10);
                     slotView.addView(icon, iconParams);
                     slotView.setContentDescription(String.valueOf(app.loadLabel(packageManager)));
                     slotView.setOnClickListener(v -> launchApp(app, slotView));
@@ -4229,32 +4233,62 @@ public class MainActivity extends Activity {
         float height = Math.max(1, outgoing.getHeight());
         int effect = getPageTransition();
         float density = getResources().getDisplayMetrics().density;
+        View incomingFace = to >= 0 && to < pagesStrip.getChildCount()
+                ? pagesStrip.getChildAt(to) : null;
 
-        View incomingFace = to >= 0 && to < pagesStrip.getChildCount() ? pagesStrip.getChildAt(to) : null;
-        // Keep the two page views in their real neighbouring positions. Translating the
-        // incoming face over the outgoing one caused the next page to pop into view.
-        // Only the parallax style moves the strip; 3D styles rotate the adjacent faces.
-        // The wheel must combine face rotation with continuous horizontal travel.
-        // Rotating two stationary neighbouring faces alone looks like a panel flip,
-        // not a wheel carrying the next page into the viewport.
-        // Move the adjacent page into view continuously. In Cube this carries the
-        // common face edge with the finger; in Page Flip it makes the fading-in page
-        // enter the viewport instead of remaining outside it.
+        if (effect == 3) {
+            // Page Flip rotates two overlapping faces around their vertical edges.
+            // Keep the strip fixed for the entire gesture. The neighbour is aligned
+            // with a constant offset (not animated sideways), then turns into view.
+            pagesStrip.setTranslationX(-from * width);
+            outgoing.setCameraDistance(10000f * density);
+            outgoing.setTranslationX(0f);
+            outgoing.setPivotX(direction > 0 ? width : 0f);
+            outgoing.setPivotY(height * 0.5f);
+            outgoing.setRotationX(0f);
+            outgoing.setRotationY(-direction * 90f * progress);
+            outgoing.setTranslationZ(-density * 8f * progress);
+            outgoing.setScaleX(1f - 0.04f * progress);
+            outgoing.setAlpha(1f - progress);
+            if (incomingFace != null) {
+                incomingFace.setCameraDistance(10000f * density);
+                // This alignment remains constant for every progress frame; it is not
+                // a slide animation. resetPageTransforms() clears it after the flip.
+                incomingFace.setTranslationX(-direction * width);
+                incomingFace.setPivotX(direction > 0 ? 0f : incomingFace.getWidth());
+                incomingFace.setPivotY(incomingFace.getHeight() * 0.5f);
+                incomingFace.setRotationX(0f);
+                incomingFace.setRotationY(direction * 90f * (1f - progress));
+                incomingFace.setTranslationZ(density * 8f * progress);
+                incomingFace.setScaleX(0.96f + 0.04f * progress);
+                incomingFace.setAlpha(progress);
+            }
+            return;
+        }
+
+        // Other transitions use the neighbouring faces' real horizontal layout:
+        // the strip travels only for these effects (cube needs a shared moving edge).
         pagesStrip.setTranslationX(-from * width - direction * width * progress);
-        // Cross-fade the pages without changing any transition geometry.
-        outgoing.setAlpha(1f - progress);
-        if (incomingFace != null) incomingFace.setAlpha(progress);
+        float outgoingAlpha = 1f - progress;
+        float incomingAlpha = progress;
+        if (effect == 1) {
+            // Keep both cube faces at >=70% opacity for every frame.
+            outgoingAlpha = 1f - 0.3f * progress;
+            incomingAlpha = 0.7f + 0.3f * progress;
+        }
+        outgoing.setAlpha(outgoingAlpha);
+        if (incomingFace != null) incomingFace.setAlpha(incomingAlpha);
+
         if (effect == 2) {
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
             outgoing.setScaleX(1f - 0.045f * progress);
             outgoing.setScaleY(1f - 0.025f * progress);
-            if (to >= 0 && to < pagesStrip.getChildCount()) {
-                View incoming = pagesStrip.getChildAt(to);
-                incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
-                incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setScaleX(0.955f + 0.045f * progress);
-                incoming.setScaleY(0.975f + 0.025f * progress);
+            if (incomingFace != null) {
+                incomingFace.setPivotX(direction > 0 ? 0f : incomingFace.getWidth());
+                incomingFace.setPivotY(incomingFace.getHeight() * 0.5f);
+                incomingFace.setScaleX(0.955f + 0.045f * progress);
+                incomingFace.setScaleY(0.975f + 0.025f * progress);
             }
             return;
         }
@@ -4270,48 +4304,29 @@ public class MainActivity extends Activity {
             outgoing.setRotationY(-direction * cubeAngle * progress);
             outgoing.setTranslationZ(-density * 28f * progress);
             outgoing.setTranslationX(0f);
-            if (to >= 0 && to < pagesStrip.getChildCount()) {
-                View incoming = pagesStrip.getChildAt(to);
-                incoming.setCameraDistance(10000f * density);
-                incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
-                incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setRotationY(direction * cubeAngle * (1f - progress));
-                incoming.setTranslationZ(density * 28f * progress);
-                incoming.setTranslationX(0f);
-            }
-        } else if (effect == 3) {
-            // Page Flip: both pages cross-fade while the incoming face moves into
-            // the viewport. Previously its alpha rose while it stayed offscreen.
-            outgoing.setPivotX(width * 0.5f);
-            outgoing.setPivotY(0f);
-            outgoing.setRotationX(direction * 68f * progress);
-            outgoing.setRotationY(direction * 5f * progress);
-            outgoing.setScaleX(1f - 0.04f * progress);
-            if (to >= 0 && to < pagesStrip.getChildCount()) {
-                View incoming = pagesStrip.getChildAt(to);
-                incoming.setCameraDistance(10000f * density);
-                incoming.setPivotX(incoming.getWidth() * 0.5f);
-                incoming.setPivotY(0f);
-                incoming.setRotationX(-direction * 68f * (1f - progress));
-                incoming.setRotationY(-direction * 5f * (1f - progress));
-                incoming.setScaleX(0.96f + 0.04f * progress);
+            if (incomingFace != null) {
+                incomingFace.setCameraDistance(10000f * density);
+                incomingFace.setPivotX(direction > 0 ? 0f : incomingFace.getWidth());
+                incomingFace.setPivotY(incomingFace.getHeight() * 0.5f);
+                incomingFace.setRotationY(direction * cubeAngle * (1f - progress));
+                incomingFace.setTranslationZ(density * 28f * progress);
+                incomingFace.setTranslationX(0f);
             }
         } else {
-            // 3D Wheel: broad rotation around the page center, controlled by the rotation slider.
+            // 3D Wheel: broad rotation around the page edge, controlled by the rotation slider.
             float angle = Math.min(180f, getPageRotationDegrees());
             outgoing.setPivotX(direction > 0 ? width : 0f);
             outgoing.setPivotY(height * 0.5f);
             outgoing.setRotationY(direction * angle * progress);
             outgoing.setScaleX(1f - 0.035f * progress);
             outgoing.setScaleY(1f - 0.025f * progress);
-            if (to >= 0 && to < pagesStrip.getChildCount()) {
-                View incoming = pagesStrip.getChildAt(to);
-                incoming.setCameraDistance(10000f * density);
-                incoming.setPivotX(direction > 0 ? 0f : incoming.getWidth());
-                incoming.setPivotY(incoming.getHeight() * 0.5f);
-                incoming.setRotationY(-direction * angle * (1f - progress));
-                incoming.setScaleX(0.965f + 0.035f * progress);
-                incoming.setScaleY(0.975f + 0.025f * progress);
+            if (incomingFace != null) {
+                incomingFace.setCameraDistance(10000f * density);
+                incomingFace.setPivotX(direction > 0 ? 0f : incomingFace.getWidth());
+                incomingFace.setPivotY(incomingFace.getHeight() * 0.5f);
+                incomingFace.setRotationY(-direction * angle * (1f - progress));
+                incomingFace.setScaleX(0.965f + 0.035f * progress);
+                incomingFace.setScaleY(0.975f + 0.025f * progress);
             }
         }
     }
