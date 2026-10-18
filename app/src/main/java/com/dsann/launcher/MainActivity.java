@@ -189,6 +189,11 @@ public class MainActivity extends Activity {
     // whenever that pass cancels/re-targets an item's active displacement animation.
     private final java.util.IdentityHashMap<View, int[]> liveDragGeometryCache =
             new java.util.IdentityHashMap<>();
+    // Relative icon/label bounds are stable during a single drag-planning pass. Caching
+    // them avoids repeatedly measuring label text for every candidate target.
+    private final java.util.IdentityHashMap<View, int[]> liveDragAppVisualBoundsCache =
+            new java.util.IdentityHashMap<>();
+    private boolean liveDragPlanningCacheActive;
     // Coalesce dense ACTION_MOVE streams into one collision-planning pass per display
     // frame. The view's geometry is still updated immediately; only expensive neighbour
     // planning is deferred. Drop/cancel paths flush or cancel this work synchronously.
@@ -6732,6 +6737,24 @@ public class MainActivity extends Activity {
      */
     private android.graphics.Rect appIconVisualRectAt(
             View view, int cellX, int cellY, int cellWidth, int cellHeight) {
+        if (!liveDragPlanningCacheActive) {
+            return calculateAppIconVisualRectAt(view, cellX, cellY, cellWidth, cellHeight);
+        }
+        int[] local = liveDragAppVisualBoundsCache.get(view);
+        if (local == null || local[4] != cellWidth || local[5] != cellHeight) {
+            android.graphics.Rect measured =
+                    calculateAppIconVisualRectAt(view, 0, 0, cellWidth, cellHeight);
+            local = new int[]{measured.left, measured.top, measured.right, measured.bottom,
+                    cellWidth, cellHeight};
+            liveDragAppVisualBoundsCache.put(view, local);
+        }
+        return new android.graphics.Rect(
+                cellX + local[0], cellY + local[1],
+                cellX + local[2], cellY + local[3]);
+    }
+
+    private android.graphics.Rect calculateAppIconVisualRectAt(
+            View view, int cellX, int cellY, int cellWidth, int cellHeight) {
         android.graphics.Rect cellBounds = new android.graphics.Rect(
                 cellX, cellY, cellX + Math.max(1, cellWidth), cellY + Math.max(1, cellHeight));
         View visualTemplate = view;
@@ -7058,6 +7081,8 @@ public class MainActivity extends Activity {
         int[] moving = itemGeometry(movingView);
         if (moving[2] <= 0 || moving[3] <= 0) return;
         android.graphics.Rect movingRect = collisionRect(movingView, moving);
+        liveDragAppVisualBoundsCache.clear();
+        liveDragPlanningCacheActive = true;
         // Start moving neighbours while the dragged item approaches from any side,
         // not only after their visible bounds already touch.
         // Push a neighbour only once the dragged item actually reaches its bounds.
@@ -7321,6 +7346,8 @@ public class MainActivity extends Activity {
         flushPendingAppDisplacementAnimations();
         liveDragGeometryCache.clear();
         enforceLiveDragCollisionSafety(page, movingView);
+        liveDragPlanningCacheActive = false;
+        liveDragAppVisualBoundsCache.clear();
     }
 
 
@@ -7387,6 +7414,33 @@ public class MainActivity extends Activity {
      */
 
 
+    /**
+     * Maintains the 96 closest coordinates in the same order as the previous stable sort:
+     * Manhattan distance first, then ascending y/x for equal-distance candidates.
+     * Only retained candidates allocate an array.
+     */
+    private void retainNearestCascadeCandidate(java.util.ArrayList<int[]> candidates,
+            int x, int y, int preferredX, int preferredY) {
+        long distance = Math.abs((long) x - preferredX)
+                + Math.abs((long) y - preferredY);
+        int low = 0;
+        int high = candidates.size();
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            int[] current = candidates.get(middle);
+            long currentDistance = Math.abs((long) current[0] - preferredX)
+                    + Math.abs((long) current[1] - preferredY);
+            int compare = Long.compare(currentDistance, distance);
+            if (compare == 0) compare = Integer.compare(current[1], y);
+            if (compare == 0) compare = Integer.compare(current[0], x);
+            if (compare <= 0) low = middle + 1;
+            else high = middle;
+        }
+        if (low >= 96) return;
+        candidates.add(low, new int[]{x, y});
+        if (candidates.size() > 96) candidates.remove(96);
+    }
+
     private boolean findCascadeDisplacementPlan(FrameLayout page, View item, View movingView,
             android.graphics.Rect movingRect, int preferredX, int preferredY,
             java.util.IdentityHashMap<View, int[]> plan,
@@ -7452,21 +7506,16 @@ public class MainActivity extends Activity {
             // search does not multiply thousands of scan candidates at every depth.
         }
 
-        java.util.ArrayList<int[]> candidates = new java.util.ArrayList<int[]>();
-        for (Integer cy : ys) for (Integer cx : xs) {
-            candidates.add(new int[]{cx.intValue(), cy.intValue()});
-        }
+        // Keep only the nearest 96 candidates while enumerating the Cartesian product.
+        // The old path allocated and sorted every coordinate pair, then immediately
+        // discarded all but 96; bounded insertion preserves the same stable tie order.
+        java.util.ArrayList<int[]> candidates = new java.util.ArrayList<int[]>(96);
         final int px = preferredX, py = preferredY;
-        java.util.Collections.sort(candidates, (a, b) -> {
-            long da = Math.abs((long) a[0] - px) + Math.abs((long) a[1] - py);
-            long db = Math.abs((long) b[0] - px) + Math.abs((long) b[1] - py);
-            return Long.compare(da, db);
-        });
-        // Large workspaces produce a Cartesian product of edge coordinates. Limit each
-        // recursive node to the nearest 96 candidates, not the first arbitrary 240
-        // candidates globally; this leaves enough budget for a complete 4–5 item cascade.
-        if (candidates.size() > 96) {
-            candidates = new java.util.ArrayList<int[]>(candidates.subList(0, 96));
+        for (Integer cy : ys) {
+            for (Integer cx : xs) {
+                retainNearestCascadeCandidate(
+                        candidates, cx.intValue(), cy.intValue(), px, py);
+            }
         }
 
         recursionStack.put(item, Boolean.TRUE);
