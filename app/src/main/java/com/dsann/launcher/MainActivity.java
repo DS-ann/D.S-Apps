@@ -5081,6 +5081,29 @@ public class MainActivity extends Activity {
         setClampedClockTranslationForPanel(panel, pageIndex, tx, ty, persist);
     }
 
+    /**
+     * Commits a live push-aside destination immediately. Delayed per-item animations
+     * caused displaced widgets to lag behind the drag, then get cancelled/restarted
+     * when the next MOVE arrived (the visible "dancing" behaviour).
+     */
+    private void placeDisplacedItemNow(View item, int left, int top) {
+        if (item == null) return;
+        item.animate().cancel();
+        if (isClockWorkspaceItem(item)) {
+            setClockVisualPosition(item, left, top, false);
+            return;
+        }
+        ViewGroup.LayoutParams raw = item.getLayoutParams();
+        if (raw instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            lp.leftMargin = left;
+            lp.topMargin = top;
+            item.setTranslationX(0f);
+            item.setTranslationY(0f);
+            item.setLayoutParams(lp);
+        }
+    }
+
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
@@ -5404,66 +5427,9 @@ public class MainActivity extends Activity {
         // A large approach gap makes nearby items jump before the drop is real.
         int gap = 0;
 
-        // First restore items whose saved slots are no longer covered by the drag.
-        // Their original slots are reserved below so another displaced item cannot
-        // occupy a slot that must later be restored.
-        java.util.Iterator<java.util.Map.Entry<View, int[]>> iterator =
-                liveDisplacedItems.entrySet().iterator();
-        while (iterator.hasNext()) {
-            java.util.Map.Entry<View, int[]> entry = iterator.next();
-            View displaced = entry.getKey();
-            int[] original = entry.getValue();
-            if (displaced.getParent() != page) {
-                liveDisplacementTargets.remove(displaced);
-                iterator.remove();
-                continue;
-            }
-            int[] g = itemGeometry(displaced);
-            android.graphics.Rect originalRect = collisionRectAt(displaced,
-                    original[0], original[1], g[2], g[3]);
-            // Add a small release margin before restoring a neighbour. Without
-            // hysteresis, tiny finger jitter at a touching edge alternates between
-            // restore and displace on successive MOVE frames ("dancing" widgets).
-            // Keep a wider dead zone around the original slot so tiny finger jitter
-            // cannot repeatedly restore and re-displace the same widget while dragging.
-            // Apply the same small dead zone to every item type. Widgets used to
-            // restore immediately at an exact edge and were re-displaced on the next
-            // frame, producing the visible "dancing" seen in crowded drags.
-            int restoreHysteresis = LauncherUiUtils.dp(this, 8);
-            boolean originalNeededByAnotherTarget = false;
-            for (java.util.Map.Entry<View, int[]> targetEntry : liveDisplacementTargets.entrySet()) {
-                View targetOwner = targetEntry.getKey();
-                if (targetOwner == displaced || targetOwner.getParent() != page) continue;
-                int[] target = targetEntry.getValue();
-                int[] targetGeometry = itemGeometry(targetOwner);
-                android.graphics.Rect targetRect = collisionRectAt(targetOwner,
-                        target[0], target[1], targetGeometry[2], targetGeometry[3]);
-                if (android.graphics.Rect.intersects(originalRect, targetRect)) {
-                    originalNeededByAnotherTarget = true;
-                    break;
-                }
-            }
-            if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)
-                    && !originalNeededByAnotherTarget) {
-                displaced.animate().cancel();
-                if (isClockWorkspaceItem(displaced)) {
-                    setClockVisualPosition(displaced, original[0], original[1], true);
-                } else {
-                    ViewGroup.LayoutParams raw = displaced.getLayoutParams();
-                    if (raw instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
-                        lp.leftMargin = original[0];
-                        lp.topMargin = original[1];
-                        displaced.setTranslationX(0f);
-                        displaced.setTranslationY(0f);
-                        displaced.setLayoutParams(lp);
-                    }
-                }
-                liveDisplacementTargets.remove(displaced);
-                iterator.remove();
-            }
-        }
-
+        // Keep a displaced neighbour in its reserved slot until finger-up/cancel.
+        // Restoring it during MOVE lets the same drag collide with it again on the next
+        // frame, repeatedly reversing its position. Finalization below handles rollback.
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
             if (other == movingView || !isWorkspaceItem(other)) continue;
@@ -5635,26 +5601,9 @@ public class MainActivity extends Activity {
                         }
                         liveDisplacementTargets.put(participant,
                                 new int[]{destination[0], destination[1]});
-                        long ordinal = Math.max(0, liveDisplacedItems.size() - 1);
-                        long startDelay = Math.min(24L, ordinal * 6L);
-                        if (isClockWorkspaceItem(participant)) {
-                            float tx = participant.getTranslationX()
-                                    + destination[0] - currentGeometry[0];
-                            float ty = participant.getTranslationY()
-                                    + destination[1] - currentGeometry[1];
-                            float[] bounded = clampClockTranslation(participant, tx, ty);
-                            participant.animate().translationX(bounded[0]).translationY(bounded[1])
-                                    .setStartDelay(animationDuration(startDelay))
-                                    .setDuration(animationDuration(120L)).start();
-                        } else {
-                            participant.animate()
-                                    .translationX(participant.getTranslationX()
-                                            + destination[0] - currentGeometry[0])
-                                    .translationY(participant.getTranslationY()
-                                            + destination[1] - currentGeometry[1])
-                                    .setStartDelay(animationDuration(startDelay))
-                                    .setDuration(animationDuration(120L)).start();
-                        }
+                        // Commit every member of the cascade in the same MOVE pass.
+                        // No stagger: all reservations become actual geometry immediately.
+                        placeDisplacedItemNow(participant, destination[0], destination[1]);
                     }
                     continue;
                 }
@@ -5670,31 +5619,8 @@ public class MainActivity extends Activity {
                 }
                 liveDisplacementTargets.put(other, new int[]{bestX, bestY});
 
-                // Animate every newly displaced item, regardless of type. Animate
-                // its visual translation while preserving its layout origin; the
-                // final destination is committed to layout params on drop. This
-                // avoids the one-frame jump caused by changing margins immediately.
-                other.animate().cancel();
-                // Give each new neighbour a short stagger. Together with destination
-                // reservations this prevents several items from racing through the same
-                // visual corridor and appearing to overlap during a dense push-aside.
-                long displacementOrdinal = Math.max(0, liveDisplacedItems.size() - 1);
-                long startDelay = Math.min(24L, displacementOrdinal * 6L);
-                if (isClockWorkspaceItem(other)) {
-                    float targetX = other.getTranslationX() + bestX - g[0];
-                    float targetY = other.getTranslationY() + bestY - g[1];
-                    float[] bounded = clampClockTranslation(other, targetX, targetY);
-                    other.animate().translationX(bounded[0]).translationY(bounded[1])
-                            .setStartDelay(animationDuration(startDelay))
-                            .setDuration(animationDuration(120L)).start();
-                } else {
-                    float targetTranslationX = other.getTranslationX() + bestX - g[0];
-                    float targetTranslationY = other.getTranslationY() + bestY - g[1];
-                    other.animate().translationX(targetTranslationX)
-                            .translationY(targetTranslationY)
-                            .setStartDelay(animationDuration(startDelay))
-                            .setDuration(animationDuration(120L)).start();
-                }
+                // Move the neighbour to its reserved free rectangle immediately.
+                placeDisplacedItemNow(other, bestX, bestY);
             }
         }
     }
