@@ -3947,8 +3947,8 @@ public class MainActivity extends Activity {
                                 || !((String) candidate.getTag()).startsWith("launcher_app:")) continue;
                         FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
                         int cc = Math.max(0, Math.min(columns - 1, Math.round((float) cp.leftMargin / cellWidth)));
-                        int cr = Math.max(0, Math.min(rows - 1,
-                                Math.round(cp.topMargin / (float) Math.max(1, cellHeight))));
+                        int cr = homeGridRowFromTop(
+                                cp.topMargin, rows, targetHeight, cellHeight);
                         occupied[cr][cc] = true;
                         if (cc == targetCol && cr == targetRow) {
                             occupant = candidate;
