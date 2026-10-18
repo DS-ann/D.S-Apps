@@ -517,10 +517,13 @@ public class MainActivity extends Activity {
                         MainActivity.this.updateWorkspaceTransferDisplacements(item, rawX, rawY,
                                 fingerOffsetX, fingerOffsetY);
                     }
-                    @Override public boolean prepareWidgetDrop(FrameLayout targetPage, View widget,
+                    @Override public int[] prepareWidgetDrop(FrameLayout targetPage, View widget,
                             float rawX, float rawY, float fingerOffsetX, float fingerOffsetY) {
                         return MainActivity.this.prepareWorkspaceWidgetDrop(targetPage, widget,
                                 rawX, rawY, fingerOffsetX, fingerOffsetY);
+                    }
+                    @Override public void updatePlacedWidgetSize(int widgetId, FrameLayout container) {
+                        MainActivity.this.updatePlacedWidgetSize(widgetId, container);
                     }
                     @Override public int finishWorkspaceTransferAnimation() {
                         return MainActivity.this.finishWorkspaceTransferAnimation();
@@ -5018,13 +5021,31 @@ public class MainActivity extends Activity {
             AppWidgetHostView widget = widgetHost.createView(this, widgetId, info);
             widget.setAppWidget(widgetId, info);
             widget.setPadding(0, 0, 0, 0);
-            int[] freeWidgetPosition = findFreeWidgetPosition(page, width, height);
+            int originalWidth = width;
+            int originalHeight = height;
+            int selectedScalePercent = 0;
+            int[] freeWidgetPosition = null;
+            for (int scalePercent = 100; scalePercent >= 80; scalePercent -= 5) {
+                int candidateWidth = Math.max(1, Math.round(originalWidth * scalePercent / 100f));
+                int candidateHeight = Math.max(1, Math.round(originalHeight * scalePercent / 100f));
+                int[] candidatePosition =
+                        findFreeWidgetPosition(page, candidateWidth, candidateHeight);
+                if (candidatePosition == null) continue;
+                width = candidateWidth;
+                height = candidateHeight;
+                freeWidgetPosition = candidatePosition;
+                selectedScalePercent = scalePercent;
+                break;
+            }
             if (freeWidgetPosition == null) {
                 try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                 Toast.makeText(this, "No space available, remove first.", Toast.LENGTH_LONG).show();
                 return;
             }
-            addWidgetContainer(page, widget, widgetId, resolvedPage, freeWidgetPosition[0], freeWidgetPosition[1], width, height);
+            // The placement search above has already made the decision; suppress the
+            // controller's older wording if its defensive second check rejects placement.
+            addWidgetContainer(page, widget, widgetId, resolvedPage,
+                    freeWidgetPosition[0], freeWidgetPosition[1], width, height, false);
             FrameLayout container = null;
             for (int i = 0; i < page.getChildCount(); i++) {
                 View child = page.getChildAt(i);
@@ -5036,6 +5057,10 @@ public class MainActivity extends Activity {
             if (container != null) {
                 WidgetController.updateWidgetSize(widgetManager, widgetId, widget, getResources().getDisplayMetrics().density,
                         container.getLayoutParams().width, container.getLayoutParams().height);
+                if (selectedScalePercent < 100) {
+                    Toast.makeText(this, "Widget resized to " + selectedScalePercent
+                            + "% to fit available space.", Toast.LENGTH_SHORT).show();
+                }
                 saveWidgetGeometry(widgetId, resolvedPage, container);
                 final FrameLayout placedWidget = container;
                 final FrameLayout placedPage = page;
@@ -5055,24 +5080,24 @@ public class MainActivity extends Activity {
      * with a destination proxy, so resolve that proxy synchronously and verify that
      * the destination can hold the widget after the planned neighbour movements.
      */
-    private boolean prepareWorkspaceWidgetDrop(FrameLayout targetPage, View widget,
+    private int[] prepareWorkspaceWidgetDrop(FrameLayout targetPage, View widget,
             float rawX, float rawY, float fingerOffsetX, float fingerOffsetY) {
         if (targetPage == null || widget == null || targetPage.getWidth() <= 0
                 || targetPage.getHeight() <= 0 || workspaceTransferItem != widget
                 || workspaceTransferTargetPage < 0 || pagesStrip == null
-                || workspaceTransferTargetPage >= pagesStrip.getChildCount()) return false;
+                || workspaceTransferTargetPage >= pagesStrip.getChildCount()) return null;
 
         boolean crossScreen = workspaceTransferTargetPage != workspaceTransferOriginPage;
         if (crossScreen) {
             updateWorkspaceTransferDisplacements(widget, rawX, rawY,
                     fingerOffsetX, fingerOffsetY);
             View proxy = workspaceTransferProxy;
-            if (proxy == null || proxy.getParent() != targetPage) return false;
+            if (proxy == null || proxy.getParent() != targetPage) return null;
             // A next-frame update is too late for the release decision; flush the
             // latest pointer position before checking the destination's end-state.
             updateLiveDisplacements(targetPage, proxy);
         } else {
-            if (widget.getParent() != targetPage) return false;
+            if (widget.getParent() != targetPage) return null;
             updateLiveDisplacements(targetPage, widget);
         }
 
@@ -5083,16 +5108,37 @@ public class MainActivity extends Activity {
         int height = raw instanceof FrameLayout.LayoutParams
                 && ((FrameLayout.LayoutParams) raw).height > 0
                 ? ((FrameLayout.LayoutParams) raw).height : widget.getHeight();
-        return width > 0 && height > 0
-                && findFreeWidgetPosition(targetPage, width, height, widget, true) != null;
+        if (width <= 0 || height <= 0
+                || !(raw instanceof FrameLayout.LayoutParams)) return null;
+        FrameLayout.LayoutParams widgetParams = (FrameLayout.LayoutParams) raw;
+        int preferredX = widgetParams.leftMargin;
+        int preferredY = widgetParams.topMargin;
+        for (int scalePercent = 100; scalePercent >= 80; scalePercent -= 5) {
+            int candidateWidth = Math.max(1, Math.round(width * scalePercent / 100f));
+            int candidateHeight = Math.max(1, Math.round(height * scalePercent / 100f));
+            int[] position = findFreeWidgetPosition(targetPage, candidateWidth, candidateHeight,
+                    widget, true, preferredX, preferredY);
+            if (position != null) {
+                // {left, top, width, height}; percentages are applied uniformly so
+                // the widget's aspect ratio is preserved up to pixel rounding.
+                return new int[]{position[0], position[1], candidateWidth, candidateHeight};
+            }
+        }
+        return null;
     }
 
     private int[] findFreeWidgetPosition(FrameLayout page, int widgetWidth, int widgetHeight) {
-        return findFreeWidgetPosition(page, widgetWidth, widgetHeight, null, false);
+        return findFreeWidgetPosition(page, widgetWidth, widgetHeight, null, false, -1, -1);
     }
 
     private int[] findFreeWidgetPosition(FrameLayout page, int widgetWidth, int widgetHeight,
             View ignoredView, boolean usePlannedDisplacements) {
+        return findFreeWidgetPosition(page, widgetWidth, widgetHeight,
+                ignoredView, usePlannedDisplacements, -1, -1);
+    }
+
+    private int[] findFreeWidgetPosition(FrameLayout page, int widgetWidth, int widgetHeight,
+            View ignoredView, boolean usePlannedDisplacements, int preferredLeft, int preferredTop) {
         if (page == null) return null;
         int pageWidth = page.getWidth() > 0 ? page.getWidth()
                 : Math.max(1, getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
@@ -5174,7 +5220,9 @@ public class MainActivity extends Activity {
                     }
                 }
                 if (blocked) continue;
-                long distance = (long) (y - minTop) * Math.max(1, pageWidth) + (x - minLeft);
+                long distance = preferredLeft >= 0 && preferredTop >= 0
+                        ? Math.abs((long) x - preferredLeft) + Math.abs((long) y - preferredTop)
+                        : (long) (y - minTop) * Math.max(1, pageWidth) + (x - minLeft);
                 if (distance < bestDistance) {
                     bestDistance = distance;
                     bestX = x;
@@ -5202,6 +5250,23 @@ public class MainActivity extends Activity {
 
     private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
         WidgetController.saveGeometry(prefs, KEY_WIDGET_IDS, widgetId, pageIndex, container);
+    }
+
+    private void updatePlacedWidgetSize(int widgetId, FrameLayout container) {
+        if (container == null
+                || !(container.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        AppWidgetHostView hostView = null;
+        for (int i = 0; i < container.getChildCount(); i++) {
+            View child = container.getChildAt(i);
+            if (child instanceof AppWidgetHostView) {
+                hostView = (AppWidgetHostView) child;
+                break;
+            }
+        }
+        if (hostView == null) return;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) container.getLayoutParams();
+        WidgetController.updateWidgetSize(widgetManager, widgetId, hostView,
+                getResources().getDisplayMetrics().density, lp.width, lp.height);
     }
 
     /**

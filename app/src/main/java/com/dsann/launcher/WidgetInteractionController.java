@@ -42,8 +42,9 @@ final class WidgetInteractionController {
         int getWorkspaceTransferTargetPage();
         void updateWorkspaceTransferDisplacements(View item, float rawX, float rawY,
                 float fingerOffsetX, float fingerOffsetY);
-        boolean prepareWidgetDrop(FrameLayout targetPage, View widget, float rawX, float rawY,
+        int[] prepareWidgetDrop(FrameLayout targetPage, View widget, float rawX, float rawY,
                 float fingerOffsetX, float fingerOffsetY);
+        void updatePlacedWidgetSize(int widgetId, FrameLayout container);
         int finishWorkspaceTransferAnimation();
         void finishWorkspaceTransferDrag(View item, boolean commit);
     }
@@ -651,10 +652,11 @@ final class WidgetInteractionController {
                     container.setTranslationX(0f);
                     container.setTranslationY(0f);
                     container.setLayoutParams(current);
-                    if (commit && targetPage != sourcePage
-                            && !listener.prepareWidgetDrop(targetPage, container,
+                    int[] preparedDrop = commit && targetPage != sourcePage
+                            ? listener.prepareWidgetDrop(targetPage, container,
                                     event.getRawX(), event.getRawY(),
-                                    fingerOffset[0], fingerOffset[1])) {
+                                    fingerOffset[0], fingerOffset[1]) : null;
+                    if (commit && targetPage != sourcePage && preparedDrop == null) {
                         // The destination cannot hold this widget after the preview
                         // rearrangement. Roll back instead of committing an overlap.
                         current.leftMargin = origin[0];
@@ -670,12 +672,22 @@ final class WidgetInteractionController {
                                 Toast.LENGTH_LONG).show();
                     } else {
                         if (commit && targetPage != sourcePage) {
+                            int oldWidth = current.width;
+                            int oldHeight = current.height;
+                            current.leftMargin = preparedDrop[0];
+                            current.topMargin = preparedDrop[1];
+                            current.width = preparedDrop[2];
+                            current.height = preparedDrop[3];
+                            container.setLayoutParams(current);
                             reparenting[0] = true;
                             sourcePage.removeView(container);
                             targetPage.addView(container, current);
                             reparenting[0] = false;
                             widgetPage[0] = targetIndex;
-                            // Recheck the real widget at its final destination geometry.
+                            if (current.width != oldWidth || current.height != oldHeight) {
+                                listener.updatePlacedWidgetSize(widgetId, container);
+                            }
+                            // Recheck the real, possibly resized widget at its final geometry.
                             listener.updateLiveDisplacements(targetPage, container);
                         } else {
                             widgetPage[0] = originalPageAtDown[0];
