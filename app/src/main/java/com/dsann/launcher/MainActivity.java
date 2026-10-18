@@ -6339,7 +6339,12 @@ public class MainActivity extends Activity {
                     new java.util.ArrayList<android.graphics.Rect>();
             for (int j = 0; j < page.getChildCount(); j++) {
                 View blocker = page.getChildAt(j);
-                if (blocker == other || !isWorkspaceItem(blocker)) continue;
+                // The cross-screen drag proxy is intentionally not a workspace item
+                // itself, but its footprint must still be reserved as an obstacle.
+                // Otherwise a displaced neighbour can select the dragged item's
+                // destination as its own "free" slot and appear not to move at all.
+                if (blocker == other
+                        || (blocker != movingView && !isWorkspaceItem(blocker))) continue;
                 int[] bg = itemGeometry(blocker);
                 if (bg[2] <= 0 || bg[3] <= 0) continue;
                 // Reserve both the current visual footprint and any destination already
