@@ -143,6 +143,11 @@ public class MainActivity extends Activity {
     // intended destination even if the 120 ms push animation has not finished.
     private final java.util.IdentityHashMap<View, int[]> liveDisplacementTargets =
             new java.util.IdentityHashMap<>();
+    // Last collision-free visual position for an actively dragged workspace item.
+    // Hold the mover while a colliding neighbour animates away instead of letting
+    // it visibly pass through the clock or another workspace item.
+    private final java.util.IdentityHashMap<View, int[]> liveDragLastSafeGeometry =
+            new java.util.IdentityHashMap<>();
     private final java.util.WeakHashMap<View, Boolean> workspaceScaleRestored =
             new java.util.WeakHashMap<View, Boolean>();
     private int workspaceGridCellWidth = 1;
@@ -228,6 +233,7 @@ public class MainActivity extends Activity {
     private int iconEdgeLatch = 0;
     private int iconEdgeHoverTargetPage = -1;
     private float iconDragLastRawX;
+    private float iconDragLastRawY;
     private android.animation.ValueAnimator iconDragPageAnimator;
     private View iconDragParallaxView;
     private View iconDragParallaxOutgoing;
@@ -651,6 +657,11 @@ public class MainActivity extends Activity {
             if (clockWidgetMoving && !clockWidgetEditing && clockPanel != null) {
                 if (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5)) {
+                    if (!clockWidgetDragging) {
+                        int[] safeClockGeometry = itemGeometry(clockPanel);
+                        liveDragLastSafeGeometry.put(clockPanel,
+                                new int[]{safeClockGeometry[0], safeClockGeometry[1]});
+                    }
                     clockWidgetDragging = true;
                     handler.removeCallbacks(clockWidgetEditLongPress);
                     // Android translation values and raw touch coordinates are both pixels.
@@ -2909,6 +2920,12 @@ public class MainActivity extends Activity {
             finishWorkspaceTransferDrag(workspaceTransferItem, false);
         }
         clearWorkspaceTransferEdgeHover();
+        liveDragLastSafeGeometry.remove(item);
+        if (item.getParent() instanceof FrameLayout) {
+            int[] initialGeometry = itemGeometry(item);
+            liveDragLastSafeGeometry.put(item,
+                    new int[]{initialGeometry[0], initialGeometry[1]});
+        }
         workspaceTransferItem = item;
         workspaceTransferSourcePage = pagesStrip.getChildAt(sourcePage) instanceof FrameLayout
                 ? (FrameLayout) pagesStrip.getChildAt(sourcePage) : null;
@@ -3040,6 +3057,17 @@ public class MainActivity extends Activity {
             updateWorkspaceTransferDisplacements(workspaceTransferItem,
                     workspaceTransferLastRawX, workspaceTransferLastRawY,
                     workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
+            final View transferItem = workspaceTransferItem;
+            final int destinationIndex = requestedTargetPage;
+            View destinationView = pagesStrip.getChildAt(destinationIndex);
+            if (destinationView != null) destinationView.post(() -> {
+                if (workspaceTransferItem == transferItem
+                        && workspaceTransferTargetPage == destinationIndex) {
+                    updateWorkspaceTransferDisplacements(transferItem,
+                            workspaceTransferLastRawX, workspaceTransferLastRawY,
+                            workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
+                }
+            });
         }
     }
 
@@ -3176,6 +3204,7 @@ public class MainActivity extends Activity {
                 pageIndicator.setText((currentPage + 1) + "  /  " + pagesStrip.getChildCount());
             }
         }
+        liveDragLastSafeGeometry.remove(item);
         workspaceTransferItem = null;
         workspaceTransferSourcePage = null;
         workspaceTransferOriginPage = -1;
@@ -3292,6 +3321,8 @@ public class MainActivity extends Activity {
         workspaceTransferTargetPage = targetPage;
         if (targetPage != workspaceTransferOriginPage) {
             createWorkspaceTransferProxy(targetPage);
+            updateWorkspaceTransferDisplacements(dragged, iconDragLastRawX, iconDragLastRawY,
+                    workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
         }
         pagesStrip.setTranslationX(-fromPage * (float) pageWidth);
         preparePageLayersForSwipe(fromPage);
@@ -3449,6 +3480,7 @@ public class MainActivity extends Activity {
                 iconTouchRawX = event.getRawX();
                 iconTouchRawY = event.getRawY();
                 iconDragLastRawX = event.getRawX();
+                iconDragLastRawY = event.getRawY();
                 iconDragArmed = false;
                 iconDragging = false;
                 iconMovedTooEarly = false;
@@ -3482,6 +3514,10 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_MOVE) {
+                iconDragLastRawX = event.getRawX();
+                iconDragLastRawY = event.getRawY();
+                workspaceTransferLastRawX = event.getRawX();
+                workspaceTransferLastRawY = event.getRawY();
                 float dx = event.getRawX() - iconTouchRawX;
                 float dy = event.getRawY() - iconTouchRawY;
                 boolean moved = Math.abs(dx) > LauncherUiUtils.dp(this, 8) || Math.abs(dy) > LauncherUiUtils.dp(this, 8);
@@ -3539,8 +3575,7 @@ public class MainActivity extends Activity {
                     if (iconDragPageIndex == sourcePageIndex && iconDragPageAnimator == null) {
                         updateLiveDisplacements(page, view);
                     } else if (workspaceTransferTargetPage >= 0
-                            && workspaceTransferTargetPage != workspaceTransferOriginPage
-                            && iconDragPageAnimator == null) {
+                            && workspaceTransferTargetPage != workspaceTransferOriginPage) {
                         updateWorkspaceTransferDisplacements(view, event.getRawX(), event.getRawY(),
                                 workspaceTransferFingerOffsetX, workspaceTransferFingerOffsetY);
                     }
@@ -3549,6 +3584,10 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            iconDragLastRawX = event.getRawX();
+            iconDragLastRawY = event.getRawY();
+            workspaceTransferLastRawX = event.getRawX();
+            workspaceTransferLastRawY = event.getRawY();
             clearIconEdgeHover();
             if (iconDragPageAnimator != null) finishIconDragPageAnimation();
             LauncherUiUtils.stopMoveHint(view);
@@ -5574,6 +5613,11 @@ public class MainActivity extends Activity {
                 if (clockWidgetMoving && !clockWidgetEditing
                         && (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5))) {
+                    if (!clockWidgetDragging) {
+                        int[] safeClockGeometry = itemGeometry(clockPanel);
+                        liveDragLastSafeGeometry.put(clockPanel,
+                                new int[]{safeClockGeometry[0], safeClockGeometry[1]});
+                    }
                     clockWidgetDragging = true;
                     float targetX = clockWidgetStartX + dx;
                     float targetY = clockWidgetStartY + dy;
@@ -6353,7 +6397,8 @@ public class MainActivity extends Activity {
                 animateDisplacedItemTo(other, bestX, bestY);
             }
         }
-    }
+    
+        enforceLiveDragCollisionSafety(page, movingView);}
 
 
     /**
@@ -6362,6 +6407,60 @@ public class MainActivity extends Activity {
      * assigned another slot in the same transaction. A bounded search keeps this safe
      * for older devices when a workspace is densely populated.
      */
+
+
+    /**
+     * Hold an actively dragged item at its last collision-free position if a visible
+     * collision remains after live displacement is scheduled. Neighbours can have a
+     * free destination while still occupying old bounds during their short animation.
+     * Invisible destination proxies are excluded; real cross-page drops are checked at
+     * their exact snapped destination before the gesture commits.
+     */
+    private void enforceLiveDragCollisionSafety(FrameLayout page, View movingView) {
+        if (page == null || movingView == null || movingView.getParent() != page
+                || "workspace_transfer_proxy".equals(movingView.getTag())) return;
+        if (movingView == workspaceTransferItem
+                && workspaceTransferOriginPage >= 0 && workspaceTransferTargetPage >= 0
+                && workspaceTransferTargetPage != workspaceTransferOriginPage) return;
+
+        int[] geometry = itemGeometry(movingView);
+        android.graphics.Rect bounds = collisionRect(movingView, geometry);
+        boolean collision = false;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingView || other.getVisibility() != View.VISIBLE
+                    || !isWorkspaceItem(other)) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            if (android.graphics.Rect.intersects(bounds, collisionRect(other, otherGeometry))) {
+                collision = true;
+                break;
+            }
+        }
+        if (!collision) {
+            liveDragLastSafeGeometry.put(movingView,
+                    new int[]{geometry[0], geometry[1]});
+            return;
+        }
+
+        int[] safe = liveDragLastSafeGeometry.get(movingView);
+        if (safe == null) return;
+        if (isClockWorkspaceItem(movingView)) {
+            setClockVisualPosition(movingView, safe[0], safe[1], false);
+        } else if (movingView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp =
+                    (FrameLayout.LayoutParams) movingView.getLayoutParams();
+            float sx = Math.max(0.01f, movingView.getScaleX());
+            float sy = Math.max(0.01f, movingView.getScaleY());
+            lp.leftMargin = safe[0]
+                    - Math.round(movingView.getPivotX() * (1f - sx));
+            lp.topMargin = safe[1]
+                    - Math.round(movingView.getPivotY() * (1f - sy));
+            movingView.setTranslationX(0f);
+            movingView.setTranslationY(0f);
+            movingView.setLayoutParams(lp);
+        }
+    }
     private boolean findCascadeDisplacementPlan(FrameLayout page, View item, View movingView,
             android.graphics.Rect movingRect, int preferredX, int preferredY,
             java.util.IdentityHashMap<View, int[]> plan,
@@ -7125,6 +7224,9 @@ public class MainActivity extends Activity {
 
         liveDisplacedItems.clear();
         liveDisplacementTargets.clear();
+        if (commit || isClockWorkspaceItem(movingView)) {
+            liveDragLastSafeGeometry.remove(movingView);
+        }
         if (commit && movingView != null
                 && movingView.getParent() instanceof FrameLayout
                 && isWorkspaceItem(movingView)) {
