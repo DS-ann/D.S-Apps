@@ -3632,6 +3632,26 @@ public class MainActivity extends Activity {
                 && pagesStrip.getChildAt(pageIndex) instanceof FrameLayout
                 ? (FrameLayout) pagesStrip.getChildAt(pageIndex) : null;
 
+        // Use a rendered app cell as the artwork/label geometry template. A full grid
+        // cell is not the icon's visual footprint and falsely blocks slots under a
+        // widget's empty cell margins.
+        View appIconTemplate = null;
+        if (pagesStrip != null) {
+            for (int pageIndexToSearch = 0; pageIndexToSearch < pagesStrip.getChildCount()
+                    && appIconTemplate == null; pageIndexToSearch++) {
+                View candidatePage = pagesStrip.getChildAt(pageIndexToSearch);
+                if (!(candidatePage instanceof ViewGroup)) continue;
+                ViewGroup group = (ViewGroup) candidatePage;
+                for (int childIndex = 0; childIndex < group.getChildCount(); childIndex++) {
+                    View child = group.getChildAt(childIndex);
+                    if (isWorkspaceAppIcon(child)) {
+                        appIconTemplate = child;
+                        break;
+                    }
+                }
+            }
+        }
+
         // Read existing app cells from the actual page when available. Fall back to
         // persisted coordinates if that page has not been laid out yet.
         boolean sawAppView = false;
@@ -3672,10 +3692,18 @@ public class MainActivity extends Activity {
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < columns; col++) {
                 if (occupied[row][col]) continue;
+                int cellLeft = col * cellWidth;
+                int cellTop = row * cellHeight;
                 android.graphics.Rect cell = new android.graphics.Rect(
-                        col * cellWidth, row * cellHeight,
+                        cellLeft, cellTop,
                         Math.min(width, (col + 1) * cellWidth),
                         Math.min(height, (row + 1) * cellHeight));
+                // Reserve only the visible app artwork and painted label. For safety on
+                // a workspace with no existing app cell template, fall back to the full
+                // cell rather than guessing typography geometry.
+                android.graphics.Rect candidateAppVisual = appIconTemplate != null
+                        ? collisionRectAt(appIconTemplate, cellLeft, cellTop, cellWidth, cellHeight)
+                        : cell;
                 boolean blocked = false;
                 if (page != null) {
                     for (int i = 0; i < page.getChildCount(); i++) {
@@ -3683,25 +3711,14 @@ public class MainActivity extends Activity {
                         Object rawTag = child.getTag();
                         if (!(rawTag instanceof String)) continue;
                         String tag = (String) rawTag;
-                        if ("launcher_clock_widget".equals(tag)
-                                || tag.startsWith("launcher_app:")
-                                || !tag.startsWith("launcher_widget:")
-                                    && !"launcher_contact_shortcut".equals(tag)) continue;
-                        ViewGroup.LayoutParams rawParams = child.getLayoutParams();
-                        int left = child.getLeft(), top = child.getTop();
-                        int childWidth = child.getWidth(), childHeight = child.getHeight();
-                        if (rawParams instanceof FrameLayout.LayoutParams) {
-                            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawParams;
-                            left = lp.leftMargin;
-                            top = lp.topMargin;
-                            if (lp.width > 0) childWidth = lp.width;
-                            if (lp.height > 0) childHeight = lp.height;
-                        }
-                        left += Math.round(child.getTranslationX());
-                        top += Math.round(child.getTranslationY());
-                        android.graphics.Rect bounds = new android.graphics.Rect(left, top,
-                                left + Math.max(0, childWidth), top + Math.max(0, childHeight));
-                        if (android.graphics.Rect.intersects(cell, bounds)) {
+                        if (tag.startsWith("launcher_app:")) continue;
+                        if (!(tag.startsWith("launcher_widget:")
+                                || "launcher_contact_shortcut".equals(tag)
+                                || "launcher_clock_widget".equals(tag))) continue;
+                        int[] geometry = itemGeometry(child);
+                        if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+                        android.graphics.Rect bounds = collisionRect(child, geometry);
+                        if (android.graphics.Rect.intersects(candidateAppVisual, bounds)) {
                             blocked = true;
                             break;
                         }
@@ -5602,7 +5619,7 @@ public class MainActivity extends Activity {
                         new java.util.IdentityHashMap<View, int[]>();
                 java.util.IdentityHashMap<View, Boolean> recursionStack =
                         new java.util.IdentityHashMap<View, Boolean>();
-                int[] searchBudget = new int[]{240};
+                int[] searchBudget = new int[]{2400};
                 int preferredX = existingTarget == null ? g[0] : existingTarget[0];
                 int preferredY = existingTarget == null ? g[1] : existingTarget[1];
                 if (findCascadeDisplacementPlan(page, other, movingView, movingRect,
@@ -5695,7 +5712,7 @@ public class MainActivity extends Activity {
             java.util.IdentityHashMap<View, Boolean> recursionStack,
             int depth, int[] searchBudget) {
         if (page == null || item == null || movingView == null
-                || depth > 6 || searchBudget[0] <= 0
+                || depth > 8 || searchBudget[0] <= 0
                 || item == movingView || item.getParent() != page
                 || recursionStack.containsKey(item)) return false;
 
@@ -5764,6 +5781,12 @@ public class MainActivity extends Activity {
             long db = Math.abs((long) b[0] - px) + Math.abs((long) b[1] - py);
             return Long.compare(da, db);
         });
+        // Large workspaces produce a Cartesian product of edge coordinates. Limit each
+        // recursive node to the nearest 96 candidates, not the first arbitrary 240
+        // candidates globally; this leaves enough budget for a complete 4–5 item cascade.
+        if (candidates.size() > 96) {
+            candidates = new java.util.ArrayList<int[]>(candidates.subList(0, 96));
+        }
 
         recursionStack.put(item, Boolean.TRUE);
         for (int[] candidatePosition : candidates) {
