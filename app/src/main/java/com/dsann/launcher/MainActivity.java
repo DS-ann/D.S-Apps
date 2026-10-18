@@ -148,6 +148,10 @@ public class MainActivity extends Activity {
     // it visibly pass through the clock or another workspace item.
     private final java.util.IdentityHashMap<View, int[]> liveDragLastSafeGeometry =
             new java.util.IdentityHashMap<>();
+    // Reused only during a single collision-planning pass. Entries are invalidated
+    // whenever that pass cancels/re-targets an item's active displacement animation.
+    private final java.util.IdentityHashMap<View, int[]> liveDragGeometryCache =
+            new java.util.IdentityHashMap<>();
     // Coalesce dense ACTION_MOVE streams into one collision-planning pass per display
     // frame. The view's geometry is still updated immediately; only expensive neighbour
     // planning is deferred. Drop/cancel paths flush or cancel this work synchronously.
@@ -6052,6 +6056,15 @@ public class MainActivity extends Activity {
                 Math.max(1, Math.round(Math.max(1, baseHeight) * sy))};
     }
 
+    private int[] cachedLiveDragGeometry(View view) {
+        int[] geometry = liveDragGeometryCache.get(view);
+        if (geometry == null) {
+            geometry = itemGeometry(view);
+            liveDragGeometryCache.put(view, geometry);
+        }
+        return geometry;
+    }
+
     private boolean isWorkspaceAppIcon(View view) {
         return view != null && view.getTag() instanceof String
                 && ((String) view.getTag()).startsWith("launcher_app:");
@@ -6353,6 +6366,7 @@ public class MainActivity extends Activity {
         // This entry point is used at transaction boundaries as well as by animation
         // callbacks. Any older queued pass is now stale; synchronous validation wins.
         cancelPendingLiveDisplacementUpdate();
+        liveDragGeometryCache.clear();
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
 
@@ -6370,13 +6384,16 @@ public class MainActivity extends Activity {
         // if its original rectangle is free. If the finger reverses again, the same
         // reserved target is eligible to be pushed away once more.
         restoreDisplacedItemsWhenDragReverses(page, movingView, movingRect);
+        // Reverse-restoration can retarget animations; take one consistent snapshot
+        // after it, then reuse geometry for repeated obstacle tests in this pass.
+        liveDragGeometryCache.clear();
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
             if (other == movingView || !isWorkspaceItem(other)) continue;
 
             boolean alreadyDisplaced = liveDisplacedItems.containsKey(other);
             int[] existingTarget = liveDisplacementTargets.get(other);
-            int[] g = itemGeometry(other);
+            int[] g = cachedLiveDragGeometry(other);
             if (g[2] <= 0 || g[3] <= 0) continue;
             android.graphics.Rect otherRect = collisionRect(other, g);
             boolean currentCollides = overlapsWithGap(movingRect, otherRect, gap);
@@ -6412,7 +6429,7 @@ public class MainActivity extends Activity {
                 // destination as its own "free" slot and appear not to move at all.
                 if (blocker == other
                         || (blocker != movingView && !isWorkspaceItem(blocker))) continue;
-                int[] bg = itemGeometry(blocker);
+                int[] bg = cachedLiveDragGeometry(blocker);
                 if (bg[2] <= 0 || bg[3] <= 0) continue;
                 // Reserve both the current visual footprint and any destination already
                 // assigned to an in-flight neighbour. Without target reservations, two
@@ -6429,7 +6446,7 @@ public class MainActivity extends Activity {
                 View reserved = entry.getKey();
                 if (reserved == other || reserved.getParent() != page) continue;
                 int[] original = entry.getValue();
-                int[] rg = itemGeometry(reserved);
+                int[] rg = cachedLiveDragGeometry(reserved);
                 obstacles.add(collisionRectAt(reserved, original[0], original[1], rg[2], rg[3]));
             }
 
@@ -6542,7 +6559,9 @@ public class MainActivity extends Activity {
                         if (oldTarget != null && oldTarget[0] == destination[0]
                                 && oldTarget[1] == destination[1]) continue;
                         participant.animate().cancel();
+                        liveDragGeometryCache.remove(participant);
                         int[] currentGeometry = itemGeometry(participant);
+                        liveDragGeometryCache.put(participant, currentGeometry);
                         if (!liveDisplacedItems.containsKey(participant)) {
                             liveDisplacedItems.put(participant,
                                     new int[]{currentGeometry[0], currentGeometry[1]});
@@ -6563,7 +6582,9 @@ public class MainActivity extends Activity {
                 // Recompute the visual origin after cancelling any old motion so the
                 // next translation starts from the exact frame that was on screen.
                 other.animate().cancel();
+                liveDragGeometryCache.remove(other);
                 g = itemGeometry(other);
+                liveDragGeometryCache.put(other, g);
                 if (!liveDisplacedItems.containsKey(other)) {
                     liveDisplacedItems.put(other, new int[]{g[0], g[1]});
                 }
@@ -6575,6 +6596,7 @@ public class MainActivity extends Activity {
             }
         }
     
+        liveDragGeometryCache.clear();
         enforceLiveDragCollisionSafety(page, movingView);
     }
 
