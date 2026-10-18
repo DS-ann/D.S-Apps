@@ -6920,6 +6920,47 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Chooses the shortest axis that separates a colliding neighbour from the dragged
+     * item. The result is used as a stable push direction for the whole displacement
+     * chain, so later MOVE events do not make each neighbour pick a different side.
+     */
+    private int[] resolveLiveDisplacementDirection(android.graphics.Rect movingBounds,
+            android.graphics.Rect otherBounds) {
+        int overlapX = Math.max(0, Math.min(movingBounds.right, otherBounds.right)
+                - Math.max(movingBounds.left, otherBounds.left));
+        int overlapY = Math.max(0, Math.min(movingBounds.bottom, otherBounds.bottom)
+                - Math.max(movingBounds.top, otherBounds.top));
+        long centerDeltaX = ((long) otherBounds.left + otherBounds.right)
+                - ((long) movingBounds.left + movingBounds.right);
+        long centerDeltaY = ((long) otherBounds.top + otherBounds.bottom)
+                - ((long) movingBounds.top + movingBounds.bottom);
+        if (overlapX <= overlapY || centerDeltaY == 0L) {
+            int direction = centerDeltaX < 0L ? -1 : 1;
+            if (centerDeltaX == 0L && otherBounds.left < movingBounds.left) direction = -1;
+            return new int[]{direction, 0};
+        }
+        int direction = centerDeltaY < 0L ? -1 : 1;
+        if (centerDeltaY == 0L && otherBounds.top < movingBounds.top) direction = -1;
+        return new int[]{0, direction};
+    }
+
+    /**
+     * Forward movement wins over sideways/backward escapes. Within the preferred
+     * half-plane, keep the chain straight and choose the smallest necessary movement.
+     */
+    private long liveDisplacementCandidateScore(int x, int y, int baseX, int baseY,
+            int pushDx, int pushDy) {
+        long offsetX = (long) x - baseX;
+        long offsetY = (long) y - baseY;
+        long projection = offsetX * pushDx + offsetY * pushDy;
+        long backwardPenalty = projection > 0L ? 0L : 1L;
+        long perpendicular = pushDx != 0 ? Math.abs(offsetY) : Math.abs(offsetX);
+        long distance = Math.abs(offsetX) + Math.abs(offsetY);
+        return backwardPenalty * 1_000_000_000_000L
+                + perpendicular * 1_000_000L + distance;
+    }
+
     private void updateLiveDisplacements(FrameLayout page, View movingView) {
         // This entry point is used at transaction boundaries as well as by animation
         // callbacks. Any older queued pass is now stale; synchronous validation wins.
@@ -6969,9 +7010,20 @@ public class MainActivity extends Activity {
             if (alreadyDisplaced && !targetCollides) continue;
             if (!alreadyDisplaced && !currentCollides) continue;
 
-            // If the dragged item reaches a neighbour's planned destination, cancel
-            // that motion and assign a new destination rather than letting the two
-            // items overlap until release.
+            android.graphics.Rect directionBounds = otherRect;
+            if (!currentCollides && targetCollides && existingTarget != null) {
+                directionBounds = collisionRectAtForInteraction(other,
+                        existingTarget[0], existingTarget[1], g[2], g[3], movingView);
+            }
+            int[] pushDirection = resolveLiveDisplacementDirection(
+                    movingBoundsForOther, directionBounds);
+            int pushDx = pushDirection[0];
+            int pushDy = pushDirection[1];
+            int preferredDisplacementX = existingTarget == null ? g[0] : existingTarget[0];
+            int preferredDisplacementY = existingTarget == null ? g[1] : existingTarget[1];
+
+            // If the dragged item reaches a neighbour's planned destination, the complete
+            // affected chain is replanned in one direction instead of reacting item by item.
 
             int maxX = page.getWidth() - g[2] - gap;
             int maxY = page.getHeight() - g[3] - gap;
@@ -7034,7 +7086,8 @@ public class MainActivity extends Activity {
                 yCandidates.add(Math.max(min, Math.min(maxY, obstacle.bottom + gap)));
             }
 
-            int bestX = -1, bestY = -1, bestDistance = Integer.MAX_VALUE;
+            int bestX = -1, bestY = -1;
+            long bestScore = Long.MAX_VALUE;
             if (isHomeGridIcon(other)) {
                 // App cells must remain snapped to the home grid during displacement.
                 int columns = homeGridColumnsForItem(other);
@@ -7080,9 +7133,11 @@ public class MainActivity extends Activity {
                         }
                     }
                     if (blocked) continue;
-                    int distance = Math.abs(x - g[0]) + Math.abs(y - g[1]);
-                    if (distance < bestDistance) {
-                        bestDistance = distance;
+                    long score = liveDisplacementCandidateScore(x, y,
+                            preferredDisplacementX, preferredDisplacementY, pushDx, pushDy);
+                    if (score < bestScore || (score == bestScore
+                            && (bestY < 0 || y < bestY || (y == bestY && x < bestX)))) {
+                        bestScore = score;
                         bestX = x;
                         bestY = y;
                     }
@@ -7099,14 +7154,9 @@ public class MainActivity extends Activity {
                     int candidateY = Math.min(maxY, y);
                     for (int x = 0; x <= maxX + step; x += step) {
                         int candidateX = Math.min(maxX, x);
-                        // Preserve the exact 6dp fallback search and tie-breaking,
-                        // but avoid testing candidates that cannot beat the best result
-                        // already found. This is especially important on crowded pages.
-                        int verticalDistance = Math.abs(candidateY - g[1]);
-                        if (bestX >= 0 && verticalDistance > bestDistance) {
-                            if (candidateY == maxY) break;
-                            continue;
-                        }
+                        // The 6dp fallback is only entered if the edge search found no
+                        // usable target. Rank every free candidate by the same directional
+                        // score as the fast path so it cannot reintroduce opposite-side jumps.
                         boolean blocked = false;
                         int candidateRight = candidateX + g[2];
                         int candidateBottom = candidateY + g[3];
@@ -7118,10 +7168,12 @@ public class MainActivity extends Activity {
                             }
                         }
                         if (blocked) continue;
-                        int distance = Math.abs(candidateX - g[0]) + verticalDistance;
-                        if (bestX >= 0 && distance > bestDistance) continue;
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
+                        long score = liveDisplacementCandidateScore(candidateX, candidateY,
+                                preferredDisplacementX, preferredDisplacementY, pushDx, pushDy);
+                        if (score < bestScore || (score == bestScore
+                                && (bestY < 0 || candidateY < bestY
+                                || (candidateY == bestY && candidateX < bestX)))) {
+                            bestScore = score;
                             bestX = candidateX;
                             bestY = candidateY;
                         }
@@ -7136,20 +7188,22 @@ public class MainActivity extends Activity {
                 continue;
             }
 
-            if (bestX < 0) {
-                // There may be no immediately empty rectangle even though a short
-                // chain of neighbours can slide into one another's vacated positions.
-                // Plan the complete chain before applying any destination so 4–5 items
-                // are shifted during the drag, not only after finger-up.
+            {
+                // Plan a direction-aware push chain before accepting a nearby empty slot.
+                // This prevents a shortcut/app/widget from escaping one way first and then
+                // being pushed again when the dragged item advances another few pixels.
                 java.util.IdentityHashMap<View, int[]> cascadePlan =
                         new java.util.IdentityHashMap<View, int[]>();
                 java.util.IdentityHashMap<View, Boolean> recursionStack =
                         new java.util.IdentityHashMap<View, Boolean>();
                 int[] searchBudget = new int[]{240};
-                int preferredX = existingTarget == null ? g[0] : existingTarget[0];
-                int preferredY = existingTarget == null ? g[1] : existingTarget[1];
                 if (findCascadeDisplacementPlan(page, other, movingView, movingRect,
-                        preferredX, preferredY, cascadePlan, recursionStack, 0, searchBudget)) {
+                        preferredDisplacementX, preferredDisplacementY, pushDx, pushDy,
+                        cascadePlan, recursionStack, 0, searchBudget)) {
+                    // Reserve every target before starting any animation. This prevents
+                    // asynchronous animation callbacks from seeing a partly committed chain.
+                    java.util.ArrayList<View> cascadeParticipantsToAnimate =
+                            new java.util.ArrayList<View>();
                     for (java.util.Map.Entry<View, int[]> planned : cascadePlan.entrySet()) {
                         View participant = planned.getKey();
                         int[] destination = planned.getValue();
@@ -7166,9 +7220,13 @@ public class MainActivity extends Activity {
                         }
                         liveDisplacementTargets.put(participant,
                                 new int[]{destination[0], destination[1]});
-                        // All neighbors share the same short animation. Their target
-                        // rectangles are reserved immediately, preventing re-plans every frame.
-                        animateDisplacedItemTo(participant, destination[0], destination[1]);
+                        cascadeParticipantsToAnimate.add(participant);
+                    }
+                    for (View participant : cascadeParticipantsToAnimate) {
+                        int[] destination = liveDisplacementTargets.get(participant);
+                        if (destination != null) {
+                            animateDisplacedItemTo(participant, destination[0], destination[1]);
+                        }
                     }
                     continue;
                 }
@@ -7265,9 +7323,9 @@ public class MainActivity extends Activity {
      */
 
 
-    private int compareCascadeCandidates(long distanceA, int xA, int yA,
-            long distanceB, int xB, int yB) {
-        int compare = Long.compare(distanceA, distanceB);
+    private int compareCascadeCandidates(long scoreA, int xA, int yA,
+            long scoreB, int xB, int yB) {
+        int compare = Long.compare(scoreA, scoreB);
         if (compare == 0) compare = Integer.compare(yA, yB);
         if (compare == 0) compare = Integer.compare(xA, xB);
         return compare;
@@ -7280,7 +7338,7 @@ public class MainActivity extends Activity {
      */
     private java.util.ArrayList<int[]> nearestCascadeCandidates(
             java.util.TreeSet<Integer> xs, java.util.TreeSet<Integer> ys,
-            int preferredX, int preferredY) {
+            int preferredX, int preferredY, int pushDx, int pushDy) {
         final int limit = Math.min(96, xs.size() * ys.size());
         java.util.ArrayList<int[]> result = new java.util.ArrayList<int[]>(limit);
         if (limit <= 0) return result;
@@ -7293,8 +7351,8 @@ public class MainActivity extends Activity {
             int y = cyValue.intValue();
             for (Integer cxValue : xs) {
                 int x = cxValue.intValue();
-                long distance = Math.abs((long) x - preferredX)
-                        + Math.abs((long) y - preferredY);
+                long distance = liveDisplacementCandidateScore(
+                        x, y, preferredX, preferredY, pushDx, pushDy);
                 if (count < limit) {
                     int index = count++;
                     heapX[index] = x;
@@ -7341,10 +7399,10 @@ public class MainActivity extends Activity {
             result.add(new int[]{heapX[i], heapY[i]});
         }
         java.util.Collections.sort(result, (a, b) -> {
-            long da = Math.abs((long) a[0] - preferredX)
-                    + Math.abs((long) a[1] - preferredY);
-            long db = Math.abs((long) b[0] - preferredX)
-                    + Math.abs((long) b[1] - preferredY);
+            long da = liveDisplacementCandidateScore(
+                    a[0], a[1], preferredX, preferredY, pushDx, pushDy);
+            long db = liveDisplacementCandidateScore(
+                    b[0], b[1], preferredX, preferredY, pushDx, pushDy);
             return compareCascadeCandidates(da, a[0], a[1], db, b[0], b[1]);
         });
         return result;
@@ -7365,6 +7423,7 @@ public class MainActivity extends Activity {
 
     private boolean findCascadeDisplacementPlan(FrameLayout page, View item, View movingView,
             android.graphics.Rect movingRect, int preferredX, int preferredY,
+            int pushDx, int pushDy,
             java.util.IdentityHashMap<View, int[]> plan,
             java.util.IdentityHashMap<View, Boolean> recursionStack,
             int depth, int[] searchBudget) {
@@ -7430,7 +7489,7 @@ public class MainActivity extends Activity {
 
         // Avoid allocating the full Cartesian product; retain only the nearest 96.
         java.util.ArrayList<int[]> candidates =
-                nearestCascadeCandidates(xs, ys, preferredX, preferredY);
+                nearestCascadeCandidates(xs, ys, preferredX, preferredY, pushDx, pushDy);
 
         recursionStack.put(item, Boolean.TRUE);
         for (int[] candidatePosition : candidates) {
@@ -7442,6 +7501,27 @@ public class MainActivity extends Activity {
             android.graphics.Rect movingBoundsForItem =
                     collisionRectForInteraction(movingView, movingGeometry, item);
             if (android.graphics.Rect.intersects(candidateForMover, movingBoundsForItem)) continue;
+
+            // Keep prior footprints reserved during a live preview. Otherwise another
+            // chain member can occupy a displaced item's restore slot, so reversing the
+            // drag no longer restores the original arrangement cleanly.
+            boolean reservedOriginalConflict = false;
+            for (java.util.Map.Entry<View, int[]> reservedEntry : liveDisplacedItems.entrySet()) {
+                View reservedItem = reservedEntry.getKey();
+                if (reservedItem == item || reservedItem == movingView
+                        || reservedItem.getParent() != page) continue;
+                int[] reservedGeometry = itemGeometry(reservedItem);
+                if (reservedGeometry[2] <= 0 || reservedGeometry[3] <= 0) continue;
+                int[] originalPosition = reservedEntry.getValue();
+                android.graphics.Rect originalBounds = collisionRectAtForInteraction(
+                        reservedItem, originalPosition[0], originalPosition[1],
+                        reservedGeometry[2], reservedGeometry[3], item);
+                if (android.graphics.Rect.intersects(candidateForMover, originalBounds)) {
+                    reservedOriginalConflict = true;
+                    break;
+                }
+            }
+            if (reservedOriginalConflict) continue;
 
             java.util.ArrayList<View> blockers = new java.util.ArrayList<View>();
             for (int i = 0; i < page.getChildCount(); i++) {
@@ -7483,7 +7563,7 @@ public class MainActivity extends Activity {
                         new java.util.IdentityHashMap<View, Boolean>(recursionStack);
                 if (!findCascadeDisplacementPlan(page, blocker, movingView, movingRect,
                         currentOrPlannedX(blocker, trial), currentOrPlannedY(blocker, trial),
-                        trial, nextStack, depth + 1, searchBudget)) {
+                        pushDx, pushDy, trial, nextStack, depth + 1, searchBudget)) {
                     solved = false;
                     break;
                 }
