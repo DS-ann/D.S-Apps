@@ -5316,9 +5316,25 @@ public class MainActivity extends Activity {
             // restore and displace on successive MOVE frames ("dancing" widgets).
             // Keep a wider dead zone around the original slot so tiny finger jitter
             // cannot repeatedly restore and re-displace the same widget while dragging.
-            int restoreHysteresis = (isWorkspaceAppIcon(movingView) || isWorkspaceAppIcon(displaced))
-                    ? LauncherUiUtils.dp(this, 8) : 0;
-            if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)) {
+            // Apply the same small dead zone to every item type. Widgets used to
+            // restore immediately at an exact edge and were re-displaced on the next
+            // frame, producing the visible "dancing" seen in crowded drags.
+            int restoreHysteresis = LauncherUiUtils.dp(this, 8);
+            boolean originalNeededByAnotherTarget = false;
+            for (java.util.Map.Entry<View, int[]> targetEntry : liveDisplacementTargets.entrySet()) {
+                View targetOwner = targetEntry.getKey();
+                if (targetOwner == displaced || targetOwner.getParent() != page) continue;
+                int[] target = targetEntry.getValue();
+                int[] targetGeometry = itemGeometry(targetOwner);
+                android.graphics.Rect targetRect = collisionRectAt(targetOwner,
+                        target[0], target[1], targetGeometry[2], targetGeometry[3]);
+                if (android.graphics.Rect.intersects(originalRect, targetRect)) {
+                    originalNeededByAnotherTarget = true;
+                    break;
+                }
+            }
+            if (!overlapsWithGap(movingRect, originalRect, restoreHysteresis)
+                    && !originalNeededByAnotherTarget) {
                 displaced.animate().cancel();
                 if (displaced == clockPanel) {
                     // Clock geometry is translation/scale based; writing its visual
@@ -5346,13 +5362,28 @@ public class MainActivity extends Activity {
 
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
-            if (other == movingView || !isWorkspaceItem(other)
-                    || liveDisplacedItems.containsKey(other)) continue;
+            if (other == movingView || !isWorkspaceItem(other)) continue;
 
+            boolean alreadyDisplaced = liveDisplacedItems.containsKey(other);
+            int[] existingTarget = liveDisplacementTargets.get(other);
             int[] g = itemGeometry(other);
             if (g[2] <= 0 || g[3] <= 0) continue;
             android.graphics.Rect otherRect = collisionRect(other, g);
-            if (!overlapsWithGap(movingRect, otherRect, gap)) continue;
+            boolean currentCollides = overlapsWithGap(movingRect, otherRect, gap);
+            boolean targetCollides = alreadyDisplaced && existingTarget != null
+                    && overlapsWithGap(movingRect, collisionRectAt(other,
+                            existingTarget[0], existingTarget[1], g[2], g[3]), gap);
+            if (alreadyDisplaced && !currentCollides && !targetCollides) continue;
+            if (!alreadyDisplaced && !currentCollides) continue;
+
+            // If the dragged item reaches a neighbour's planned destination, cancel
+            // that motion and assign a new destination rather than letting the two
+            // items overlap until release.
+            if (alreadyDisplaced) {
+                other.animate().cancel();
+                g = itemGeometry(other);
+                otherRect = collisionRect(other, g);
+            }
 
             int maxX = page.getWidth() - g[2] - gap;
             int maxY = page.getHeight() - g[3] - gap;
@@ -5450,7 +5481,7 @@ public class MainActivity extends Activity {
             // page at a modest interval and choose the nearest collision-free position.
             // This makes displacement work consistently near the top as well as below.
             if (bestX < 0 && !isWorkspaceAppIcon(other)) {
-                int step = Math.max(1, LauncherUiUtils.dp(this, 12));
+                int step = Math.max(1, LauncherUiUtils.dp(this, 6));
                 for (int y = 0; y <= maxY + step; y += step) {
                     int candidateY = Math.min(maxY, y);
                     for (int x = 0; x <= maxX + step; x += step) {
@@ -5477,8 +5508,60 @@ public class MainActivity extends Activity {
                 }
             }
 
+            if (bestX < 0) {
+                // There may be no immediately empty rectangle even though a short
+                // chain of neighbours can slide into one another's vacated positions.
+                // Plan the complete chain before applying any destination so 4–5 items
+                // are shifted during the drag, not only after finger-up.
+                java.util.IdentityHashMap<View, int[]> cascadePlan =
+                        new java.util.IdentityHashMap<View, int[]>();
+                java.util.IdentityHashMap<View, Boolean> recursionStack =
+                        new java.util.IdentityHashMap<View, Boolean>();
+                int[] searchBudget = new int[]{320};
+                int preferredX = existingTarget == null ? g[0] : existingTarget[0];
+                int preferredY = existingTarget == null ? g[1] : existingTarget[1];
+                if (findCascadeDisplacementPlan(page, other, movingView, movingRect,
+                        preferredX, preferredY, cascadePlan, recursionStack, 0, searchBudget)) {
+                    for (java.util.Map.Entry<View, int[]> planned : cascadePlan.entrySet()) {
+                        View participant = planned.getKey();
+                        int[] destination = planned.getValue();
+                        participant.animate().cancel();
+                        int[] currentGeometry = itemGeometry(participant);
+                        if (!liveDisplacedItems.containsKey(participant)) {
+                            liveDisplacedItems.put(participant,
+                                    new int[]{currentGeometry[0], currentGeometry[1]});
+                        }
+                        liveDisplacementTargets.put(participant,
+                                new int[]{destination[0], destination[1]});
+                        long ordinal = Math.max(0, liveDisplacedItems.size() - 1);
+                        long startDelay = Math.min(72L, ordinal * 18L);
+                        if (participant == clockPanel) {
+                            float tx = clockPanel.getTranslationX()
+                                    + destination[0] - currentGeometry[0];
+                            float ty = clockPanel.getTranslationY()
+                                    + destination[1] - currentGeometry[1];
+                            float[] bounded = clampClockTranslation(clockPanel, tx, ty);
+                            clockPanel.animate().translationX(bounded[0]).translationY(bounded[1])
+                                    .setStartDelay(animationDuration(startDelay))
+                                    .setDuration(animationDuration(120L)).start();
+                        } else {
+                            participant.animate()
+                                    .translationX(participant.getTranslationX()
+                                            + destination[0] - currentGeometry[0])
+                                    .translationY(participant.getTranslationY()
+                                            + destination[1] - currentGeometry[1])
+                                    .setStartDelay(animationDuration(startDelay))
+                                    .setDuration(animationDuration(120L)).start();
+                        }
+                    }
+                    continue;
+                }
+            }
+
             if (bestX >= 0) {
-                liveDisplacedItems.put(other, new int[]{g[0], g[1]});
+                if (!liveDisplacedItems.containsKey(other)) {
+                    liveDisplacedItems.put(other, new int[]{g[0], g[1]});
+                }
                 liveDisplacementTargets.put(other, new int[]{bestX, bestY});
 
                 // Animate every newly displaced item, regardless of type. Animate
@@ -5508,6 +5591,165 @@ public class MainActivity extends Activity {
                 }
             }
         }
+    }
+
+
+    /**
+     * Recursively plans a short push chain when every direct destination is occupied.
+     * The moving item and all planned destinations are reserved, while blockers may be
+     * assigned another slot in the same transaction. A bounded search keeps this safe
+     * for older devices when a workspace is densely populated.
+     */
+    private boolean findCascadeDisplacementPlan(FrameLayout page, View item, View movingView,
+            android.graphics.Rect movingRect, int preferredX, int preferredY,
+            java.util.IdentityHashMap<View, int[]> plan,
+            java.util.IdentityHashMap<View, Boolean> recursionStack,
+            int depth, int[] searchBudget) {
+        if (page == null || item == null || movingView == null
+                || depth > 6 || searchBudget[0] <= 0
+                || item == movingView || item.getParent() != page
+                || recursionStack.containsKey(item)) return false;
+
+        int[] geometry = itemGeometry(item);
+        int width = Math.max(1, geometry[2]);
+        int height = Math.max(1, geometry[3]);
+        int maxX = Math.max(0, page.getWidth() - width);
+        int maxY = Math.max(0, page.getHeight() - height);
+        preferredX = Math.max(0, Math.min(maxX, preferredX));
+        preferredY = Math.max(0, Math.min(maxY, preferredY));
+
+        java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
+        java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
+        xs.add(preferredX); ys.add(preferredY);
+        xs.add(0); ys.add(0); xs.add(maxX); ys.add(maxY);
+        boolean appIcon = isWorkspaceAppIcon(item);
+        if (appIcon) {
+            int columns = Math.max(1, getHomeColumns());
+            int cellWidth = Math.max(1, page.getWidth() / columns);
+            int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+            int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+            int rows = Math.max(1, page.getHeight() / Math.max(1, cellHeight));
+            xs.clear(); ys.clear();
+            for (int col = 0; col < columns; col++) {
+                int x = col * cellWidth;
+                if (x + cellWidth <= page.getWidth()) xs.add(x);
+            }
+            for (int row = 0; row < rows; row++) {
+                int y = row * cellHeight;
+                if (y + cellHeight <= page.getHeight()) ys.add(y);
+            }
+        } else {
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View blocker = page.getChildAt(i);
+                if (blocker == item || blocker == movingView || !isWorkspaceItem(blocker)) continue;
+                int[] bg = itemGeometry(blocker);
+                if (bg[2] <= 0 || bg[3] <= 0) continue;
+                android.graphics.Rect bounds = collisionRect(blocker, bg);
+                xs.add(Math.max(0, Math.min(maxX, bounds.left - width)));
+                xs.add(Math.max(0, Math.min(maxX, bounds.right)));
+                ys.add(Math.max(0, Math.min(maxY, bounds.top - height)));
+                ys.add(Math.max(0, Math.min(maxY, bounds.bottom)));
+                int[] target = plan.get(blocker);
+                if (target == null) target = liveDisplacementTargets.get(blocker);
+                if (target != null) {
+                    android.graphics.Rect targetBounds = collisionRectAt(blocker,
+                            target[0], target[1], bg[2], bg[3]);
+                    xs.add(Math.max(0, Math.min(maxX, targetBounds.left - width)));
+                    xs.add(Math.max(0, Math.min(maxX, targetBounds.right)));
+                    ys.add(Math.max(0, Math.min(maxY, targetBounds.top - height)));
+                    ys.add(Math.max(0, Math.min(maxY, targetBounds.bottom)));
+                }
+            }
+            // This search is only used after the fast exact-edge placement failed.
+            int step = Math.max(1, LauncherUiUtils.dp(this, 12));
+            for (int y = 0; y <= maxY; y += step) ys.add(Math.min(maxY, y));
+            for (int x = 0; x <= maxX; x += step) xs.add(Math.min(maxX, x));
+        }
+
+        java.util.ArrayList<int[]> candidates = new java.util.ArrayList<int[]>();
+        for (Integer cy : ys) for (Integer cx : xs) {
+            candidates.add(new int[]{cx.intValue(), cy.intValue()});
+        }
+        final int px = preferredX, py = preferredY;
+        java.util.Collections.sort(candidates, (a, b) -> {
+            long da = Math.abs((long) a[0] - px) + Math.abs((long) a[1] - py);
+            long db = Math.abs((long) b[0] - px) + Math.abs((long) b[1] - py);
+            return Long.compare(da, db);
+        });
+
+        recursionStack.put(item, Boolean.TRUE);
+        for (int[] candidatePosition : candidates) {
+            if (searchBudget[0]-- <= 0) break;
+            int x = candidatePosition[0], y = candidatePosition[1];
+            android.graphics.Rect candidate = collisionRectAt(item, x, y, width, height);
+            if (android.graphics.Rect.intersects(candidate, movingRect)) continue;
+
+            java.util.ArrayList<View> blockers = new java.util.ArrayList<View>();
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View blocker = page.getChildAt(i);
+                if (blocker == item || blocker == movingView || !isWorkspaceItem(blocker)) continue;
+                int[] bg = itemGeometry(blocker);
+                if (bg[2] <= 0 || bg[3] <= 0) continue;
+
+                int[] localTarget = plan.get(blocker);
+                int[] existingTarget = liveDisplacementTargets.get(blocker);
+                if (localTarget != null) {
+                    android.graphics.Rect targetRect = collisionRectAt(blocker,
+                            localTarget[0], localTarget[1], bg[2], bg[3]);
+                    if (android.graphics.Rect.intersects(candidate, targetRect)) blockers.add(blocker);
+                } else {
+                    android.graphics.Rect currentRect = collisionRect(blocker, bg);
+                    boolean hit = android.graphics.Rect.intersects(candidate, currentRect);
+                    if (existingTarget != null) {
+                        android.graphics.Rect targetRect = collisionRectAt(blocker,
+                                existingTarget[0], existingTarget[1], bg[2], bg[3]);
+                        hit = hit || android.graphics.Rect.intersects(candidate, targetRect);
+                    }
+                    if (hit) blockers.add(blocker);
+                }
+            }
+
+            java.util.IdentityHashMap<View, int[]> trial =
+                    new java.util.IdentityHashMap<View, int[]>(plan);
+            trial.put(item, new int[]{x, y});
+            boolean solved = true;
+            for (View blocker : blockers) {
+                if (recursionStack.containsKey(blocker)) {
+                    solved = false;
+                    break;
+                }
+                java.util.IdentityHashMap<View, Boolean> nextStack =
+                        new java.util.IdentityHashMap<View, Boolean>(recursionStack);
+                if (!findCascadeDisplacementPlan(page, blocker, movingView, movingRect,
+                        currentOrPlannedX(blocker, trial), currentOrPlannedY(blocker, trial),
+                        trial, nextStack, depth + 1, searchBudget)) {
+                    solved = false;
+                    break;
+                }
+            }
+            if (solved) {
+                plan.clear();
+                plan.putAll(trial);
+                recursionStack.remove(item);
+                return true;
+            }
+        }
+        recursionStack.remove(item);
+        return false;
+    }
+
+    private int currentOrPlannedX(View item, java.util.IdentityHashMap<View, int[]> plan) {
+        int[] target = plan.get(item);
+        if (target == null) target = liveDisplacementTargets.get(item);
+        if (target != null) return target[0];
+        return itemGeometry(item)[0];
+    }
+
+    private int currentOrPlannedY(View item, java.util.IdentityHashMap<View, int[]> plan) {
+        int[] target = plan.get(item);
+        if (target == null) target = liveDisplacementTargets.get(item);
+        if (target != null) return target[1];
+        return itemGeometry(item)[1];
     }
 
     /**
@@ -5990,9 +6232,25 @@ public class MainActivity extends Activity {
                 android.graphics.Rect originalRect = collisionRectAt(displaced,
                         original[0], original[1],
                         Math.max(1, oldGeometry[2]), Math.max(1, oldGeometry[3]));
-                // A displacement is committed only if the dropped item still
-                // covers this neighbour's former footprint.
+                // Keep a cascade member displaced when another planned destination
+                // occupies its former slot, even if the dragged widget itself does not
+                // cover that slot. Otherwise finger-up would restore into a live target.
                 keepDisplacement = android.graphics.Rect.intersects(movingRect, originalRect);
+                if (!keepDisplacement) {
+                    for (java.util.Map.Entry<View, int[]> targetEntry : liveDisplacementTargets.entrySet()) {
+                        View targetOwner = targetEntry.getKey();
+                        if (targetOwner == displaced || targetOwner.getParent() != page) continue;
+                        int[] destination = targetEntry.getValue();
+                        int[] destinationGeometry = itemGeometry(targetOwner);
+                        android.graphics.Rect targetRect = collisionRectAt(targetOwner,
+                                destination[0], destination[1],
+                                destinationGeometry[2], destinationGeometry[3]);
+                        if (android.graphics.Rect.intersects(originalRect, targetRect)) {
+                            keepDisplacement = true;
+                            break;
+                        }
+                    }
+                }
             }
 
             // Stop any in-flight animation before applying the final geometry;
