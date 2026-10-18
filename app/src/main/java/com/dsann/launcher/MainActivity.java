@@ -3786,7 +3786,9 @@ public class MainActivity extends Activity {
                     }
                     hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
                     finishWorkspaceTransferDrag(view, true);
-                    if (hadLiveDisplacementPlan) finishLiveDisplacements(true, view);
+                    // Always validate the exact destination before rebuilding the page.
+                    // This is a no-op when the live displacement plan is already clear.
+                    finishLiveDisplacements(true, view);
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     int committedPage = destinationPage;
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
