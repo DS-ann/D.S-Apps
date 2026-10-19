@@ -14,6 +14,8 @@ final class LauncherScreenTransitions {
     private static LinearLayout activeParallaxHome;
     private static LinearLayout activeParallaxDrawer;
     private static float activeParallaxProgress;
+    // Tracks finger-release settling for non-Parallax drawer effects too.
+    private static android.animation.ValueAnimator activeDrawerSettleAnimator;
 
     private static float clampProgress(float progress) {
         return Math.max(0f, Math.min(1f, progress));
@@ -21,8 +23,45 @@ final class LauncherScreenTransitions {
 
     static boolean isDrawerTransitionRunning(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect) {
-        return effect == 0 && activeParallaxAnimator != null
-                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen;
+        if (effect == 0 && activeParallaxAnimator != null
+                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) return true;
+        if (activeDrawerSettleAnimator != null) return true;
+        // Canned non-Parallax transitions use ViewPropertyAnimator. Both surfaces
+        // are visible only while that transition is in flight (or during a live drag).
+        return homeScreen != null && drawerScreen != null
+                && homeScreen.getVisibility() == View.VISIBLE
+                && drawerScreen.getVisibility() == View.VISIBLE;
+    }
+
+    /**
+     * Give a fresh touch inside the visible drawer to its grid immediately, even if
+     * an entrance/settling animation has not finished. This avoids interpreting a
+     * fast second swipe as another request to animate the drawer.
+     */
+    static void snapDrawerOpenForScrolling(LinearLayout homeScreen, LinearLayout drawerScreen,
+            Runnable markDrawerOpen) {
+        android.animation.ValueAnimator parallax = activeParallaxAnimator;
+        activeParallaxAnimator = null;
+        activeParallaxHome = null;
+        activeParallaxDrawer = null;
+        android.animation.ValueAnimator settle = activeDrawerSettleAnimator;
+        activeDrawerSettleAnimator = null;
+        if (parallax != null) parallax.cancel();
+        if (settle != null) settle.cancel();
+        if (homeScreen != null) homeScreen.animate().cancel();
+        if (drawerScreen != null) drawerScreen.animate().cancel();
+        if (markDrawerOpen != null) markDrawerOpen.run();
+        if (homeScreen != null) {
+            homeScreen.setVisibility(View.GONE);
+            resetTransitionPose(homeScreen);
+            releaseTransitionLayer(homeScreen);
+        }
+        if (drawerScreen != null) {
+            drawerScreen.setVisibility(View.VISIBLE);
+            resetTransitionPose(drawerScreen);
+            releaseTransitionLayer(drawerScreen);
+        }
+        activeParallaxProgress = 1f;
     }
 
     static float getDrawerTransitionProgress(LinearLayout homeScreen,
@@ -53,6 +92,12 @@ final class LauncherScreenTransitions {
         drawerScreen.setVisibility(View.VISIBLE);
         updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
         return progress;
+    }
+
+    private static void cancelActiveDrawerSettleAnimator() {
+        android.animation.ValueAnimator old = activeDrawerSettleAnimator;
+        activeDrawerSettleAnimator = null;
+        if (old != null) old.cancel();
     }
 
     private static void cancelActiveParallaxAnimator() {
@@ -517,8 +562,10 @@ final class LauncherScreenTransitions {
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
+        cancelActiveDrawerSettleAnimator();
         android.animation.ValueAnimator animator =
                 android.animation.ValueAnimator.ofFloat(start, 0f);
+        activeDrawerSettleAnimator = animator;
         animator.setDuration(LauncherMotion.duration(activity,
                 Math.max(110L, (long) (300L * start))));
         animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
@@ -527,6 +574,8 @@ final class LauncherScreenTransitions {
                         (Float) value.getAnimatedValue()));
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (activeDrawerSettleAnimator != animator) return;
+                activeDrawerSettleAnimator = null;
                 markDrawerClosed.run();
                 homeScreen.setVisibility(View.VISIBLE);
                 homeScreen.setAlpha(1f);
@@ -570,8 +619,10 @@ final class LauncherScreenTransitions {
         prepareTransitionLayers(homeScreen, drawerScreen);
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
+        cancelActiveDrawerSettleAnimator();
         android.animation.ValueAnimator animator =
                 android.animation.ValueAnimator.ofFloat(start, 1f);
+        activeDrawerSettleAnimator = animator;
         animator.setDuration(LauncherMotion.duration(activity,
                 Math.max(110L, (long) (300L * (1f - start)))));
         animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
@@ -580,6 +631,8 @@ final class LauncherScreenTransitions {
                         (Float) value.getAnimatedValue()));
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (activeDrawerSettleAnimator != animator) return;
+                activeDrawerSettleAnimator = null;
                 markDrawerOpen.run();
                 homeScreen.setVisibility(View.GONE);
                 homeScreen.setAlpha(1f);
