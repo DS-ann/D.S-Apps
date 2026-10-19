@@ -422,13 +422,12 @@ final class LauncherIconDrawable extends Drawable {
         int[] pixels = new int[count];
         rendered.getPixels(pixels, 0, width, 0, 0, width, height);
 
-        // Flattened pre-Android-8 icons can contain their own solid backdrop. Identify
-        // only a clearly dominant edge-connected colour and leave that region untouched.
-        // If an opaque icon has a complex/ambiguous border, preserve the whole icon rather
-        // than risk recolouring its built-in background.
-        boolean[] backdrop = findOpaqueBackdrop(pixels, width, height);
-        if (backdrop == null) return rendered;
-        boolean hasBackdrop = backdrop.length == count;
+        // Nothing Monochrome targets the complete app-provided icon artwork, including
+        // opaque built-in tiles. Other themes keep protecting confidently detected backdrops.
+        boolean[] backdrop = theme == ARTWORK_NOTHING_MONOCHROME
+                ? null : findOpaqueBackdrop(pixels, width, height);
+        if (backdrop == null && theme != ARTWORK_NOTHING_MONOCHROME) return rendered;
+        boolean hasBackdrop = backdrop != null && backdrop.length == count;
 
         float[] sourceHsv = new float[3];
         float[] targetHsv = new float[3];
