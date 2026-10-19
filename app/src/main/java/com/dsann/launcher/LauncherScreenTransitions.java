@@ -353,15 +353,54 @@ final class LauncherScreenTransitions {
         }
     }
 
+    /**
+     * Parallax only animates alpha and vertical translation. Keep its finger-driven
+     * path lightweight: prepare cached layers once, repair stale transforms only when
+     * necessary, and avoid writing unused rotation/scale/depth properties every frame.
+     */
+    private static void updateParallaxSwipe(Activity activity, LinearLayout homeScreen,
+                                             LinearLayout drawerScreen, float progress) {
+        if (homeScreen == null || drawerScreen == null) return;
+        if (homeScreen.getVisibility() != View.VISIBLE) homeScreen.setVisibility(View.VISIBLE);
+        if (drawerScreen.getVisibility() != View.VISIBLE) drawerScreen.setVisibility(View.VISIBLE);
+
+        // Reuse the same layer caching used by the settle animator, so the first
+        // finger-controlled frames do not continuously redraw both full-screen surfaces.
+        prepareTransitionLayers(homeScreen, drawerScreen);
+        resetParallaxStaticPose(homeScreen);
+        resetParallaxStaticPose(drawerScreen);
+
+        float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
+        homeScreen.setAlpha(1f - progress);
+        homeScreen.setTranslationY(-travelDistance * progress);
+        drawerScreen.setAlpha(progress);
+        drawerScreen.setTranslationY(travelDistance * (1f - progress));
+    }
+
+    /** Reset only non-Parallax properties, and only if an interrupted effect left them changed. */
+    private static void resetParallaxStaticPose(View view) {
+        if (view.getTranslationX() != 0f) view.setTranslationX(0f);
+        if (view.getTranslationZ() != 0f) view.setTranslationZ(0f);
+        if (view.getRotationX() != 0f) view.setRotationX(0f);
+        if (view.getRotationY() != 0f) view.setRotationY(0f);
+        if (view.getScaleX() != 1f) view.setScaleX(1f);
+        if (view.getScaleY() != 1f) view.setScaleY(1f);
+    }
+
     static void updateDrawerSwipe(Activity activity, LinearLayout homeScreen,
                                    LinearLayout drawerScreen, int effect, float swipeProgress) {
         float progress = clampProgress(swipeProgress);
         activeParallaxProgress = progress;
+        if (effect == 0) {
+            updateParallaxSwipe(activity, homeScreen, drawerScreen, progress);
+            return;
+        }
+
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
-        homeScreen.setVisibility(View.VISIBLE);
-        drawerScreen.setVisibility(View.VISIBLE);
+        if (homeScreen.getVisibility() != View.VISIBLE) homeScreen.setVisibility(View.VISIBLE);
+        if (drawerScreen.getVisibility() != View.VISIBLE) drawerScreen.setVisibility(View.VISIBLE);
         if (effect == 1 || effect == 3 || effect > 3) {
             float cameraDistance = 10000f * density;
             if (homeScreen.getCameraDistance() != cameraDistance) {
@@ -372,30 +411,8 @@ final class LauncherScreenTransitions {
             }
         }
 
-        // These poses are updated on every ACTION_MOVE: the drawer and home
-        // surface now track the finger rather than merely inheriting progress
-        // after release. Each selectable effect has a matching interactive pose.
-        if (effect == 0) {
-            // Finger progress is shared by the two surfaces: the workspace travels
-            // upward, the drawer travels upward from below, and their alpha values cross.
-            float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
-            homeScreen.setAlpha(1f - progress);
-            homeScreen.setTranslationY(-travelDistance * progress);
-            homeScreen.setTranslationX(0f);
-            homeScreen.setTranslationZ(0f);
-            homeScreen.setRotationX(0f);
-            homeScreen.setRotationY(0f);
-            homeScreen.setScaleX(1f);
-            homeScreen.setScaleY(1f);
-            drawerScreen.setAlpha(progress);
-            drawerScreen.setTranslationY(travelDistance * (1f - progress));
-            drawerScreen.setTranslationX(0f);
-            drawerScreen.setTranslationZ(0f);
-            drawerScreen.setRotationX(0f);
-            drawerScreen.setRotationY(0f);
-            drawerScreen.setScaleX(1f);
-            drawerScreen.setScaleY(1f);
-        } else if (effect == 1) {
+        // Non-Parallax poses track the finger directly; keep their existing motion intact.
+        if (effect == 1) {
             homeScreen.setPivotX(width * 0.5f);
             homeScreen.setPivotY(height * 0.5f);
             drawerScreen.setPivotX(0f);
