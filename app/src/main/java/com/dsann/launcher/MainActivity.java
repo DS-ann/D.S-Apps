@@ -6438,7 +6438,7 @@ public class MainActivity extends Activity {
             if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
                 clockText.setTextColor(CLOCK_DIGIT_SILVER);
             }
-            applyAnimatedTextGradient(clockText, CLOCK_DATE_GRADIENT_COLORS,
+            applyAnimatedTextGradient(clockText, digitColours,
                     0f, clockDigitGradients);
         } else {
             clockDigitGradients.remove(clockText);
