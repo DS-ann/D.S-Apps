@@ -1439,6 +1439,7 @@ public class MainActivity extends Activity {
                 // Progress is the remaining-open fraction: a 10% downward
                 // swipe leaves progress at 90%, which is enough to close to Home.
                 if (drawerSwipeProgress > 0.90f) {
+                                        refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1451,6 +1452,7 @@ public class MainActivity extends Activity {
                 flushDrawerSwipeFrame();
                 drawerSwipeVisualActive = false;
                 if (drawerSwipeProgress >= 0.10f) {
+                                        refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1503,6 +1505,7 @@ public class MainActivity extends Activity {
                 // A 10% downward pull is enough to complete the drawer-to-Home
                 // transition; progress represents how much of the drawer remains open.
                 if (drawerSwipeProgress > 0.90f) {
+                                        refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1515,6 +1518,7 @@ public class MainActivity extends Activity {
                 flushDrawerSwipeFrame();
                 drawerSwipeVisualActive = false;
                 if (drawerSwipeProgress >= 0.10f) {
+                                        refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1538,7 +1542,8 @@ public class MainActivity extends Activity {
                     // Finish from the current pose, but do not force a tiny partial
                     // swipe all the way open. Always settle to home or drawer.
                     if (drawerSwipeProgress >= 0.10f) {
-                        LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                                            refreshDrawerIconAppearances();
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                                 () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                     } else {
                         LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
