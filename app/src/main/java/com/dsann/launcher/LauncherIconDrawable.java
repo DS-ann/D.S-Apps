@@ -42,6 +42,8 @@ final class LauncherIconDrawable extends Drawable {
     private final RectF rect = new RectF();
     private final Path path = new Path();
     private final android.graphics.Rect bounds = new android.graphics.Rect();
+    // Reuse these six points rather than allocating seven arrays every icon redraw.
+    private final float[][] hexagonVertices = new float[6][2];
 
     LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
             int innerShapeColor) {
@@ -209,14 +211,19 @@ final class LauncherIconDrawable extends Drawable {
 
     private void setRoundedHexagonPath(RectF target) {
         float inset = target.width() * 0.25f;
-        float[][] vertices = new float[][] {
-                {target.left + inset, target.top},
-                {target.right - inset, target.top},
-                {target.right, target.centerY()},
-                {target.right - inset, target.bottom},
-                {target.left + inset, target.bottom},
-                {target.left, target.centerY()}
-        };
+        float[][] vertices = hexagonVertices;
+        vertices[0][0] = target.left + inset;
+        vertices[0][1] = target.top;
+        vertices[1][0] = target.right - inset;
+        vertices[1][1] = target.top;
+        vertices[2][0] = target.right;
+        vertices[2][1] = target.centerY();
+        vertices[3][0] = target.right - inset;
+        vertices[3][1] = target.bottom;
+        vertices[4][0] = target.left + inset;
+        vertices[4][1] = target.bottom;
+        vertices[5][0] = target.left;
+        vertices[5][1] = target.centerY();
         float cornerDistance = Math.min(target.width(), target.height()) * 0.085f;
         for (int i = 0; i < vertices.length; i++) {
             float[] current = vertices[i];
