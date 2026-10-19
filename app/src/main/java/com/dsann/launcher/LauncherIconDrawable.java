@@ -485,16 +485,20 @@ final class LauncherIconDrawable extends Drawable {
         final int width = bitmap.getWidth();
         final int height = bitmap.getHeight();
         if (width < 3 || height < 3) return;
+
         final int count = width * height;
         final int[] sourcePixels = new int[count];
         bitmap.getPixels(sourcePixels, 0, width, 0, 0, width, height);
+
+        // Work on the binary alpha silhouette, not on RGB values. That prevents the outline
+        // from changing internal lettering, symbols, or monochrome logo details.
         final boolean[] exterior = new boolean[count];
         final int[] queue = new int[count];
         int head = 0;
         int tail = 0;
 
-        // Find transparent/antialiased space connected to the outer canvas edge. An enclosed
-        // hole inside a glyph remains unvisited and therefore does not gain an unwanted border.
+        // Flood-fill transparent/antialiased pixels connected to the outside. Closed holes
+        // within letters and symbols are deliberately not treated as the outer silhouette.
         for (int x = 0; x < width; x++) {
             int top = x;
             int bottom = (height - 1) * width + x;
@@ -539,38 +543,83 @@ final class LauncherIconDrawable extends Drawable {
             }
         }
 
-        // Exactly double the previous border's source-pixel thickness at each raster size.
-        // Restrict colouring to pixels inside the icon; transparent pixels are never painted.
+        // Double the original border thickness, but make it adaptive to local stroke width.
+        // A fixed inward band can consume an entire thin glyph (e.g. +, -, digits or letters).
         final int thickness = 2 * Math.max(1,
                 Math.round(Math.min(width, height) * 0.009f));
-        final int radiusSquared = thickness * thickness;
+        final int[] depth = new int[count];
+        java.util.Arrays.fill(depth, -1);
+        head = 0;
+        tail = 0;
+
+        // Start a four-neighbour distance transform at the exterior edge of the foreground.
+        // Seed canvas-edge pixels too, for conventional opaque square/backplate icons.
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int index = y * width + x;
+                if (Color.alpha(sourcePixels[index]) < 96) continue;
+                boolean boundary = x == 0 || x == width - 1 || y == 0 || y == height - 1;
+                if (!boundary) {
+                    boundary = exterior[index - 1] || exterior[index + 1]
+                            || exterior[index - width] || exterior[index + width];
+                }
+                if (boundary) {
+                    depth[index] = 1;
+                    queue[tail++] = index;
+                }
+            }
+        }
+
+        while (head < tail) {
+            int index = queue[head++];
+            int x = index % width;
+            int y = index / width;
+            int nextDepth = depth[index] + 1;
+            if (x > 0) tail = enqueueOutlineDepth(index - 1, sourcePixels, depth, queue, tail, nextDepth);
+            if (x + 1 < width) tail = enqueueOutlineDepth(index + 1, sourcePixels, depth, queue, tail, nextDepth);
+            if (y > 0) tail = enqueueOutlineDepth(index - width, sourcePixels, depth, queue, tail, nextDepth);
+            if (y + 1 < height) tail = enqueueOutlineDepth(index + width, sourcePixels, depth, queue, tail, nextDepth);
+        }
+
+        final int safeCoreSearch = thickness + 1;
         final int[] outputPixels = sourcePixels.clone();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
                 int alpha = Color.alpha(sourcePixels[index]);
-                if (alpha < 96 || exterior[index]) continue;
-                boolean contour = false;
-                for (int dy = -thickness; dy <= thickness && !contour; dy++) {
+                if (alpha < 96 || exterior[index] || depth[index] < 1
+                        || depth[index] > thickness) continue;
+
+                // Only darken an edge pixel when the local stroke has room for an inner fill
+                // pixel. If no such core exists nearby, keep the entire tiny stroke visible
+                // instead of turning a thin plus/minus/text glyph into a black blob.
+                boolean hasVisibleCore = false;
+                for (int dy = -safeCoreSearch; dy <= safeCoreSearch && !hasVisibleCore; dy++) {
                     int ny = y + dy;
-                    for (int dx = -thickness; dx <= thickness; dx++) {
-                        if (dx * dx + dy * dy > radiusSquared) continue;
+                    if (ny < 0 || ny >= height) continue;
+                    int horizontalReach = safeCoreSearch - Math.abs(dy);
+                    for (int dx = -horizontalReach; dx <= horizontalReach; dx++) {
                         int nx = x + dx;
-                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-                            contour = true;
-                            break;
-                        }
-                        int neighbour = ny * width + nx;
-                        if (exterior[neighbour]) {
-                            contour = true;
+                        if (nx < 0 || nx >= width) continue;
+                        if (depth[ny * width + nx] > thickness) {
+                            hasVisibleCore = true;
                             break;
                         }
                     }
                 }
-                if (contour) outputPixels[index] = Color.argb(alpha, 0, 0, 0);
+                if (hasVisibleCore) outputPixels[index] = Color.argb(alpha, 0, 0, 0);
             }
         }
         bitmap.setPixels(outputPixels, 0, width, 0, 0, width, height);
+    }
+
+    private static int enqueueOutlineDepth(int index, int[] pixels, int[] depth,
+            int[] queue, int tail, int nextDepth) {
+        if (depth[index] < 0 && Color.alpha(pixels[index]) >= 96) {
+            depth[index] = nextDepth;
+            queue[tail++] = index;
+        }
+        return tail;
     }
 
     private static final class Api33MonochromeRenderer {
