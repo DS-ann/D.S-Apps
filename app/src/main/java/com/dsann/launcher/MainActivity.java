@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_STYLE = "clock_style";
     private static final String KEY_CLOCK_DIGIT_GRADIENT = "animated_clock_digit_colours";
     private static final String KEY_CLOCK_LIVE_GRADIENT = "live_clock_colour_transition";
+    private static final String KEY_CLOCK_ICON_ARTWORK = "clock_icon_artwork";
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
@@ -6350,6 +6351,12 @@ public class MainActivity extends Activity {
         float displayPhase = live ? phase : 0f;
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+        boolean iconArtworkRequested = prefs != null
+                && prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+        int iconArtworkTheme = prefs == null ? LauncherIconDrawable.ARTWORK_ORIGINAL
+                : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
+                        LauncherIconDrawable.ARTWORK_ORIGINAL));
+        boolean iconArtworkActive = iconArtworkRequested && !digitGradient && !live;
         // Date and AM/PM follow the same master gradient switch as the digits:
         // enabled = Home Studio palette, disabled = the original silver treatment.
         if (dateText != null) {
@@ -6393,8 +6400,21 @@ public class MainActivity extends Activity {
                 clockText.getPaint().setShader(null);
                 clockText.invalidate();
             }
-            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
+            if (!iconArtworkActive
+                    && clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
                 clockText.setTextColor(CLOCK_DIGIT_SILVER);
+            }
+        }
+        if (clockText instanceof SevenSegmentClockTextView) {
+            ((SevenSegmentClockTextView) clockText)
+                    .setIconArtworkTheme(iconArtworkTheme, iconArtworkActive);
+        } else if (!digitGradient) {
+            int requestedColor = iconArtworkActive
+                    ? LauncherIconDrawable.artworkColorForClock(
+                            CLOCK_DIGIT_SILVER, iconArtworkTheme)
+                    : CLOCK_DIGIT_SILVER;
+            if (clockText.getCurrentTextColor() != requestedColor) {
+                clockText.setTextColor(requestedColor);
             }
         }
     }
@@ -6545,6 +6565,7 @@ public class MainActivity extends Activity {
                     clockText.setText(displayClock);
                 }
             }
+            updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
             boolean useDateGradient = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
@@ -9463,6 +9484,7 @@ public class MainActivity extends Activity {
             }
             themeEdit.apply();
             refreshWorkspaceIconAppearance();
+            applyClockColorEffects(clockColorPhase, true);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◈", "Theme shortcut icons",
@@ -9539,6 +9561,13 @@ public class MainActivity extends Activity {
                 applyClockPanelColor(false);
             }
             activateClockForPage(restorePage);
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addSettingRow(content, "◈", "Match app icon artwork",
+                prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false) ? "On" : "Off", () -> {
+            prefs.edit().putBoolean(KEY_CLOCK_ICON_ARTWORK,
+                    !prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false)).apply();
+            applyClockColorEffects(clockColorPhase, true);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "✦", "Gradient clock digits",
@@ -9798,6 +9827,36 @@ public class MainActivity extends Activity {
     private int clockGravity() {
         int position = getClockPosition();
         return position == 0 ? Gravity.LEFT : (position == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.RIGHT);
+    }
+
+    private void updateClockDigitHorizontalOffset() {
+        if (clockPanel == null || clockText == null) return;
+        boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
+                && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
+        float targetX;
+        if (sevenSegment) {
+            targetX = -LauncherUiUtils.dp(this, 15) / panelScaleX;
+        } else {
+            boolean singleDigitHour = false;
+            String currentClock = clockText.getText() == null
+                    ? "" : clockText.getText().toString();
+            int colon = currentClock.indexOf(':');
+            if (colon > 0) {
+                int hourDigits = 0;
+                for (int i = 0; i < colon; i++) {
+                    if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
+                }
+                singleDigitHour = hourDigits == 1;
+            }
+            int horizontalOffset = LauncherUiUtils.dp(this, 5)
+                    + (singleDigitHour ? LauncherUiUtils.dp(this, 20) : 0);
+            targetX = -horizontalOffset / panelScaleX;
+        }
+        // Avoid invalidating the view when the computed offset hasn't actually changed.
+        if (Math.abs(clockText.getTranslationX() - targetX) > 0.5f) {
+            clockText.setTranslationX(targetX);
+        }
     }
 
     private void applyClockPositionAndSize() {
@@ -10083,27 +10142,9 @@ public class MainActivity extends Activity {
         clockText.setScaleY(sevenSegment ? breadthScale
                 : normalizedNonLedHeightScale * nonLedDigitScale
                         * (1.20f + 20f / 114f) * breadthScale);
-        // Shift the digits and colon slightly left relative to the background.
-        // For non-7-segment clocks with a one-digit hour (1–9), add a small
-        // extra left shift to visually balance the reserved invisible leading cell.
-        // Compensate for panel scaling so the offset remains stable at every length.
-        boolean singleDigitHour = false;
-        if (!sevenSegment && clockText.getText() != null) {
-            String currentClock = clockText.getText().toString();
-            int colon = currentClock.indexOf(':');
-            if (colon > 0) {
-                int hourDigits = 0;
-                for (int i = 0; i < colon; i++) {
-                    if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
-                }
-                singleDigitHour = hourDigits == 1;
-            }
-        }
-        int horizontalOffset = LauncherUiUtils.dp(this, 5)
-                + (singleDigitHour ? LauncherUiUtils.dp(this, 20) : 0);
-        clockText.setTranslationX(sevenSegment
-                ? -LauncherUiUtils.dp(this, 15) / Math.max(0.01f, lengthScale)
-                : -horizontalOffset / Math.max(0.01f, lengthScale));
+        // Keep the horizontal glyph anchor synchronized with the current hour shape
+        // without recalculating or changing the background geometry.
+        updateClockDigitHorizontalOffset();
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         // The panel itself no longer uses scaleY, so this offset must remain a
@@ -10112,12 +10153,10 @@ public class MainActivity extends Activity {
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
-            // Give the LED renderer the complete clock-group width. The colon is
-            // centered against the actual clock background, not a narrower
-            // wrap-content child containing only the digits.
-            textParams.width = sevenSegment
-                    ? ViewGroup.LayoutParams.MATCH_PARENT
-                    : ViewGroup.LayoutParams.WRAP_CONTENT;
+            // Tie every clock style to the same fixed group width. WRAP_CONTENT lets
+            // proportional digits remeasure the child as the time changes, which can
+            // make the glyphs drift horizontally while the background remains fixed.
+            textParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
             // Keep the seven-segment renderer at its natural measured height
             // and scale the glyphs separately from the background. Non-LED clocks
             // continue to use the actual resized row height.

@@ -1168,6 +1168,42 @@ final class LauncherIconDrawable extends Drawable {
         return interpolatePalette(SUNSET_PALETTE, position);
     }
 
+    /**
+     * Applies the same selected artwork palette to a single clock-glyph colour.
+     * Spectrum Mix and the gradient themes mirror recolourArtwork()'s HSV mapping.
+     * Silver digits meet the existing source-white classifier, so Nothing Monochrome
+     * keeps them white and legible over the clock's dark translucent background.
+     */
+    static int artworkColorForClock(int sourceColor, int theme) {
+        int boundedTheme = clampArtworkTheme(theme);
+        int alpha = Color.alpha(sourceColor);
+        if (alpha == 0 || boundedTheme == ARTWORK_ORIGINAL) return sourceColor;
+
+        if (boundedTheme == ARTWORK_NOTHING_MONOCHROME) {
+            int tone = isSourceWhiteSegment(sourceColor) ? 255 : 0;
+            return Color.argb(alpha, tone, tone, tone);
+        }
+
+        float[] sourceHsv = new float[3];
+        float[] targetHsv = new float[3];
+        Color.colorToHSV(sourceColor, sourceHsv);
+        float hue = sourceHsv[0];
+        float saturation = sourceHsv[1];
+        float value = sourceHsv[2];
+        if (saturation < 0.16f && (value < 0.12f || value > 0.96f)) return sourceColor;
+
+        int themed = artworkColour(boundedTheme, hue, saturation, value);
+        Color.colorToHSV(themed, targetHsv);
+        targetHsv[2] = value;
+        if (saturation < 0.16f) {
+            targetHsv[1] = Math.min(targetHsv[1], 0.58f);
+        } else {
+            targetHsv[1] = Math.max(0.52f, Math.min(0.92f, targetHsv[1]));
+        }
+        int rgb = Color.HSVToColor(targetHsv);
+        return Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));
+    }
+
     private static int interpolatePalette(int[] palette, float position) {
         float bounded = Math.max(0f, Math.min(1f, position));
         float scaled = bounded * (palette.length - 1f);

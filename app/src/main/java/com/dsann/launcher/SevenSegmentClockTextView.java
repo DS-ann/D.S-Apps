@@ -20,6 +20,9 @@ public final class SevenSegmentClockTextView extends TextView {
     private boolean sevenSegmentMode;
     private boolean segmentModeInitialized;
     private int segmentColor = Color.rgb(196, 200, 209);
+    private int baseTextColor = Color.rgb(196, 200, 209);
+    private int iconArtworkTheme = LauncherIconDrawable.ARTWORK_ORIGINAL;
+    private boolean iconArtworkEnabled;
     private boolean segmentGradientEnabled;
     private int segmentGradientWidth = -1;
     private int[] segmentGradientColors;
@@ -51,8 +54,25 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     @Override public void setTextColor(int color) {
-        super.setTextColor(color);
-        if (Color.alpha(color) != 0) segmentColor = color;
+        if (Color.alpha(color) != 0) baseTextColor = color;
+        applyEffectiveTextColor();
+    }
+
+    /** Uses the selected app-icon artwork palette for the clock's digit glyphs. */
+    public void setIconArtworkTheme(int theme, boolean enabled) {
+        int boundedTheme = LauncherIconDrawable.clampArtworkTheme(theme);
+        if (iconArtworkTheme == boundedTheme && iconArtworkEnabled == enabled) return;
+        iconArtworkTheme = boundedTheme;
+        iconArtworkEnabled = enabled;
+        applyEffectiveTextColor();
+    }
+
+    private void applyEffectiveTextColor() {
+        int resolvedColor = iconArtworkEnabled
+                ? LauncherIconDrawable.artworkColorForClock(baseTextColor, iconArtworkTheme)
+                : baseTextColor;
+        super.setTextColor(resolvedColor);
+        if (Color.alpha(resolvedColor) != 0) segmentColor = resolvedColor;
         invalidate();
     }
 
