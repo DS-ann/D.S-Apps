@@ -2308,9 +2308,15 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     private Bitmap getCachedComposedIconBitmap(int left, int top, int width, int height) {
-        // Do not cache the temporary un-themed logo shown while asynchronous artwork conversion
-        // is pending, or altered-alpha/filtered Drawables whose output depends on live state.
-        if (!showBackground || !sourceIsProcessedArtwork || !(source instanceof BitmapDrawable)
+        // Keep Nothing Monochrome logos on the direct drawable path. Its thin internal seams,
+        // cut-outs, and recovered letter details are sensitive to a second full-icon raster pass;
+        // cache the processed artwork bitmap, but let the platform canvas composite it directly
+        // so those structural details stay consistent with the pre-composition renderer.
+        // Also avoid caching the temporary un-themed logo shown while conversion is pending, or
+        // altered-alpha/filtered Drawables whose output depends on live state.
+        if (!showBackground
+                || clampArtworkTheme(artworkTheme) == ARTWORK_NOTHING_MONOCHROME
+                || !sourceIsProcessedArtwork || !(source instanceof BitmapDrawable)
                 || drawableAlpha != 255 || drawableColorFilter != null
                 || originalSourceState == null || width <= 0 || height <= 0) {
             return null;
