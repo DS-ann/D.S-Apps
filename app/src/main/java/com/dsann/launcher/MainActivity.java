@@ -5926,9 +5926,10 @@ public class MainActivity extends Activity {
 
     private void startClockColorAnimator() {
         if (prefs == null || !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
+            // Fixed mode needs no per-transition shader invalidation. Its phase is
+            // reset when the switch changes; page settle must not redraw both clocks.
             stopClockColorAnimator();
             clockColorPhase = 0f;
-            applyClockColorEffects(0f, true);
             return;
         }
         if (!clockUpdatesActive || pageTransitionBusy) return;
