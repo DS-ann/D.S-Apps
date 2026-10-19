@@ -364,7 +364,7 @@ final class LauncherIconDrawable extends Drawable {
                 Drawable workerDrawable = state.newDrawable();
                 if (workerDrawable != null) workerDrawable = workerDrawable.mutate();
                 Bitmap rendered = rasterize(workerDrawable);
-                if (rendered != null) themed = recolourArtwork(rendered, theme, stableCacheToken);
+                if (rendered != null) themed = recolourArtwork(rendered, theme);
             } catch (RuntimeException ignored) {
                 // A vendor Drawable may not support worker-thread rasterisation; retain its
                 // original icon rather than crash the drawer.
@@ -404,7 +404,7 @@ final class LauncherIconDrawable extends Drawable {
         if (bitmap == null) {
             Bitmap rendered = rasterize(original);
             if (rendered == null) return original;
-            bitmap = recolourArtwork(rendered, clampedTheme, stableCacheToken);
+            bitmap = recolourArtwork(rendered, clampedTheme);
             if (key != null && bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES) {
                 ARTWORK_CACHE.put(key, bitmap);
             }
@@ -450,178 +450,21 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /**
-     * The Nothing pack relies on a clean, recognizable foreground mark rather than a
-     * brightness threshold applied to the original brand colours. Some legacy icons use
-     * the same hue for their symbol and negative space (WhatsApp) or contain several
-     * interlocking colour regions (Play Store), which cannot be separated reliably by a
-     * global per-pixel threshold. For these common icons draw a high-contrast monochrome
-     * glyph while preserving the app asset's original alpha silhouette and dimensions.
+     * Converts every app icon through the same monochrome pipeline. When the source has
+     * a confidently detected backplate, the backplate determines black/white polarity,
+     * foreground regions use the opposite tone, and strong internal colour boundaries
+     * become thin separators. No package names or per-app artwork are consulted.
      */
-    private static Bitmap renderKnownNothingGlyph(Bitmap rendered, String stableCacheToken) {
-        if (stableCacheToken == null) return null;
-        String token = stableCacheToken.toLowerCase(java.util.Locale.US);
-        final int kind;
-        if (token.startsWith("org.telegram.messenger/")) {
-            kind = 1;
-        } else if (token.startsWith("com.whatsapp/") || token.startsWith("com.whatsapp.w4b/")) {
-            kind = 2;
-        } else if (token.startsWith("com.android.vending/")) {
-            kind = 3;
-        } else {
-            return null;
-        }
-
-        int width = rendered.getWidth();
-        int height = rendered.getHeight();
-        int count = width * height;
-        int[] pixels = new int[count];
-        rendered.getPixels(pixels, 0, width, 0, 0, width, height);
-        for (int i = 0; i < count; i++) {
-            int alpha = Color.alpha(pixels[i]);
-            pixels[i] = alpha == 0 ? Color.TRANSPARENT : Color.argb(alpha, 0, 0, 0);
-        }
-
-        Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        output.setDensity(rendered.getDensity());
-        output.setPixels(pixels, 0, width, 0, 0, width, height);
-        Canvas canvas = new Canvas(output);
-        float unit = Math.min(width, height);
-        canvas.translate((width - unit) * 0.5f, (height - unit) * 0.5f);
-        canvas.scale(unit / 100f, unit / 100f);
-
-        Paint white = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        white.setColor(Color.WHITE);
-        white.setStyle(Paint.Style.FILL);
-        white.setStrokeCap(Paint.Cap.ROUND);
-        white.setStrokeJoin(Paint.Join.ROUND);
-
-        Paint black = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        black.setColor(Color.BLACK);
-        black.setStyle(Paint.Style.STROKE);
-        black.setStrokeCap(Paint.Cap.ROUND);
-        black.setStrokeJoin(Paint.Join.ROUND);
-
-        if (kind == 1) {
-            // Telegram: paper-plane silhouette plus two dark fold seams to keep the
-            // wing/body structure readable when reduced to a small launcher glyph.
-            Path plane = new Path();
-            plane.moveTo(17f, 46f);
-            plane.lineTo(83f, 21f);
-            plane.lineTo(65f, 80f);
-            plane.lineTo(47f, 62f);
-            plane.lineTo(39f, 73f);
-            plane.lineTo(37f, 55f);
-            plane.close();
-            canvas.drawPath(plane, white);
-            black.setStrokeWidth(2.1f);
-            Path folds = new Path();
-            folds.moveTo(37f, 55f);
-            folds.lineTo(83f, 21f);
-            folds.lineTo(48f, 62f);
-            folds.moveTo(47f, 62f);
-            folds.lineTo(53f, 47f);
-            canvas.drawPath(folds, black);
-        } else if (kind == 2) {
-            // WhatsApp: outlined message bubble with a separate handset. Keeping the
-            // handset as a real stroke/silhouette avoids merging it with the white bubble.
-            Path bubble = new Path();
-            bubble.moveTo(39f, 71f);
-            bubble.lineTo(25f, 78f);
-            bubble.lineTo(29f, 62f);
-            bubble.cubicTo(24f, 56f, 22f, 49f, 24f, 42f);
-            bubble.cubicTo(27f, 30f, 38f, 23f, 51f, 23f);
-            bubble.cubicTo(66f, 23f, 78f, 34f, 78f, 49f);
-            bubble.cubicTo(78f, 64f, 66f, 75f, 52f, 75f);
-            bubble.cubicTo(47f, 75f, 43f, 74f, 39f, 71f);
-            bubble.close();
-            Paint bubbleStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-            bubbleStroke.setColor(Color.WHITE);
-            bubbleStroke.setStyle(Paint.Style.STROKE);
-            bubbleStroke.setStrokeWidth(4.4f);
-            bubbleStroke.setStrokeCap(Paint.Cap.ROUND);
-            bubbleStroke.setStrokeJoin(Paint.Join.ROUND);
-            canvas.drawPath(bubble, bubbleStroke);
-
-            Path receiver = new Path();
-            receiver.moveTo(36f, 34f);
-            receiver.cubicTo(38f, 31f, 41f, 32f, 43f, 35f);
-            receiver.lineTo(47f, 40f);
-            receiver.cubicTo(49f, 42f, 46f, 45f, 44f, 46f);
-            receiver.cubicTo(47f, 51f, 51f, 55f, 56f, 57f);
-            receiver.lineTo(60f, 53f);
-            receiver.cubicTo(62f, 51f, 64f, 52f, 66f, 54f);
-            receiver.lineTo(70f, 59f);
-            receiver.cubicTo(72f, 61f, 69f, 64f, 67f, 66f);
-            receiver.cubicTo(63f, 69f, 56f, 66f, 51f, 63f);
-            receiver.cubicTo(44f, 59f, 38f, 52f, 35f, 45f);
-            receiver.cubicTo(33f, 41f, 33f, 37f, 36f, 34f);
-            receiver.close();
-            canvas.drawPath(receiver, white);
-        } else {
-            // Play Store: a unified play triangle with deliberate black seam lines.
-            // The seams keep the four-part Play mark recognizable without using colours.
-            Path play = new Path();
-            play.moveTo(25f, 17f);
-            play.lineTo(82f, 50f);
-            play.lineTo(25f, 83f);
-            play.close();
-            canvas.drawPath(play, white);
-            black.setStrokeWidth(2.8f);
-            Path seams = new Path();
-            seams.moveTo(28f, 20f);
-            seams.lineTo(53f, 50f);
-            seams.lineTo(28f, 80f);
-            seams.moveTo(53f, 50f);
-            seams.lineTo(79f, 50f);
-            canvas.drawPath(seams, black);
-        }
-        return output;
-    }
-
-    private static Bitmap recolourArtwork(Bitmap rendered, int theme, String stableCacheToken) {
+    private static Bitmap recolourArtwork(Bitmap rendered, int theme) {
         if (theme == ARTWORK_NOTHING_MONOCHROME) {
-            Bitmap knownNothingIcon = renderKnownNothingGlyph(rendered, stableCacheToken);
-            if (knownNothingIcon != null) {
-                rendered.recycle();
-                return knownNothingIcon;
-            }
+            return recolourNothingMonochrome(rendered);
         }
+
         int width = rendered.getWidth();
         int height = rendered.getHeight();
         int count = width * height;
         int[] pixels = new int[count];
         rendered.getPixels(pixels, 0, width, 0, 0, width, height);
-
-        // Colour themes must include an app's own raster background (for example, a
-        // blue tile embedded inside a legacy icon), not only its foreground logo. Nothing
-        // uses a detected backplate to build the black/light treatment below.
-        boolean[] backdrop = theme == ARTWORK_NOTHING_MONOCHROME
-                ? findMonochromeBackdrop(pixels, width, height) : null;
-        boolean hasBackdrop = backdrop != null && backdrop.length == count;
-        float backdropLuminance = 0f;
-        float backdropSaturation = 0f;
-        int backdropPixels = 0;
-        if (theme == ARTWORK_NOTHING_MONOCHROME && hasBackdrop) {
-            float[] backdropHsv = new float[3];
-            for (int i = 0; i < count; i++) {
-                if (!backdrop[i] || Color.alpha(pixels[i]) == 0) continue;
-                int pixel = pixels[i];
-                backdropLuminance += Color.red(pixel) * 0.2126f
-                        + Color.green(pixel) * 0.7152f
-                        + Color.blue(pixel) * 0.0722f;
-                Color.colorToHSV(pixel, backdropHsv);
-                backdropSaturation += backdropHsv[1];
-                backdropPixels++;
-            }
-        }
-        if (backdropPixels > 0) {
-            backdropLuminance /= backdropPixels;
-            backdropSaturation /= backdropPixels;
-        }
-        // A near-white neutral backplate needs inverted foreground polarity: its darker
-        // logo becomes white, while source pixels matching the backplate become black.
-        boolean invertBrightNeutralBackdrop = backdropPixels > 0
-                && backdropLuminance >= 190f && backdropSaturation < 0.20f;
 
         float[] sourceHsv = new float[3];
         float[] targetHsv = new float[3];
@@ -630,44 +473,17 @@ final class LauncherIconDrawable extends Drawable {
             int alpha = Color.alpha(pixel);
             if (alpha == 0) continue;
 
-            // Nothing keeps the detected app backplate black; it is not treated as
-            // ordinary foreground artwork. This avoids converting white discs to white discs.
-            // That preserves separate coloured regions in logos (for example Chrome's
-            // ring and centre) so different apps no longer inherit the same colour bands.
+            // Recolour by original hue while leaving alpha and the app's own backplate
+            // treatment untouched in the mixed/gradient themes.
             Color.colorToHSV(pixel, sourceHsv);
             float hue = sourceHsv[0];
             float saturation = sourceHsv[1];
             float value = sourceHsv[2];
-
-            if (theme == ARTWORK_NOTHING_MONOCHROME) {
-                if (hasBackdrop && backdrop[index]) {
-                    pixels[index] = Color.argb(alpha, 0, 0, 0);
-                    continue;
-                }
-                float luminance = Color.red(pixel) * 0.2126f
-                        + Color.green(pixel) * 0.7152f
-                        + Color.blue(pixel) * 0.0722f;
-                int mono;
-                if (invertBrightNeutralBackdrop) {
-                    // Coloured app marks remain a white silhouette. Neutral dark logo
-                    // strokes also become white, while light negative-space details go
-                    // black so an adaptive white tile cannot collapse into a white circle.
-                    Color.colorToHSV(pixel, sourceHsv);
-                    mono = sourceHsv[1] >= 0.18f ? 255 : (luminance < 128f ? 255 : 0);
-                } else {
-                    mono = luminance >= 128f ? 255 : 0;
-                }
-                pixels[index] = Color.argb(alpha, mono, mono, mono);
-                continue;
-            }
-
-            // Keep near-black contours and near-white highlights neutral; they carry
-            // useful shape/contrast information at small launcher icon sizes.
             if (saturation < 0.16f && (value < 0.12f || value > 0.96f)) continue;
 
             int themed = artworkColour(theme, hue, saturation, value);
             Color.colorToHSV(themed, targetHsv);
-            targetHsv[2] = value; // retain source shading and contour contrast
+            targetHsv[2] = value;
             if (saturation < 0.16f) {
                 targetHsv[1] = Math.min(targetHsv[1], 0.58f);
             } else {
@@ -684,96 +500,349 @@ final class LauncherIconDrawable extends Drawable {
         return output;
     }
 
-    /**
-     * Nothing Monochrome needs to distinguish the icon's own backplate from its logo.
-     * First reuse the reliable edge-connected detector for opaque square legacy icons.
-     * For icons whose circular backplate sits inside transparent corners, locate the
-     * dominant opaque colour component instead. The size/bounds tests avoid treating a
-     * small, solid logo mark as a background.
-     */
-    private static boolean[] findMonochromeBackdrop(int[] pixels, int width, int height) {
-        boolean[] edgeBackdrop = findOpaqueBackdrop(pixels, width, height);
-        if (edgeBackdrop != null && edgeBackdrop.length == pixels.length) return edgeBackdrop;
+    private static Bitmap recolourNothingMonochrome(Bitmap rendered) {
+        int width = rendered.getWidth();
+        int height = rendered.getHeight();
+        int count = width * height;
+        int[] pixels = new int[count];
+        rendered.getPixels(pixels, 0, width, 0, 0, width, height);
 
+        boolean[] backdrop = findMonochromeBackdrop(pixels, width, height);
+        boolean hasBackdrop = backdrop != null && backdrop.length == count;
         int opaqueCount = 0;
-        int[] bucketCounts = new int[32768];
-        for (int i = 0; i < pixels.length; i++) {
-            if (Color.alpha(pixels[i]) < 128) continue;
-            int pixel = pixels[i];
-            int bucket = ((Color.red(pixel) >> 3) << 10)
-                    | ((Color.green(pixel) >> 3) << 5)
-                    | (Color.blue(pixel) >> 3);
-            bucketCounts[bucket]++;
+        int transparentCount = 0;
+        double allLuminance = 0d;
+        for (int pixel : pixels) {
+            int alpha = Color.alpha(pixel);
+            if (alpha < 24) {
+                transparentCount++;
+                continue;
+            }
             opaqueCount++;
+            allLuminance += pixelLuminance(pixel);
         }
-        if (opaqueCount < pixels.length * 0.18f) return null;
+        if (opaqueCount > 0) allLuminance /= opaqueCount;
 
-        int dominantBucket = 0;
-        int dominantCount = 0;
-        for (int i = 0; i < bucketCounts.length; i++) {
-            if (bucketCounts[i] > dominantCount) {
-                dominantCount = bucketCounts[i];
-                dominantBucket = i;
+        int backdropRed = 0, backdropGreen = 0, backdropBlue = 0;
+        double backdropLuminance = 0d;
+        double sumRedSquared = 0d, sumGreenSquared = 0d, sumBlueSquared = 0d;
+        int backdropSampleCount = 0;
+        if (hasBackdrop) {
+            for (int i = 0; i < count; i++) {
+                if (!backdrop[i] || Color.alpha(pixels[i]) < 24) continue;
+                int pixel = pixels[i];
+                int red = Color.red(pixel), green = Color.green(pixel), blue = Color.blue(pixel);
+                backdropRed += red;
+                backdropGreen += green;
+                backdropBlue += blue;
+                backdropLuminance += pixelLuminance(pixel);
+                sumRedSquared += red * red;
+                sumGreenSquared += green * green;
+                sumBlueSquared += blue * blue;
+                backdropSampleCount++;
             }
         }
-        // Require a substantial colour region before interpreting it as a backplate.
-        if (dominantCount < opaqueCount * 0.20f) return null;
-        int red = ((dominantBucket >> 10) & 31) * 8 + 4;
-        int green = ((dominantBucket >> 5) & 31) * 8 + 4;
-        int blue = (dominantBucket & 31) * 8 + 4;
+        if (backdropSampleCount > 0) {
+            backdropRed /= backdropSampleCount;
+            backdropGreen /= backdropSampleCount;
+            backdropBlue /= backdropSampleCount;
+            backdropLuminance /= backdropSampleCount;
+        }
+        double redVariance = backdropSampleCount == 0 ? 0d
+                : Math.max(0d, sumRedSquared / backdropSampleCount - backdropRed * backdropRed);
+        double greenVariance = backdropSampleCount == 0 ? 0d
+                : Math.max(0d, sumGreenSquared / backdropSampleCount - backdropGreen * backdropGreen);
+        double blueVariance = backdropSampleCount == 0 ? 0d
+                : Math.max(0d, sumBlueSquared / backdropSampleCount - backdropBlue * backdropBlue);
+        boolean flatBackdrop = hasBackdrop
+                && Math.sqrt(redVariance) < 25d
+                && Math.sqrt(greenVariance) < 25d
+                && Math.sqrt(blueVariance) < 25d;
 
-        int seed = -1;
-        // The first visible matching pixel on a centred disc is normally on its upper
-        // rim, away from the app glyph in the centre.
-        for (int y = 0; y < height && seed < 0; y++) {
+        // Light source backplates stay light with a dark mark; dark backplates stay dark
+        // with a light mark. This is more stable than thresholding each original RGB colour
+        // independently, which made multi-colour logos collapse into arbitrary black/white
+        // halves. Strong colour boundaries inside the logo are preserved as fine separators.
+        int backgroundTone = backdropLuminance >= 140d ? 255 : 0;
+        int foregroundTone = 255 - backgroundTone;
+        boolean[] separators = findMonochromeSeparators(
+                pixels, hasBackdrop ? backdrop : null, width, height);
+
+        int noBackdropForeground = allLuminance >= 140d ? 0 : 255;
+        int noBackdropSeparator = 255 - noBackdropForeground;
+        int adaptiveThreshold = otsuThreshold(pixels);
+
+        for (int index = 0; index < count; index++) {
+            int pixel = pixels[index];
+            int alpha = Color.alpha(pixel);
+            if (alpha == 0) continue;
+
+            int mono;
+            if (hasBackdrop) {
+                boolean isBackdropPixel = backdrop[index]
+                        || (flatBackdrop && isNearColor(pixel, backdropRed, backdropGreen,
+                                backdropBlue, 38));
+                if (isBackdropPixel || separators[index]) {
+                    mono = backgroundTone;
+                } else {
+                    mono = foregroundTone;
+                }
+            } else if (transparentCount > count * 0.025f) {
+                // For artwork floating on transparency, keep the original alpha silhouette
+                // and make the visible logo a single readable tone. Multicolour sub-regions
+                // become contrasting seams rather than turning into unrelated black blocks.
+                mono = separators[index] ? noBackdropSeparator : noBackdropForeground;
+            } else {
+                // Unusual fully opaque assets without a reliable backplate use an image-
+                // adaptive threshold rather than a fixed 128 cutoff.
+                mono = pixelLuminance(pixel) >= adaptiveThreshold ? 255 : 0;
+            }
+            pixels[index] = Color.argb(alpha, mono, mono, mono);
+        }
+
+        Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        output.setDensity(rendered.getDensity());
+        output.setPixels(pixels, 0, width, 0, 0, width, height);
+        rendered.recycle();
+        return output;
+    }
+
+    private static float pixelLuminance(int pixel) {
+        return Color.red(pixel) * 0.2126f
+                + Color.green(pixel) * 0.7152f
+                + Color.blue(pixel) * 0.0722f;
+    }
+
+    private static boolean isNearColor(int pixel, int red, int green, int blue, int tolerance) {
+        return Color.alpha(pixel) >= 80
+                && Math.abs(Color.red(pixel) - red) <= tolerance
+                && Math.abs(Color.green(pixel) - green) <= tolerance
+                && Math.abs(Color.blue(pixel) - blue) <= tolerance;
+    }
+
+    /**
+     * Finds strong colour changes between neighbouring non-background pixels. The resulting
+     * one-pixel separators preserve structure inside logos such as segmented play symbols,
+     * while a plain glyph stays plain. This operates on all icons identically.
+     */
+    private static boolean[] findMonochromeSeparators(int[] pixels, boolean[] backdrop,
+            int width, int height) {
+        boolean[] separators = new boolean[pixels.length];
+        for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
-                if (Color.alpha(pixels[index]) < 128) continue;
-                int pixel = pixels[index];
-                int bucket = ((Color.red(pixel) >> 3) << 10)
-                        | ((Color.green(pixel) >> 3) << 5)
-                        | (Color.blue(pixel) >> 3);
-                if (bucket == dominantBucket) {
-                    seed = index;
-                    break;
+                if (Color.alpha(pixels[index]) < 160
+                        || (backdrop != null && backdrop[index])) continue;
+                if (x + 1 < width) {
+                    int right = index + 1;
+                    if (Color.alpha(pixels[right]) >= 160
+                            && (backdrop == null || !backdrop[right])
+                            && strongColourBoundary(pixels[index], pixels[right])) {
+                        separators[index] = true;
+                        separators[right] = true;
+                    }
+                }
+                if (y + 1 < height) {
+                    int down = index + width;
+                    if (Color.alpha(pixels[down]) >= 160
+                            && (backdrop == null || !backdrop[down])
+                            && strongColourBoundary(pixels[index], pixels[down])) {
+                        separators[index] = true;
+                        separators[down] = true;
+                    }
                 }
             }
         }
-        if (seed < 0) return null;
+        return separators;
+    }
 
-        boolean[] mask = new boolean[pixels.length];
-        int[] queue = new int[pixels.length];
-        int head = 0;
-        int tail = 0;
-        mask[seed] = true;
-        queue[tail++] = seed;
-        int minX = seed % width, maxX = minX;
-        int minY = seed / width, maxY = minY;
-        while (head < tail) {
-            int index = queue[head++];
-            int x = index % width;
-            int y = index / width;
+    private static boolean strongColourBoundary(int first, int second) {
+        int redDifference = Math.abs(Color.red(first) - Color.red(second));
+        int greenDifference = Math.abs(Color.green(first) - Color.green(second));
+        int blueDifference = Math.abs(Color.blue(first) - Color.blue(second));
+        int largestDifference = Math.max(redDifference, Math.max(greenDifference, blueDifference));
+        int totalDifference = redDifference + greenDifference + blueDifference;
+        return largestDifference >= 78 && totalDifference >= 135;
+    }
+
+    private static int otsuThreshold(int[] pixels) {
+        int[] histogram = new int[256];
+        long totalLuminance = 0L;
+        int total = 0;
+        for (int pixel : pixels) {
+            if (Color.alpha(pixel) < 24) continue;
+            int luminance = Math.max(0, Math.min(255, Math.round(pixelLuminance(pixel))));
+            histogram[luminance]++;
+            totalLuminance += luminance;
+            total++;
+        }
+        if (total == 0) return 128;
+        long backgroundLuminance = 0L;
+        int backgroundCount = 0;
+        double bestVariance = -1d;
+        int bestThreshold = 128;
+        for (int threshold = 0; threshold < 255; threshold++) {
+            backgroundCount += histogram[threshold];
+            if (backgroundCount == 0) continue;
+            int foregroundCount = total - backgroundCount;
+            if (foregroundCount == 0) break;
+            backgroundLuminance += (long) threshold * histogram[threshold];
+            double backgroundMean = backgroundLuminance / (double) backgroundCount;
+            double foregroundMean = (totalLuminance - backgroundLuminance)
+                    / (double) foregroundCount;
+            double difference = backgroundMean - foregroundMean;
+            double variance = (double) backgroundCount * foregroundCount * difference * difference;
+            if (variance > bestVariance) {
+                bestVariance = variance;
+                bestThreshold = threshold;
+            }
+        }
+        return bestThreshold;
+    }
+
+    /**
+     * Detect a backplate only when it occupies a broad region connected to the outer edge,
+     * or forms a broad field just inside transparent icon corners. Never pick the most
+     * common colour from the entire logo: that was why single Play Store colour regions
+     * were incorrectly classified as backgrounds.
+     */
+    private static boolean[] findMonochromeBackdrop(int[] pixels, int width, int height) {
+        boolean[] edgeBackdrop = findOpaqueBackdrop(pixels, width, height);
+        if (isCredibleBackdropMask(edgeBackdrop, width, height, pixels.length * 0.18f,
+                width * 0.55f, height * 0.55f)) {
+            return edgeBackdrop;
+        }
+        if (!hasTransparentOuterEdge(pixels, width, height)) return null;
+        return findTransparentCornerBackdrop(pixels, width, height);
+    }
+
+    private static boolean isCredibleBackdropMask(boolean[] mask, int width, int height,
+            float minimumPixels, float minimumWidth, float minimumHeight) {
+        if (mask == null || mask.length != width * height) return false;
+        int count = 0;
+        int minX = width, minY = height, maxX = -1, maxY = -1;
+        for (int i = 0; i < mask.length; i++) {
+            if (!mask[i]) continue;
+            count++;
+            int x = i % width;
+            int y = i / width;
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
             if (y > maxY) maxY = y;
+        }
+        return count >= minimumPixels && maxX >= minX && maxY >= minY
+                && maxX - minX + 1 >= minimumWidth
+                && maxY - minY + 1 >= minimumHeight;
+    }
+
+    private static boolean hasTransparentOuterEdge(int[] pixels, int width, int height) {
+        int borderCount = width * 2 + Math.max(0, height - 2) * 2;
+        int transparent = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (x != 0 && x != width - 1 && y != 0 && y != height - 1) continue;
+                if (Color.alpha(pixels[y * width + x]) < 24) transparent++;
+            }
+        }
+        return transparent >= borderCount * 0.08f;
+    }
+
+    private static boolean[] findTransparentCornerBackdrop(int[] pixels, int width, int height) {
+        int minX = width, minY = height, maxX = -1, maxY = -1;
+        int opaqueCount = 0;
+        for (int i = 0; i < pixels.length; i++) {
+            if (Color.alpha(pixels[i]) < 80) continue;
+            int x = i % width;
+            int y = i / width;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            opaqueCount++;
+        }
+        if (opaqueCount < pixels.length * 0.18f || maxX <= minX || maxY <= minY) return null;
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+        if (contentWidth < width * 0.55f || contentHeight < height * 0.55f) return null;
+
+        int bandX = Math.max(2, Math.round(contentWidth * 0.10f));
+        int bandY = Math.max(2, Math.round(contentHeight * 0.10f));
+        int[] ringCounts = new int[32768];
+        int ringSamples = 0;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                boolean inRing = x - minX < bandX || maxX - x < bandX
+                        || y - minY < bandY || maxY - y < bandY;
+                if (!inRing) continue;
+                int pixel = pixels[y * width + x];
+                if (Color.alpha(pixel) < 160) continue;
+                int bucket = ((Color.red(pixel) >> 3) << 10)
+                        | ((Color.green(pixel) >> 3) << 5)
+                        | (Color.blue(pixel) >> 3);
+                ringCounts[bucket]++;
+                ringSamples++;
+            }
+        }
+        if (ringSamples < (contentWidth + contentHeight) * 0.35f) return null;
+
+        int dominantBucket = 0;
+        int dominantRingCount = 0;
+        for (int i = 0; i < ringCounts.length; i++) {
+            if (ringCounts[i] > dominantRingCount) {
+                dominantRingCount = ringCounts[i];
+                dominantBucket = i;
+            }
+        }
+        if (dominantRingCount < ringSamples * 0.48f) return null;
+
+        int red = ((dominantBucket >> 10) & 31) * 8 + 4;
+        int green = ((dominantBucket >> 5) & 31) * 8 + 4;
+        int blue = (dominantBucket & 31) * 8 + 4;
+        int[] allColourCounts = new int[32768];
+        for (int pixel : pixels) {
+            if (Color.alpha(pixel) < 80) continue;
+            int bucket = ((Color.red(pixel) >> 3) << 10)
+                    | ((Color.green(pixel) >> 3) << 5)
+                    | (Color.blue(pixel) >> 3);
+            allColourCounts[bucket]++;
+        }
+        if (allColourCounts[dominantBucket] < opaqueCount * 0.28f) return null;
+
+        boolean[] mask = new boolean[pixels.length];
+        int[] queue = new int[pixels.length];
+        int tail = 0;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                boolean inRing = x - minX < bandX || maxX - x < bandX
+                        || y - minY < bandY || maxY - y < bandY;
+                if (!inRing) continue;
+                int index = y * width + x;
+                if (Color.alpha(pixels[index]) >= 80
+                        && isBackdropPixel(pixels[index], red, green, blue)) {
+                    mask[index] = true;
+                    queue[tail++] = index;
+                }
+            }
+        }
+        int head = 0;
+        while (head < tail) {
+            int index = queue[head++];
+            int x = index % width;
             if (x > 0) tail = enqueueBackdrop(index - 1, pixels, mask, queue, tail,
                     red, green, blue);
             if (x + 1 < width) tail = enqueueBackdrop(index + 1, pixels, mask, queue, tail,
                     red, green, blue);
-            if (y > 0) tail = enqueueBackdrop(index - width, pixels, mask, queue, tail,
+            if (index >= width) tail = enqueueBackdrop(index - width, pixels, mask, queue, tail,
                     red, green, blue);
-            if (y + 1 < height) tail = enqueueBackdrop(index + width, pixels, mask, queue, tail,
-                    red, green, blue);
+            if (index + width < pixels.length) {
+                tail = enqueueBackdrop(index + width, pixels, mask, queue, tail,
+                        red, green, blue);
+            }
         }
-
-        // A Nothing-style backing field should be a broad, centred tile/disc, not just a
-        // narrow logo stroke or a small region that happens to use one common colour.
-        int componentWidth = maxX - minX + 1;
-        int componentHeight = maxY - minY + 1;
-        if (tail < opaqueCount * 0.28f
-                || componentWidth < width * 0.55f
-                || componentHeight < height * 0.55f) {
+        if (!isCredibleBackdropMask(mask, width, height, pixels.length * 0.18f,
+                contentWidth * 0.55f, contentHeight * 0.55f)
+                || tail < opaqueCount * 0.36f) {
             return null;
         }
         return mask;
