@@ -211,7 +211,7 @@ public final class SevenSegmentClockTextView extends TextView {
             char ch = value.charAt(i);
             if (ch == ':') {
                 segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
-                segmentPaint.setColor(color);
+                segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : color);
                 float radius = Math.max(2.5f, thickness * 0.38f);
                 // The colon is the fixed anchor between hour and minute.
                 canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
@@ -242,7 +242,7 @@ public final class SevenSegmentClockTextView extends TextView {
                 float[] seg = segments[j];
                 boolean lit = (litMask & (1 << j)) != 0;
                 segmentPaint.setShader(segmentGradientEnabled && lit ? segmentGradient : null);
-                segmentPaint.setColor(lit ? color : unlitColor);
+                segmentPaint.setColor(lit ? (segmentGradientEnabled ? Color.WHITE : color) : unlitColor);
                 canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
                         thickness * 0.45f, thickness * 0.45f, segmentPaint);
             }
