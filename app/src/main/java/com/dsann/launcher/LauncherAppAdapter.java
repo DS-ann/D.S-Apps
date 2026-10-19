@@ -289,6 +289,67 @@ public final class LauncherAppAdapter extends BaseAdapter {
         wrapped.setExternalShapeClip(outlineClip);
     }
 
+    /**
+     * Apply the latest icon settings to the currently attached drawer cells without rebuilding
+     * the grid or reloading package icons. The drawer view remains alive while hidden, so this
+     * also restores settings changed in Home Studio before the next opening.
+     */
+    void refreshVisibleIconAppearance(android.widget.GridView grid) {
+        if (!drawer || grid == null || preferences == null) return;
+        boolean showBackground =
+                preferences.getBoolean("icon_rounded_square_background", false);
+        int iconShape = LauncherIconDrawable.clampShape(
+                preferences.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL));
+        int backgroundColor = LauncherIconDrawable.backgroundColorFromPreferences(preferences);
+        int artworkTheme = LauncherIconDrawable.clampArtworkTheme(
+                preferences.getInt("icon_artwork_theme", LauncherIconDrawable.ARTWORK_ORIGINAL));
+        boolean fitInsideBackground =
+                preferences.getBoolean("icon_fit_inside_background", false);
+        boolean outlineClip = showBackground
+                && (iconShape == LauncherIconDrawable.SHAPE_SQUARE
+                    || iconShape == LauncherIconDrawable.SHAPE_ROUND)
+                && android.os.Build.VERSION.SDK_INT >= 21;
+
+        for (int childIndex = 0; childIndex < grid.getChildCount(); childIndex++) {
+            View cell = grid.getChildAt(childIndex);
+            int position = grid.getPositionForView(cell);
+            if (position < 0 || position >= drawerApps.size()
+                    || !(cell instanceof ViewGroup)) continue;
+
+            ImageView icon = null;
+            ViewGroup cellGroup = (ViewGroup) cell;
+            for (int child = 0; child < cellGroup.getChildCount(); child++) {
+                View candidate = cellGroup.getChildAt(child);
+                if (candidate instanceof ImageView) {
+                    icon = (ImageView) candidate;
+                    break;
+                }
+            }
+            if (icon == null) continue;
+            android.graphics.drawable.Drawable current = icon.getDrawable();
+            if (!(current instanceof LauncherIconDrawable)) continue;
+
+            if (outlineClip) {
+                ViewOutlineProvider provider = iconShape == LauncherIconDrawable.SHAPE_ROUND
+                        ? ROUND_OUTLINE : ROUNDED_SQUARE_OUTLINE;
+                if (icon.getOutlineProvider() != provider) {
+                    icon.setOutlineProvider(provider);
+                    icon.invalidateOutline();
+                }
+                if (!icon.getClipToOutline()) {
+                    icon.setClipToOutline(true);
+                    icon.invalidateOutline();
+                }
+            } else if (icon.getClipToOutline()) {
+                icon.setClipToOutline(false);
+            }
+            LauncherIconDrawable wrapped = (LauncherIconDrawable) current;
+            wrapped.updateAppearance(showBackground, iconShape, backgroundColor,
+                    artworkTheme, fitInsideBackground);
+            wrapped.setExternalShapeClip(outlineClip);
+        }
+    }
+
     /** Called only when PackageManager reports an installed-app change. */
     public void clearPackageCaches() {
         iconCacheGeneration++;

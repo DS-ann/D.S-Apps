@@ -54,10 +54,9 @@ final class LauncherIconDrawable extends Drawable {
     static final int ARTWORK_SUNSET_GRADIENT = 3;
     static final int ARTWORK_NOTHING_MONOCHROME = 4;
 
-    // Keep the cache large enough for a typical drawer page plus nearby rows, without
-    // retaining multiple full-size copies of every installed icon on low-RAM devices.
-    // Bounded cache large enough to retain more recently seen icons while scrolling back.
-    private static final int MAX_ARTWORK_CACHE_BYTES = 12 * 1024 * 1024;
+    // Keep a bounded cache of processed artwork per app/theme. Sixteen MiB retains more
+    // variants when switching artwork styles without growing with the installed-app count.
+    private static final int MAX_ARTWORK_CACHE_BYTES = 16 * 1024 * 1024;
     private static final boolean[] NO_BACKDROP_MASK = new boolean[0];
     private static final LruCache<ArtworkCacheKey, Bitmap> ARTWORK_CACHE =
             new LruCache<ArtworkCacheKey, Bitmap>(MAX_ARTWORK_CACHE_BYTES) {
@@ -896,10 +895,10 @@ final class LauncherIconDrawable extends Drawable {
             pixels[index] = Color.argb(alpha, mono, mono, mono);
         }
 
-        // Reinforce fragile one-pixel foreground strokes before the icon is scaled down.
-        // Expand only into opaque source pixels that are not confidently identified as
-        // backdrop, separators, enclosed counters, or light key interiors. This keeps
-        // letter strokes legible at launcher size without closing A/O/P/R counters.
+        // Reinforce fragile foreground strokes before the icon is scaled down. One
+        // source-pixel expansion is allowed into the white backplate; otherwise ordinary
+        // letter edges never grow because those pixels are marked as backdrop. Preserve
+        // deliberately white separators, enclosed counters/details, and key interiors.
         int[] reinforced = pixels.clone();
         for (int y = 1; y < height - 1; y++) {
             for (int x = 1; x < width - 1; x++) {
@@ -912,7 +911,6 @@ final class LauncherIconDrawable extends Drawable {
                         int neighbour = (y + dy) * width + x + dx;
                         if (Color.alpha(pixels[neighbour]) < 180
                                 || Color.red(pixels[neighbour]) < 220) continue;
-                        if (hasBackdrop && backdrop[neighbour]) continue;
                         if (separators[neighbour]) continue;
                         if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
                         if (enclosedBackdropCounters != null

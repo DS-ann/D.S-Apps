@@ -5010,6 +5010,9 @@ public class MainActivity extends Activity {
     private void showDrawer() { showDrawer(0f); }
 
     private void showDrawer(float swipeProgress) {
+        if (drawerAdapter != null) {
+            drawerAdapter.refreshVisibleIconAppearance(drawerGrid);
+        }
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
         }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
