@@ -899,6 +899,12 @@ final class LauncherIconDrawable extends Drawable {
             sourceWhite[i] = isSourceWhiteSegment(source[i]);
         }
 
+        // Original dark artwork takes priority over generated junction seams. Protect
+        // near-black source pixels plus one adjacent ring of dark antialiased edge pixels.
+        // The ring prevents a softened black outline from being recoloured white.
+        final boolean[] protectedSourceBlack =
+                findProtectedSourceBlackPixels(source, width, height);
+
         final boolean[] seams = new boolean[count];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -912,13 +918,18 @@ final class LauncherIconDrawable extends Drawable {
                         final int maxDifference = largestSourceChannelDifference(
                                 source[index], source[right]);
                         if (maxDifference >= 46 && delta >= 76) {
-                            // Strong colour junction: preserve a narrow, clear divider.
-                            seams[index] = true;
-                            seams[right] = true;
+                            // Strong colour junction. Never paint over source-black detail;
+                            // when only one side is protected, keep the seam on the other side.
+                            if (!protectedSourceBlack[index]) seams[index] = true;
+                            if (!protectedSourceBlack[right]) seams[right] = true;
                         } else if (maxDifference >= 5 && delta >= 9) {
-                            // Subtle/near-colour transition: only one source pixel, so the
-                            // seam remains finer than the normal strong-junction divider.
-                            seams[index] = true;
+                            // Subtle junctions normally use one pixel. If that pixel belongs
+                            // to a protected dark stroke, shift the seam to the other side.
+                            if (!protectedSourceBlack[index]) {
+                                seams[index] = true;
+                            } else if (!protectedSourceBlack[right]) {
+                                seams[right] = true;
+                            }
                         }
                     }
                 }
@@ -931,10 +942,16 @@ final class LauncherIconDrawable extends Drawable {
                         final int maxDifference = largestSourceChannelDifference(
                                 source[index], source[down]);
                         if (maxDifference >= 46 && delta >= 76) {
-                            seams[index] = true;
-                            seams[down] = true;
+                            // Keep original dark strokes intact and place the seam only on
+                            // the unprotected side when a junction touches dark artwork.
+                            if (!protectedSourceBlack[index]) seams[index] = true;
+                            if (!protectedSourceBlack[down]) seams[down] = true;
                         } else if (maxDifference >= 5 && delta >= 9) {
-                            seams[index] = true;
+                            if (!protectedSourceBlack[index]) {
+                                seams[index] = true;
+                            } else if (!protectedSourceBlack[down]) {
+                                seams[down] = true;
+                            }
                         }
                     }
                 }
@@ -948,7 +965,9 @@ final class LauncherIconDrawable extends Drawable {
                 outputPixels[i] = Color.TRANSPARENT;
                 continue;
             }
-            final int tone = sourceWhite[i] || seams[i] ? 255 : 0;
+            // A seam is never allowed to supersede an original black/dark pixel.
+            final int tone = sourceWhite[i]
+                    || (seams[i] && !protectedSourceBlack[i]) ? 255 : 0;
             outputPixels[i] = Color.argb(alpha, tone, tone, tone);
         }
 
@@ -971,6 +990,62 @@ final class LauncherIconDrawable extends Drawable {
         int minimum = Math.min(red, Math.min(green, blue));
         int maximum = Math.max(red, Math.max(green, blue));
         return minimum >= 190 && maximum - minimum <= 24;
+    }
+
+    /**
+     * Identifies original dark artwork that must never be overwritten by generated white seams.
+     * Pure/near-black source pixels seed the mask; one adjacent ring of darkened edge pixels is
+     * also protected to preserve antialiased black strokes. Brighter neighbouring colour pixels
+     * remain eligible for a seam, so a black-to-colour junction can still be outlined on the
+     * coloured side rather than erasing the original dark drawing.
+     */
+    private static boolean[] findProtectedSourceBlackPixels(
+            int[] source, int width, int height) {
+        final int count = width * height;
+        final boolean[] protectedPixels = new boolean[count];
+
+        for (int i = 0; i < count; i++) {
+            protectedPixels[i] = isSourceBlackSegment(source[i]);
+        }
+
+        // Protect only one ring from the original dark mask (not a recursively growing mask).
+        // This catches antialias pixels blended against an adjacent icon colour without
+        // swallowing entire coloured regions into the protected area.
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                final int index = y * width + x;
+                if (protectedPixels[index] || Color.alpha(source[index]) < 32) continue;
+                final int pixel = source[index];
+                final int maximum = Math.max(Color.red(pixel),
+                        Math.max(Color.green(pixel), Color.blue(pixel)));
+                if (maximum > 192) continue;
+
+                boolean touchesDarkCore = false;
+                for (int dy = -1; dy <= 1 && !touchesDarkCore; dy++) {
+                    final int ny = y + dy;
+                    if (ny < 0 || ny >= height) continue;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        if (dx == 0 && dy == 0) continue;
+                        final int nx = x + dx;
+                        if (nx < 0 || nx >= width) continue;
+                        if (isSourceBlackSegment(source[ny * width + nx])) {
+                            touchesDarkCore = true;
+                            break;
+                        }
+                    }
+                }
+                if (touchesDarkCore) protectedPixels[index] = true;
+            }
+        }
+        return protectedPixels;
+    }
+
+    /** Treat the original black and near-black filled pixels as immutable dark artwork. */
+    private static boolean isSourceBlackSegment(int pixel) {
+        if (Color.alpha(pixel) < 32) return false;
+        int maximum = Math.max(Color.red(pixel),
+                Math.max(Color.green(pixel), Color.blue(pixel)));
+        return maximum <= 64;
     }
 
     /**
