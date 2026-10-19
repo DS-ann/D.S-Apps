@@ -545,8 +545,10 @@ final class LauncherIconDrawable extends Drawable {
 
         // Double the original border thickness, but make it adaptive to local stroke width.
         // A fixed inward band can consume an entire thin glyph (e.g. +, -, digits or letters).
-        final int thickness = 2 * Math.max(1,
-                Math.round(Math.min(width, height) * 0.009f));
+        // Increase the prior doubled contour by a further 50% while retaining the local
+        // stroke-width safeguard below for thin letters, digits and mathematical symbols.
+        final int thickness = Math.max(1, Math.round(3f * Math.max(1,
+                Math.round(Math.min(width, height) * 0.009f))));
         final int[] depth = new int[count];
         java.util.Arrays.fill(depth, -1);
         head = 0;
@@ -970,7 +972,9 @@ final class LauncherIconDrawable extends Drawable {
         int blueDifference = Math.abs(Color.blue(first) - Color.blue(second));
         int largestDifference = Math.max(redDifference, Math.max(greenDifference, blueDifference));
         int totalDifference = redDifference + greenDifference + blueDifference;
-        return largestDifference >= 78 && totalDifference >= 135;
+        // Recover boundaries between small adjacent logo segments at icon resolution. The
+        // dual threshold still avoids marking gradual gradients as seams.
+        return largestDifference >= 48 && totalDifference >= 88;
     }
 
     /**
