@@ -43,8 +43,10 @@ public final class SevenSegmentClockTextView extends TextView {
         setSingleLine(true);
         setIncludeFontPadding(false);
         setWillNotDraw(false);
-        // The renderer uses filled rounded segments (not hardware-sensitive line effects).
-        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
+        // Keep the view on Android's normal rendering pipeline. A software layer
+        // caches text/glyphs into a bitmap at the untransformed view size; the clock
+        // is scaled for its length and breadth, which can make enlarged digits look
+        // pixelated. The custom rounded segments are compatible with hardware drawing.
         segmentPaint.setStyle(Paint.Style.FILL);
     }
 
@@ -118,8 +120,10 @@ public final class SevenSegmentClockTextView extends TextView {
             sevenSegmentMode = false;
             super.setTextColor(segmentColor);
         }
-        if (getLayerType() != android.view.View.LAYER_TYPE_SOFTWARE) {
-            setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null);
+        // Do not re-enable a cached software bitmap when switching clock styles.
+        // Let Android draw typography and the custom segment geometry at display scale.
+        if (getLayerType() == android.view.View.LAYER_TYPE_SOFTWARE) {
+            setLayerType(android.view.View.LAYER_TYPE_NONE, null);
         }
         invalidate();
         requestLayout();
