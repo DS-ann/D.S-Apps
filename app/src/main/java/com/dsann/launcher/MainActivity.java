@@ -299,6 +299,8 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, ClockTextGradientState> clockDigitGradients =
             new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, Boolean> dateGradientModeApplied =
+            new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
@@ -5960,15 +5962,26 @@ public class MainActivity extends Activity {
     private void applyClockColorEffectsToActivePage(float phase) {
         boolean live = prefs != null && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
         float displayPhase = live ? phase : 0f;
-        // Date and AM/PM always retain the Home Studio palette. With live mode off
-        // its shader is fixed at phase zero; with live mode on it moves alongside digits.
-        if (dateText != null) {
-            applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
-                    displayPhase, clockDateGradients);
-        }
-        if (clockText == null) return;
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+        // Date and AM/PM follow the same master gradient switch as the digits:
+        // enabled = Home Studio palette, disabled = the original silver treatment.
+        if (dateText != null) {
+            if (digitGradient) {
+                applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
+                        displayPhase, clockDateGradients);
+            } else {
+                clockDateGradients.remove(dateText);
+                if (dateText.getPaint().getShader() != null) {
+                    dateText.getPaint().setShader(null);
+                    dateText.invalidate();
+                }
+                if (dateText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
+                    dateText.setTextColor(CLOCK_DIGIT_SILVER);
+                }
+            }
+        }
+        if (clockText == null) return;
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         if (clockText instanceof SevenSegmentClockTextView) {
@@ -6050,8 +6063,13 @@ public class MainActivity extends Activity {
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
                     0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            dateLine.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(192, 192, 198)),
-                    0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) {
+                // In the non-gradient mode, AM/PM uses the same restrained silver as
+                // the clock digits. When enabled, the date TextView shader paints it
+                // with the Home Studio gradient instead.
+                dateLine.setSpan(new android.text.style.ForegroundColorSpan(CLOCK_DIGIT_SILVER),
+                        0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
             dateLine.setSpan(new android.text.style.RelativeSizeSpan(1f), 0, period.length(),
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
@@ -6143,7 +6161,14 @@ public class MainActivity extends Activity {
             }
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
-            if (!dateLine.toString().contentEquals(dateText.getText())) dateText.setText(dateLine);
+            boolean useDateGradient = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+            Boolean previousDateGradient = dateGradientModeApplied.get(dateText);
+            boolean dateModeChanged = previousDateGradient == null
+                    || previousDateGradient.booleanValue() != useDateGradient;
+            if (!dateLine.toString().contentEquals(dateText.getText()) || dateModeChanged) {
+                dateText.setText(dateLine);
+                dateGradientModeApplied.put(dateText, useDateGradient);
+            }
             // Layout, typography and panel appearance are configuration-driven and
             // are applied when the clock is created or settings change, not every minute.
         }
@@ -9078,6 +9103,7 @@ public class MainActivity extends Activity {
                 prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false) ? "On" : "Off", () -> {
             boolean enabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
             prefs.edit().putBoolean(KEY_CLOCK_DIGIT_GRADIENT, enabled).apply();
+            updateClock();
             applyClockColorEffects(clockColorPhase, true);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
