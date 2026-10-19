@@ -228,9 +228,9 @@ public final class SevenSegmentClockTextView extends TextView {
                 return;
             }
 
-            // Draw the normal glyphs first, then overprint a fine contrasting stroke.
-            // Using TextView's own Layout retains the selected font, letter spacing,
-            // antialiasing and locale-specific glyph shaping.
+            // Draw the normal glyphs, then create a stroked copy in a temporary layer.
+            // A glyph-shaped DST_IN mask removes the half of the stroke outside the text,
+            // leaving a thin inner contour rather than a halo around each character.
             super.onDraw(canvas);
             Paint textPaint = getPaint();
             Paint.Style previousStyle = textPaint.getStyle();
@@ -238,20 +238,34 @@ public final class SevenSegmentClockTextView extends TextView {
             Paint.Join previousJoin = textPaint.getStrokeJoin();
             Paint.Cap previousCap = textPaint.getStrokeCap();
             Shader previousShader = textPaint.getShader();
+            android.graphics.Xfermode previousXfermode = textPaint.getXfermode();
             int previousColor = textPaint.getColor();
+            int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
             try {
+                textPaint.setXfermode(null);
                 textPaint.setStyle(Paint.Style.STROKE);
                 textPaint.setStrokeWidth(contrastInnerBorderWidth);
                 textPaint.setStrokeJoin(Paint.Join.ROUND);
                 textPaint.setStrokeCap(Paint.Cap.ROUND);
                 textPaint.setShader(ensureTextBorderGradient());
                 super.onDraw(canvas);
+
+                // Keep only outline pixels that fall within the filled glyph silhouette.
+                textPaint.setStyle(Paint.Style.FILL);
+                textPaint.setStrokeWidth(previousStrokeWidth);
+                textPaint.setShader(null);
+                textPaint.setColor(Color.WHITE);
+                textPaint.setXfermode(new android.graphics.PorterDuffXfermode(
+                        android.graphics.PorterDuff.Mode.DST_IN));
+                super.onDraw(canvas);
             } finally {
+                canvas.restoreToCount(layer);
                 textPaint.setStyle(previousStyle);
                 textPaint.setStrokeWidth(previousStrokeWidth);
                 textPaint.setStrokeJoin(previousJoin);
                 textPaint.setStrokeCap(previousCap);
                 textPaint.setShader(previousShader);
+                textPaint.setXfermode(previousXfermode);
                 textPaint.setColor(previousColor);
             }
             return;
