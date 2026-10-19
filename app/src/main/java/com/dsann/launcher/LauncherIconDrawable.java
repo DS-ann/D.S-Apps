@@ -215,22 +215,23 @@ final class LauncherIconDrawable extends Drawable {
         }
     }
 
-    /** Cache key for the transparent, shape-clipped artwork layer. The background fill is
-     * deliberately excluded, so changing its colour does not force image processing again. */
+    /** Cache key for a completed background-plus-artwork icon at the target draw size. */
     private static final class CompositionCacheKey {
         final ArtworkCacheKey artwork;
         final int width;
         final int height;
         final int shape;
+        final int backgroundColor;
         final boolean fitInsideBackground;
         final boolean externalShapeClip;
 
         CompositionCacheKey(ArtworkCacheKey artwork, int width, int height, int shape,
-                boolean fitInsideBackground, boolean externalShapeClip) {
+                int backgroundColor, boolean fitInsideBackground, boolean externalShapeClip) {
             this.artwork = artwork;
             this.width = width;
             this.height = height;
             this.shape = shape;
+            this.backgroundColor = backgroundColor;
             this.fitInsideBackground = fitInsideBackground;
             this.externalShapeClip = externalShapeClip;
         }
@@ -240,6 +241,7 @@ final class LauncherIconDrawable extends Drawable {
             result = 31 * result + width;
             result = 31 * result + height;
             result = 31 * result + shape;
+            result = 31 * result + backgroundColor;
             result = 31 * result + (fitInsideBackground ? 1 : 0);
             result = 31 * result + (externalShapeClip ? 1 : 0);
             return result;
@@ -250,6 +252,7 @@ final class LauncherIconDrawable extends Drawable {
             if (!(other instanceof CompositionCacheKey)) return false;
             CompositionCacheKey key = (CompositionCacheKey) other;
             return width == key.width && height == key.height && shape == key.shape
+                    && backgroundColor == key.backgroundColor
                     && fitInsideBackground == key.fitInsideBackground
                     && externalShapeClip == key.externalShapeClip
                     && artwork.equals(key.artwork);
@@ -2274,6 +2277,16 @@ final class LauncherIconDrawable extends Drawable {
         }
         paint.setColor(backgroundColor);
         paint.setStyle(Paint.Style.FILL);
+        // A completed icon bitmap avoids drawing the backing, rasterizing the source, and
+        // clipping custom silhouettes on every frame. The key contains every appearance
+        // setting that affects pixels, so changing a setting safely selects another variant.
+        Bitmap composedIcon = getCachedComposedIconBitmap(
+                bounds.left, bounds.top, bounds.width(), bounds.height());
+        if (composedIcon != null) {
+            canvas.drawBitmap(composedIcon, bounds.left, bounds.top, COMPOSITION_BITMAP_PAINT);
+            return;
+        }
+
         if (externalShapeClip) {
             // The containing ImageView clips these supported shapes natively. Drawing the
             // backing and artwork directly avoids Canvas.clipPath on every scroll frame.
@@ -2287,18 +2300,6 @@ final class LauncherIconDrawable extends Drawable {
             return;
         }
 
-        // For custom silhouettes, cache just the clipped icon layer (not the background
-        // colour). This removes repeated clipPath/source raster work on every scroll frame
-        // and lets background-colour changes reuse exactly the same processed artwork.
-        Bitmap clippedArtwork = getCachedClippedArtworkBitmap(
-                bounds.left, bounds.top, bounds.width(), bounds.height());
-        if (clippedArtwork != null) {
-            canvas.drawPath(path, paint);
-            canvas.drawBitmap(clippedArtwork, bounds.left, bounds.top,
-                    COMPOSITION_BITMAP_PAINT);
-            return;
-        }
-
         canvas.drawPath(path, paint);
         int save = canvas.save();
         canvas.clipPath(path);
@@ -2306,10 +2307,10 @@ final class LauncherIconDrawable extends Drawable {
         canvas.restoreToCount(save);
     }
 
-    private Bitmap getCachedClippedArtworkBitmap(int left, int top, int width, int height) {
+    private Bitmap getCachedComposedIconBitmap(int left, int top, int width, int height) {
         // Do not cache the temporary un-themed logo shown while asynchronous artwork conversion
         // is pending, or altered-alpha/filtered Drawables whose output depends on live state.
-        if (!sourceIsProcessedArtwork || !(source instanceof BitmapDrawable)
+        if (!showBackground || !sourceIsProcessedArtwork || !(source instanceof BitmapDrawable)
                 || drawableAlpha != 255 || drawableColorFilter != null
                 || originalSourceState == null || width <= 0 || height <= 0) {
             return null;
@@ -2318,7 +2319,7 @@ final class LauncherIconDrawable extends Drawable {
         ArtworkCacheKey artworkKey = new ArtworkCacheKey(
                 originalSourceState, sourceCacheToken, clampArtworkTheme(artworkTheme));
         CompositionCacheKey key = new CompositionCacheKey(artworkKey, width, height, shape,
-                fitInsideBackground, externalShapeClip);
+                backgroundColor, fitInsideBackground, externalShapeClip);
         Bitmap cached = COMPOSITION_CACHE.get(key);
         if (cached != null) return cached;
 
@@ -2328,10 +2329,21 @@ final class LauncherIconDrawable extends Drawable {
             rendered.setDensity(Resources.getSystem().getDisplayMetrics().densityDpi);
             Canvas offscreen = new Canvas(rendered);
             offscreen.translate(-left, -top);
-            int save = offscreen.save();
-            offscreen.clipPath(path);
-            source.draw(offscreen);
-            offscreen.restoreToCount(save);
+            if (externalShapeClip) {
+                if (shape == SHAPE_ROUND) {
+                    offscreen.drawOval(rect, paint);
+                } else {
+                    float corner = Math.min(rect.width(), rect.height()) * 0.23f;
+                    offscreen.drawRoundRect(rect, corner, corner, paint);
+                }
+                source.draw(offscreen);
+            } else {
+                offscreen.drawPath(path, paint);
+                int save = offscreen.save();
+                offscreen.clipPath(path);
+                source.draw(offscreen);
+                offscreen.restoreToCount(save);
+            }
             if (rendered.getByteCount() > MAX_COMPOSITION_CACHE_BYTES) {
                 rendered.recycle();
                 return null;
