@@ -16,10 +16,18 @@ import android.util.LruCache;
 
 /** Draws app icons with optional backing and selectable silhouettes. */
 final class LauncherIconDrawable extends Drawable {
-    static final int SHAPE_ORIGINAL = 0;
-    static final int SHAPE_TRIANGLE = 1;
-    static final int SHAPE_PEAR = 2;
-    static final int SHAPE_ROUNDED_HEXAGON = 3;
+    static final int SHAPE_SQUARE = 0;
+    static final int SHAPE_ROUND = 1;
+    static final int SHAPE_HEXAGON = 2;
+    static final int SHAPE_PENTAGON = 3;
+    static final int SHAPE_TILTED_PEAR = 4;
+
+    // Compatibility aliases for existing internal call sites and legacy preference
+    // terminology. Persisted old values are migrated in MainActivity.
+    static final int SHAPE_ORIGINAL = SHAPE_SQUARE;
+    static final int SHAPE_TRIANGLE = SHAPE_SQUARE;
+    static final int SHAPE_PEAR = SHAPE_TILTED_PEAR;
+    static final int SHAPE_ROUNDED_HEXAGON = SHAPE_HEXAGON;
 
     static final int BACKGROUND_BLACK = 0;
     static final int BACKGROUND_WHITE = 1;
@@ -96,7 +104,7 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     static int clampShape(int shape) {
-        return Math.max(SHAPE_ORIGINAL, Math.min(SHAPE_ROUNDED_HEXAGON, shape));
+        return Math.max(SHAPE_SQUARE, Math.min(SHAPE_TILTED_PEAR, shape));
     }
 
     static int clampArtworkTheme(int theme) {
@@ -516,116 +524,117 @@ final class LauncherIconDrawable extends Drawable {
         float height = bottom - top;
         if (width <= 0 || height <= 0) return;
 
+        // Every choice uses the same full drawable bounds; the shape only clips pixels
+        // outside its silhouette and never resizes or insets the icon artwork.
+        rect.set(left, top, right, bottom);
+        if (rect.width() <= 0 || rect.height() <= 0) return;
+        if (shapePathDirty) {
+            setShapePath(rect);
+            shapePathDirty = false;
+        }
+
         if (showBackground) {
             paint.setColor(backgroundColor);
             paint.setStyle(Paint.Style.FILL);
-            float corner = Math.min(width, height) * 0.23f;
-            canvas.drawRoundRect(left, top, right, bottom, corner, corner, paint);
-        }
-
-        // Use the full drawable bounds: no inset for any icon shape.
-        rect.set(left, top, right, bottom);
-        if (rect.width() <= 0 || rect.height() <= 0) return;
-
-        if (shape == SHAPE_TRIANGLE || shape == SHAPE_PEAR
-                || shape == SHAPE_ROUNDED_HEXAGON) {
-            if (shapePathDirty) {
-                setShapePath(rect);
-                shapePathDirty = false;
-            }
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(innerShapeColor);
             canvas.drawPath(path, paint);
-
-            // The app artwork follows the selected silhouette. Reuse the same cached
-            // path for fill and clipping rather than calculating it twice per draw.
-            int save = canvas.save();
-            canvas.clipPath(path);
-            source.setBounds(Math.round(rect.left), Math.round(rect.top),
-                    Math.round(rect.right), Math.round(rect.bottom));
-            source.draw(canvas);
-            canvas.restoreToCount(save);
-        } else {
-            source.setBounds(Math.round(rect.left), Math.round(rect.top),
-                    Math.round(rect.right), Math.round(rect.bottom));
-            source.draw(canvas);
+        } else if (shape != SHAPE_SQUARE) {
+            // Preserve the existing inner-colour behaviour while the main backing is off.
+            // When the backing is on, its selected silhouette uses backgroundColor only.
+            paint.setColor(innerShapeColor);
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawPath(path, paint);
         }
+
+        int save = canvas.save();
+        canvas.clipPath(path);
+        source.setBounds(Math.round(rect.left), Math.round(rect.top),
+                Math.round(rect.right), Math.round(rect.bottom));
+        source.draw(canvas);
+        canvas.restoreToCount(save);
     }
 
     private void setShapePath(RectF target) {
         path.reset();
-        if (shape == SHAPE_TRIANGLE) {
-            path.moveTo(target.centerX(), target.top);
-            if (showBackground) {
-                // Round only the lower triangle corners; retain its full-width base.
-                float corner = Math.min(target.width(), target.height()) * 0.23f;
-                path.lineTo(target.right, target.bottom - corner);
-                path.quadTo(target.right, target.bottom,
-                        target.right - corner, target.bottom);
-                path.lineTo(target.left + corner, target.bottom);
-                path.quadTo(target.left, target.bottom,
-                        target.left, target.bottom - corner);
-            } else {
-                path.lineTo(target.right, target.bottom);
-                path.lineTo(target.left, target.bottom);
+        switch (shape) {
+            case SHAPE_ROUND: {
+                float radius = Math.min(target.width(), target.height()) * 0.5f;
+                path.addCircle(target.centerX(), target.centerY(), radius, Path.Direction.CW);
+                break;
             }
-            path.close();
-        } else if (shape == SHAPE_PEAR) {
-            // Pear silhouette: narrow rounded top, widening toward a full lower half.
-            path.moveTo(target.centerX(), target.top);
-            path.cubicTo(target.left + target.width() * 0.20f, target.top,
-                    target.left + target.width() * 0.30f, target.top + target.height() * 0.24f,
-                    target.left + target.width() * 0.18f, target.top + target.height() * 0.43f);
-            path.cubicTo(target.left - target.width() * 0.02f, target.top + target.height() * 0.76f,
-                    target.left + target.width() * 0.19f, target.bottom,
-                    target.centerX(), target.bottom);
-            path.cubicTo(target.right - target.width() * 0.19f, target.bottom,
-                    target.right + target.width() * 0.02f, target.top + target.height() * 0.76f,
-                    target.right - target.width() * 0.18f, target.top + target.height() * 0.43f);
-            path.cubicTo(target.right - target.width() * 0.30f, target.top + target.height() * 0.24f,
-                    target.right - target.width() * 0.20f, target.top,
-                    target.centerX(), target.top);
-            path.close();
-        } else if (shape == SHAPE_ROUNDED_HEXAGON) {
-            setRoundedHexagonPath(target);
+            case SHAPE_HEXAGON:
+                setRegularPolygonPath(target, 6, 0f);
+                break;
+            case SHAPE_PENTAGON:
+                setRegularPolygonPath(target, 5, -90f);
+                break;
+            case SHAPE_TILTED_PEAR:
+                setTiltedPearPath(target);
+                break;
+            case SHAPE_SQUARE:
+            default: {
+                // Preserve the current rounded-square visual, but use the same path to
+                // clip the logo so no artwork leaks outside the square icon bounds.
+                float corner = Math.min(target.width(), target.height()) * 0.23f;
+                path.addRoundRect(target, corner, corner, Path.Direction.CW);
+                break;
+            }
         }
     }
 
-    private void setRoundedHexagonPath(RectF target) {
-        float inset = target.width() * 0.25f;
-        float[][] vertices = hexagonVertices;
-        vertices[0][0] = target.left + inset;
-        vertices[0][1] = target.top;
-        vertices[1][0] = target.right - inset;
-        vertices[1][1] = target.top;
-        vertices[2][0] = target.right;
-        vertices[2][1] = target.centerY();
-        vertices[3][0] = target.right - inset;
-        vertices[3][1] = target.bottom;
-        vertices[4][0] = target.left + inset;
-        vertices[4][1] = target.bottom;
-        vertices[5][0] = target.left;
-        vertices[5][1] = target.centerY();
-        float cornerDistance = Math.min(target.width(), target.height()) * 0.085f;
-        for (int i = 0; i < vertices.length; i++) {
-            float[] current = vertices[i];
-            float[] previous = vertices[(i + vertices.length - 1) % vertices.length];
-            float[] next = vertices[(i + 1) % vertices.length];
-            float previousLength = (float) Math.hypot(previous[0] - current[0],
-                    previous[1] - current[1]);
-            float nextLength = (float) Math.hypot(next[0] - current[0], next[1] - current[1]);
-            float beforeFraction = previousLength <= 0f ? 0f
-                    : Math.min(0.18f, cornerDistance / previousLength);
-            float afterFraction = nextLength <= 0f ? 0f
-                    : Math.min(0.18f, cornerDistance / nextLength);
-            float beforeX = current[0] + (previous[0] - current[0]) * beforeFraction;
-            float beforeY = current[1] + (previous[1] - current[1]) * beforeFraction;
-            float afterX = current[0] + (next[0] - current[0]) * afterFraction;
-            float afterY = current[1] + (next[1] - current[1]) * afterFraction;
-            if (i == 0) path.moveTo(beforeX, beforeY);
-            else path.lineTo(beforeX, beforeY);
-            path.quadTo(current[0], current[1], afterX, afterY);
+    /**
+     * Generate a regular polygon and normalize its vertex bounds to the existing icon
+     * bounds. Hexagons use horizontal top/bottom edges; pentagons use an apex at the top.
+     */
+    private void setRegularPolygonPath(RectF target, int sides, float startAngleDegrees) {
+        float minX = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        float[] xs = new float[sides];
+        float[] ys = new float[sides];
+        for (int i = 0; i < sides; i++) {
+            double angle = Math.toRadians(startAngleDegrees + (360.0 * i / sides));
+            xs[i] = (float) Math.cos(angle);
+            ys[i] = (float) Math.sin(angle);
+            minX = Math.min(minX, xs[i]);
+            maxX = Math.max(maxX, xs[i]);
+            minY = Math.min(minY, ys[i]);
+            maxY = Math.max(maxY, ys[i]);
         }
+        float scaleX = target.width() / Math.max(0.0001f, maxX - minX);
+        float scaleY = target.height() / Math.max(0.0001f, maxY - minY);
+        for (int i = 0; i < sides; i++) {
+            float x = target.left + (xs[i] - minX) * scaleX;
+            float y = target.top + (ys[i] - minY) * scaleY;
+            if (i == 0) path.moveTo(x, y);
+            else path.lineTo(x, y);
+        }
+        path.close();
+    }
+
+    /** A slanted pear silhouette, kept inside the same square-sized bounding rectangle. */
+    private void setTiltedPearPath(RectF target) {
+        float w = target.width();
+        float h = target.height();
+        float left = target.left;
+        float top = target.top;
+        float right = target.right;
+        float bottom = target.bottom;
+        // A narrower crown leans left; the wider base leans right. All control points
+        // remain within the square bounding box, so adjacent layout spacing is unchanged.
+        path.moveTo(left + w * 0.39f, top);
+        path.cubicTo(left + w * 0.22f, top,
+                left + w * 0.16f, top + h * 0.22f,
+                left + w * 0.13f, top + h * 0.42f);
+        path.cubicTo(left + w * 0.08f, top + h * 0.67f,
+                left + w * 0.23f, bottom,
+                left + w * 0.52f, bottom);
+        path.cubicTo(left + w * 0.80f, bottom,
+                right - w * 0.03f, top + h * 0.68f,
+                right - w * 0.11f, top + h * 0.42f);
+        path.cubicTo(right - w * 0.18f, top + h * 0.22f,
+                left + w * 0.61f, top,
+                left + w * 0.39f, top);
         path.close();
     }
 

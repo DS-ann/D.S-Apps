@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_SIZE = "icon_size";
     private static final String KEY_ICON_BACKGROUND_COLOR = "icon_background_color";
     private static final String KEY_ICON_BACKGROUND_COLOR_POSITION = "icon_background_color_position";
+    private static final String KEY_ICON_SHAPE_MIGRATION = "app_icon_shape_migration_v2";
     private static final String KEY_ICON_ARTWORK_THEME = "icon_artwork_theme";
     private static final String KEY_ICON_INNER_COLOR_POSITION = "icon_inner_shape_color_position";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
@@ -8739,6 +8740,23 @@ public class MainActivity extends Activity {
         int drawerColumns = Math.max(3, Math.min(6, prefs.getInt(KEY_DRAWER_COLUMNS, COLUMNS)));
         SharedPreferences.Editor edit = prefs.edit();
 
+        // Migrate the old shape IDs once: Original -> Square, Triangle -> Square,
+        // Pear -> Tilted Pear, Rounded Hexagon -> Hexagon. This prevents stale saved
+        // integers from silently selecting the wrong new shape after the options change.
+        if (!prefs.getBoolean(KEY_ICON_SHAPE_MIGRATION, false)) {
+            int oldShape = prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_SQUARE);
+            int migratedShape;
+            switch (oldShape) {
+                case 2: migratedShape = LauncherIconDrawable.SHAPE_TILTED_PEAR; break;
+                case 3: migratedShape = LauncherIconDrawable.SHAPE_HEXAGON; break;
+                case 0:
+                case 1:
+                default: migratedShape = LauncherIconDrawable.SHAPE_SQUARE; break;
+            }
+            edit.putInt("app_icon_shape", migratedShape);
+            edit.putBoolean(KEY_ICON_SHAPE_MIGRATION, true);
+        }
+
         if (!prefs.getBoolean(KEY_FONT_SIZE_SLIDER_VALUES, false)) {
             int[] legacyFontSizes = {9, 9, 10, 12, 14};
             if (prefs.contains(KEY_HOME_FONT_SIZE)) {
@@ -9251,7 +9269,7 @@ public class MainActivity extends Activity {
             rebuildContactShortcutViews();
             validateWorkspacePagesAfterLayout();
         });
-        addSettingRow(content, "▣", "Rounded-square icon background",
+        addSettingRow(content, "▣", "App icon background",
                 prefs.getBoolean("icon_rounded_square_background", false) ? "On" : "Off", () -> {
             prefs.edit().putBoolean("icon_rounded_square_background",
                     !prefs.getBoolean("icon_rounded_square_background", false)).apply();
@@ -9269,9 +9287,10 @@ public class MainActivity extends Activity {
             prefs.edit().putInt(KEY_ICON_INNER_COLOR_POSITION, value).apply();
             refreshWorkspaceIconAppearance();
         });
-        addChoiceRow(content, "App icon shape",
-                LauncherIconDrawable.clampShape(prefs.getInt("app_icon_shape", 0)),
-                new String[]{"Original", "Triangle", "Pear", "Rounded hexagon"}, value -> {
+        addChoiceRow(content, "App background shape",
+                LauncherIconDrawable.clampShape(prefs.getInt("app_icon_shape",
+                        LauncherIconDrawable.SHAPE_SQUARE)),
+                new String[]{"Square", "Round", "Hexagon", "Pentagon", "Tilted Pear"}, value -> {
             prefs.edit().putInt("app_icon_shape",
                     LauncherIconDrawable.clampShape(value)).apply();
             refreshWorkspaceIconAppearance();
