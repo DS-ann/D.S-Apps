@@ -401,10 +401,6 @@ public final class SevenSegmentClockTextView extends TextView {
                 continue;
             }
 
-            if (colonIndex >= 0 && i > colonIndex) {
-                int minuteDigitIndex = i - colonIndex - 1;
-                x = minuteStartX + minuteDigitIndex * advance;
-            }
             float l = x;
             float r = x + digitWidth;
             float t = y;
