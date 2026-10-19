@@ -92,7 +92,7 @@ final class LauncherIconDrawable extends Drawable {
     private Drawable originalSource;
     private Drawable.ConstantState originalSourceState;
     private String sourceCacheToken;
-    // -1 forces the first bind to build the cached, outlined raster even for Original artwork.
+    // Force the first appearance bind through the cache so Original icons get the outline too.
     private int artworkTheme = -1;
     private boolean showBackground;
     private boolean fitInsideBackground;
@@ -469,52 +469,108 @@ final class LauncherIconDrawable extends Drawable {
             if (rendered == null) return null;
             output = theme == ARTWORK_ORIGINAL ? rendered : recolourArtwork(rendered, theme);
         }
-        if (output != null) addInnerBlackBorder(output);
+        // Apply only the outer silhouette contour after all artwork/theme processing. The
+        // monochrome conversion itself stays at its stable pre-experiment implementation.
+        addInnerBlackBorder(output);
         return output;
     }
 
     /**
-     * Adds a very fine black contour only to pixels already inside the drawable's alpha mask.
-     * This follows rounded/adaptive, circular, irregular and legacy square icons alike instead
-     * of drawing an external rectangle or changing the image bounds. It runs once per cached
-     * icon raster, never on the frame-by-frame draw path.
+     * Adds an inward-only black contour along the icon silhouette. Transparent space is flood
+     * filled from the bitmap edges first, so enclosed transparent holes and internal logo
+     * details are not treated as the icon's outer border. The original colour/theme conversion
+     * is never used to calculate the contour.
      */
     private static void addInnerBlackBorder(Bitmap bitmap) {
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
+        final int width = bitmap.getWidth();
+        final int height = bitmap.getHeight();
         if (width < 3 || height < 3) return;
-        int count = width * height;
-        int[] pixels = new int[count];
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
-        int[] outlined = pixels.clone();
-        int radius = Math.max(1, Math.round(Math.min(width, height) * 0.009f));
-        int radiusSquared = radius * radius;
+        final int count = width * height;
+        final int[] sourcePixels = new int[count];
+        bitmap.getPixels(sourcePixels, 0, width, 0, 0, width, height);
+        final boolean[] exterior = new boolean[count];
+        final int[] queue = new int[count];
+        int head = 0;
+        int tail = 0;
+
+        // Find transparent/antialiased space connected to the outer canvas edge. An enclosed
+        // hole inside a glyph remains unvisited and therefore does not gain an unwanted border.
+        for (int x = 0; x < width; x++) {
+            int top = x;
+            int bottom = (height - 1) * width + x;
+            if (Color.alpha(sourcePixels[top]) < 96 && !exterior[top]) {
+                exterior[top] = true;
+                queue[tail++] = top;
+            }
+            if (Color.alpha(sourcePixels[bottom]) < 96 && !exterior[bottom]) {
+                exterior[bottom] = true;
+                queue[tail++] = bottom;
+            }
+        }
+        for (int y = 1; y < height - 1; y++) {
+            int left = y * width;
+            int right = left + width - 1;
+            if (Color.alpha(sourcePixels[left]) < 96 && !exterior[left]) {
+                exterior[left] = true;
+                queue[tail++] = left;
+            }
+            if (Color.alpha(sourcePixels[right]) < 96 && !exterior[right]) {
+                exterior[right] = true;
+                queue[tail++] = right;
+            }
+        }
+
+        while (head < tail) {
+            int index = queue[head++];
+            int x = index % width;
+            int y = index / width;
+            for (int dy = -1; dy <= 1; dy++) {
+                int ny = y + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = x + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    int next = ny * width + nx;
+                    if (exterior[next] || Color.alpha(sourcePixels[next]) >= 96) continue;
+                    exterior[next] = true;
+                    queue[tail++] = next;
+                }
+            }
+        }
+
+        // Exactly double the previous border's source-pixel thickness at each raster size.
+        // Restrict colouring to pixels inside the icon; transparent pixels are never painted.
+        final int thickness = 2 * Math.max(1,
+                Math.round(Math.min(width, height) * 0.009f));
+        final int radiusSquared = thickness * thickness;
+        final int[] outputPixels = sourcePixels.clone();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
-                int alpha = Color.alpha(pixels[index]);
-                if (alpha < 24) continue;
-                boolean edge = false;
-                for (int dy = -radius; dy <= radius && !edge; dy++) {
-                    if (dy * dy > radiusSquared) continue;
+                int alpha = Color.alpha(sourcePixels[index]);
+                if (alpha < 96 || exterior[index]) continue;
+                boolean contour = false;
+                for (int dy = -thickness; dy <= thickness && !contour; dy++) {
                     int ny = y + dy;
-                    for (int dx = -radius; dx <= radius; dx++) {
+                    for (int dx = -thickness; dx <= thickness; dx++) {
                         if (dx * dx + dy * dy > radiusSquared) continue;
                         int nx = x + dx;
                         if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-                            edge = true;
+                            contour = true;
                             break;
                         }
-                        if (Color.alpha(pixels[ny * width + nx]) < 32) {
-                            edge = true;
+                        int neighbour = ny * width + nx;
+                        if (exterior[neighbour]) {
+                            contour = true;
                             break;
                         }
                     }
                 }
-                if (edge) outlined[index] = Color.argb(alpha, 0, 0, 0);
+                if (contour) outputPixels[index] = Color.argb(alpha, 0, 0, 0);
             }
         }
-        bitmap.setPixels(outlined, 0, width, 0, 0, width, height);
+        bitmap.setPixels(outputPixels, 0, width, 0, 0, width, height);
     }
 
     private static final class Api33MonochromeRenderer {
@@ -681,17 +737,15 @@ final class LauncherIconDrawable extends Drawable {
             if (hasBackdrop) {
                 // White fill and white internal cut-lines preserve distinct pieces in divided
                 // logos; app-background pixels are never recoloured based on their original hue.
-                if (backdrop[index] || separators[index] || isBrightLogoDetail(pixel)) {
+                if (backdrop[index] || separators[index]) {
                     mono = backgroundTone;
                 } else {
                     mono = foregroundTone;
                 }
             } else if (transparentCount > count * 0.025f) {
-                // Keep bright, non-background logo cut-ins (such as a handset, camera ring or
-                // letter counter) white as well as colour-boundary seams; turning every source
-                // pixel black erased these details on older, flattened app icons.
-                mono = (separators[index] || isBrightLogoDetail(pixel))
-                        ? noBackdropSeparator : noBackdropForeground;
+                // Source has genuine transparent margins: use a black silhouette and retain
+                // white seams only at meaningful internal colour divisions.
+                mono = separators[index] ? noBackdropSeparator : noBackdropForeground;
             } else {
                 // When no reliable background is present in an opaque legacy icon, do not
                 // invent a split through the logo. Keep its tonal detail as neutral greys.
@@ -760,11 +814,6 @@ final class LauncherIconDrawable extends Drawable {
             }
         }
         return expanded;
-    }
-
-    /** Recognises near-white internal logo detail independently of the source hue. */
-    private static boolean isBrightLogoDetail(int pixel) {
-        return Color.alpha(pixel) >= 96 && pixelLuminance(pixel) >= 222f;
     }
 
     private static float pixelLuminance(int pixel) {
@@ -872,11 +921,7 @@ final class LauncherIconDrawable extends Drawable {
         int blueDifference = Math.abs(Color.blue(first) - Color.blue(second));
         int largestDifference = Math.max(redDifference, Math.max(greenDifference, blueDifference));
         int totalDifference = redDifference + greenDifference + blueDifference;
-        // Adjacent samples across narrow logo segments can have lower contrast than broad
-        // primaries (for example, tiny coloured dividers). Gradients change smoothly and do
-        // not meet both thresholds, so lowering these values recovers structure without
-        // outlining every pixel of a smooth fill.
-        return largestDifference >= 60 && totalDifference >= 105;
+        return largestDifference >= 78 && totalDifference >= 135;
     }
 
     /**

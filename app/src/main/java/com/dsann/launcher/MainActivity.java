@@ -3357,9 +3357,8 @@ public class MainActivity extends Activity {
                     LauncherIconDrawable.SHAPE_SQUARE, backgroundColor, requestedTheme, false);
             return;
         }
-        // Keep the shortcut on the same cached icon renderer even when artwork theming is
-        // disabled, so the inside contour stays consistent with app icons. Original artwork
-        // remains untouched apart from that fine border and the icon's geometry is unchanged.
+        // Keep the shortcut on the shared renderer even when recolouring is disabled. This
+        // applies only the cached inner silhouette border to Original artwork in that case.
         if (current == null) return;
         String token = shortcutTile == null ? "shortcut:unknown"
                 : String.valueOf(shortcutTile.getContentDescription());
