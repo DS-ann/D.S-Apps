@@ -306,6 +306,7 @@ public class MainActivity extends Activity {
         int viewWidth;
         float spanWidth;
         String textValue = "";
+        int[] colors;
         android.graphics.LinearGradient shader;
         final android.graphics.Matrix matrix = new android.graphics.Matrix();
     }
@@ -6367,6 +6368,19 @@ public class MainActivity extends Activity {
         activateClockForPage(restorePage);
     }
 
+    private int[] getClockArtworkTransitionColours() {
+        int artworkTheme = prefs == null
+                ? LauncherIconDrawable.ARTWORK_ORIGINAL
+                : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                        KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+        int[] artworkColours =
+                LauncherIconDrawable.clockTransitionPaletteForArtwork(artworkTheme);
+        // "Original Colours" has no universal icon palette, so use the existing Home Studio
+        // spectrum as its neutral fallback. The other themes use their own real icon palettes.
+        return artworkColours != null && artworkColours.length >= 2
+                ? artworkColours : CLOCK_DATE_GRADIENT_COLORS;
+    }
+
     private void applyClockColorEffectsToActivePage(float phase) {
         boolean live = prefs != null && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
         float displayPhase = live ? phase : 0f;
@@ -6394,12 +6408,11 @@ public class MainActivity extends Activity {
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
 
-        // "Match app icon artwork" uses a fixed Home Studio brand gradient. It does
-        // not advance its phase or start an animator; animated/fixed gradient settings
-        // continue to use their existing palette and precedence.
+        // Artwork matching uses the selected icon artwork's actual theme palette,
+        // held stationary at phase zero. It never starts or advances the colour animator.
         boolean useDigitGradient = digitGradient || iconArtworkActive;
         int[] digitColours = iconArtworkActive
-                ? CLOCK_DATE_GRADIENT_COLORS : CLOCK_DIGIT_GRADIENT_COLORS;
+                ? getClockArtworkTransitionColours() : CLOCK_DIGIT_GRADIENT_COLORS;
         float digitPhase = digitGradient ? displayPhase : 0f;
 
         if (clockText instanceof SevenSegmentClockTextView) {
@@ -6421,8 +6434,7 @@ public class MainActivity extends Activity {
             applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
                     displayPhase, clockDigitGradients);
         } else if (iconArtworkActive) {
-            // Phase zero pins the Home Studio cyan/lavender/pink/orange gradient in
-            // place. It is static until this separate artwork switch is turned off.
+            // Phase zero pins the selected artwork theme's colours in place.
             if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
                 clockText.setTextColor(CLOCK_DIGIT_SILVER);
             }
@@ -6451,11 +6463,13 @@ public class MainActivity extends Activity {
         ClockTextGradientState state = cache.get(view);
         if (state == null || state.viewWidth != viewWidth
                 || Math.abs(state.spanWidth - span) > 1f
-                || !state.textValue.equals(value)) {
+                || !state.textValue.equals(value)
+                || !java.util.Arrays.equals(state.colors, colors)) {
             state = new ClockTextGradientState();
             state.viewWidth = viewWidth;
             state.spanWidth = span;
             state.textValue = value;
+            state.colors = colors.clone();
             float startX = (viewWidth - span) * 0.5f;
             state.shader = new android.graphics.LinearGradient(startX, 0f,
                     startX + span, 0f, colors, null,
