@@ -356,6 +356,11 @@ public class MainActivity extends Activity {
     // Remains true from the first finger-driven frame until the settle animator ends.
     private boolean pageTransitionBusy = false;
     private boolean pageTransitionBusyAtDown = false;
+    // Input remains locked to the transition gesture, except that the incoming page
+    // can receive child touches after at least 80% of its entrance has completed.
+    private boolean pageTransitionGestureLocked = false;
+    private boolean pageTransitionTouchPassthrough = false;
+    private int pageTransitionTargetPage = -1;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
     private boolean gestureStartedOnDrawerGrid = false;
@@ -371,6 +376,9 @@ public class MainActivity extends Activity {
     private boolean suppressResizeOutsideTouchStream = false;
     // Ignore an entire touch stream if it starts while the drawer is settling.
     private boolean drawerTransitionGestureLocked = false;
+    // Once the drawer is at least 80% open, keep a new grid touch owned by the app list
+    // for the full gesture so it can scroll without being reinterpreted as navigation.
+    private boolean drawerTransitionGridTouchActive = false;
     private float iconTouchRawX, iconTouchRawY;
     private float iconDragFingerOffsetY;
     private int iconOriginalLeft, iconOriginalTop;
@@ -664,8 +672,30 @@ public class MainActivity extends Activity {
             }
             return true;
         }
-        // Do not let a second swipe take over, reverse, or scroll through a drawer
-        // transition. Lock the complete touch stream until its UP/CANCEL arrives.
+        // A drawer-list touch that starts at 80% open stays with the grid for the
+        // whole stream; this enables scrolling/taps without giving the gesture to
+        // workspace or drawer-navigation recognizers.
+        if (drawerTransitionGridTouchActive) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                drawerTransitionGridTouchActive = false;
+            }
+            return super.dispatchTouchEvent(event);
+        }
+        if (pageTransitionTouchPassthrough) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                pageTransitionTouchPassthrough = false;
+            }
+            return super.dispatchTouchEvent(event);
+        }
+        // If a page is settling, no fresh gesture may start another navigation. At
+        // 80% of the incoming page's entrance, child input becomes live; below that,
+        // ignore the entire touch sequence rather than letting it take over mid-frame.
+        if (pageTransitionGestureLocked) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                pageTransitionGestureLocked = false;
+            }
+            return true;
+        }
         if (drawerTransitionGestureLocked) {
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 drawerTransitionGestureLocked = false;
@@ -675,7 +705,32 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_DOWN
                 && LauncherScreenTransitions.isDrawerTransitionRunning(
                         homeScreen, drawerScreen, getDrawerTransition())) {
+            float transitionProgress = LauncherScreenTransitions.getDrawerTransitionProgress(
+                    homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
+            boolean drawerGridReady = LauncherScreenTransitions.isDrawerTransitionOpening()
+                    && transitionProgress >= 0.80f
+                    && drawerScreen != null && drawerScreen.getVisibility() == View.VISIBLE
+                    && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
+            if (drawerGridReady) {
+                drawerTransitionGridTouchActive = true;
+                return super.dispatchTouchEvent(event);
+            }
             drawerTransitionGestureLocked = true;
+            return true;
+        }
+        if (action == MotionEvent.ACTION_DOWN && pageTransitionBusy) {
+            boolean incomingPageReady = pageTransitionTargetPage >= 0
+                    && pageTransitionTargetPage != currentPage
+                    && wheelSwipeProgress >= 0.80f
+                    && pagesStrip != null
+                    && touchStartedOnTransitionPage(
+                            pagesStrip.getChildAt(pageTransitionTargetPage),
+                            event.getRawX(), event.getRawY());
+            if (incomingPageReady) {
+                pageTransitionTouchPassthrough = true;
+                return super.dispatchTouchEvent(event);
+            }
+            pageTransitionGestureLocked = true;
             return true;
         }
         if (action == MotionEvent.ACTION_DOWN) {
@@ -1091,6 +1146,7 @@ public class MainActivity extends Activity {
                     if (!pageSwipeActive) {
                         pageSwipeActive = true;
                         pageTransitionBusy = true;
+                        pageTransitionTargetPage = adjacent;
                         if (prefs != null && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
                             handler.removeCallbacks(clockColorFrame);
                             clockColorLastFrameUptime = 0L;
@@ -1306,6 +1362,17 @@ public class MainActivity extends Activity {
             // Vertical gestures are claimed in ACTION_MOVE above.
         }
         return super.dispatchTouchEvent(event);
+    }
+
+    private boolean touchStartedOnTransitionPage(View page, float rawX, float rawY) {
+        if (page == null || page.getVisibility() != View.VISIBLE
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+        int[] location = new int[2];
+        page.getLocationOnScreen(location);
+        float width = page.getWidth() * Math.max(0.01f, Math.abs(page.getScaleX()));
+        float height = page.getHeight() * Math.max(0.01f, Math.abs(page.getScaleY()));
+        return rawX >= location[0] && rawX < location[0] + width
+                && rawY >= location[1] && rawY < location[1] + height;
     }
 
     private boolean touchStartedOnDrawerGrid(float rawX, float rawY) {
@@ -4388,6 +4455,7 @@ public class MainActivity extends Activity {
         final float startProgress = Math.max(0f, Math.min(1f, wheelSwipeProgress));
         final float endProgress = to == from ? 0f : 1f;
         final int width = Math.max(1, pageWidth);
+        pageTransitionTargetPage = to;
         pagesStrip.animate().cancel();
 
         if (direction == 0 || from + direction < 0
@@ -4397,6 +4465,7 @@ public class MainActivity extends Activity {
             wheelSwipeProgress = 0f;
             wheelSwipeDirection = 0;
             pageTransitionBusy = false;
+            pageTransitionTargetPage = -1;
             startClockColorAnimator();
             return;
         }
@@ -4405,7 +4474,10 @@ public class MainActivity extends Activity {
                 android.animation.ValueAnimator.ofFloat(startProgress, endProgress);
         animator.setDuration(animationDuration(to == from ? 170L : 260L));
         animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
-        animator.addUpdateListener(value -> applyWheelSwipe(direction, (Float) value.getAnimatedValue()));
+        animator.addUpdateListener(value -> {
+            wheelSwipeProgress = ((Number) value.getAnimatedValue()).floatValue();
+            applyWheelSwipe(direction, wheelSwipeProgress);
+        });
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
             private boolean cancelled;
 
@@ -4424,6 +4496,7 @@ public class MainActivity extends Activity {
                 releasePageLayers();
                 wheelSwipeProgress = 0f;
                 wheelSwipeDirection = 0;
+                pageTransitionTargetPage = -1;
                 // Avoid invalidating the newly settled page's cached texture on the
                 // exact final frame of its entrance animation.
                 clockGradientResumeAtUptime = android.os.SystemClock.uptimeMillis() + 180L;
