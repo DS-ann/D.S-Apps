@@ -9949,6 +9949,7 @@ public class MainActivity extends Activity {
             targetX = -LauncherUiUtils.dp(this, 15) / panelScaleX;
         } else {
             boolean singleDigitHour = false;
+            boolean twoDigitNeonCircuitHour = false;
             String currentClock = clockText.getText() == null
                     ? "" : clockText.getText().toString();
             int colon = currentClock.indexOf(':');
@@ -9958,6 +9959,7 @@ public class MainActivity extends Activity {
                     if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
                 }
                 singleDigitHour = hourDigits == 1;
+                twoDigitNeonCircuitHour = style == 2 && hourDigits > 1;
             }
 
             float horizontalOffset = LauncherUiUtils.dp(this, 5);
@@ -9981,6 +9983,13 @@ public class MainActivity extends Activity {
                 horizontalOffset += singleDigitAdjustment;
             }
             targetX = -horizontalOffset / panelScaleX;
+            // The Neon Circuit two-digit width reduction is 20dp total. Compensate
+            // by half that width so the rendered digits remain centered in the same
+            // background. Keep it here (rather than only during layout) because a live
+            // clock refresh also resets this translation.
+            if (twoDigitNeonCircuitHour) {
+                targetX += LauncherUiUtils.dp(this, 10) / panelScaleX;
+            }
         }
         // Avoid invalidating the view when the computed offset hasn't actually changed.
         if (Math.abs(clockText.getTranslationX() - targetX) > 0.5f) {
@@ -10303,13 +10312,6 @@ public class MainActivity extends Activity {
         // Keep the horizontal glyph anchor synchronized with the current hour shape
         // without recalculating or changing the background geometry.
         updateClockDigitHorizontalOffset();
-        // The text view normally scales from its left edge. Add half of the
-        // width reduction back as an offset so the two-digit Neon Circuit clock
-        // stays centred while its left and right sides each gain about 10dp.
-        if (neonCircuitTwoDigitHour) {
-            clockText.setTranslationX(clockText.getTranslationX()
-                    + LauncherUiUtils.dp(this, 10));
-        }
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         // The panel itself no longer uses scaleY, so this offset must remain a
