@@ -503,6 +503,14 @@ public class MainActivity extends Activity {
         }
     };
     private boolean drawerOpen = false;
+    // Coalesce high-frequency touch MOVE events to one drawer pose update per display frame.
+    private float drawerSwipePendingProgress;
+    private int drawerSwipePendingEffect;
+    private boolean drawerSwipeFrameScheduled = false;
+    private final Runnable drawerSwipeFrame = () -> {
+        drawerSwipeFrameScheduled = false;
+        applyDrawerSwipeFrame();
+    };
     private boolean drawerAtTopOnGestureDown = true;
     private boolean packageReceiverRegistered = false;
     private final BroadcastReceiver packageChangesReceiver = new BroadcastReceiver() {
@@ -1032,8 +1040,7 @@ public class MainActivity extends Activity {
                         Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
                 homeScreen.animate().cancel();
                 drawerScreen.animate().cancel();
-                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition(), drawerSwipeProgress);
+                scheduleDrawerSwipeFrame(drawerSwipeProgress);
                 handler.removeCallbacks(homeLongPress);
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
@@ -1258,8 +1265,7 @@ public class MainActivity extends Activity {
                 int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
                         ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
                 drawerSwipeProgress = Math.max(0f, Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
-                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition(), drawerSwipeProgress);
+                scheduleDrawerSwipeFrame(drawerSwipeProgress);
                 return true;
             }
             // A held item gesture belongs to its move/resize controller, not workspace navigation.
@@ -1281,8 +1287,7 @@ public class MainActivity extends Activity {
                     drawerSwipeVisualActive = true;
                     homeScreen.animate().cancel();
                     drawerScreen.animate().cancel();
-                    LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                            getDrawerTransition(), drawerSwipeProgress);
+                    scheduleDrawerSwipeFrame(drawerSwipeProgress);
                 }
                 handler.removeCallbacks(homeLongPress);
                 handler.removeCallbacks(clockWidgetLongPress);
@@ -1299,8 +1304,7 @@ public class MainActivity extends Activity {
                             ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
                     drawerSwipeProgress = Math.max(0f, Math.min(1f, drawerSwipeStartProgress - dy / (float) swipeHeight));
                     if (dy < 0f) drawerSwipeVisualActive = true;
-                    LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                            getDrawerTransition(), drawerSwipeProgress);
+                    scheduleDrawerSwipeFrame(drawerSwipeProgress);
                 }
                 return true;
             }
@@ -1419,6 +1423,7 @@ public class MainActivity extends Activity {
             }
             handler.removeCallbacks(homeLongPress);
             if (drawerCloseSwipeClaimed) {
+                flushDrawerSwipeFrame();
                 drawerCloseSwipeClaimed = false;
                 // Progress is the remaining-open fraction: a 10% downward
                 // swipe leaves progress at 90%, which is enough to close to Home.
@@ -1432,6 +1437,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (drawerSwipeVisualActive) {
+                flushDrawerSwipeFrame();
                 drawerSwipeVisualActive = false;
                 if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
@@ -1481,6 +1487,7 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(homeLongPress);
             if (longPressTriggered) return true;
             if (drawerCloseSwipeClaimed) {
+                flushDrawerSwipeFrame();
                 drawerCloseSwipeClaimed = false;
                 // A 10% downward pull is enough to complete the drawer-to-Home
                 // transition; progress represents how much of the drawer remains open.
@@ -1494,6 +1501,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (drawerSwipeVisualActive) {
+                flushDrawerSwipeFrame();
                 drawerSwipeVisualActive = false;
                 if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
@@ -4952,6 +4960,33 @@ public class MainActivity extends Activity {
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
         }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
+    }
+
+    private void scheduleDrawerSwipeFrame(float progress) {
+        drawerSwipePendingProgress = Math.max(0f, Math.min(1f, progress));
+        drawerSwipePendingEffect = getDrawerTransition();
+        if (root == null) {
+            applyDrawerSwipeFrame();
+            return;
+        }
+        if (!drawerSwipeFrameScheduled) {
+            drawerSwipeFrameScheduled = true;
+            root.postOnAnimation(drawerSwipeFrame);
+        }
+    }
+
+    private void applyDrawerSwipeFrame() {
+        if (homeScreen == null || drawerScreen == null) return;
+        LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
+                drawerSwipePendingEffect, drawerSwipePendingProgress);
+    }
+
+    /** Ensure the last finger position is rendered before starting the settle animation. */
+    private void flushDrawerSwipeFrame() {
+        if (!drawerSwipeFrameScheduled) return;
+        if (root != null) root.removeCallbacks(drawerSwipeFrame);
+        drawerSwipeFrameScheduled = false;
+        applyDrawerSwipeFrame();
     }
 
     private boolean addToHome(String packageName) { return addToHome(packageName, currentPage); }
