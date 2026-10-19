@@ -42,6 +42,8 @@ final class LauncherIconDrawable extends Drawable {
     private final RectF rect = new RectF();
     private final Path path = new Path();
     private final android.graphics.Rect bounds = new android.graphics.Rect();
+    // Shape geometry is constant between bounds/style changes; do not rebuild it on every draw.
+    private boolean shapePathDirty = true;
     // Reuse these six points rather than allocating seven arrays every icon redraw.
     private final float[][] hexagonVertices = new float[6][2];
 
@@ -118,8 +120,12 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     void updateAppearance(boolean showBackground, int shape, int backgroundColor, int innerShapeColor) {
+        int clampedShape = clampShape(shape);
+        if (this.showBackground != showBackground || this.shape != clampedShape) {
+            shapePathDirty = true;
+        }
         this.showBackground = showBackground;
-        this.shape = clampShape(shape);
+        this.shape = clampedShape;
         this.backgroundColor = backgroundColor;
         this.innerShapeColor = innerShapeColor;
         invalidateSelf();
@@ -157,15 +163,17 @@ final class LauncherIconDrawable extends Drawable {
 
         if (shape == SHAPE_TRIANGLE || shape == SHAPE_PEAR
                 || shape == SHAPE_ROUNDED_HEXAGON) {
-            setShapePath(rect);
+            if (shapePathDirty) {
+                setShapePath(rect);
+                shapePathDirty = false;
+            }
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(innerShapeColor);
             canvas.drawPath(path, paint);
 
-            // The app artwork follows the selected silhouette. The independent inner
-            // colour remains visible only where the source artwork is transparent.
+            // The app artwork follows the selected silhouette. Reuse the same cached
+            // path for fill and clipping rather than calculating it twice per draw.
             int save = canvas.save();
-            setShapePath(rect);
             canvas.clipPath(path);
             source.setBounds(Math.round(rect.left), Math.round(rect.top),
                     Math.round(rect.right), Math.round(rect.bottom));
@@ -270,6 +278,7 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     @Override protected void onBoundsChange(android.graphics.Rect bounds) {
+        shapePathDirty = true;
         if (source != null) source.setBounds(bounds);
     }
 }
