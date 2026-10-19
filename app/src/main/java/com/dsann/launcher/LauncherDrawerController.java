@@ -30,10 +30,13 @@ final class LauncherDrawerController {
         final LinearLayout screen;
         final GridView grid;
         final LauncherAppAdapter adapter;
-        BuiltDrawer(LinearLayout screen, GridView grid, LauncherAppAdapter adapter) {
+        final Runnable refreshAppList;
+        BuiltDrawer(LinearLayout screen, GridView grid, LauncherAppAdapter adapter,
+                    Runnable refreshAppList) {
             this.screen = screen;
             this.grid = grid;
             this.adapter = adapter;
+            this.refreshAppList = refreshAppList;
         }
     }
 
@@ -106,15 +109,29 @@ final class LauncherDrawerController {
         searchRow.setVisibility(View.GONE);
         screen.addView(searchRow, 1, searchRowParams);
 
-        final List<ResolveInfo> originalApps = new java.util.ArrayList<>(drawerApps);
         final EditText[] activeQuery = new EditText[1];
 
-        Runnable restoreApps = () -> {
+        // allApps is the stable, freshly re-queried source owned by MainActivity. Do not
+        // retain a startup snapshot here: newly installed or re-enabled apps must survive
+        // closing search, even when the drawer was built before they became available.
+        Runnable refreshAppList = () -> {
+            String needle = activeQuery[0] == null ? ""
+                    : activeQuery[0].getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
             drawerApps.clear();
-            drawerApps.addAll(originalApps);
+            String ownPackage = activity.getPackageName();
+            for (ResolveInfo app : allApps) {
+                if (app == null || app.activityInfo == null
+                        || ownPackage.equals(app.activityInfo.packageName)) continue;
+                String label = adapter.cachedLabel(app);
+                if (needle.isEmpty()
+                        || label.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                    drawerApps.add(app);
+                }
+            }
             adapter.notifyDataSetChanged();
             grid.setSelection(0);
         };
+        Runnable restoreApps = () -> refreshAppList.run();
         Runnable closeSearch = () -> {
             android.view.inputmethod.InputMethodManager imm =
                     (android.view.inputmethod.InputMethodManager) activity.getSystemService(
@@ -162,20 +179,7 @@ final class LauncherDrawerController {
             queryInput.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    String needle = s.toString().trim().toLowerCase(java.util.Locale.ROOT);
-                    drawerApps.clear();
-                    if (needle.isEmpty()) {
-                        drawerApps.addAll(originalApps);
-                    } else {
-                        for (ResolveInfo app : originalApps) {
-                            String label = adapter.cachedLabel(app);
-                            if (label.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
-                                drawerApps.add(app);
-                            }
-                        }
-                    }
-                    adapter.notifyDataSetChanged();
-                    grid.setSelection(0);
+                    refreshAppList.run();
                 }
                 @Override public void afterTextChanged(Editable s) {}
             });
@@ -199,6 +203,6 @@ final class LauncherDrawerController {
             });
         });
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
-        return new BuiltDrawer(screen, grid, adapter);
+        return new BuiltDrawer(screen, grid, adapter, refreshAppList);
     }
 }

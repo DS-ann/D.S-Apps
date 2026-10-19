@@ -340,6 +340,7 @@ public class MainActivity extends Activity {
     private boolean clockGestureLockedAtDown = false;
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
+    private Runnable refreshDrawerAppList;
     private List<ResolveInfo> allApps = new ArrayList<>();
     private List<ResolveInfo> drawerApps = new ArrayList<>();
     // The same labels used to sort allApps are reused by drawer cells and search.
@@ -526,26 +527,33 @@ public class MainActivity extends Activity {
                 widgetRestoreRetryCount = 0;
                 handler.removeCallbacks(refreshClockGeometryAfterPackageChange);
                 handler.postDelayed(refreshClockGeometryAfterPackageChange, 350L);
+                // Rebuild ResolveInfo records after an update; launch activities/labels can
+                // change even when the package name itself stays the same.
+                scheduleAppDrawerRefresh();
                 return;
             }
-            if (!Intent.ACTION_PACKAGE_ADDED.equals(action)
-                    && !Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
-                return;
-            }
-            // Ignore the remove/add broadcasts generated while an app is being updated.
-            // The drawer list is refreshed only for a genuine install or uninstall.
-            if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return;
+            boolean packageAdded = Intent.ACTION_PACKAGE_ADDED.equals(action);
+            boolean packageRemoved = Intent.ACTION_PACKAGE_REMOVED.equals(action);
+            boolean packageChanged = Intent.ACTION_PACKAGE_CHANGED.equals(action);
+            if (!packageAdded && !packageRemoved && !packageChanged) return;
 
-            // PackageManager can briefly return a stale launcher-activity query immediately
-            // after the broadcast. Debounce the refresh so the installed/uninstalled package
-            // is reflected by the single drawer refresh.
-            handler.removeCallbacks(refreshAppsAfterPackageChange);
-            handler.postDelayed(refreshAppsAfterPackageChange, 800L);
+            // Ignore the remove/add pair emitted during an update; PACKAGE_REPLACED performs
+            // the single authoritative refresh after the new package is fully available.
+            if ((packageAdded || packageRemoved)
+                    && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return;
+
+            // PACKAGE_CHANGED is also sent for enabled/disabled component changes. Debounce
+            // broadcasts so multi-component state changes cause only one PackageManager scan.
+            scheduleAppDrawerRefresh();
         }
     };
     private final Runnable refreshAppsAfterPackageChange = new Runnable() {
         @Override public void run() { loadApps(); }
     };
+    private void scheduleAppDrawerRefresh() {
+        handler.removeCallbacks(refreshAppsAfterPackageChange);
+        handler.postDelayed(refreshAppsAfterPackageChange, 800L);
+    }
     private static final int MAX_WIDGET_RESTORE_RETRIES = 8;
     private boolean widgetRestoreRetryScheduled = false;
     private int widgetRestoreRetryCount = 0;
@@ -609,6 +617,7 @@ public class MainActivity extends Activity {
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
         packageFilter.addDataScheme("package");
         registerReceiver(packageChangesReceiver, packageFilter);
@@ -1847,7 +1856,8 @@ public class MainActivity extends Activity {
             if (!clockUpdatesActive || widgetHost == null) return;
             try { widgetHost.startListening(); } catch (Exception ignored) {}
         }, 500L);
-        // The app list is loaded at startup and refreshed only by package add/remove broadcasts.
+        // Avoid a PackageManager scan on every resume. Install, removal, update, and
+        // component-enabled broadcasts refresh the drawer through packageChangesReceiver.
     }
 
     @Override protected void onPause() {
@@ -1942,7 +1952,10 @@ public class MainActivity extends Activity {
         if (drawerAdapter != null) {
             drawerAdapter.clearPackageCaches();
             drawerAdapter.seedLabelCache(preloadedAppLabels);
-            drawerAdapter.notifyDataSetChanged();
+            // Re-apply the live search query, if present, against the newly queried package
+            // list instead of allowing search state to restore a stale startup snapshot.
+            if (refreshDrawerAppList != null) refreshDrawerAppList.run();
+            else drawerAdapter.notifyDataSetChanged();
         }
     }
 
@@ -2543,6 +2556,7 @@ public class MainActivity extends Activity {
         drawerScreen = built.screen;
         drawerGrid = built.grid;
         drawerAdapter = built.adapter;
+        refreshDrawerAppList = built.refreshAppList;
         drawerAdapter.seedLabelCache(preloadedAppLabels);
     }
 

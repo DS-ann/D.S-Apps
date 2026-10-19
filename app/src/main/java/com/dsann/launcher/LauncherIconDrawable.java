@@ -991,6 +991,22 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /**
+     * Lower, detail-only boundary threshold: the separator pass remains conservative, while
+     * this pass can still segment antialiased letters and small symbols whose adjacent pixels
+     * differ less than a major logo segment. Component geometry and contrast reject most
+     * gradient noise before anything is changed.
+     */
+    private static boolean detailColourBoundary(int first, int second) {
+        int redDifference = Math.abs(Color.red(first) - Color.red(second));
+        int greenDifference = Math.abs(Color.green(first) - Color.green(second));
+        int blueDifference = Math.abs(Color.blue(first) - Color.blue(second));
+        int largestDifference = Math.max(redDifference,
+                Math.max(greenDifference, blueDifference));
+        int totalDifference = redDifference + greenDifference + blueDifference;
+        return largestDifference >= 30 && totalDifference >= 54;
+    }
+
+    /**
      * Finds small, enclosed high-contrast colour regions that carry internal logo meaning.
      * The component is segmented using the same universal colour-boundary threshold as the
      * separator pass. A candidate is retained as a white detail only when it is compact,
@@ -1010,7 +1026,7 @@ final class LauncherIconDrawable extends Drawable {
         final int[] queue = new int[count];
         final int[] dx = { -1, 1, 0, 0 };
         final int[] dy = { 0, 0, -1, 1 };
-        final int minArea = Math.max(3, Math.round(count * 0.00020f));
+        final int minArea = Math.max(3, Math.round(count * 0.00012f));
         final int maxArea = Math.max(minArea, Math.round(count * 0.09f));
         int nextLabel = 0;
 
@@ -1026,11 +1042,16 @@ final class LauncherIconDrawable extends Drawable {
             queue[tail++] = start;
             labels[start] = label;
             boolean touchesExterior = false;
+            int minX = width, minY = height, maxX = -1, maxY = -1;
 
             while (head < tail) {
                 int index = queue[head++];
                 int x = index % width;
                 int y = index / width;
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
                 int current = pixels[index];
                 for (int direction = 0; direction < 4; direction++) {
                     int nx = x + dx[direction];
@@ -1050,21 +1071,36 @@ final class LauncherIconDrawable extends Drawable {
                         continue;
                     }
                     if (labels[neighbour] >= 0) continue;
-                    if (strongColourBoundary(current, pixels[neighbour])) continue;
+                    if (detailColourBoundary(current, pixels[neighbour])) continue;
                     labels[neighbour] = label;
                     queue[tail++] = neighbour;
                 }
             }
 
             int area = tail;
-            if (touchesExterior || area < minArea || area > maxArea) continue;
+            int componentWidth = maxX - minX + 1;
+            int componentHeight = maxY - minY + 1;
+            int boundsArea = Math.max(1, componentWidth * componentHeight);
+            float aspectRatio = Math.max(componentWidth, componentHeight)
+                    / (float) Math.max(1, Math.min(componentWidth, componentHeight));
+            float fillRatio = area / (float) boundsArea;
+            // Reject long seams and sparse gradient fragments. Text counters and icon symbols
+            // are compact, bounded shapes; the limits still allow thin minus/I-like glyphs.
+            if (touchesExterior || area < minArea || area > maxArea
+                    || aspectRatio > 9f || fillRatio < 0.035f) continue;
 
             long componentLuminance = 0;
+            long componentRed = 0, componentGreen = 0, componentBlue = 0;
             long surroundingLuminance = 0;
+            long surroundingRed = 0, surroundingGreen = 0, surroundingBlue = 0;
             int surroundingSamples = 0;
             for (int i = 0; i < area; i++) {
                 int index = queue[i];
-                componentLuminance += Math.round(pixelLuminance(pixels[index]));
+                int componentPixel = pixels[index];
+                componentLuminance += Math.round(pixelLuminance(componentPixel));
+                componentRed += Color.red(componentPixel);
+                componentGreen += Color.green(componentPixel);
+                componentBlue += Color.blue(componentPixel);
                 int x = index % width;
                 int y = index / width;
                 for (int direction = 0; direction < 4; direction++) {
@@ -1077,8 +1113,12 @@ final class LauncherIconDrawable extends Drawable {
                             || Color.alpha(pixels[neighbour]) < 160) {
                         continue;
                     }
-                    if (strongColourBoundary(pixels[index], pixels[neighbour])) {
-                        surroundingLuminance += Math.round(pixelLuminance(pixels[neighbour]));
+                    if (detailColourBoundary(pixels[index], pixels[neighbour])) {
+                        int surroundingPixel = pixels[neighbour];
+                        surroundingLuminance += Math.round(pixelLuminance(surroundingPixel));
+                        surroundingRed += Color.red(surroundingPixel);
+                        surroundingGreen += Color.green(surroundingPixel);
+                        surroundingBlue += Color.blue(surroundingPixel);
                         surroundingSamples++;
                     }
                 }
@@ -1087,7 +1127,19 @@ final class LauncherIconDrawable extends Drawable {
             if (surroundingSamples < Math.max(4, area / 2)) continue;
             float componentMean = componentLuminance / (float) area;
             float surroundingMean = surroundingLuminance / (float) surroundingSamples;
-            if (Math.abs(componentMean - surroundingMean) < 52f) continue;
+            int redDifference = Math.round(Math.abs(componentRed / (float) area
+                    - surroundingRed / (float) surroundingSamples));
+            int greenDifference = Math.round(Math.abs(componentGreen / (float) area
+                    - surroundingGreen / (float) surroundingSamples));
+            int blueDifference = Math.round(Math.abs(componentBlue / (float) area
+                    - surroundingBlue / (float) surroundingSamples));
+            int largestChannelDifference = Math.max(redDifference,
+                    Math.max(greenDifference, blueDifference));
+            int totalChannelDifference = redDifference + greenDifference + blueDifference;
+            boolean strongLuminanceContrast = Math.abs(componentMean - surroundingMean) >= 34f;
+            boolean strongColourContrast = largestChannelDifference >= 36
+                    && totalChannelDifference >= 72;
+            if (!strongLuminanceContrast && !strongColourContrast) continue;
 
             // The accepted region is small, interior, and demonstrably distinct from its
             // surrounding colour. Preserve all its core pixels as white negative-space detail.
