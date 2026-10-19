@@ -691,7 +691,7 @@ final class LauncherScreenTransitions {
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
-        beginPropertyTransition();
+        beginPropertyTransition(false);
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
         float drawerExitY = effect == 0
