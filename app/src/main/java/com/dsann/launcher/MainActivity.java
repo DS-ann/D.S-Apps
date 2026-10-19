@@ -279,6 +279,15 @@ public class MainActivity extends Activity {
                 clockColorLastFrameUptime = 0L;
                 return;
             }
+            // The moving home/drawer surfaces are cached as hardware layers. Avoid
+            // invalidating the home layer for clock-gradient changes during this motion.
+            if (drawerSwipeVisualActive || drawerCloseSwipeClaimed
+                    || LauncherScreenTransitions.isDrawerTransitionRunning(
+                            homeScreen, drawerScreen, getDrawerTransition())) {
+                clockColorLastFrameUptime = 0L;
+                handler.postDelayed(this, 250L);
+                return;
+            }
             long now = android.os.SystemClock.uptimeMillis();
             if (clockColorLastFrameUptime > 0L) {
                 long elapsed = Math.max(0L, Math.min(500L, now - clockColorLastFrameUptime));
@@ -337,7 +346,6 @@ public class MainActivity extends Activity {
     private float drawerSwipeProgress = 0f;
     private float drawerSwipeStartProgress = 0f;
     private float drawerSwipeAnchorY = 0f;
-    private boolean drawerTransitionInterruptedAtDown = false;
     private boolean drawerSwipeVisualActive = false;
     private boolean gestureStartedOnAppCell = false;
     private boolean gestureStartedOnWidget = false;
@@ -361,6 +369,8 @@ public class MainActivity extends Activity {
     private boolean iconMovedTooEarly = false;
     private boolean workspaceIconReparenting = false;
     private boolean suppressResizeOutsideTouchStream = false;
+    // Ignore an entire touch stream if it starts while the drawer is settling.
+    private boolean drawerTransitionGestureLocked = false;
     private float iconTouchRawX, iconTouchRawY;
     private float iconDragFingerOffsetY;
     private int iconOriginalLeft, iconOriginalTop;
@@ -654,6 +664,20 @@ public class MainActivity extends Activity {
             }
             return true;
         }
+        // Do not let a second swipe take over, reverse, or scroll through a drawer
+        // transition. Lock the complete touch stream until its UP/CANCEL arrives.
+        if (drawerTransitionGestureLocked) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                drawerTransitionGestureLocked = false;
+            }
+            return true;
+        }
+        if (action == MotionEvent.ACTION_DOWN
+                && LauncherScreenTransitions.isDrawerTransitionRunning(
+                        homeScreen, drawerScreen, getDrawerTransition())) {
+            drawerTransitionGestureLocked = true;
+            return true;
+        }
         if (action == MotionEvent.ACTION_DOWN) {
             boolean dismissedResizeMode = false;
             if (widgetInteractionController != null) {
@@ -675,9 +699,6 @@ public class MainActivity extends Activity {
             pageSwipeChildCancelled = false;
             verticalSwipeClaimed = false;
             drawerCloseSwipeClaimed = false;
-            drawerTransitionInterruptedAtDown =
-                    LauncherScreenTransitions.isDrawerTransitionRunning(
-                            homeScreen, drawerScreen, getDrawerTransition());
             drawerSwipeStartProgress = LauncherScreenTransitions.getDrawerTransitionProgress(
                     homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
             drawerSwipeAnchorY = event.getY();
@@ -686,16 +707,6 @@ public class MainActivity extends Activity {
             boolean touchOnVisibleDrawerGrid = drawerScreen != null
                     && drawerScreen.getVisibility() == View.VISIBLE
                     && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
-            if (touchOnVisibleDrawerGrid && drawerTransitionInterruptedAtDown) {
-                // The drawer is already under the finger. Finish its visual settle now,
-                // so the same DOWN/MOVE stream belongs to GridView scrolling, not to a
-                // second launcher transition gesture.
-                LauncherScreenTransitions.snapDrawerOpenForScrolling(
-                        homeScreen, drawerScreen, () -> drawerOpen = true);
-                drawerTransitionInterruptedAtDown = false;
-                drawerSwipeStartProgress = 1f;
-                drawerSwipeProgress = 1f;
-            }
             gestureStartedOnDrawerGrid = touchOnVisibleDrawerGrid && drawerOpen;
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
@@ -761,43 +772,6 @@ public class MainActivity extends Activity {
 
         float dx = event.getX() - gestureDownX;
         float dy = event.getY() - gestureDownY;
-
-        // A second gesture during a settling Parallex transition takes over at the
-        // currently rendered progress. A tap does not interrupt the animation.
-        if (action == MotionEvent.ACTION_MOVE && drawerTransitionInterruptedAtDown) {
-            boolean transitionVerticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
-                    && Math.abs(dy) > Math.abs(dx) * 1.15f;
-            if (!drawerSwipeVisualActive
-                    && !LauncherScreenTransitions.isDrawerTransitionRunning(
-                            homeScreen, drawerScreen, getDrawerTransition())) {
-                drawerTransitionInterruptedAtDown = false;
-                drawerSwipeStartProgress = drawerOpen ? 1f : 0f;
-                drawerSwipeProgress = drawerSwipeStartProgress;
-            } else if (!drawerSwipeVisualActive && transitionVerticalSwipe) {
-                drawerSwipeStartProgress = LauncherScreenTransitions.interruptDrawerTransition(
-                        this, homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
-                drawerSwipeAnchorY = event.getY();
-                drawerSwipeProgress = drawerSwipeStartProgress;
-                drawerSwipeVisualActive = true;
-                verticalSwipeClaimed = true;
-                handler.removeCallbacks(homeLongPress);
-                handler.removeCallbacks(clockWidgetLongPress);
-                handler.removeCallbacks(clockWidgetEditLongPress);
-                MotionEvent cancel = MotionEvent.obtain(event);
-                cancel.setAction(MotionEvent.ACTION_CANCEL);
-                super.dispatchTouchEvent(cancel);
-                cancel.recycle();
-                return true;
-            } else if (drawerSwipeVisualActive) {
-                int swipeHeight = Math.max(1, pageViewport != null && pageViewport.getHeight() > 0
-                        ? pageViewport.getHeight() : getResources().getDisplayMetrics().heightPixels);
-                drawerSwipeProgress = Math.max(0f, Math.min(1f,
-                        drawerSwipeStartProgress - (event.getY() - drawerSwipeAnchorY) / swipeHeight));
-                LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
-                        getDrawerTransition(), drawerSwipeProgress);
-                return true;
-            }
-        }
 
         // While the drawer is open, let a qualifying downward pull close it on the
         // first gesture whenever that gesture begins at the top of the app list. Users
@@ -1212,19 +1186,7 @@ public class MainActivity extends Activity {
             }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                boolean interruptedTransition = drawerTransitionInterruptedAtDown;
-                drawerTransitionInterruptedAtDown = false;
-                // Normal gestures keep the existing 10% threshold. A gesture that
-                // takes over a running animation settles at the nearest endpoint.
-                if (interruptedTransition) {
-                    if (drawerSwipeProgress >= 0.50f) {
-                        LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                                () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
-                    } else {
-                        LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
-                                () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
-                    }
-                } else if (drawerSwipeProgress >= 0.10f) {
+                if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1286,14 +1248,7 @@ public class MainActivity extends Activity {
             }
             if (drawerSwipeVisualActive) {
                 drawerSwipeVisualActive = false;
-                boolean interruptedTransition = drawerTransitionInterruptedAtDown;
-                drawerTransitionInterruptedAtDown = false;
-                // Interrupted settles choose the nearest endpoint; ordinary short
-                // opening swipes keep their established 10% threshold.
-                if (interruptedTransition && drawerSwipeProgress < 0.50f) {
-                    LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
-                } else if (interruptedTransition || drawerSwipeProgress >= 0.10f) {
+                if (drawerSwipeProgress >= 0.10f) {
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
                 } else {
