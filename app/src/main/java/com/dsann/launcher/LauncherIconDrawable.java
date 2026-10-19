@@ -1169,39 +1169,26 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /**
-     * Applies the same selected artwork palette to a single clock-glyph colour.
-     * Spectrum Mix and the gradient themes mirror recolourArtwork()'s HSV mapping.
-     * Silver digits meet the existing source-white classifier, so Nothing Monochrome
-     * keeps them white and legible over the clock's dark translucent background.
+     * Static clock-glyph palette mapped to the exact palette families selected for app icons.
+     * The artwork switch is not an animation: successive glyphs use stable palette regions.
+     * Nothing Monochrome uses white glyphs; its black keyline is rendered by the clock view.
      */
-    static int artworkColorForClock(int sourceColor, int theme) {
+    static int clockArtworkColorForGlyph(int theme, int glyphIndex, int originalColor) {
         int boundedTheme = clampArtworkTheme(theme);
-        int alpha = Color.alpha(sourceColor);
-        if (alpha == 0 || boundedTheme == ARTWORK_ORIGINAL) return sourceColor;
-
-        if (boundedTheme == ARTWORK_NOTHING_MONOCHROME) {
-            int tone = isSourceWhiteSegment(sourceColor) ? 255 : 0;
-            return Color.argb(alpha, tone, tone, tone);
+        int index = Math.floorMod(Math.max(0, glyphIndex), 3);
+        switch (boundedTheme) {
+            case ARTWORK_SPECTRUM_MIX:
+                return MIXED_PALETTE[index];
+            case ARTWORK_OCEAN_GRADIENT:
+                return OCEAN_PALETTE[index];
+            case ARTWORK_SUNSET_GRADIENT:
+                return SUNSET_PALETTE[index];
+            case ARTWORK_NOTHING_MONOCHROME:
+                return Color.WHITE;
+            case ARTWORK_ORIGINAL:
+            default:
+                return originalColor;
         }
-
-        float[] sourceHsv = new float[3];
-        float[] targetHsv = new float[3];
-        Color.colorToHSV(sourceColor, sourceHsv);
-        float hue = sourceHsv[0];
-        float saturation = sourceHsv[1];
-        float value = sourceHsv[2];
-        if (saturation < 0.16f && (value < 0.12f || value > 0.96f)) return sourceColor;
-
-        int themed = artworkColour(boundedTheme, hue, saturation, value);
-        Color.colorToHSV(themed, targetHsv);
-        targetHsv[2] = value;
-        if (saturation < 0.16f) {
-            targetHsv[1] = Math.min(targetHsv[1], 0.58f);
-        } else {
-            targetHsv[1] = Math.max(0.52f, Math.min(0.92f, targetHsv[1]));
-        }
-        int rgb = Color.HSVToColor(targetHsv);
-        return Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));
     }
 
     private static int interpolatePalette(int[] palette, float position) {

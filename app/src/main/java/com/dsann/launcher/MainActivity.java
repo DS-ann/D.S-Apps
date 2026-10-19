@@ -143,6 +143,7 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler();
     private boolean clockUpdatesActive = false;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
+    private final java.util.Map<TextView, Integer> appliedClockArtworkModes = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
     private int homeStudioAccentColor = Color.rgb(119, 205, 255);
@@ -615,6 +616,7 @@ public class MainActivity extends Activity {
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         normalizeAppIconSettings();
+        normalizeClockVisualModePreferences();
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
@@ -6222,6 +6224,54 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean isClockIconArtworkActive() {
+        return prefs != null
+                && prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false)
+                && !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                && !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+    }
+
+    /** Zero means normal rendering; positive values encode the selected icon-artwork theme. */
+    private int getEffectiveClockArtworkMode() {
+        if (!isClockIconArtworkActive()) return 0;
+        int theme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+        return theme + 1;
+    }
+
+    private void applyClockArtworkSpans(
+            android.text.SpannableStringBuilder text, int theme) {
+        int glyphIndex = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.digit(ch, 10) >= 0) {
+                int color = LauncherIconDrawable.clockArtworkColorForGlyph(
+                        theme, glyphIndex, CLOCK_DIGIT_SILVER);
+                text.setSpan(new android.text.style.ForegroundColorSpan(color),
+                        i, i + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                glyphIndex++;
+            } else if (ch == ':' || ch == '.' || ch == '\u2236') {
+                int color = LauncherIconDrawable.clockArtworkColorForGlyph(
+                        theme, glyphIndex, CLOCK_DIGIT_SILVER);
+                text.setSpan(new android.text.style.ForegroundColorSpan(color),
+                        i, i + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+    }
+
+    private void refreshClockArtworkAppearance() {
+        int restorePage = Math.max(0, Math.min(1, currentPage));
+        // Restore each style's own typography/shadow before applying the chosen
+        // artwork. This also removes the monochrome outline when the switch turns off.
+        for (int page = 0; page < clockPanelsByPage.length; page++) {
+            if (clockPanelsByPage[page] == null) continue;
+            activateClockForPage(page);
+            applyClockStyle();
+        }
+        activateClockForPage(restorePage);
+        updateClock();
+    }
+
     private void refreshClockTypographyAndGeometry() {
         int restorePage = Math.max(0, Math.min(1, currentPage));
         updateClock();
@@ -6410,12 +6460,19 @@ public class MainActivity extends Activity {
                     .setIconArtworkTheme(iconArtworkTheme, iconArtworkActive);
         } else if (!digitGradient) {
             int requestedColor = iconArtworkActive
-                    ? LauncherIconDrawable.artworkColorForClock(
-                            CLOCK_DIGIT_SILVER, iconArtworkTheme)
+                    ? LauncherIconDrawable.clockArtworkColorForGlyph(
+                            iconArtworkTheme, 0, CLOCK_DIGIT_SILVER)
                     : CLOCK_DIGIT_SILVER;
             if (clockText.getCurrentTextColor() != requestedColor) {
                 clockText.setTextColor(requestedColor);
             }
+        }
+        if (iconArtworkActive && !sevenSegment
+                && iconArtworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME) {
+            // The app-icon monochrome theme relies on crisp white details against
+            // black regions. A restrained dark keyline makes the clock glyphs read
+            // like that artwork rather than looking identical to unthemed silver text.
+            clockText.setShadowLayer(LauncherUiUtils.dp(this, 1.1f), 0f, 0f, Color.BLACK);
         }
     }
 
@@ -6553,17 +6610,25 @@ public class MainActivity extends Activity {
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
-            // Only update the TextView when its displayed value actually changes.
-            // This avoids needless layout invalidations from time/date broadcasts.
-            if (!displayClock.toString().contentEquals(clockText.getText())) {
-                // The seven-segment renderer draws within fixed bounds. Avoid
-                // text-metric-driven remeasurement as hour digits change (e.g. 1 -> 2).
+            int artworkMode = getEffectiveClockArtworkMode();
+            Integer previousArtworkMode = appliedClockArtworkModes.get(clockText);
+            boolean artworkModeChanged = previousArtworkMode == null
+                    || previousArtworkMode.intValue() != artworkMode;
+            if (artworkMode > 0 && !sevenSegmentClock) {
+                int selectedArtworkTheme = artworkMode - 1;
+                applyClockArtworkSpans(displayClock, selectedArtworkTheme);
+            }
+            // Rebind on a theme/switch change even when time has not changed. In
+            // particular this removes old ForegroundColorSpans when gradients take over.
+            if (!displayClock.toString().contentEquals(clockText.getText())
+                    || artworkModeChanged) {
                 if (sevenSegmentClock) {
                     clockText.setText(displayClock, TextView.BufferType.NORMAL);
                     clockText.postInvalidateOnAnimation();
                 } else {
                     clockText.setText(displayClock);
                 }
+                appliedClockArtworkModes.put(clockText, artworkMode);
             }
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
@@ -8891,6 +8956,25 @@ public class MainActivity extends Activity {
         resolveAllWorkspaceOverlaps(page, widgetContainer);
     }
 
+    private void normalizeClockVisualModePreferences() {
+        boolean matchArtwork = prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+        boolean digitGradient = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+        boolean liveGradient = prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+        SharedPreferences.Editor edit = prefs.edit();
+        boolean changed = false;
+        if (matchArtwork && (digitGradient || liveGradient)) {
+            // Prefer the explicitly enabled artwork switch when migrating the
+            // conflicting state written by earlier builds.
+            edit.putBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                    .putBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+            changed = true;
+        } else if (!matchArtwork && liveGradient && !digitGradient) {
+            edit.putBoolean(KEY_CLOCK_DIGIT_GRADIENT, true);
+            changed = true;
+        }
+        if (changed) edit.apply();
+    }
+
     private void normalizeAppIconSettings() {
         if (prefs == null) return;
         int homeSize = prefs.getInt(KEY_ICON_SIZE, 48);
@@ -9484,7 +9568,7 @@ public class MainActivity extends Activity {
             }
             themeEdit.apply();
             refreshWorkspaceIconAppearance();
-            applyClockColorEffects(clockColorPhase, true);
+            refreshClockArtworkAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◈", "Theme shortcut icons",
@@ -9565,21 +9649,31 @@ public class MainActivity extends Activity {
         });
         addSettingRow(content, "◈", "Match app icon artwork",
                 prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false) ? "On" : "Off", () -> {
-            prefs.edit().putBoolean(KEY_CLOCK_ICON_ARTWORK,
-                    !prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false)).apply();
-            applyClockColorEffects(clockColorPhase, true);
+            boolean enabled = !prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+            SharedPreferences.Editor edit = prefs.edit().putBoolean(KEY_CLOCK_ICON_ARTWORK, enabled);
+            if (enabled) {
+                // Artwork mode and either gradient mode are mutually exclusive.
+                edit.putBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                        .putBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+            }
+            edit.apply();
+            stopClockColorAnimator();
+            clockColorPhase = 0f;
+            refreshClockArtworkAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "✦", "Gradient clock digits",
                 prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false) ? "On" : "Off", () -> {
             boolean enabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
-            prefs.edit().putBoolean(KEY_CLOCK_DIGIT_GRADIENT, enabled).apply();
-            updateClock();
-            applyClockColorEffects(clockColorPhase, true);
+            SharedPreferences.Editor edit = prefs.edit().putBoolean(KEY_CLOCK_DIGIT_GRADIENT, enabled);
+            if (enabled) edit.putBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+            edit.apply();
+            if (!enabled || !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
+                stopClockColorAnimator();
+            }
+            refreshClockArtworkAppearance();
             if (enabled && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
                 startClockColorAnimator();
-            } else {
-                stopClockColorAnimator();
             }
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -9587,19 +9681,18 @@ public class MainActivity extends Activity {
                 prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false) ? "Live" : "Fixed", () -> {
             boolean enabled = !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
             SharedPreferences.Editor edit = prefs.edit().putBoolean(KEY_CLOCK_LIVE_GRADIENT, enabled);
-            // Enabling live colour also enables the digit gradient so the date,
-            // AM/PM and digits move through their palettes together. Turning live
-            // mode back off leaves that gradient in place as a fixed colour sweep.
-            if (enabled) edit.putBoolean(KEY_CLOCK_DIGIT_GRADIENT, true);
-            edit.apply();
+            // Live animation uses the gradient mode and therefore switches artwork matching off.
             if (enabled) {
-                applyClockColorEffects(clockColorPhase, true);
-                startClockColorAnimator();
-            } else {
+                edit.putBoolean(KEY_CLOCK_DIGIT_GRADIENT, true)
+                        .putBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+            }
+            edit.apply();
+            if (!enabled) {
                 stopClockColorAnimator();
                 clockColorPhase = 0f;
-                applyClockColorEffects(0f, true);
             }
+            refreshClockArtworkAppearance();
+            if (enabled) startClockColorAnimator();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
