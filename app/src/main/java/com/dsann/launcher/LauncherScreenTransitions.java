@@ -60,6 +60,13 @@ final class LauncherScreenTransitions {
         }
         if (drawerScreen != null && drawerScreen.getVisibility() == View.GONE) return 0f;
         if (homeScreen != null && homeScreen.getVisibility() == View.GONE) return 1f;
+        // Both surfaces are intentionally visible during a finger-controlled partial
+        // swipe. Preserve that exact progress if the gesture is cancelled/released.
+        if (homeScreen != null && drawerScreen != null
+                && homeScreen.getVisibility() == View.VISIBLE
+                && drawerScreen.getVisibility() == View.VISIBLE) {
+            return clampProgress(activeParallaxProgress);
+        }
         return drawerOpen ? 1f : 0f;
     }
 
