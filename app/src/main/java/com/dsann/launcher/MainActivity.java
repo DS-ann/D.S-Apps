@@ -2385,7 +2385,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Keep a 25dp breathing space between the label-enabled home grid and the dock.
+     * Keep a 45dp breathing space between the label-enabled home grid and the dock.
      * With labels disabled, preserve the previous workspace capacity exactly.
      */
     private int homeGridBottomGapPx() {
