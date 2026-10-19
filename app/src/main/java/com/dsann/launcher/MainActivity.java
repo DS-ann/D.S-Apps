@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_SHAPE_MIGRATION = "app_icon_shape_migration_v2";
     private static final String KEY_ICON_ARTWORK_THEME = "icon_artwork_theme";
     private static final String KEY_ICON_FIT_BACKGROUND = "icon_fit_inside_background";
+    private static final String KEY_THEME_WIDGET_SHORTCUT_ARTWORK = "theme_widget_shortcut_artwork";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
@@ -2797,6 +2798,10 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (!iconLoaded) icon.setImageResource(android.R.drawable.sym_action_call);
+        updateShortcutIconAppearance(icon, tile,
+                LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
+                        LauncherIconDrawable.ARTWORK_ORIGINAL)),
+                LauncherIconDrawable.backgroundColorFromPreferences(prefs));
 
         FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                 initialIconSize, initialIconSize, Gravity.TOP | Gravity.LEFT);
@@ -3339,6 +3344,30 @@ public class MainActivity extends Activity {
                 fitInsideBackground));
     }
 
+    private void updateShortcutIconAppearance(ImageView icon, View shortcutTile,
+            int artworkTheme, int backgroundColor) {
+        if (icon == null || prefs == null) return;
+        boolean enabled = prefs.getBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK, false);
+        int requestedTheme = enabled
+                ? LauncherIconDrawable.clampArtworkTheme(artworkTheme)
+                : LauncherIconDrawable.ARTWORK_ORIGINAL;
+        Drawable current = icon.getDrawable();
+        if (current instanceof LauncherIconDrawable) {
+            ((LauncherIconDrawable) current).updateAppearance(false,
+                    LauncherIconDrawable.SHAPE_SQUARE, backgroundColor, requestedTheme, false);
+            return;
+        }
+        // The wrapper retains the exact original shortcut icon so disabling this option
+        // restores it without rewriting the saved image or changing the icon's geometry.
+        if (!enabled || requestedTheme == LauncherIconDrawable.ARTWORK_ORIGINAL
+                || current == null) return;
+        String token = shortcutTile == null ? "shortcut:unknown"
+                : String.valueOf(shortcutTile.getContentDescription());
+        icon.setImageDrawable(new LauncherIconDrawable(current, false,
+                LauncherIconDrawable.SHAPE_SQUARE, backgroundColor, requestedTheme,
+                "shortcut:" + token, false));
+    }
+
     private void refreshWorkspaceIconAppearance() {
         if (prefs == null) return;
         boolean showBackground = prefs.getBoolean("icon_rounded_square_background", false);
@@ -3357,9 +3386,20 @@ public class MainActivity extends Activity {
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object rawTag = child.getTag();
-                    if (!(rawTag instanceof String)
-                            || !((String) rawTag).startsWith("launcher_app:")) continue;
-                    String packageName = ((String) rawTag).substring("launcher_app:".length());
+                    if (!(rawTag instanceof String)) continue;
+                    String workspaceTag = (String) rawTag;
+                    if ("launcher_contact_shortcut".equals(workspaceTag)) {
+                        if (child instanceof ViewGroup
+                                && ((ViewGroup) child).getChildCount() > 0
+                                && ((ViewGroup) child).getChildAt(0) instanceof ImageView) {
+                            updateShortcutIconAppearance(
+                                    (ImageView) ((ViewGroup) child).getChildAt(0), child,
+                                    artworkTheme, backgroundColor);
+                        }
+                        continue;
+                    }
+                    if (!workspaceTag.startsWith("launcher_app:")) continue;
+                    String packageName = workspaceTag.substring("launcher_app:".length());
                     ResolveInfo app = findApp(packageName);
                     if (app == null || !(child instanceof ViewGroup)
                             || ((ViewGroup) child).getChildCount() == 0) continue;
@@ -5316,7 +5356,7 @@ public class MainActivity extends Activity {
             @Override public void onShortcutSelected(ResolveInfo shortcutActivity) {
                 beginCreateShortcut(shortcutActivity);
             }
-        }).show();
+        }, prefs).show();
     }
 
     private void beginCreateShortcut(ResolveInfo shortcutActivity) {
@@ -9372,6 +9412,13 @@ public class MainActivity extends Activity {
                 new String[]{"Original Colours", "Spectrum Mix", "Ocean Gradient", "Sunset Gradient", "Nothing Monochrome"}, value -> {
             prefs.edit().putInt(KEY_ICON_ARTWORK_THEME,
                     LauncherIconDrawable.clampArtworkTheme(value)).apply();
+            refreshWorkspaceIconAppearance();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addSettingRow(content, "◈", "Theme widget & shortcut icons",
+                prefs.getBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK, false) ? "On" : "Off", () -> {
+            prefs.edit().putBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK,
+                    !prefs.getBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK, false)).apply();
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });

@@ -363,8 +363,7 @@ final class LauncherIconDrawable extends Drawable {
             try {
                 Drawable workerDrawable = state.newDrawable();
                 if (workerDrawable != null) workerDrawable = workerDrawable.mutate();
-                Bitmap rendered = rasterize(workerDrawable);
-                if (rendered != null) themed = recolourArtwork(rendered, theme);
+                themed = createThemedArtworkBitmap(workerDrawable, theme);
             } catch (RuntimeException ignored) {
                 // A vendor Drawable may not support worker-thread rasterisation; retain its
                 // original icon rather than crash the drawer.
@@ -402,9 +401,8 @@ final class LauncherIconDrawable extends Drawable {
                 ? null : new ArtworkCacheKey(state, stableCacheToken, clampedTheme);
         Bitmap bitmap = key == null ? null : ARTWORK_CACHE.get(key);
         if (bitmap == null) {
-            Bitmap rendered = rasterize(original);
-            if (rendered == null) return original;
-            bitmap = recolourArtwork(rendered, clampedTheme);
+            bitmap = createThemedArtworkBitmap(original, clampedTheme);
+            if (bitmap == null) return original;
             if (key != null && bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES) {
                 ARTWORK_CACHE.put(key, bitmap);
             }
@@ -447,6 +445,129 @@ final class LauncherIconDrawable extends Drawable {
             drawable.setBounds(previousBounds);
         }
         return bitmap;
+    }
+
+    /**
+     * Prefer an app's declared monochrome adaptive-icon layer on Android 13+. This is the
+     * only reliable way to recover a logo's intended shape without guessing from its colours.
+     * Older devices retain the universal bitmap fallback below.
+     */
+    private static Bitmap createThemedArtworkBitmap(Drawable drawable, int theme) {
+        if (drawable == null) return null;
+        if (theme == ARTWORK_NOTHING_MONOCHROME && android.os.Build.VERSION.SDK_INT >= 33) {
+            // Keep API-33-only framework references isolated so this class remains loadable
+            // on the launcher's Android 6 minimum API.
+            Bitmap nativeMonochrome = Api33MonochromeRenderer.render(drawable);
+            if (nativeMonochrome != null) return nativeMonochrome;
+        }
+        Bitmap rendered = rasterize(drawable);
+        if (rendered == null) return null;
+        return recolourArtwork(rendered, theme);
+    }
+
+    private static final class Api33MonochromeRenderer {
+        static Bitmap render(Drawable source) {
+            if (!(source instanceof android.graphics.drawable.AdaptiveIconDrawable)) return null;
+            android.graphics.drawable.AdaptiveIconDrawable adaptive =
+                    (android.graphics.drawable.AdaptiveIconDrawable) source;
+            Drawable monochrome;
+            try {
+                monochrome = adaptive.getMonochrome();
+            } catch (RuntimeException ignored) {
+                return null;
+            }
+            if (monochrome == null) return null;
+
+            Bitmap fullIcon = rasterize(adaptive);
+            Bitmap glyph = rasterize(monochrome);
+            if (fullIcon == null || glyph == null) {
+                if (fullIcon != null) fullIcon.recycle();
+                if (glyph != null) glyph.recycle();
+                return null;
+            }
+            if (glyph.getWidth() != fullIcon.getWidth()
+                    || glyph.getHeight() != fullIcon.getHeight()) {
+                Bitmap scaled = Bitmap.createScaledBitmap(
+                        glyph, fullIcon.getWidth(), fullIcon.getHeight(), true);
+                if (scaled != glyph) glyph.recycle();
+                glyph = scaled;
+            }
+
+            Bitmap backgroundBitmap = null;
+            try {
+                Drawable background = adaptive.getBackground();
+                if (background != null) backgroundBitmap = rasterize(background);
+            } catch (RuntimeException ignored) {}
+
+            int width = fullIcon.getWidth();
+            int height = fullIcon.getHeight();
+            int count = width * height;
+            int[] fullPixels = new int[count];
+            int[] glyphPixels = new int[count];
+            fullIcon.getPixels(fullPixels, 0, width, 0, 0, width, height);
+            glyph.getPixels(glyphPixels, 0, width, 0, 0, width, height);
+
+            double backgroundLuminance = backgroundBitmap == null ? -1d
+                    : averageVisibleLuminance(backgroundBitmap);
+            if (backgroundBitmap != null) backgroundBitmap.recycle();
+            if (backgroundLuminance < 0d) {
+                backgroundLuminance = averageLuminanceOutsideGlyph(fullPixels, glyphPixels);
+            }
+            if (backgroundLuminance < 0d) backgroundLuminance = averageLuminance(fullPixels);
+            int backgroundTone = backgroundLuminance >= 140d ? 255 : 0;
+            int foregroundTone = 255 - backgroundTone;
+            int[] outputPixels = new int[count];
+            for (int i = 0; i < count; i++) {
+                int iconAlpha = Color.alpha(fullPixels[i]);
+                if (iconAlpha < 8) {
+                    outputPixels[i] = Color.TRANSPARENT;
+                    continue;
+                }
+                // Blend glyph edge coverage into the two-tone artwork so antialiasing survives.
+                float coverage = Color.alpha(glyphPixels[i]) / 255f;
+                int tone = Math.round(backgroundTone * (1f - coverage)
+                        + foregroundTone * coverage);
+                outputPixels[i] = Color.argb(iconAlpha, tone, tone, tone);
+            }
+
+            Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            output.setDensity(fullIcon.getDensity());
+            output.setPixels(outputPixels, 0, width, 0, 0, width, height);
+            fullIcon.recycle();
+            glyph.recycle();
+            return output;
+        }
+    }
+
+    private static double averageVisibleLuminance(Bitmap bitmap) {
+        if (bitmap == null) return -1d;
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int[] pixels = new int[width * height];
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        return averageLuminance(pixels);
+    }
+
+    private static double averageLuminanceOutsideGlyph(int[] iconPixels, int[] glyphPixels) {
+        long sum = 0L;
+        int samples = 0;
+        for (int i = 0; i < iconPixels.length; i++) {
+            if (Color.alpha(iconPixels[i]) < 24 || Color.alpha(glyphPixels[i]) >= 32) continue;
+            sum += Math.round(pixelLuminance(iconPixels[i]));
+            samples++;
+        }
+        return samples == 0 ? -1d : sum / (double) samples;
+    }
+
+    private static double averageLuminance(int[] pixels) {
+        long sum = 0L;
+        int samples = 0;
+        for (int pixel : pixels) {
+            if (Color.alpha(pixel) < 24) continue;
+            sum += Math.round(pixelLuminance(pixel));
+            samples++;
+        }
+        return samples == 0 ? -1d : sum / (double) samples;
     }
 
     /**
@@ -570,8 +691,6 @@ final class LauncherIconDrawable extends Drawable {
 
         int noBackdropForeground = allLuminance >= 140d ? 0 : 255;
         int noBackdropSeparator = 255 - noBackdropForeground;
-        int adaptiveThreshold = otsuThreshold(pixels);
-
         for (int index = 0; index < count; index++) {
             int pixel = pixels[index];
             int alpha = Color.alpha(pixel);
@@ -593,9 +712,13 @@ final class LauncherIconDrawable extends Drawable {
                 // become contrasting seams rather than turning into unrelated black blocks.
                 mono = separators[index] ? noBackdropSeparator : noBackdropForeground;
             } else {
-                // Unusual fully opaque assets without a reliable backplate use an image-
-                // adaptive threshold rather than a fixed 128 cutoff.
-                mono = pixelLuminance(pixel) >= adaptiveThreshold ? 255 : 0;
+                // An opaque icon whose background cannot be identified confidently is
+                // ambiguous. A global threshold can turn unrelated regions into hard black
+                // and white blocks, so preserve the source's luminance and internal details
+                // in neutral greys rather than inventing a false background boundary.
+                float luminance = pixelLuminance(pixel);
+                float contrasted = 128f + (luminance - 128f) * 1.18f;
+                mono = Math.max(0, Math.min(255, Math.round(contrasted)));
             }
             pixels[index] = Color.argb(alpha, mono, mono, mono);
         }
@@ -663,41 +786,6 @@ final class LauncherIconDrawable extends Drawable {
         int largestDifference = Math.max(redDifference, Math.max(greenDifference, blueDifference));
         int totalDifference = redDifference + greenDifference + blueDifference;
         return largestDifference >= 78 && totalDifference >= 135;
-    }
-
-    private static int otsuThreshold(int[] pixels) {
-        int[] histogram = new int[256];
-        long totalLuminance = 0L;
-        int total = 0;
-        for (int pixel : pixels) {
-            if (Color.alpha(pixel) < 24) continue;
-            int luminance = Math.max(0, Math.min(255, Math.round(pixelLuminance(pixel))));
-            histogram[luminance]++;
-            totalLuminance += luminance;
-            total++;
-        }
-        if (total == 0) return 128;
-        long backgroundLuminance = 0L;
-        int backgroundCount = 0;
-        double bestVariance = -1d;
-        int bestThreshold = 128;
-        for (int threshold = 0; threshold < 255; threshold++) {
-            backgroundCount += histogram[threshold];
-            if (backgroundCount == 0) continue;
-            int foregroundCount = total - backgroundCount;
-            if (foregroundCount == 0) break;
-            backgroundLuminance += (long) threshold * histogram[threshold];
-            double backgroundMean = backgroundLuminance / (double) backgroundCount;
-            double foregroundMean = (totalLuminance - backgroundLuminance)
-                    / (double) foregroundCount;
-            double difference = backgroundMean - foregroundMean;
-            double variance = (double) backgroundCount * foregroundCount * difference * difference;
-            if (variance > bestVariance) {
-                bestVariance = variance;
-                bestThreshold = threshold;
-            }
-        }
-        return bestThreshold;
     }
 
     /**
