@@ -367,6 +367,7 @@ public class MainActivity extends Activity {
     private boolean drawerCloseSwipeClaimed = false;
     private float wheelSwipeProgress = 0f;
     private int wheelSwipeDirection = 0;
+    private android.animation.ValueAnimator pageSettleAnimator;
     private float longPressDownX, longPressDownY;
     private boolean longPressTriggered = false;
     private boolean iconDragArmed = false;
@@ -682,10 +683,18 @@ public class MainActivity extends Activity {
             return super.dispatchTouchEvent(event);
         }
         if (pageTransitionTouchPassthrough) {
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                pageTransitionTouchPassthrough = false;
+            boolean terminal = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
+            if (terminal) pageTransitionTouchPassthrough = false;
+            // Keep the incoming page's hit geometry stable during the tap/child gesture.
+            // Resume the settle only after the child has received its UP/CANCEL.
+            boolean resumePageSettle = terminal && pageSettleAnimator != null
+                    && pageSettleAnimator.isStarted() && pageSettleAnimator.isPaused();
+            boolean handled = super.dispatchTouchEvent(event);
+            if (resumePageSettle && pageSettleAnimator != null
+                    && pageSettleAnimator.isStarted() && pageSettleAnimator.isPaused()) {
+                pageSettleAnimator.resume();
             }
-            return super.dispatchTouchEvent(event);
+            return handled;
         }
         // If a page is settling, no fresh gesture may start another navigation. At
         // 80% of the incoming page's entrance, child input becomes live; below that,
@@ -728,6 +737,10 @@ public class MainActivity extends Activity {
                             event.getRawX(), event.getRawY());
             if (incomingPageReady) {
                 pageTransitionTouchPassthrough = true;
+                if (pageSettleAnimator != null && pageSettleAnimator.isStarted()
+                        && !pageSettleAnimator.isPaused()) {
+                    pageSettleAnimator.pause();
+                }
                 return super.dispatchTouchEvent(event);
             }
             pageTransitionGestureLocked = true;
@@ -4466,12 +4479,14 @@ public class MainActivity extends Activity {
             wheelSwipeDirection = 0;
             pageTransitionBusy = false;
             pageTransitionTargetPage = -1;
+            pageSettleAnimator = null;
             startClockColorAnimator();
             return;
         }
 
         final android.animation.ValueAnimator animator =
                 android.animation.ValueAnimator.ofFloat(startProgress, endProgress);
+        pageSettleAnimator = animator;
         animator.setDuration(animationDuration(to == from ? 170L : 260L));
         animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
         animator.addUpdateListener(value -> {
@@ -4497,6 +4512,7 @@ public class MainActivity extends Activity {
                 wheelSwipeProgress = 0f;
                 wheelSwipeDirection = 0;
                 pageTransitionTargetPage = -1;
+                if (pageSettleAnimator == animator) pageSettleAnimator = null;
                 // Avoid invalidating the newly settled page's cached texture on the
                 // exact final frame of its entrance animation.
                 clockGradientResumeAtUptime = android.os.SystemClock.uptimeMillis() + 180L;
