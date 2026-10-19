@@ -620,21 +620,24 @@ final class LauncherIconDrawable extends Drawable {
         float top = target.top;
         float right = target.right;
         float bottom = target.bottom;
-        // A narrower crown leans left; the wider base leans right. All control points
-        // remain within the square bounding box, so adjacent layout spacing is unchanged.
-        path.moveTo(left + w * 0.39f, top);
-        path.cubicTo(left + w * 0.22f, top,
-                left + w * 0.16f, top + h * 0.22f,
-                left + w * 0.13f, top + h * 0.42f);
-        path.cubicTo(left + w * 0.08f, top + h * 0.67f,
+        // A narrower crown leans left; the wider base leans right. The side curves
+        // reach both horizontal bounds while remaining inside the original square box.
+        path.moveTo(left + w * 0.42f, top);
+        path.cubicTo(left + w * 0.20f, top,
+                left + w * 0.06f, top + h * 0.18f,
+                left + w * 0.06f, top + h * 0.38f);
+        path.cubicTo(left + w * 0.05f, top + h * 0.48f,
+                left, top + h * 0.51f,
+                left, top + h * 0.56f);
+        path.cubicTo(left, top + h * 0.75f,
                 left + w * 0.23f, bottom,
-                left + w * 0.52f, bottom);
-        path.cubicTo(left + w * 0.80f, bottom,
-                right - w * 0.03f, top + h * 0.68f,
-                right - w * 0.11f, top + h * 0.42f);
-        path.cubicTo(right - w * 0.18f, top + h * 0.22f,
-                left + w * 0.61f, top,
-                left + w * 0.39f, top);
+                left + w * 0.54f, bottom);
+        path.cubicTo(left + w * 0.81f, bottom,
+                right, bottom - h * 0.22f,
+                right, top + h * 0.56f);
+        path.cubicTo(right, top + h * 0.38f,
+                right - w * 0.05f, top + h * 0.17f,
+                left + w * 0.42f, top);
         path.close();
     }
 
