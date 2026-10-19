@@ -131,6 +131,12 @@ public final class LauncherAppAdapter extends BaseAdapter {
         return value;
     }
 
+    /** Seed labels already retrieved during MainActivity.loadApps(), avoiding UI-thread lookups. */
+    void seedLabelCache(Map<String, String> labels) {
+        labelCache.clear();
+        if (labels != null) labelCache.putAll(labels);
+    }
+
     private android.graphics.drawable.Drawable cachedIcon(ResolveInfo app,
             ImageView imageView, String appKey) {
         android.graphics.drawable.Drawable.ConstantState state = iconCache.get(appKey);

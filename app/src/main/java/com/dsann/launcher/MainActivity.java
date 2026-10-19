@@ -341,6 +341,8 @@ public class MainActivity extends Activity {
     private LauncherAppAdapter drawerAdapter;
     private List<ResolveInfo> allApps = new ArrayList<>();
     private List<ResolveInfo> drawerApps = new ArrayList<>();
+    // The same labels used to sort allApps are reused by drawer cells and search.
+    private final java.util.Map<String, String> preloadedAppLabels = new java.util.HashMap<>();
     private final List<String> homePackages = new ArrayList<>();
     private final List<List<String>> pages = new ArrayList<>();
     private int currentPage = 0;
@@ -1876,6 +1878,7 @@ public class MainActivity extends Activity {
         // every comparator invocation (O(n log n) resource lookups).
         final java.util.IdentityHashMap<ResolveInfo, String> appLabels =
                 new java.util.IdentityHashMap<>();
+        preloadedAppLabels.clear();
         for (ResolveInfo app : result) {
             String label;
             try {
@@ -1884,6 +1887,10 @@ public class MainActivity extends Activity {
                 label = "";
             }
             appLabels.put(app, label);
+            if (app.activityInfo != null) {
+                preloadedAppLabels.put(app.activityInfo.packageName + "/" + app.activityInfo.name,
+                        label);
+            }
         }
         final boolean descending = prefs != null
                 && prefs.getBoolean(KEY_DRAWER_DESCENDING, false);
@@ -1925,6 +1932,7 @@ public class MainActivity extends Activity {
         }
         if (drawerAdapter != null) {
             drawerAdapter.clearPackageCaches();
+            drawerAdapter.seedLabelCache(preloadedAppLabels);
             drawerAdapter.notifyDataSetChanged();
         }
     }
@@ -2526,6 +2534,7 @@ public class MainActivity extends Activity {
         drawerScreen = built.screen;
         drawerGrid = built.grid;
         drawerAdapter = built.adapter;
+        drawerAdapter.seedLabelCache(preloadedAppLabels);
     }
 
     private void renderHomePages(boolean animate) {
