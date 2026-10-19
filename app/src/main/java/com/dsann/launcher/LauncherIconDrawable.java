@@ -149,14 +149,14 @@ final class LauncherIconDrawable extends Drawable {
 
         ArtworkCacheKey(Drawable.ConstantState state, String token, int theme) {
             this.state = state;
-            this.token = state == null ? token : null;
+            this.token = token;
             this.theme = theme;
         }
 
         @Override public int hashCode() {
-            int identityHash = state == null ? (token == null ? 0 : token.hashCode())
-                    : System.identityHashCode(state);
-            return identityHash * 31 + theme;
+            int identityHash = state == null ? 0 : System.identityHashCode(state);
+            int tokenHash = token == null ? 0 : token.hashCode();
+            return (identityHash * 31 + tokenHash) * 31 + theme;
         }
 
         @Override public boolean equals(Object other) {
@@ -164,8 +164,9 @@ final class LauncherIconDrawable extends Drawable {
             if (!(other instanceof ArtworkCacheKey)) return false;
             ArtworkCacheKey key = (ArtworkCacheKey) other;
             if (theme != key.theme) return false;
-            if (state != null || key.state != null) return state != null && state == key.state;
-            return token != null && token.equals(key.token);
+            if (state != key.state) return false;
+            if (token == null) return key.token == null;
+            return token.equals(key.token);
         }
     }
 
@@ -324,7 +325,7 @@ final class LauncherIconDrawable extends Drawable {
         // while its themed bitmap is prepared. Completion invalidates this drawable.
         source = original;
         source.setBounds(getBounds());
-        requestArtworkBitmap(key, state, theme, this);
+        requestArtworkBitmap(key, state, theme, sourceCacheToken, this);
     }
 
     private void applyArtworkBitmap(Bitmap bitmap) {
@@ -343,7 +344,8 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     private static void requestArtworkBitmap(ArtworkCacheKey key,
-            Drawable.ConstantState state, int theme, LauncherIconDrawable waiter) {
+            Drawable.ConstantState state, int theme, String stableCacheToken,
+            LauncherIconDrawable waiter) {
         boolean startWorker = false;
         synchronized (ARTWORK_REQUEST_LOCK) {
             java.util.ArrayList<WeakReference<LauncherIconDrawable>> waiters = ARTWORK_WAITERS.get(key);
@@ -362,7 +364,7 @@ final class LauncherIconDrawable extends Drawable {
                 Drawable workerDrawable = state.newDrawable();
                 if (workerDrawable != null) workerDrawable = workerDrawable.mutate();
                 Bitmap rendered = rasterize(workerDrawable);
-                if (rendered != null) themed = recolourArtwork(rendered, theme);
+                if (rendered != null) themed = recolourArtwork(rendered, theme, stableCacheToken);
             } catch (RuntimeException ignored) {
                 // A vendor Drawable may not support worker-thread rasterisation; retain its
                 // original icon rather than crash the drawer.
@@ -402,7 +404,7 @@ final class LauncherIconDrawable extends Drawable {
         if (bitmap == null) {
             Bitmap rendered = rasterize(original);
             if (rendered == null) return original;
-            bitmap = recolourArtwork(rendered, clampedTheme);
+            bitmap = recolourArtwork(rendered, clampedTheme, stableCacheToken);
             if (key != null && bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES) {
                 ARTWORK_CACHE.put(key, bitmap);
             }
@@ -447,7 +449,143 @@ final class LauncherIconDrawable extends Drawable {
         return bitmap;
     }
 
-    private static Bitmap recolourArtwork(Bitmap rendered, int theme) {
+    /**
+     * The Nothing pack relies on a clean, recognizable foreground mark rather than a
+     * brightness threshold applied to the original brand colours. Some legacy icons use
+     * the same hue for their symbol and negative space (WhatsApp) or contain several
+     * interlocking colour regions (Play Store), which cannot be separated reliably by a
+     * global per-pixel threshold. For these common icons draw a high-contrast monochrome
+     * glyph while preserving the app asset's original alpha silhouette and dimensions.
+     */
+    private static Bitmap renderKnownNothingGlyph(Bitmap rendered, String stableCacheToken) {
+        if (stableCacheToken == null) return null;
+        String token = stableCacheToken.toLowerCase(java.util.Locale.US);
+        final int kind;
+        if (token.startsWith("org.telegram.messenger/")) {
+            kind = 1;
+        } else if (token.startsWith("com.whatsapp/") || token.startsWith("com.whatsapp.w4b/")) {
+            kind = 2;
+        } else if (token.startsWith("com.android.vending/")) {
+            kind = 3;
+        } else {
+            return null;
+        }
+
+        int width = rendered.getWidth();
+        int height = rendered.getHeight();
+        int count = width * height;
+        int[] pixels = new int[count];
+        rendered.getPixels(pixels, 0, width, 0, 0, width, height);
+        for (int i = 0; i < count; i++) {
+            int alpha = Color.alpha(pixels[i]);
+            pixels[i] = alpha == 0 ? Color.TRANSPARENT : Color.argb(alpha, 0, 0, 0);
+        }
+
+        Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        output.setDensity(rendered.getDensity());
+        output.setPixels(pixels, 0, width, 0, 0, width, height);
+        Canvas canvas = new Canvas(output);
+        float unit = Math.min(width, height);
+        canvas.translate((width - unit) * 0.5f, (height - unit) * 0.5f);
+        canvas.scale(unit / 100f, unit / 100f);
+
+        Paint white = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        white.setColor(Color.WHITE);
+        white.setStyle(Paint.Style.FILL);
+        white.setStrokeCap(Paint.Cap.ROUND);
+        white.setStrokeJoin(Paint.Join.ROUND);
+
+        Paint black = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        black.setColor(Color.BLACK);
+        black.setStyle(Paint.Style.STROKE);
+        black.setStrokeCap(Paint.Cap.ROUND);
+        black.setStrokeJoin(Paint.Join.ROUND);
+
+        if (kind == 1) {
+            // Telegram: paper-plane silhouette plus two dark fold seams to keep the
+            // wing/body structure readable when reduced to a small launcher glyph.
+            Path plane = new Path();
+            plane.moveTo(17f, 46f);
+            plane.lineTo(83f, 21f);
+            plane.lineTo(65f, 80f);
+            plane.lineTo(47f, 62f);
+            plane.lineTo(39f, 73f);
+            plane.lineTo(37f, 55f);
+            plane.close();
+            canvas.drawPath(plane, white);
+            black.setStrokeWidth(2.1f);
+            Path folds = new Path();
+            folds.moveTo(37f, 55f);
+            folds.lineTo(83f, 21f);
+            folds.lineTo(48f, 62f);
+            folds.moveTo(47f, 62f);
+            folds.lineTo(53f, 47f);
+            canvas.drawPath(folds, black);
+        } else if (kind == 2) {
+            // WhatsApp: outlined message bubble with a separate handset. Keeping the
+            // handset as a real stroke/silhouette avoids merging it with the white bubble.
+            Path bubble = new Path();
+            bubble.moveTo(39f, 71f);
+            bubble.lineTo(25f, 78f);
+            bubble.lineTo(29f, 62f);
+            bubble.cubicTo(24f, 56f, 22f, 49f, 24f, 42f);
+            bubble.cubicTo(27f, 30f, 38f, 23f, 51f, 23f);
+            bubble.cubicTo(66f, 23f, 78f, 34f, 78f, 49f);
+            bubble.cubicTo(78f, 64f, 66f, 75f, 52f, 75f);
+            bubble.cubicTo(47f, 75f, 43f, 74f, 39f, 71f);
+            bubble.close();
+            Paint bubbleStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+            bubbleStroke.setColor(Color.WHITE);
+            bubbleStroke.setStyle(Paint.Style.STROKE);
+            bubbleStroke.setStrokeWidth(4.4f);
+            bubbleStroke.setStrokeCap(Paint.Cap.ROUND);
+            bubbleStroke.setStrokeJoin(Paint.Join.ROUND);
+            canvas.drawPath(bubble, bubbleStroke);
+
+            Path receiver = new Path();
+            receiver.moveTo(36f, 34f);
+            receiver.cubicTo(38f, 31f, 41f, 32f, 43f, 35f);
+            receiver.lineTo(47f, 40f);
+            receiver.cubicTo(49f, 42f, 46f, 45f, 44f, 46f);
+            receiver.cubicTo(47f, 51f, 51f, 55f, 56f, 57f);
+            receiver.lineTo(60f, 53f);
+            receiver.cubicTo(62f, 51f, 64f, 52f, 66f, 54f);
+            receiver.lineTo(70f, 59f);
+            receiver.cubicTo(72f, 61f, 69f, 64f, 67f, 66f);
+            receiver.cubicTo(63f, 69f, 56f, 66f, 51f, 63f);
+            receiver.cubicTo(44f, 59f, 38f, 52f, 35f, 45f);
+            receiver.cubicTo(33f, 41f, 33f, 37f, 36f, 34f);
+            receiver.close();
+            canvas.drawPath(receiver, white);
+        } else {
+            // Play Store: a unified play triangle with deliberate black seam lines.
+            // The seams keep the four-part Play mark recognizable without using colours.
+            Path play = new Path();
+            play.moveTo(25f, 17f);
+            play.lineTo(82f, 50f);
+            play.lineTo(25f, 83f);
+            play.close();
+            canvas.drawPath(play, white);
+            black.setStrokeWidth(2.8f);
+            Path seams = new Path();
+            seams.moveTo(28f, 20f);
+            seams.lineTo(53f, 50f);
+            seams.lineTo(28f, 80f);
+            seams.moveTo(53f, 50f);
+            seams.lineTo(79f, 50f);
+            canvas.drawPath(seams, black);
+        }
+        return output;
+    }
+
+    private static Bitmap recolourArtwork(Bitmap rendered, int theme, String stableCacheToken) {
+        if (theme == ARTWORK_NOTHING_MONOCHROME) {
+            Bitmap knownNothingIcon = renderKnownNothingGlyph(rendered, stableCacheToken);
+            if (knownNothingIcon != null) {
+                rendered.recycle();
+                return knownNothingIcon;
+            }
+        }
         int width = rendered.getWidth();
         int height = rendered.getHeight();
         int count = width * height;
