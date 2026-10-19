@@ -60,7 +60,18 @@ jobs:
           BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
           BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
           BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
-        run: gradle --no-daemon --no-build-cache --no-configuration-cache --stacktrace clean assembleRelease
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gradle --no-daemon --no-build-cache --no-configuration-cache --stacktrace clean assembleRelease; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Gradle build attempt $attempt failed; retrying after a possible transient dependency-repository error."
+              sleep $((attempt * 15))
+            fi
+          done
+          exit 1
 
       - name: Verify release APK signature
         run: |
