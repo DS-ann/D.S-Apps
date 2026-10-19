@@ -286,6 +286,27 @@ final class LauncherIconDrawable extends Drawable {
         return Color.rgb(red, green, blue);
     }
 
+    /**
+     * Returns the real accent palette used by each recoloured app-icon artwork theme.
+     * Original Colours has no shared palette, so the clock keeps its Home Studio fallback.
+     * Nothing Monochrome uses the same black/white pair as the icon treatment.
+     */
+    static int[] clockTransitionPaletteForArtwork(int theme) {
+        switch (clampArtworkTheme(theme)) {
+            case ARTWORK_SPECTRUM_MIX:
+                return MIXED_PALETTE.clone();
+            case ARTWORK_OCEAN_GRADIENT:
+                return OCEAN_PALETTE.clone();
+            case ARTWORK_SUNSET_GRADIENT:
+                return SUNSET_PALETTE.clone();
+            case ARTWORK_NOTHING_MONOCHROME:
+                return new int[] {Color.WHITE, Color.BLACK, Color.WHITE};
+            case ARTWORK_ORIGINAL:
+            default:
+                return null;
+        }
+    }
+
     static int backgroundPositionFromPreferences(SharedPreferences preferences) {
         if (preferences == null) return 125;
         if (preferences.getInt("icon_artwork_theme", ARTWORK_ORIGINAL)
