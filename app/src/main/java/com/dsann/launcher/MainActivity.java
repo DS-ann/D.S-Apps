@@ -6846,29 +6846,56 @@ public class MainActivity extends Activity {
         int[][] tones = new int[][] {
                 {115, 159, 255}, {119, 137, 255}, {179, 124, 255}, {90, 190, 196}
         };
-        int[] tone = tones[Math.max(0, Math.min(tones.length - 1, phase))];
-        // Two complementary colour fields meet at the centre: cool teal/blue on
-        // the left and the existing phase-driven violet/blue on the right.
-        int leftR = Math.max(55, Math.min(220, tone[0] * 2 / 3));
-        int leftG = Math.max(150, Math.min(225, tone[1] + 28));
-        int leftB = Math.max(170, Math.min(240, tone[2] + 18));
+        int tonePhase = Math.max(0, Math.min(tones.length - 1, phase));
+        int[] tone = tones[tonePhase];
         int opacity = Math.max(0, Math.min(100,
                 prefs == null ? 50 : prefs.getInt(KEY_CLOCK_BG_OPACITY, 50)));
-        // 50% reproduces the original background alpha; 100% doubles it.
+        // Preserve the existing background-opacity control: 50% retains the original
+        // approximate alpha, while 100% is fully opaque.
         int opacityScale = opacity * 2;
-        int leftEdge = Color.argb(Math.min(255, 125 * opacityScale / 100), leftR, leftG, leftB);
-        int rightEdge = Color.argb(Math.min(255, 149 * opacityScale / 100), tone[0], tone[1], tone[2]);
-        int leftMid = Color.argb(Math.min(255, 72 * opacityScale / 100), leftR, leftG, leftB);
-        int rightMid = Color.argb(Math.min(255, 76 * opacityScale / 100), tone[0], tone[1], tone[2]);
-        GradientDrawable next = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[] {leftEdge, leftMid,
-                        Color.argb(Math.min(255, 22 * opacityScale / 100), 125, 155, 235),
-                        rightMid, rightEdge});
+
+        boolean nothingMonochrome = isClockIconArtworkActive()
+                && prefs != null
+                && LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                        KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL))
+                        == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+
+        final int[] backgroundColours;
+        if (nothingMonochrome) {
+            // The Nothing clock uses the exact inverse of its white-black-white digit
+            // palette: black-white-black. Keep the colour channels pure (no greys or
+            // tinted blues/purples), so each region contrasts with the digit fill.
+            int monoAlpha = Math.min(255, 128 * opacityScale / 100);
+            int black = Color.argb(monoAlpha, 0, 0, 0);
+            int white = Color.argb(monoAlpha, 255, 255, 255);
+            backgroundColours = new int[] {black, white, black};
+        } else {
+            // Existing cool teal/blue and phase-driven violet/blue treatment for other themes.
+            int leftR = Math.max(55, Math.min(220, tone[0] * 2 / 3));
+            int leftG = Math.max(150, Math.min(225, tone[1] + 28));
+            int leftB = Math.max(170, Math.min(240, tone[2] + 18));
+            int leftEdge = Color.argb(Math.min(255, 125 * opacityScale / 100),
+                    leftR, leftG, leftB);
+            int rightEdge = Color.argb(Math.min(255, 149 * opacityScale / 100),
+                    tone[0], tone[1], tone[2]);
+            int leftMid = Color.argb(Math.min(255, 72 * opacityScale / 100),
+                    leftR, leftG, leftB);
+            int rightMid = Color.argb(Math.min(255, 76 * opacityScale / 100),
+                    tone[0], tone[1], tone[2]);
+            int centre = Color.argb(Math.min(255, 22 * opacityScale / 100),
+                    125, 155, 235);
+            backgroundColours = new int[] {
+                    leftEdge, leftMid, centre, rightMid, rightEdge
+            };
+        }
+
+        GradientDrawable next = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, backgroundColours);
         next.setCornerRadius(LauncherUiUtils.dp(this, 18));
-        // Keep the coloured clock background at the full container height for both styles.
+        // Keep the background at full container height for both clock styles.
         ClockPanelBackgroundDrawable centeredBackground =
                 new ClockPanelBackgroundDrawable(next, 0f);
-        if (animate) {
+        if (animate && !nothingMonochrome) {
             hero.setBackground(centeredBackground);
             next.setAlpha(0);
             android.animation.ValueAnimator fade = android.animation.ValueAnimator.ofInt(0, 255);
