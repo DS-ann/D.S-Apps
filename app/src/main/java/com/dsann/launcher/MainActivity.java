@@ -387,6 +387,8 @@ public class MainActivity extends Activity {
     // settling animation while preserving normal taps/scrolls on the incoming drawer grid.
     private boolean drawerTransitionReverseGestureCandidate = false;
     private boolean drawerTransitionReverseGesturePassthrough = false;
+    private boolean drawerTransitionReverseGestureClaimed = false;
+    private boolean pageTransitionReverseGestureClaimed = false;
     private boolean drawerTransitionWasOpening = false;
     private boolean drawerTransitionReverseSwipeAllowed = true;
     private float drawerTransitionTouchDownX = 0f;
@@ -687,6 +689,29 @@ public class MainActivity extends Activity {
             }
             return true;
         }
+        // Once a reverse swipe takes ownership of the stream, consume its remaining
+        // events. Otherwise ACTION_UP falls through to stale gesture coordinates and
+        // can start a second navigation that overrides the reverse settle.
+        if (drawerTransitionReverseGestureClaimed) {
+            if (action == MotionEvent.ACTION_DOWN) {
+                drawerTransitionReverseGestureClaimed = false;
+            } else {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    drawerTransitionReverseGestureClaimed = false;
+                }
+                return true;
+            }
+        }
+        if (pageTransitionReverseGestureClaimed) {
+            if (action == MotionEvent.ACTION_DOWN) {
+                pageTransitionReverseGestureClaimed = false;
+            } else {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    pageTransitionReverseGestureClaimed = false;
+                }
+                return true;
+            }
+        }
         // During the last 20% of a drawer transition, detect an intentional reverse
         // swipe before handing the event to the grid. Ordinary taps and list scrolling
         // continue through to the child; a qualifying reverse cancels that child stream
@@ -708,6 +733,7 @@ public class MainActivity extends Activity {
                     cancel.recycle();
                 }
                 boolean wasOpening = drawerTransitionWasOpening;
+                drawerTransitionReverseGestureClaimed = true;
                 drawerTransitionReverseGestureCandidate = false;
                 drawerTransitionReverseGesturePassthrough = false;
                 drawerTransitionGridTouchActive = false;
@@ -726,7 +752,13 @@ public class MainActivity extends Activity {
                 boolean passthrough = drawerTransitionReverseGesturePassthrough;
                 drawerTransitionReverseGestureCandidate = false;
                 drawerTransitionReverseGesturePassthrough = false;
-                return passthrough ? super.dispatchTouchEvent(event) : true;
+                if (passthrough) {
+                    boolean handled = super.dispatchTouchEvent(event);
+                    LauncherScreenTransitions.resumeDrawerTransitionIfPaused();
+                    return handled;
+                }
+                LauncherScreenTransitions.resumeDrawerTransitionIfPaused();
+                return true;
             }
             return drawerTransitionReverseGesturePassthrough
                     ? super.dispatchTouchEvent(event) : true;
@@ -757,6 +789,7 @@ public class MainActivity extends Activity {
                 }
                 int reverseTarget = pageTransitionGestureReverseTargetPage;
                 pageTransitionTouchPassthrough = false;
+                pageTransitionReverseGestureClaimed = true;
                 pageTransitionReverseGestureCandidate = false;
                 int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
                         ? pageViewport.getWidth()
@@ -843,6 +876,8 @@ public class MainActivity extends Activity {
                 // otherwise a downward pull during opening is the reverse/close gesture.
                 drawerTransitionReverseSwipeAllowed = !opening || !touchOnDrawerGrid
                         || isDrawerAtTop();
+                LauncherScreenTransitions.pauseDrawerTransition(
+                        homeScreen, drawerScreen, getDrawerTransition());
                 if (drawerGridReady) return super.dispatchTouchEvent(event);
                 return true;
             }
