@@ -2033,11 +2033,10 @@ public class MainActivity extends Activity {
         // The viewport stays fixed while the page strip moves inside it.
         pagesStrip = new LinearLayout(this);
         pagesStrip.setOrientation(LinearLayout.HORIZONTAL);
-        // Keep the complete workspace strip in a hardware layer so page changes
-        // transform cached pixels instead of rebuilding every icon/widget frame.
-        // Android still redraws individual contents when a live widget invalidates.
-        pagesStrip.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        pageViewport.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        // Do not cache the viewport and the complete two-page strip as nested
+        // full-screen hardware layers. Each page gets its own temporary/cached layer
+        // in preparePageLayersForSwipe()/releasePageLayers(); the extra parent textures
+        // waste GPU memory on older devices and can worsen frame drops during 3D motion.
         pagesStrip.setClipChildren(true);
         pagesStrip.setClipToPadding(true);
         pageViewport.addView(pagesStrip, new FrameLayout.LayoutParams(-2, -1, Gravity.TOP | Gravity.LEFT));
