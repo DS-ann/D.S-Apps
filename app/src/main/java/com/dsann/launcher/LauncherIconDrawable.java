@@ -1081,12 +1081,14 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /**
-     * Prevent a generated white seam from erasing a one-source-pixel coloured strip between
-     * another colour and white. The artwork is normalized to 96–192 px before this pass, so
-     * one source pixel represents roughly a 0.5 dp detail at launcher-icon size.
+     * Prevent generated white seams on colour junctions when a coloured strip no more than
+     * two source pixels wide lies between another colour and white. The artwork is normalized
+     * to 96–192 px before this pass; two source pixels are the pipeline's approximation of
+     * a 1 dp hairline at launcher-icon size.
      *
-     * Only checks the pixel directly outward from either endpoint of the candidate colour
-     * transition. Wider colour regions have a non-white outward pixel and remain unchanged.
+     * Search outward from both endpoints of the candidate colour transition along its axis.
+     * A white pixel within two source pixels suppresses this seam; wider coloured regions
+     * remain eligible for the existing seam rules.
      */
     private static boolean isThinColourStripBetweenColourAndWhite(
             boolean[] sourceWhite, int width, int height,
@@ -1098,19 +1100,24 @@ final class LauncherIconDrawable extends Drawable {
         int secondX = secondIndex % width;
         int secondY = secondIndex / width;
 
-        int firstOutX = firstX - dx;
-        int firstOutY = firstY - dy;
-        if (firstOutX >= 0 && firstOutX < width
-                && firstOutY >= 0 && firstOutY < height
-                && sourceWhite[firstOutY * width + firstOutX]) {
-            return true;
-        }
+        for (int distance = 1; distance <= 2; distance++) {
+            int firstOutX = firstX - dx * distance;
+            int firstOutY = firstY - dy * distance;
+            if (firstOutX >= 0 && firstOutX < width
+                    && firstOutY >= 0 && firstOutY < height
+                    && sourceWhite[firstOutY * width + firstOutX]) {
+                return true;
+            }
 
-        int secondOutX = secondX + dx;
-        int secondOutY = secondY + dy;
-        return secondOutX >= 0 && secondOutX < width
-                && secondOutY >= 0 && secondOutY < height
-                && sourceWhite[secondOutY * width + secondOutX];
+            int secondOutX = secondX + dx * distance;
+            int secondOutY = secondY + dy * distance;
+            if (secondOutX >= 0 && secondOutX < width
+                    && secondOutY >= 0 && secondOutY < height
+                    && sourceWhite[secondOutY * width + secondOutX]) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
