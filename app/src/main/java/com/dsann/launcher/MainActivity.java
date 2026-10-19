@@ -6862,13 +6862,16 @@ public class MainActivity extends Activity {
 
         final int[] backgroundColours;
         if (nothingMonochrome) {
-            // The Nothing clock uses the exact inverse of its white-black-white digit
-            // palette: black-white-black. Keep the colour channels pure (no greys or
-            // tinted blues/purples), so each region contrasts with the digit fill.
+            // Use black only for every gradient stop. Vary alpha to create a soft
+            // black gradient without introducing white, grey or coloured pixels.
+            // The opacity slider scales the full gradient; the centre is darkest.
             int monoAlpha = Math.min(255, 128 * opacityScale / 100);
-            int black = Color.argb(monoAlpha, 0, 0, 0);
-            int white = Color.argb(monoAlpha, 255, 255, 255);
-            backgroundColours = new int[] {black, white, black};
+            int edgeAlpha = monoAlpha * 28 / 100;
+            int midAlpha = monoAlpha * 62 / 100;
+            int edge = Color.argb(edgeAlpha, 0, 0, 0);
+            int mid = Color.argb(midAlpha, 0, 0, 0);
+            int centre = Color.argb(monoAlpha, 0, 0, 0);
+            backgroundColours = new int[] {edge, mid, centre, mid, edge};
         } else {
             // Existing cool teal/blue and phase-driven violet/blue treatment for other themes.
             int leftR = Math.max(55, Math.min(220, tone[0] * 2 / 3));
