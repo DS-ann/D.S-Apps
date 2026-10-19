@@ -46,5 +46,8 @@ final class LauncherClockStyler {
                 clock.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
                 break;
         }
+        if (clock instanceof SevenSegmentClockTextView) {
+            ((SevenSegmentClockTextView) clock).invalidateContrastTextBorderCache();
+        }
     }
 }

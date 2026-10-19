@@ -171,6 +171,19 @@ public final class SevenSegmentClockTextView extends TextView {
         segmentBorderGradient.setLocalMatrix(segmentBorderGradientMatrix);
     }
 
+    /**
+     * Typeface, tracking and font changes can alter glyph contours while keeping
+     * almost the same measured advance. Explicitly invalidate the monochrome border
+     * shader after a clock preset changes so its gradient is rebuilt for the new glyphs.
+     */
+    void invalidateContrastTextBorderCache() {
+        textBorderGradient = null;
+        textBorderGradientWidth = -1;
+        textBorderSpanWidth = -1f;
+        textBorderValue = "";
+        invalidate();
+    }
+
     private LinearGradient ensureTextBorderGradient() {
         if (!contrastInnerBorderEnabled || contrastBorderColors == null) return null;
         int width = Math.max(1, getWidth());

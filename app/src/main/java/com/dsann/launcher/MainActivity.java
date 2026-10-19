@@ -6397,10 +6397,16 @@ public class MainActivity extends Activity {
                             KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
             boolean useNothingInnerBorder = iconArtworkActive
                     && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
-            // Use the same stronger inner-border thickness for 7-segment and standard
-            // clock fonts. This is 50% thicker than the previous outline.
+            // The cursive Neon Circuit font has much thinner strokes than the other
+            // presets. Its standard text stroke is masked to the glyph interior, leaving
+            // only half the requested stroke visible; double its source width so the inner
+            // contour is as visible as the 7-segment outline. This affects borders only,
+            // not the glyph geometry or its already-correct position.
             float innerBorderWidth = Math.max(2.25f,
                     getResources().getDisplayMetrics().density * 1.65f);
+            if (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2) {
+                innerBorderWidth *= 2f;
+            }
             clockRenderer.setContrastInnerBorderEnabled(
                     useNothingInnerBorder, digitColours, innerBorderWidth);
         }
