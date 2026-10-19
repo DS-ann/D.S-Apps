@@ -360,6 +360,12 @@ public class MainActivity extends Activity {
     // can receive child touches after at least 80% of its entrance has completed.
     private boolean pageTransitionGestureLocked = false;
     private boolean pageTransitionTouchPassthrough = false;
+    // A reverse swipe may interrupt a page settle after 80% of its current direction.
+    private boolean pageTransitionReverseGestureCandidate = false;
+    private float pageTransitionTouchDownX = 0f;
+    private float pageTransitionTouchDownY = 0f;
+    private int pageTransitionGestureDirection = 0;
+    private int pageTransitionGestureReverseTargetPage = -1;
     private int pageTransitionTargetPage = -1;
     private boolean pageSwipeChildCancelled = false;
     private boolean verticalSwipeClaimed = false;
@@ -377,6 +383,14 @@ public class MainActivity extends Activity {
     private boolean suppressResizeOutsideTouchStream = false;
     // Ignore an entire touch stream if it starts while the drawer is settling.
     private boolean drawerTransitionGestureLocked = false;
+    // At 80% transition completion, reserve a qualifying reverse swipe to reverse the
+    // settling animation while preserving normal taps/scrolls on the incoming drawer grid.
+    private boolean drawerTransitionReverseGestureCandidate = false;
+    private boolean drawerTransitionReverseGesturePassthrough = false;
+    private boolean drawerTransitionWasOpening = false;
+    private boolean drawerTransitionReverseSwipeAllowed = true;
+    private float drawerTransitionTouchDownX = 0f;
+    private float drawerTransitionTouchDownY = 0f;
     // Once the drawer is at least 80% open, keep a new grid touch owned by the app list
     // for the full gesture so it can scroll without being reinterpreted as navigation.
     private boolean drawerTransitionGridTouchActive = false;
@@ -673,6 +687,51 @@ public class MainActivity extends Activity {
             }
             return true;
         }
+        // During the last 20% of a drawer transition, detect an intentional reverse
+        // swipe before handing the event to the grid. Ordinary taps and list scrolling
+        // continue through to the child; a qualifying reverse cancels that child stream
+        // and settles toward the opposite surface from the current visual progress.
+        if (drawerTransitionReverseGestureCandidate) {
+            float dx = event.getX() - drawerTransitionTouchDownX;
+            float dy = event.getY() - drawerTransitionTouchDownY;
+            boolean terminal = action == MotionEvent.ACTION_UP
+                    || action == MotionEvent.ACTION_CANCEL;
+            boolean verticalSwipe = Math.abs(dy) > LauncherUiUtils.dp(this, 12)
+                    && Math.abs(dy) > Math.abs(dx) * 1.15f;
+            boolean reversedDirection = drawerTransitionWasOpening ? dy > 0f : dy < 0f;
+            if (action == MotionEvent.ACTION_MOVE && drawerTransitionReverseSwipeAllowed
+                    && verticalSwipe && reversedDirection) {
+                if (drawerTransitionReverseGesturePassthrough) {
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    super.dispatchTouchEvent(cancel);
+                    cancel.recycle();
+                }
+                boolean wasOpening = drawerTransitionWasOpening;
+                drawerTransitionReverseGestureCandidate = false;
+                drawerTransitionReverseGesturePassthrough = false;
+                drawerTransitionGridTouchActive = false;
+                float progress = LauncherScreenTransitions.getDrawerTransitionProgress(
+                        homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
+                if (wasOpening) {
+                    LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = false, getDrawerTransition(), progress);
+                } else {
+                    LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
+                            () -> drawerOpen = true, getDrawerTransition(), progress);
+                }
+                return true;
+            }
+            if (terminal) {
+                boolean passthrough = drawerTransitionReverseGesturePassthrough;
+                drawerTransitionReverseGestureCandidate = false;
+                drawerTransitionReverseGesturePassthrough = false;
+                return passthrough ? super.dispatchTouchEvent(event) : true;
+            }
+            return drawerTransitionReverseGesturePassthrough
+                    ? super.dispatchTouchEvent(event) : true;
+        }
+
         // A drawer-list touch that starts at 80% open stays with the grid for the
         // whole stream; this enables scrolling/taps without giving the gesture to
         // workspace or drawer-navigation recognizers.
@@ -681,6 +740,54 @@ public class MainActivity extends Activity {
                 drawerTransitionGridTouchActive = false;
             }
             return super.dispatchTouchEvent(event);
+        }
+        if (pageTransitionReverseGestureCandidate) {
+            float dx = event.getX() - pageTransitionTouchDownX;
+            float dy = event.getY() - pageTransitionTouchDownY;
+            boolean terminal = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
+            boolean horizontalSwipe = Math.abs(dx) > LauncherUiUtils.dp(this, 12)
+                    && Math.abs(dx) > Math.abs(dy) * 0.75f;
+            boolean reversedDirection = dx * pageTransitionGestureDirection > 0f;
+            if (action == MotionEvent.ACTION_MOVE && horizontalSwipe && reversedDirection) {
+                if (pageTransitionTouchPassthrough) {
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    cancel.setAction(MotionEvent.ACTION_CANCEL);
+                    super.dispatchTouchEvent(cancel);
+                    cancel.recycle();
+                }
+                int reverseTarget = pageTransitionGestureReverseTargetPage;
+                pageTransitionTouchPassthrough = false;
+                pageTransitionReverseGestureCandidate = false;
+                int pageWidth = pageViewport != null && pageViewport.getWidth() > 0
+                        ? pageViewport.getWidth()
+                        : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                                - LauncherUiUtils.dp(this, 40));
+                // finishPageSwipe replaces the paused settle animator without allowing
+                // its cancellation callback to overwrite the new target state.
+                finishPageSwipe(reverseTarget, pageWidth);
+                return true;
+            }
+            if (terminal) {
+                boolean passthrough = pageTransitionTouchPassthrough;
+                pageTransitionTouchPassthrough = false;
+                pageTransitionReverseGestureCandidate = false;
+                if (passthrough) {
+                    boolean resumePageSettle = pageSettleAnimator != null
+                            && pageSettleAnimator.isStarted() && pageSettleAnimator.isPaused();
+                    boolean handled = super.dispatchTouchEvent(event);
+                    if (resumePageSettle && pageSettleAnimator != null
+                            && pageSettleAnimator.isStarted() && pageSettleAnimator.isPaused()) {
+                        pageSettleAnimator.resume();
+                    }
+                    return handled;
+                }
+                if (pageSettleAnimator != null && pageSettleAnimator.isStarted()
+                        && pageSettleAnimator.isPaused()) {
+                    pageSettleAnimator.resume();
+                }
+                return true;
+            }
+            return pageTransitionTouchPassthrough ? super.dispatchTouchEvent(event) : true;
         }
         if (pageTransitionTouchPassthrough) {
             boolean terminal = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
@@ -716,32 +823,61 @@ public class MainActivity extends Activity {
                         homeScreen, drawerScreen, getDrawerTransition())) {
             float transitionProgress = LauncherScreenTransitions.getDrawerTransitionProgress(
                     homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
-            boolean drawerGridReady = LauncherScreenTransitions.isDrawerTransitionOpening()
-                    && transitionProgress >= 0.80f
-                    && drawerScreen != null && drawerScreen.getVisibility() == View.VISIBLE
+            boolean opening = LauncherScreenTransitions.isDrawerTransitionOpening();
+            // The progress value represents how open the drawer is. Therefore 80% of an
+            // opening transition is progress >= .80, while 80% of a closing transition
+            // is progress <= .20.
+            boolean transitionPastEightyPercent = opening
+                    ? transitionProgress >= 0.80f : transitionProgress <= 0.20f;
+            boolean touchOnDrawerGrid = drawerScreen != null
+                    && drawerScreen.getVisibility() == View.VISIBLE
                     && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
-            if (drawerGridReady) {
-                drawerTransitionGridTouchActive = true;
-                return super.dispatchTouchEvent(event);
+            boolean drawerGridReady = opening && transitionPastEightyPercent && touchOnDrawerGrid;
+            if (transitionPastEightyPercent) {
+                drawerTransitionReverseGestureCandidate = true;
+                drawerTransitionReverseGesturePassthrough = drawerGridReady;
+                drawerTransitionWasOpening = opening;
+                drawerTransitionTouchDownX = event.getX();
+                drawerTransitionTouchDownY = event.getY();
+                // Preserve normal list scrolling when the grid is not at its top edge;
+                // otherwise a downward pull during opening is the reverse/close gesture.
+                drawerTransitionReverseSwipeAllowed = !opening || !touchOnDrawerGrid
+                        || isDrawerAtTop();
+                if (drawerGridReady) return super.dispatchTouchEvent(event);
+                return true;
             }
             drawerTransitionGestureLocked = true;
             return true;
         }
         if (action == MotionEvent.ACTION_DOWN && pageTransitionBusy) {
-            boolean incomingPageReady = pageTransitionTargetPage >= 0
-                    && pageTransitionTargetPage != currentPage
-                    && wheelSwipeProgress >= 0.80f
-                    && pagesStrip != null
-                    && touchStartedOnTransitionPage(
-                            pagesStrip.getChildAt(pageTransitionTargetPage),
-                            event.getRawX(), event.getRawY());
-            if (incomingPageReady) {
-                pageTransitionTouchPassthrough = true;
+            boolean settlingBackToCurrentPage = pageTransitionTargetPage == currentPage;
+            float transitionCompletion = settlingBackToCurrentPage
+                    ? 1f - wheelSwipeProgress : wheelSwipeProgress;
+            boolean transitionPastEightyPercent = pageTransitionTargetPage >= 0
+                    && wheelSwipeDirection != 0 && transitionCompletion >= 0.80f;
+            if (transitionPastEightyPercent) {
+                pageTransitionReverseGestureCandidate = true;
+                pageTransitionTouchDownX = event.getX();
+                pageTransitionTouchDownY = event.getY();
+                // When returning to the starting page, reverse direction is opposite to
+                // the original page-change direction; otherwise it is the current direction.
+                pageTransitionGestureDirection = settlingBackToCurrentPage
+                        ? -wheelSwipeDirection : wheelSwipeDirection;
+                pageTransitionGestureReverseTargetPage = settlingBackToCurrentPage
+                        ? currentPage + wheelSwipeDirection : currentPage;
+                boolean incomingPageReady = pagesStrip != null
+                        && touchStartedOnTransitionPage(
+                                pagesStrip.getChildAt(pageTransitionTargetPage),
+                                event.getRawX(), event.getRawY());
+                pageTransitionTouchPassthrough = incomingPageReady;
+                // Hold the exact visual pose while deciding whether this touch reverses
+                // the transition; a tap/scroll resumes the existing settle on release.
                 if (pageSettleAnimator != null && pageSettleAnimator.isStarted()
                         && !pageSettleAnimator.isPaused()) {
                     pageSettleAnimator.pause();
                 }
-                return super.dispatchTouchEvent(event);
+                if (incomingPageReady) return super.dispatchTouchEvent(event);
+                return true;
             }
             pageTransitionGestureLocked = true;
             return true;
@@ -4459,6 +4595,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void cancelPageSettleAnimatorForReplacement() {
+        android.animation.ValueAnimator old = pageSettleAnimator;
+        pageSettleAnimator = null;
+        if (old != null) old.cancel();
+    }
+
     private void finishPageSwipe(int requestedPage, int pageWidth) {
         if (pagesStrip == null || pagesStrip.getChildCount() == 0) return;
         final int from = Math.max(0, Math.min(pagesStrip.getChildCount() - 1, currentPage));
@@ -4468,6 +4610,7 @@ public class MainActivity extends Activity {
         final float startProgress = Math.max(0f, Math.min(1f, wheelSwipeProgress));
         final float endProgress = to == from ? 0f : 1f;
         final int width = Math.max(1, pageWidth);
+        cancelPageSettleAnimatorForReplacement();
         pageTransitionTargetPage = to;
         pagesStrip.animate().cancel();
 
@@ -4503,6 +4646,8 @@ public class MainActivity extends Activity {
             }
 
             @Override public void onAnimationEnd(android.animation.Animator animation) {
+                // Replaced animators must not reset state after a newer reverse settle starts.
+                if (pageSettleAnimator != animator) return;
                 int settledPage = cancelled ? from : to;
                 currentPage = settledPage;
                 activateClockForPage(currentPage);
