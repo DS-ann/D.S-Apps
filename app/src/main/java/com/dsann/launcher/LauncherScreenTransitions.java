@@ -15,8 +15,6 @@ final class LauncherScreenTransitions {
     private static float activeParallaxProgress;
     // Tracks finger-release settling for non-Parallax drawer effects too.
     private static android.animation.ValueAnimator activeDrawerSettleAnimator;
-    // ViewPropertyAnimator completion is tracked across its two screen animations.
-    private static int propertyTransitionAnimationsRemaining;
     // True while the active transition is settling toward the fully open drawer.
     private static boolean activeDrawerTransitionToOpen;
 
@@ -26,32 +24,19 @@ final class LauncherScreenTransitions {
 
     static boolean isDrawerTransitionRunning(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect) {
-        if (activeParallaxAnimator != null && activeParallaxAnimator.isRunning()
+        if (activeParallaxAnimator != null && activeParallaxAnimator.isStarted()
                 && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
             return true;
         }
-        if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isRunning()) return true;
-        return propertyTransitionAnimationsRemaining > 0;
+        return activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isStarted();
     }
 
     static boolean isDrawerTransitionOpening() {
         return activeDrawerTransitionToOpen;
     }
 
-    private static void beginPropertyTransition(boolean opening) {
-        propertyTransitionAnimationsRemaining = 2;
-        activeDrawerTransitionToOpen = opening;
-    }
-
-    private static void finishPropertyTransitionAnimation() {
-        if (propertyTransitionAnimationsRemaining > 0) {
-            propertyTransitionAnimationsRemaining--;
-        }
-    }
-
     /** Cancel all tracked animations before snapping the launcher home immediately. */
     static void cancelTrackedDrawerTransitions() {
-        propertyTransitionAnimationsRemaining = 0;
         activeDrawerTransitionToOpen = false;
         cancelActiveParallaxAnimator();
         activeParallaxHome = null;
@@ -62,22 +47,16 @@ final class LauncherScreenTransitions {
 
     static float getDrawerTransitionProgress(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect, boolean drawerOpen) {
-        if (activeParallaxAnimator != null && activeParallaxAnimator.isRunning()
+        if (activeParallaxAnimator != null && activeParallaxAnimator.isStarted()
                 && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
             Object value = activeParallaxAnimator.getAnimatedValue();
             if (value instanceof Number) activeParallaxProgress =
                     clampProgress(((Number) value).floatValue());
             return activeParallaxProgress;
         }
-        if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isRunning()) {
+        if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isStarted()) {
             Object value = activeDrawerSettleAnimator.getAnimatedValue();
             if (value instanceof Number) return clampProgress(((Number) value).floatValue());
-        }
-        // Property-animator effects expose their in-flight opening fraction through alpha.
-        // Reading it avoids adding a second per-frame progress animator for touch readiness.
-        if (propertyTransitionAnimationsRemaining > 0 && drawerScreen != null
-                && drawerScreen.getVisibility() == View.VISIBLE) {
-            return clampProgress(drawerScreen.getAlpha());
         }
         if (drawerScreen != null && drawerScreen.getVisibility() == View.GONE) return 0f;
         if (homeScreen != null && homeScreen.getVisibility() == View.GONE) return 1f;
@@ -198,158 +177,88 @@ final class LauncherScreenTransitions {
 
     static void showHome(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
                          Runnable markDrawerClosed, int effect) {
+        float start = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, true);
+        markDrawerClosed.run();
+        long fullDuration = effect == 0 ? 380L
+                : effect == 1 ? 360L
+                : effect == 2 ? 360L
+                : effect == 3 ? 390L : 340L;
+        animateDrawerProgress(activity, homeScreen, drawerScreen, effect, start, 0f,
+                fullDuration, false, () -> finishParallaxAtHome(homeScreen, drawerScreen));
+    }
+
+    /**
+     * All non-Parallax drawer effects use the same progress-driven renderer as
+     * finger gestures. A reversal therefore continues from the exact current pose
+     * instead of switching between two different ViewPropertyAnimator trajectories.
+     */
+    private static void animateDrawerProgress(Activity activity, LinearLayout homeScreen,
+            LinearLayout drawerScreen, int effect, float start, float end, long fullDuration,
+            boolean opening, Runnable endAction) {
+        final float from = clampProgress(start);
+        final float to = clampProgress(end);
+        activeDrawerTransitionToOpen = opening;
         if (effect == 0) {
-            float start = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, true);
-            markDrawerClosed.run();
-            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 380L,
-                    () -> finishParallaxAtHome(homeScreen, drawerScreen));
+            cancelActiveDrawerSettleAnimator();
+            animateParallaxProgress(activity, homeScreen, drawerScreen, from, to,
+                    fullDuration, endAction);
             return;
         }
-        markDrawerClosed.run();
-        drawerScreen.animate().cancel();
+
+        cancelActiveParallaxAnimator();
+        activeParallaxHome = null;
+        activeParallaxDrawer = null;
         homeScreen.animate().cancel();
-        beginPropertyTransition(false);
+        drawerScreen.animate().cancel();
+        cancelActiveDrawerSettleAnimator();
         prepareTransitionLayers(homeScreen, drawerScreen);
-        float density = activity.getResources().getDisplayMetrics().density;
-        float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
-        float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
-        homeScreen.setCameraDistance(10000f * density);
-        drawerScreen.setCameraDistance(10000f * density);
         homeScreen.setVisibility(View.VISIBLE);
+        drawerScreen.setVisibility(View.VISIBLE);
+        updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, from);
 
-        // Clear transforms left by a previous effect before setting this effect's start pose.
-        homeScreen.setRotationX(0f);
-        homeScreen.setRotationY(0f);
-        homeScreen.setTranslationX(0f);
-        homeScreen.setTranslationZ(0f);
-        drawerScreen.setRotationX(0f);
-        drawerScreen.setRotationY(0f);
-        drawerScreen.setTranslationX(0f);
-        drawerScreen.setTranslationZ(0f);
+        final android.animation.ValueAnimator animator =
+                android.animation.ValueAnimator.ofFloat(from, to);
+        activeDrawerSettleAnimator = animator;
+        long duration = Math.max(110L, Math.round(fullDuration * Math.abs(to - from)));
+        animator.setDuration(LauncherMotion.duration(activity, duration));
+        animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        animator.addUpdateListener(value -> {
+            if (activeDrawerSettleAnimator != animator) return;
+            updateDrawerSwipe(activity, homeScreen, drawerScreen, effect,
+                    ((Number) value.getAnimatedValue()).floatValue());
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (activeDrawerSettleAnimator != animator) return;
+                activeDrawerSettleAnimator = null;
+                if (endAction != null) endAction.run();
+            }
+        });
+        animator.start();
+    }
 
-        if (effect == 0) {
-            // Reverse of the Parallex entrance: home drops in from above while the
-            // drawer moves down and fades away, with both surfaces on the same plane.
-            float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
-            long duration = LauncherMotion.duration(activity, 380L);
-            drawerScreen.setVisibility(View.VISIBLE);
-            drawerScreen.setAlpha(1f);
-            drawerScreen.setScaleX(1f);
-            drawerScreen.setScaleY(1f);
-            drawerScreen.setRotationX(0f);
-            drawerScreen.setRotationY(0f);
-            drawerScreen.setTranslationX(0f);
-            drawerScreen.setTranslationY(0f);
-            drawerScreen.setTranslationZ(0f);
-            homeScreen.setAlpha(0f);
-            homeScreen.setScaleX(1f);
-            homeScreen.setScaleY(1f);
-            homeScreen.setRotationX(0f);
-            homeScreen.setRotationY(0f);
-            homeScreen.setTranslationX(0f);
-            homeScreen.setTranslationY(-travelDistance);
-            homeScreen.setTranslationZ(0f);
-            drawerScreen.animate().alpha(0f).translationY(travelDistance)
-                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
-                    .scaleX(1f).scaleY(1f).setDuration(duration)
-                    .withEndAction(() -> {
-                        drawerScreen.setVisibility(View.GONE);
-                        drawerScreen.setAlpha(1f);
-                        drawerScreen.setTranslationX(0f);
-                        drawerScreen.setTranslationY(0f);
-                        drawerScreen.setTranslationZ(0f);
-                        drawerScreen.setRotationX(0f);
-                        drawerScreen.setRotationY(0f);
-                        drawerScreen.setScaleX(1f);
-                        drawerScreen.setScaleY(1f);
-                        releaseTransitionLayer(drawerScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            homeScreen.animate().alpha(1f).translationY(0f).translationX(0f)
-                    .translationZ(0f).rotationX(0f).rotationY(0f)
-                    .scaleX(1f).scaleY(1f).setDuration(duration)
-                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
-        } else if (effect == 1) {
-            drawerScreen.setAlpha(1f);
-            drawerScreen.setScaleX(1f);
-            drawerScreen.setScaleY(1f);
-            drawerScreen.setPivotX(width * 0.5f);
-            drawerScreen.setPivotY(height * 0.5f);
-            homeScreen.setAlpha(0f);
-            homeScreen.setScaleX(0.94f);
-            homeScreen.setScaleY(0.94f);
-            homeScreen.setPivotX(width * 0.5f);
-            homeScreen.setPivotY(height * 0.5f);
-            homeScreen.setRotationY(-13f);
-            drawerScreen.animate().alpha(0f).rotationY(18f).scaleX(0.96f).scaleY(0.96f)
-                    .setDuration(LauncherMotion.duration(activity, 330L))
-                    .withEndAction(() -> {
-                        drawerScreen.setVisibility(View.GONE);
-                        drawerScreen.setRotationY(0f);
-                        releaseTransitionLayer(drawerScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            homeScreen.animate().alpha(1f).rotationY(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 360L))
-                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
-        } else if (effect == 2) {
-            homeScreen.setAlpha(0f);
-            homeScreen.setScaleX(0.90f);
-            homeScreen.setScaleY(0.90f);
-            homeScreen.setTranslationY(-LauncherUiUtils.dp(activity, 18));
-            homeScreen.setTranslationZ(-density * 36f);
-            drawerScreen.animate().alpha(0f).translationY(LauncherUiUtils.dp(activity, 34))
-                    .translationZ(-density * 40f).scaleX(0.92f).scaleY(0.92f)
-                    .setDuration(LauncherMotion.duration(activity, 280L))
-                    .withEndAction(() -> {
-                        drawerScreen.setVisibility(View.GONE);
-                        drawerScreen.setTranslationZ(0f);
-                        releaseTransitionLayer(drawerScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            homeScreen.animate().alpha(1f).translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 360L))
-                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
-        } else if (effect == 3) {
-            drawerScreen.setPivotX(width * 0.5f);
-            drawerScreen.setPivotY(height * 0.5f);
-            homeScreen.setPivotX(width * 0.5f);
-            homeScreen.setPivotY(height * 0.5f);
-            homeScreen.setAlpha(0f);
-            homeScreen.setScaleX(0.92f);
-            homeScreen.setScaleY(0.92f);
-            homeScreen.setRotationY(-34f);
-            homeScreen.setTranslationX(-width * 0.12f);
-            drawerScreen.animate().alpha(0f).rotationY(62f).translationX(width * 0.18f)
-                    .scaleX(0.94f).scaleY(0.94f)
-                    .setDuration(LauncherMotion.duration(activity, 360L))
-                    .withEndAction(() -> {
-                        drawerScreen.setVisibility(View.GONE);
-                        drawerScreen.setRotationY(0f);
-                        drawerScreen.setTranslationX(0f);
-                        releaseTransitionLayer(drawerScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            homeScreen.animate().alpha(1f).rotationY(0f).translationX(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 390L))
-                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
-        } else {
-            // Original transition retained as the default and selectable option.
-            homeScreen.setAlpha(0.82f);
-            homeScreen.setScaleX(0.96f);
-            homeScreen.setScaleY(0.96f);
-            homeScreen.setTranslationY(LauncherUiUtils.dp(activity, 24));
-            drawerScreen.animate().alpha(0f).translationY(LauncherUiUtils.dp(activity, 40))
-                    .scaleX(0.96f).scaleY(0.96f).rotationX(-7f)
-                    .setDuration(LauncherMotion.duration(activity, 260L))
-                    .withEndAction(() -> {
-                        drawerScreen.setVisibility(View.GONE);
-                        releaseTransitionLayer(drawerScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            homeScreen.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
-                    .setDuration(LauncherMotion.duration(activity, 340L))
-                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
+    /** Freeze the in-flight transition while deciding whether this touch reverses it. */
+    static void pauseDrawerTransition(LinearLayout homeScreen, LinearLayout drawerScreen, int effect) {
+        if (effect == 0 && activeParallaxAnimator != null
+                && activeParallaxAnimator.isStarted() && !activeParallaxAnimator.isPaused()
+                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
+            activeParallaxAnimator.pause();
+        } else if (activeDrawerSettleAnimator != null
+                && activeDrawerSettleAnimator.isStarted()
+                && !activeDrawerSettleAnimator.isPaused()) {
+            activeDrawerSettleAnimator.pause();
+        }
+    }
+
+    /** Resume a paused transition when the touch was not a reverse swipe. */
+    static void resumeDrawerTransitionIfPaused() {
+        if (activeParallaxAnimator != null && activeParallaxAnimator.isStarted()
+                && activeParallaxAnimator.isPaused()) {
+            activeParallaxAnimator.resume();
+        }
+        if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isStarted()
+                && activeDrawerSettleAnimator.isPaused()) {
+            activeDrawerSettleAnimator.resume();
         }
     }
 
@@ -481,258 +390,44 @@ final class LauncherScreenTransitions {
     static void showDrawer(Activity activity, LinearLayout homeScreen, LinearLayout drawerScreen,
                            Runnable beforeOpen, int effect, float swipeProgress) {
         float progress = clampProgress(swipeProgress);
-        if (effect == 0) {
-            if (isDrawerTransitionRunning(homeScreen, drawerScreen, effect) && progress <= 0.001f) {
-                progress = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, true);
-            }
-            beforeOpen.run();
-            animateParallaxProgress(activity, homeScreen, drawerScreen, progress, 1f, 380L,
-                    () -> finishParallaxAtDrawer(homeScreen, drawerScreen));
-            return;
+        if (progress <= 0.001f
+                && isDrawerTransitionRunning(homeScreen, drawerScreen, effect)) {
+            progress = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, false);
         }
         beforeOpen.run();
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
-        prepareTransitionLayers(homeScreen, drawerScreen);
-        updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
-        float remaining = 1f - progress;
-        long duration = LauncherMotion.duration(activity,
-                Math.max(100L, (long) ((effect == 0 ? 380L : 420L) * remaining)));
-        beginPropertyTransition(true);
-        float density = activity.getResources().getDisplayMetrics().density;
-        float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
-        float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
-
-        if (effect == 0) {
-            float travelDistance = transitionHeight(activity, homeScreen, drawerScreen);
-            homeScreen.animate().alpha(0f).translationY(-travelDistance)
-                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
-                    .scaleX(1f).scaleY(1f).setDuration(duration)
-                    .withEndAction(() -> {
-                        homeScreen.setVisibility(View.GONE);
-                        homeScreen.setAlpha(1f);
-                        homeScreen.setTranslationX(0f);
-                        homeScreen.setTranslationY(0f);
-                        homeScreen.setTranslationZ(0f);
-                        homeScreen.setRotationX(0f);
-                        homeScreen.setRotationY(0f);
-                        homeScreen.setScaleX(1f);
-                        homeScreen.setScaleY(1f);
-                        releaseTransitionLayer(homeScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            drawerScreen.animate().alpha(1f).translationY(0f)
-                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
-                    .scaleX(1f).scaleY(1f).setDuration(duration)
-                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
-        } else if (effect == 1) {
-            homeScreen.animate().alpha(0f).rotationY(13f).scaleX(0.94f).scaleY(0.94f)
-                    .setDuration(duration)
-                    .withEndAction(() -> {
-                        homeScreen.setVisibility(View.GONE);
-                        releaseTransitionLayer(homeScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
-                    .scaleX(1f).scaleY(1f)
-                    .setDuration(duration)
-                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
-        } else if (effect == 2) {
-            homeScreen.animate().alpha(0f).scaleX(0.89f).scaleY(0.89f)
-                    .translationY(-LauncherUiUtils.dp(activity, 18)).translationZ(-density * 36f)
-                    .setDuration(duration)
-                    .withEndAction(() -> {
-                        homeScreen.setVisibility(View.GONE);
-                        releaseTransitionLayer(homeScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
-                    .translationX(0f).translationZ(0f).rotationX(0f)
-                    .setDuration(duration)
-                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
-        } else if (effect == 3) {
-            homeScreen.animate().alpha(0f).rotationY(34f).translationX(-width * 0.12f)
-                    .scaleX(0.92f).scaleY(0.92f)
-                    .setDuration(duration)
-                    .withEndAction(() -> {
-                        homeScreen.setVisibility(View.GONE);
-                        releaseTransitionLayer(homeScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
-                    .scaleX(1f).scaleY(1f)
-                    .setDuration(duration)
-                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
-        } else {
-            homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f)
-                    .translationY(-LauncherUiUtils.dp(activity, 22))
-                    .setDuration(duration)
-                    .withEndAction(() -> {
-                        homeScreen.setVisibility(View.GONE);
-                        releaseTransitionLayer(homeScreen);
-                        finishPropertyTransitionAnimation();
-                    }).start();
-            drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
-                    .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
-                    .setDuration(duration)
-                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
-        }
+        animateDrawerProgress(activity, homeScreen, drawerScreen, effect, progress, 1f,
+                effect == 0 ? 380L : 420L, true,
+                () -> finishParallaxAtDrawer(homeScreen, drawerScreen));
     }
 
     /**
-     * Complete a finger-driven drawer close. The release animation continues from
-     * the exact gesture pose instead of snapping into the canned showHome transition.
+     * Complete a finger-driven drawer close without changing the animation path.
      */
     static void finishDrawerSwipeToHome(Activity activity, LinearLayout homeScreen,
                                         LinearLayout drawerScreen, Runnable markDrawerClosed,
                                         int effect, float swipeProgress) {
-        activeDrawerTransitionToOpen = false;
-        final float start = clampProgress(swipeProgress);
-        if (effect == 0) {
-            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 300L, () -> {
-                markDrawerClosed.run();
-                finishParallaxAtHome(homeScreen, drawerScreen);
-            });
-            return;
-        }
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
-        prepareTransitionLayers(homeScreen, drawerScreen);
-        cancelActiveDrawerSettleAnimator();
-        android.animation.ValueAnimator animator =
-                android.animation.ValueAnimator.ofFloat(start, 0f);
-        activeDrawerSettleAnimator = animator;
-        animator.setDuration(LauncherMotion.duration(activity,
-                Math.max(110L, (long) (300L * start))));
-        animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
-        animator.addUpdateListener(value ->
-                updateDrawerSwipe(activity, homeScreen, drawerScreen, effect,
-                        (Float) value.getAnimatedValue()));
-        animator.addListener(new android.animation.AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(android.animation.Animator animation) {
-                if (activeDrawerSettleAnimator != animator) return;
-                activeDrawerSettleAnimator = null;
-                markDrawerClosed.run();
-                homeScreen.setVisibility(View.VISIBLE);
-                homeScreen.setAlpha(1f);
-                homeScreen.setRotationX(0f);
-                homeScreen.setRotationY(0f);
-                homeScreen.setTranslationX(0f);
-                homeScreen.setTranslationY(0f);
-                homeScreen.setTranslationZ(0f);
-                homeScreen.setScaleX(1f);
-                homeScreen.setScaleY(1f);
-                drawerScreen.setVisibility(View.GONE);
-                drawerScreen.setAlpha(1f);
-                drawerScreen.setRotationX(0f);
-                drawerScreen.setRotationY(0f);
-                drawerScreen.setTranslationX(0f);
-                drawerScreen.setTranslationY(0f);
-                drawerScreen.setTranslationZ(0f);
-                drawerScreen.setScaleX(1f);
-                drawerScreen.setScaleY(1f);
-                releaseTransitionLayer(homeScreen);
-                releaseTransitionLayer(drawerScreen);
-            }
-        });
-        animator.start();
+        animateDrawerProgress(activity, homeScreen, drawerScreen, effect, swipeProgress, 0f,
+                300L, false, () -> {
+                    markDrawerClosed.run();
+                    finishParallaxAtHome(homeScreen, drawerScreen);
+                });
     }
 
-    /** Return a cancelled finger-driven close gesture to the fully open drawer. */
+    /** Complete or reverse a finger-driven drawer opening from its exact current progress. */
     static void finishDrawerSwipeToDrawer(Activity activity, LinearLayout homeScreen,
                                           LinearLayout drawerScreen, Runnable markDrawerOpen,
                                           int effect, float swipeProgress) {
-        activeDrawerTransitionToOpen = true;
-        final float start = clampProgress(swipeProgress);
-        if (effect == 0) {
-            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 1f, 300L, () -> {
-                markDrawerOpen.run();
-                finishParallaxAtDrawer(homeScreen, drawerScreen);
-            });
-            return;
-        }
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
-        prepareTransitionLayers(homeScreen, drawerScreen);
-        homeScreen.setVisibility(View.VISIBLE);
-        drawerScreen.setVisibility(View.VISIBLE);
-        cancelActiveDrawerSettleAnimator();
-        android.animation.ValueAnimator animator =
-                android.animation.ValueAnimator.ofFloat(start, 1f);
-        activeDrawerSettleAnimator = animator;
-        animator.setDuration(LauncherMotion.duration(activity,
-                Math.max(110L, (long) (300L * (1f - start)))));
-        animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
-        animator.addUpdateListener(value ->
-                updateDrawerSwipe(activity, homeScreen, drawerScreen, effect,
-                        (Float) value.getAnimatedValue()));
-        animator.addListener(new android.animation.AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(android.animation.Animator animation) {
-                if (activeDrawerSettleAnimator != animator) return;
-                activeDrawerSettleAnimator = null;
-                markDrawerOpen.run();
-                homeScreen.setVisibility(View.GONE);
-                homeScreen.setAlpha(1f);
-                homeScreen.setRotationX(0f);
-                homeScreen.setRotationY(0f);
-                homeScreen.setTranslationX(0f);
-                homeScreen.setTranslationY(0f);
-                homeScreen.setTranslationZ(0f);
-                homeScreen.setScaleX(1f);
-                homeScreen.setScaleY(1f);
-                drawerScreen.setVisibility(View.VISIBLE);
-                drawerScreen.setAlpha(1f);
-                drawerScreen.setRotationX(0f);
-                drawerScreen.setRotationY(0f);
-                drawerScreen.setTranslationX(0f);
-                drawerScreen.setTranslationY(0f);
-                drawerScreen.setTranslationZ(0f);
-                drawerScreen.setScaleX(1f);
-                drawerScreen.setScaleY(1f);
-                releaseTransitionLayer(homeScreen);
-                releaseTransitionLayer(drawerScreen);
-            }
-        });
-        animator.start();
+        animateDrawerProgress(activity, homeScreen, drawerScreen, effect, swipeProgress, 1f,
+                300L, true, () -> {
+                    markDrawerOpen.run();
+                    finishParallaxAtDrawer(homeScreen, drawerScreen);
+                });
     }
 
     static void cancelDrawerSwipe(Activity activity, LinearLayout homeScreen,
-                                 LinearLayout drawerScreen, int effect) {
-        activeDrawerTransitionToOpen = false;
-        if (effect == 0) {
-            float start = clampProgress(activeParallaxProgress);
-            animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 180L,
-                    () -> finishParallaxAtHome(homeScreen, drawerScreen));
-            return;
-        }
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
-        prepareTransitionLayers(homeScreen, drawerScreen);
-        beginPropertyTransition(false);
-        homeScreen.setVisibility(View.VISIBLE);
-        drawerScreen.setVisibility(View.VISIBLE);
-        float drawerExitY = effect == 0
-                ? transitionHeight(activity, homeScreen, drawerScreen) : 0f;
-        homeScreen.animate().alpha(1f).rotationX(0f).rotationY(0f).translationX(0f)
-                .translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
-                .setDuration(LauncherMotion.duration(activity, 180L))
-                .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
-        drawerScreen.animate().alpha(0f).rotationX(0f).rotationY(0f).translationX(0f)
-                .translationY(drawerExitY).translationZ(0f).scaleX(1f).scaleY(1f)
-                .setDuration(LauncherMotion.duration(activity, 180L))
-                .withEndAction(() -> {
-                    drawerScreen.setVisibility(View.GONE);
-                    drawerScreen.setAlpha(1f);
-                    drawerScreen.setScaleX(1f);
-                    drawerScreen.setScaleY(1f);
-                    drawerScreen.setRotationX(0f);
-                    drawerScreen.setRotationY(0f);
-                    drawerScreen.setTranslationX(0f);
-                    drawerScreen.setTranslationY(0f);
-                    drawerScreen.setTranslationZ(0f);
-                    releaseTransitionLayer(drawerScreen);
-                    finishPropertyTransitionAnimation();
-                }).start();
+                                  LinearLayout drawerScreen, int effect) {
+        float start = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, false);
+        animateDrawerProgress(activity, homeScreen, drawerScreen, effect, start, 0f,
+                180L, false, () -> finishParallaxAtHome(homeScreen, drawerScreen));
     }
-
 }
