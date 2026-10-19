@@ -15,9 +15,8 @@ final class LauncherScreenTransitions {
     private static float activeParallaxProgress;
     // Tracks finger-release settling for non-Parallax drawer effects too.
     private static android.animation.ValueAnimator activeDrawerSettleAnimator;
-    // ViewPropertyAnimator has no running-state query; track the known drawer
-    // transition duration instead, with explicit clearing for immediate-home resets.
-    private static long propertyTransitionEndUptime;
+    // ViewPropertyAnimator completion is tracked across its two screen animations.
+    private static int propertyTransitionAnimationsRemaining;
 
     private static float clampProgress(float progress) {
         return Math.max(0f, Math.min(1f, progress));
@@ -30,20 +29,22 @@ final class LauncherScreenTransitions {
             return true;
         }
         if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isRunning()) return true;
-        if (propertyTransitionEndUptime == 0L) return false;
-        if (android.os.SystemClock.uptimeMillis() < propertyTransitionEndUptime) return true;
-        propertyTransitionEndUptime = 0L;
-        return false;
+        return propertyTransitionAnimationsRemaining > 0;
     }
 
-    private static void trackPropertyTransition(long durationMillis) {
-        propertyTransitionEndUptime = android.os.SystemClock.uptimeMillis()
-                + Math.max(0L, durationMillis);
+    private static void beginPropertyTransition() {
+        propertyTransitionAnimationsRemaining = 2;
+    }
+
+    private static void finishPropertyTransitionAnimation() {
+        if (propertyTransitionAnimationsRemaining > 0) {
+            propertyTransitionAnimationsRemaining--;
+        }
     }
 
     /** Cancel all tracked animations before snapping the launcher home immediately. */
     static void cancelTrackedDrawerTransitions() {
-        propertyTransitionEndUptime = 0L;
+        propertyTransitionAnimationsRemaining = 0;
         cancelActiveParallaxAnimator();
         activeParallaxHome = null;
         activeParallaxDrawer = null;
@@ -188,8 +189,7 @@ final class LauncherScreenTransitions {
         markDrawerClosed.run();
         drawerScreen.animate().cancel();
         homeScreen.animate().cancel();
-        trackPropertyTransition(LauncherMotion.duration(activity,
-                effect == 3 ? 390L : (effect == 1 || effect == 2 ? 360L : 340L)));
+        beginPropertyTransition();
         prepareTransitionLayers(homeScreen, drawerScreen);
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
@@ -244,11 +244,12 @@ final class LauncherScreenTransitions {
                         drawerScreen.setScaleX(1f);
                         drawerScreen.setScaleY(1f);
                         releaseTransitionLayer(drawerScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             homeScreen.animate().alpha(1f).translationY(0f).translationX(0f)
                     .translationZ(0f).rotationX(0f).rotationY(0f)
                     .scaleX(1f).scaleY(1f).setDuration(duration)
-                    .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
         } else if (effect == 1) {
             drawerScreen.setAlpha(1f);
             drawerScreen.setScaleX(1f);
@@ -267,10 +268,11 @@ final class LauncherScreenTransitions {
                         drawerScreen.setVisibility(View.GONE);
                         drawerScreen.setRotationY(0f);
                         releaseTransitionLayer(drawerScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             homeScreen.animate().alpha(1f).rotationY(0f).scaleX(1f).scaleY(1f)
                     .setDuration(LauncherMotion.duration(activity, 360L))
-                    .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
         } else if (effect == 2) {
             homeScreen.setAlpha(0f);
             homeScreen.setScaleX(0.90f);
@@ -284,10 +286,11 @@ final class LauncherScreenTransitions {
                         drawerScreen.setVisibility(View.GONE);
                         drawerScreen.setTranslationZ(0f);
                         releaseTransitionLayer(drawerScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             homeScreen.animate().alpha(1f).translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
                     .setDuration(LauncherMotion.duration(activity, 360L))
-                    .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
         } else if (effect == 3) {
             drawerScreen.setPivotX(width * 0.5f);
             drawerScreen.setPivotY(height * 0.5f);
@@ -306,10 +309,11 @@ final class LauncherScreenTransitions {
                         drawerScreen.setRotationY(0f);
                         drawerScreen.setTranslationX(0f);
                         releaseTransitionLayer(drawerScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             homeScreen.animate().alpha(1f).rotationY(0f).translationX(0f).scaleX(1f).scaleY(1f)
                     .setDuration(LauncherMotion.duration(activity, 390L))
-                    .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
         } else {
             // Original transition retained as the default and selectable option.
             homeScreen.setAlpha(0.82f);
@@ -322,10 +326,11 @@ final class LauncherScreenTransitions {
                     .withEndAction(() -> {
                         drawerScreen.setVisibility(View.GONE);
                         releaseTransitionLayer(drawerScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             homeScreen.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
                     .setDuration(LauncherMotion.duration(activity, 340L))
-                    .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
         }
     }
 
@@ -457,7 +462,7 @@ final class LauncherScreenTransitions {
         float remaining = 1f - progress;
         long duration = LauncherMotion.duration(activity,
                 Math.max(100L, (long) ((effect == 0 ? 380L : 420L) * remaining)));
-        trackPropertyTransition(duration);
+        beginPropertyTransition();
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
@@ -478,22 +483,24 @@ final class LauncherScreenTransitions {
                         homeScreen.setScaleX(1f);
                         homeScreen.setScaleY(1f);
                         releaseTransitionLayer(homeScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             drawerScreen.animate().alpha(1f).translationY(0f)
                     .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
                     .scaleX(1f).scaleY(1f).setDuration(duration)
-                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
         } else if (effect == 1) {
             homeScreen.animate().alpha(0f).rotationY(13f).scaleX(0.94f).scaleY(0.94f)
                     .setDuration(duration)
                     .withEndAction(() -> {
                         homeScreen.setVisibility(View.GONE);
                         releaseTransitionLayer(homeScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
                     .scaleX(1f).scaleY(1f)
                     .setDuration(duration)
-                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
         } else if (effect == 2) {
             homeScreen.animate().alpha(0f).scaleX(0.89f).scaleY(0.89f)
                     .translationY(-LauncherUiUtils.dp(activity, 18)).translationZ(-density * 36f)
@@ -501,11 +508,12 @@ final class LauncherScreenTransitions {
                     .withEndAction(() -> {
                         homeScreen.setVisibility(View.GONE);
                         releaseTransitionLayer(homeScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
                     .translationX(0f).translationZ(0f).rotationX(0f)
                     .setDuration(duration)
-                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
         } else if (effect == 3) {
             homeScreen.animate().alpha(0f).rotationY(34f).translationX(-width * 0.12f)
                     .scaleX(0.92f).scaleY(0.92f)
@@ -513,11 +521,12 @@ final class LauncherScreenTransitions {
                     .withEndAction(() -> {
                         homeScreen.setVisibility(View.GONE);
                         releaseTransitionLayer(homeScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             drawerScreen.animate().alpha(1f).rotationY(0f).translationX(0f).translationY(0f)
                     .scaleX(1f).scaleY(1f)
                     .setDuration(duration)
-                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
         } else {
             homeScreen.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f)
                     .translationY(-LauncherUiUtils.dp(activity, 22))
@@ -525,11 +534,12 @@ final class LauncherScreenTransitions {
                     .withEndAction(() -> {
                         homeScreen.setVisibility(View.GONE);
                         releaseTransitionLayer(homeScreen);
+                        finishPropertyTransitionAnimation();
                     }).start();
             drawerScreen.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
                     .translationX(0f).translationZ(0f).rotationX(0f).rotationY(0f)
                     .setDuration(duration)
-                    .withEndAction(() -> releaseTransitionLayer(drawerScreen)).start();
+                    .withEndAction(() -> { releaseTransitionLayer(drawerScreen); finishPropertyTransitionAnimation(); }).start();
         }
     }
 
@@ -659,7 +669,7 @@ final class LauncherScreenTransitions {
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
-        trackPropertyTransition(LauncherMotion.duration(activity, 180L));
+        beginPropertyTransition();
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
         float drawerExitY = effect == 0
@@ -667,7 +677,7 @@ final class LauncherScreenTransitions {
         homeScreen.animate().alpha(1f).rotationX(0f).rotationY(0f).translationX(0f)
                 .translationY(0f).translationZ(0f).scaleX(1f).scaleY(1f)
                 .setDuration(LauncherMotion.duration(activity, 180L))
-                .withEndAction(() -> releaseTransitionLayer(homeScreen)).start();
+                .withEndAction(() -> { releaseTransitionLayer(homeScreen); finishPropertyTransitionAnimation(); }).start();
         drawerScreen.animate().alpha(0f).rotationX(0f).rotationY(0f).translationX(0f)
                 .translationY(drawerExitY).translationZ(0f).scaleX(1f).scaleY(1f)
                 .setDuration(LauncherMotion.duration(activity, 180L))
@@ -682,6 +692,7 @@ final class LauncherScreenTransitions {
                     drawerScreen.setTranslationY(0f);
                     drawerScreen.setTranslationZ(0f);
                     releaseTransitionLayer(drawerScreen);
+                    finishPropertyTransitionAnimation();
                 }).start();
     }
 
