@@ -454,21 +454,46 @@ final class LauncherIconDrawable extends Drawable {
         int[] pixels = new int[count];
         rendered.getPixels(pixels, 0, width, 0, 0, width, height);
 
-        // Nothing Monochrome targets the complete app-provided icon artwork, including
-        // opaque built-in tiles. Other themes keep protecting confidently detected backdrops.
+        // Colour themes must include an app's own raster background (for example, a
+        // blue tile embedded inside a legacy icon), not only its foreground logo. Nothing
+        // uses a detected backplate to build the black/light treatment below.
         boolean[] backdrop = theme == ARTWORK_NOTHING_MONOCHROME
-                ? null : findOpaqueBackdrop(pixels, width, height);
-        if (backdrop == null && theme != ARTWORK_NOTHING_MONOCHROME) return rendered;
+                ? findMonochromeBackdrop(pixels, width, height) : null;
         boolean hasBackdrop = backdrop != null && backdrop.length == count;
+        float backdropLuminance = 0f;
+        float backdropSaturation = 0f;
+        int backdropPixels = 0;
+        if (theme == ARTWORK_NOTHING_MONOCHROME && hasBackdrop) {
+            float[] backdropHsv = new float[3];
+            for (int i = 0; i < count; i++) {
+                if (!backdrop[i] || Color.alpha(pixels[i]) == 0) continue;
+                int pixel = pixels[i];
+                backdropLuminance += Color.red(pixel) * 0.2126f
+                        + Color.green(pixel) * 0.7152f
+                        + Color.blue(pixel) * 0.0722f;
+                Color.colorToHSV(pixel, backdropHsv);
+                backdropSaturation += backdropHsv[1];
+                backdropPixels++;
+            }
+        }
+        if (backdropPixels > 0) {
+            backdropLuminance /= backdropPixels;
+            backdropSaturation /= backdropPixels;
+        }
+        // A near-white neutral backplate needs inverted foreground polarity: its darker
+        // logo becomes white, while source pixels matching the backplate become black.
+        boolean invertBrightNeutralBackdrop = backdropPixels > 0
+                && backdropLuminance >= 190f && backdropSaturation < 0.20f;
 
         float[] sourceHsv = new float[3];
         float[] targetHsv = new float[3];
         for (int index = 0; index < count; index++) {
             int pixel = pixels[index];
             int alpha = Color.alpha(pixel);
-            if (alpha == 0 || (hasBackdrop && backdrop[index])) continue;
+            if (alpha == 0) continue;
 
-            // Recolour according to each pixel's original hue, not its screen position.
+            // Nothing keeps the detected app backplate black; it is not treated as
+            // ordinary foreground artwork. This avoids converting white discs to white discs.
             // That preserves separate coloured regions in logos (for example Chrome's
             // ring and centre) so different apps no longer inherit the same colour bands.
             Color.colorToHSV(pixel, sourceHsv);
@@ -476,13 +501,24 @@ final class LauncherIconDrawable extends Drawable {
             float saturation = sourceHsv[1];
             float value = sourceHsv[2];
 
-            // Nothing Monochrome is strictly binary black and white. Keep source alpha
-            // (including anti-aliased edges), but remove every intermediate RGB tone.
             if (theme == ARTWORK_NOTHING_MONOCHROME) {
+                if (hasBackdrop && backdrop[index]) {
+                    pixels[index] = Color.argb(alpha, 0, 0, 0);
+                    continue;
+                }
                 float luminance = Color.red(pixel) * 0.2126f
                         + Color.green(pixel) * 0.7152f
                         + Color.blue(pixel) * 0.0722f;
-                int mono = luminance >= 128f ? 255 : 0;
+                int mono;
+                if (invertBrightNeutralBackdrop) {
+                    // Coloured app marks remain a white silhouette. Neutral dark logo
+                    // strokes also become white, while light negative-space details go
+                    // black so an adaptive white tile cannot collapse into a white circle.
+                    Color.colorToHSV(pixel, sourceHsv);
+                    mono = sourceHsv[1] >= 0.18f ? 255 : (luminance < 128f ? 255 : 0);
+                } else {
+                    mono = luminance >= 128f ? 255 : 0;
+                }
                 pixels[index] = Color.argb(alpha, mono, mono, mono);
                 continue;
             }
@@ -511,9 +547,103 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /**
+     * Nothing Monochrome needs to distinguish the icon's own backplate from its logo.
+     * First reuse the reliable edge-connected detector for opaque square legacy icons.
+     * For icons whose circular backplate sits inside transparent corners, locate the
+     * dominant opaque colour component instead. The size/bounds tests avoid treating a
+     * small, solid logo mark as a background.
+     */
+    private static boolean[] findMonochromeBackdrop(int[] pixels, int width, int height) {
+        boolean[] edgeBackdrop = findOpaqueBackdrop(pixels, width, height);
+        if (edgeBackdrop != null && edgeBackdrop.length == pixels.length) return edgeBackdrop;
+
+        int opaqueCount = 0;
+        int[] bucketCounts = new int[32768];
+        for (int i = 0; i < pixels.length; i++) {
+            if (Color.alpha(pixels[i]) < 128) continue;
+            int pixel = pixels[i];
+            int bucket = ((Color.red(pixel) >> 3) << 10)
+                    | ((Color.green(pixel) >> 3) << 5)
+                    | (Color.blue(pixel) >> 3);
+            bucketCounts[bucket]++;
+            opaqueCount++;
+        }
+        if (opaqueCount < pixels.length * 0.18f) return null;
+
+        int dominantBucket = 0;
+        int dominantCount = 0;
+        for (int i = 0; i < bucketCounts.length; i++) {
+            if (bucketCounts[i] > dominantCount) {
+                dominantCount = bucketCounts[i];
+                dominantBucket = i;
+            }
+        }
+        // Require a substantial colour region before interpreting it as a backplate.
+        if (dominantCount < opaqueCount * 0.20f) return null;
+        int red = ((dominantBucket >> 10) & 31) * 8 + 4;
+        int green = ((dominantBucket >> 5) & 31) * 8 + 4;
+        int blue = (dominantBucket & 31) * 8 + 4;
+
+        int seed = -1;
+        // The first visible matching pixel on a centred disc is normally on its upper
+        // rim, away from the app glyph in the centre.
+        for (int y = 0; y < height && seed < 0; y++) {
+            for (int x = 0; x < width; x++) {
+                int index = y * width + x;
+                if (Color.alpha(pixels[index]) < 128) continue;
+                int pixel = pixels[index];
+                int bucket = ((Color.red(pixel) >> 3) << 10)
+                        | ((Color.green(pixel) >> 3) << 5)
+                        | (Color.blue(pixel) >> 3);
+                if (bucket == dominantBucket) {
+                    seed = index;
+                    break;
+                }
+            }
+        }
+        if (seed < 0) return null;
+
+        boolean[] mask = new boolean[pixels.length];
+        int[] queue = new int[pixels.length];
+        int head = 0;
+        int tail = 0;
+        mask[seed] = true;
+        queue[tail++] = seed;
+        int minX = seed % width, maxX = minX;
+        int minY = seed / width, maxY = minY;
+        while (head < tail) {
+            int index = queue[head++];
+            int x = index % width;
+            int y = index / width;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            if (x > 0) tail = enqueueBackdrop(index - 1, pixels, mask, queue, tail,
+                    red, green, blue);
+            if (x + 1 < width) tail = enqueueBackdrop(index + 1, pixels, mask, queue, tail,
+                    red, green, blue);
+            if (y > 0) tail = enqueueBackdrop(index - width, pixels, mask, queue, tail,
+                    red, green, blue);
+            if (y + 1 < height) tail = enqueueBackdrop(index + width, pixels, mask, queue, tail,
+                    red, green, blue);
+        }
+
+        // A Nothing-style backing field should be a broad, centred tile/disc, not just a
+        // narrow logo stroke or a small region that happens to use one common colour.
+        int componentWidth = maxX - minX + 1;
+        int componentHeight = maxY - minY + 1;
+        if (tail < opaqueCount * 0.28f
+                || componentWidth < width * 0.55f
+                || componentHeight < height * 0.55f) {
+            return null;
+        }
+        return mask;
+    }
+
+    /**
      * Returns a mask of confidently identified built-in background pixels. A null result
-     * means that an opaque raster has no reliable background boundary and must be left
-     * unchanged to honour the "artwork only" requirement.
+     * means no reliable edge-connected backdrop was found.
      */
     private static boolean[] findOpaqueBackdrop(int[] pixels, int width, int height) {
         int borderCount = width * 2 + Math.max(0, height - 2) * 2;
