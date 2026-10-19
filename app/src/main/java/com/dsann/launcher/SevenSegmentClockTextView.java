@@ -32,11 +32,24 @@ public final class SevenSegmentClockTextView extends TextView {
     private LinearGradient segmentBorderGradient;
     private int segmentBorderGradientWidth = -1;
     private final Matrix segmentBorderGradientMatrix = new Matrix();
+    // Remember the clock's normal shadow so the inner-border mask can be rendered sharply.
+    private float configuredTextShadowRadius;
+    private float configuredTextShadowDx;
+    private float configuredTextShadowDy;
+    private int configuredTextShadowColor = Color.TRANSPARENT;
     private LinearGradient textBorderGradient;
     private int textBorderGradientWidth = -1;
     private float textBorderSpanWidth = -1f;
     private String textBorderValue = "";
     private final float[][] segmentRects = new float[7][4];
+
+    @Override public void setShadowLayer(float radius, float dx, float dy, int color) {
+        configuredTextShadowRadius = radius;
+        configuredTextShadowDx = dx;
+        configuredTextShadowDy = dy;
+        configuredTextShadowColor = color;
+        super.setShadowLayer(radius, dx, dy, color);
+    }
 
     public SevenSegmentClockTextView(Context context) {
         super(context);
@@ -253,8 +266,16 @@ public final class SevenSegmentClockTextView extends TextView {
             Shader previousShader = textPaint.getShader();
             android.graphics.Xfermode previousXfermode = textPaint.getXfermode();
             int previousColor = textPaint.getColor();
+            float previousShadowRadius = configuredTextShadowRadius;
+            float previousShadowDx = configuredTextShadowDx;
+            float previousShadowDy = configuredTextShadowDy;
+            int previousShadowColor = configuredTextShadowColor;
             int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
             try {
+                // A blurred shadow also expands the DST_IN mask, which can swallow the
+                // fine inner contour on Neon Circuit's cursive glyphs. Keep both border
+                // passes shadow-free; the regular filled text above retains its glow.
+                textPaint.clearShadowLayer();
                 textPaint.setXfermode(null);
                 textPaint.setStyle(Paint.Style.STROKE);
                 textPaint.setStrokeWidth(contrastInnerBorderWidth);
@@ -280,6 +301,12 @@ public final class SevenSegmentClockTextView extends TextView {
                 textPaint.setShader(previousShader);
                 textPaint.setXfermode(previousXfermode);
                 textPaint.setColor(previousColor);
+                if (previousShadowRadius > 0f && Color.alpha(previousShadowColor) != 0) {
+                    textPaint.setShadowLayer(previousShadowRadius, previousShadowDx,
+                            previousShadowDy, previousShadowColor);
+                } else {
+                    textPaint.clearShadowLayer();
+                }
             }
             return;
         }
