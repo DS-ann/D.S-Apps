@@ -26,6 +26,16 @@ public final class SevenSegmentClockTextView extends TextView {
     private float segmentGradientPhase;
     private LinearGradient segmentGradient;
     private final Matrix segmentGradientMatrix = new Matrix();
+    private boolean contrastInnerBorderEnabled;
+    private float contrastInnerBorderWidth;
+    private int[] contrastBorderColors;
+    private LinearGradient segmentBorderGradient;
+    private int segmentBorderGradientWidth = -1;
+    private final Matrix segmentBorderGradientMatrix = new Matrix();
+    private LinearGradient textBorderGradient;
+    private int textBorderGradientWidth = -1;
+    private float textBorderSpanWidth = -1f;
+    private String textBorderValue = "";
     private final float[][] segmentRects = new float[7][4];
 
     public SevenSegmentClockTextView(Context context) {
@@ -58,7 +68,18 @@ public final class SevenSegmentClockTextView extends TextView {
 
     @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        if (segmentGradientEnabled && w > 0) { segmentGradientWidth = -1; ensureSegmentGradient(); }
+        if (segmentGradientEnabled && w > 0) {
+            segmentGradientWidth = -1;
+            ensureSegmentGradient();
+        }
+        if (contrastInnerBorderEnabled && sevenSegmentMode && w > 0) {
+            segmentBorderGradientWidth = -1;
+            ensureSegmentBorderGradient();
+        }
+        if (w != oldw) {
+            textBorderGradient = null;
+            textBorderGradientWidth = -1;
+        }
         invalidate();
     }
 
@@ -99,6 +120,77 @@ public final class SevenSegmentClockTextView extends TextView {
         segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
     }
 
+    /**
+     * Adds a thin contrast line inside digit contours for Nothing Monochrome artwork.
+     * The outline palette is the RGB inverse of the fill palette, so white receives black,
+     * black receives white, and transition greys receive complementary greys.
+     */
+    public void setContrastInnerBorderEnabled(boolean enabled, int[] fillColors,
+            float strokeWidthPx) {
+        int[] nextBorderColors = null;
+        if (enabled && fillColors != null && fillColors.length >= 2) {
+            nextBorderColors = new int[fillColors.length];
+            for (int i = 0; i < fillColors.length; i++) {
+                int color = fillColors[i];
+                nextBorderColors[i] = Color.argb(Color.alpha(color),
+                        255 - Color.red(color), 255 - Color.green(color),
+                        255 - Color.blue(color));
+            }
+        }
+
+        boolean paletteChanged = !java.util.Arrays.equals(contrastBorderColors, nextBorderColors);
+        float nextWidth = enabled ? Math.max(0.5f, strokeWidthPx) : 0f;
+        boolean widthChanged = Math.abs(contrastInnerBorderWidth - nextWidth) > 0.01f;
+        boolean nextEnabled = enabled && nextBorderColors != null;
+        if (paletteChanged || widthChanged) {
+            contrastBorderColors = nextBorderColors;
+            segmentBorderGradient = null;
+            segmentBorderGradientWidth = -1;
+            textBorderGradient = null;
+            textBorderGradientWidth = -1;
+            textBorderSpanWidth = -1f;
+            textBorderValue = "";
+        }
+        contrastInnerBorderEnabled = nextEnabled;
+        contrastInnerBorderWidth = nextWidth;
+        if (contrastInnerBorderEnabled && sevenSegmentMode && getWidth() > 0) {
+            ensureSegmentBorderGradient();
+        }
+        invalidate();
+    }
+
+    private void ensureSegmentBorderGradient() {
+        if (!contrastInnerBorderEnabled || contrastBorderColors == null) return;
+        int width = Math.max(1, getWidth());
+        if (segmentBorderGradient == null || segmentBorderGradientWidth != width) {
+            segmentBorderGradient = new LinearGradient(0f, 0f, width, 0f,
+                    contrastBorderColors, null, Shader.TileMode.MIRROR);
+            segmentBorderGradientWidth = width;
+        }
+        segmentBorderGradientMatrix.setTranslate(-segmentGradientPhase * width * 2f, 0f);
+        segmentBorderGradient.setLocalMatrix(segmentBorderGradientMatrix);
+    }
+
+    private LinearGradient ensureTextBorderGradient() {
+        if (!contrastInnerBorderEnabled || contrastBorderColors == null) return null;
+        int width = Math.max(1, getWidth());
+        String value = getText() == null ? "" : getText().toString();
+        float measured = getPaint().measureText(value);
+        float span = Math.max(1f, Math.min((float) width,
+                measured > 0f ? measured : (float) width));
+        if (textBorderGradient == null || textBorderGradientWidth != width
+                || Math.abs(textBorderSpanWidth - span) > 1f
+                || !textBorderValue.equals(value)) {
+            float startX = (width - span) * 0.5f;
+            textBorderGradient = new LinearGradient(startX, 0f,
+                    startX + span, 0f, contrastBorderColors, null, Shader.TileMode.MIRROR);
+            textBorderGradientWidth = width;
+            textBorderSpanWidth = span;
+            textBorderValue = value;
+        }
+        return textBorderGradient;
+    }
+
     public void setSevenSegmentMode(boolean enabled) {
         if (segmentModeInitialized && sevenSegmentMode == enabled) return;
         segmentModeInitialized = true;
@@ -131,7 +223,37 @@ public final class SevenSegmentClockTextView extends TextView {
 
     @Override protected void onDraw(Canvas canvas) {
         if (!sevenSegmentMode) {
+            if (!contrastInnerBorderEnabled || contrastBorderColors == null) {
+                super.onDraw(canvas);
+                return;
+            }
+
+            // Draw the normal glyphs first, then overprint a fine contrasting stroke.
+            // Using TextView's own Layout retains the selected font, letter spacing,
+            // antialiasing and locale-specific glyph shaping.
             super.onDraw(canvas);
+            Paint textPaint = getPaint();
+            Paint.Style previousStyle = textPaint.getStyle();
+            float previousStrokeWidth = textPaint.getStrokeWidth();
+            Paint.Join previousJoin = textPaint.getStrokeJoin();
+            Paint.Cap previousCap = textPaint.getStrokeCap();
+            Shader previousShader = textPaint.getShader();
+            int previousColor = textPaint.getColor();
+            try {
+                textPaint.setStyle(Paint.Style.STROKE);
+                textPaint.setStrokeWidth(contrastInnerBorderWidth);
+                textPaint.setStrokeJoin(Paint.Join.ROUND);
+                textPaint.setStrokeCap(Paint.Cap.ROUND);
+                textPaint.setShader(ensureTextBorderGradient());
+                super.onDraw(canvas);
+            } finally {
+                textPaint.setStyle(previousStyle);
+                textPaint.setStrokeWidth(previousStrokeWidth);
+                textPaint.setStrokeJoin(previousJoin);
+                textPaint.setStrokeCap(previousCap);
+                textPaint.setShader(previousShader);
+                textPaint.setColor(previousColor);
+            }
             return;
         }
 
@@ -214,12 +336,26 @@ public final class SevenSegmentClockTextView extends TextView {
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
             if (ch == ':') {
+                segmentPaint.setStyle(Paint.Style.FILL);
                 segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
                 segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : color);
                 float radius = Math.max(2.5f, thickness * 0.38f);
                 // The colon is the fixed anchor between hour and minute.
-                canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
-                canvas.drawCircle(dotX, y + digitHeight * 0.68f, radius, segmentPaint);
+                float upperDotY = y + digitHeight * 0.34f;
+                float lowerDotY = y + digitHeight * 0.68f;
+                canvas.drawCircle(dotX, upperDotY, radius, segmentPaint);
+                canvas.drawCircle(dotX, lowerDotY, radius, segmentPaint);
+                if (contrastInnerBorderEnabled && segmentBorderGradient != null) {
+                    float insetRadius = Math.max(0f, radius - contrastInnerBorderWidth * 0.5f);
+                    segmentPaint.setStyle(Paint.Style.STROKE);
+                    segmentPaint.setStrokeWidth(contrastInnerBorderWidth);
+                    segmentPaint.setShader(segmentBorderGradient);
+                    segmentPaint.setColor(Color.WHITE);
+                    canvas.drawCircle(dotX, upperDotY, insetRadius, segmentPaint);
+                    canvas.drawCircle(dotX, lowerDotY, insetRadius, segmentPaint);
+                    segmentPaint.setStyle(Paint.Style.FILL);
+                    segmentPaint.setStrokeWidth(0f);
+                }
                 x = minuteStartX;
                 continue;
             }
@@ -245,13 +381,37 @@ public final class SevenSegmentClockTextView extends TextView {
             for (int j = 0; j < segments.length; j++) {
                 float[] seg = segments[j];
                 boolean lit = (litMask & (1 << j)) != 0;
+                segmentPaint.setStyle(Paint.Style.FILL);
                 segmentPaint.setShader(segmentGradientEnabled && lit ? segmentGradient : null);
                 segmentPaint.setColor(lit ? (segmentGradientEnabled ? Color.WHITE : color) : unlitColor);
                 canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
                         thickness * 0.45f, thickness * 0.45f, segmentPaint);
+
+                if (lit && contrastInnerBorderEnabled && segmentBorderGradient != null) {
+                    // Inset the stroke by half its width so the outline stays inside the
+                    // rounded segment, instead of growing the digit's visible bounds.
+                    float inset = contrastInnerBorderWidth * 0.5f;
+                    float innerLeft = seg[0] + inset;
+                    float innerTop = seg[1] + inset;
+                    float innerRight = seg[2] - inset;
+                    float innerBottom = seg[3] - inset;
+                    if (innerRight > innerLeft && innerBottom > innerTop) {
+                        segmentPaint.setStyle(Paint.Style.STROKE);
+                        segmentPaint.setStrokeWidth(contrastInnerBorderWidth);
+                        segmentPaint.setShader(segmentBorderGradient);
+                        segmentPaint.setColor(Color.WHITE);
+                        float innerRadius = Math.max(0f, thickness * 0.45f - inset);
+                        canvas.drawRoundRect(innerLeft, innerTop, innerRight, innerBottom,
+                                innerRadius, innerRadius, segmentPaint);
+                        segmentPaint.setStyle(Paint.Style.FILL);
+                        segmentPaint.setStrokeWidth(0f);
+                    }
+                }
             }
             x += advance;
         }
+        segmentPaint.setStyle(Paint.Style.FILL);
+        segmentPaint.setStrokeWidth(0f);
         segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
         canvas.restore();
     }
