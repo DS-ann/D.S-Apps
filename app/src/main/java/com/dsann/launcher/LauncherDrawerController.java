@@ -76,6 +76,11 @@ final class LauncherDrawerController {
         grid.setVerticalSpacing(LauncherUiUtils.dp(activity, spacing));
         grid.setHorizontalSpacing(LauncherUiUtils.dp(activity, spacing / 2));
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        // Keep list-cell reuse enabled while avoiding a coloured cache flash behind
+        // icons as GridView scrolls. No extra layers or per-frame scroll callbacks.
+        grid.setScrollingCacheEnabled(true);
+        grid.setSmoothScrollbarEnabled(true);
+        grid.setCacheColorHint(android.graphics.Color.TRANSPARENT);
         grid.setSelector(android.R.color.transparent);
         final Runnable[] closeSearchRef = new Runnable[1];
         LauncherAppAdapter adapter = new LauncherAppAdapter(activity, prefs, packageManager, allApps, drawerApps, null,

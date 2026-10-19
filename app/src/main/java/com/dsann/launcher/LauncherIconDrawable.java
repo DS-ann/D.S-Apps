@@ -42,7 +42,9 @@ final class LauncherIconDrawable extends Drawable {
     static final int ARTWORK_OCEAN_GRADIENT = 2;
     static final int ARTWORK_SUNSET_GRADIENT = 3;
 
-    private static final int MAX_ARTWORK_CACHE_BYTES = 4 * 1024 * 1024;
+    // Keep the cache large enough for a typical drawer page plus nearby rows, without
+    // retaining multiple full-size copies of every installed icon on low-RAM devices.
+    private static final int MAX_ARTWORK_CACHE_BYTES = 8 * 1024 * 1024;
     private static final LruCache<ArtworkCacheKey, Bitmap> ARTWORK_CACHE =
             new LruCache<ArtworkCacheKey, Bitmap>(MAX_ARTWORK_CACHE_BYTES) {
                 @Override protected int sizeOf(ArtworkCacheKey key, Bitmap value) {
@@ -52,6 +54,8 @@ final class LauncherIconDrawable extends Drawable {
 
     private Drawable source;
     private Drawable originalSource;
+    private Drawable.ConstantState originalSourceState;
+    private String sourceCacheToken;
     private int artworkTheme = ARTWORK_ORIGINAL;
     private boolean showBackground;
     private int shape;
@@ -73,8 +77,15 @@ final class LauncherIconDrawable extends Drawable {
 
     LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
             int innerShapeColor, int artworkTheme) {
+        this(source, showBackground, shape, backgroundColor, innerShapeColor, artworkTheme, null);
+    }
+
+    LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
+            int innerShapeColor, int artworkTheme, String stableCacheToken) {
         this.originalSource = source;
         this.source = source;
+        this.originalSourceState = source == null ? null : source.getConstantState();
+        this.sourceCacheToken = stableCacheToken;
         this.showBackground = showBackground;
         this.shape = clampShape(shape);
         this.backgroundColor = backgroundColor;
@@ -93,24 +104,40 @@ final class LauncherIconDrawable extends Drawable {
 
     private static final class ArtworkCacheKey {
         final Drawable.ConstantState state;
+        final String token;
         final int theme;
 
-        ArtworkCacheKey(Drawable.ConstantState state, int theme) {
+        ArtworkCacheKey(Drawable.ConstantState state, String token, int theme) {
             this.state = state;
+            this.token = state == null ? token : null;
             this.theme = theme;
         }
 
         @Override public int hashCode() {
-            return System.identityHashCode(state) * 31 + theme;
+            int identityHash = state == null ? (token == null ? 0 : token.hashCode())
+                    : System.identityHashCode(state);
+            return identityHash * 31 + theme;
         }
 
         @Override public boolean equals(Object other) {
             if (this == other) return true;
             if (!(other instanceof ArtworkCacheKey)) return false;
             ArtworkCacheKey key = (ArtworkCacheKey) other;
-            return state == key.state && theme == key.theme;
+            if (theme != key.theme) return false;
+            if (state != null || key.state != null) return state != null && state == key.state;
+            return token != null && token.equals(key.token);
         }
     }
+
+    private static final int[] MIXED_PALETTE = {
+            Color.rgb(39, 117, 255), Color.rgb(139, 78, 220), Color.rgb(255, 74, 153)
+    };
+    private static final int[] OCEAN_PALETTE = {
+            Color.rgb(21, 94, 239), Color.rgb(0, 184, 217), Color.rgb(104, 224, 181)
+    };
+    private static final int[] SUNSET_PALETTE = {
+            Color.rgb(255, 155, 39), Color.rgb(255, 79, 118), Color.rgb(138, 69, 234)
+    };
 
     static int[] spectrumTrackColors() {
         return SPECTRUM_COLORS.clone();
@@ -178,12 +205,18 @@ final class LauncherIconDrawable extends Drawable {
             int innerShapeColor, int requestedArtworkTheme) {
         int clampedShape = clampShape(shape);
         int clampedArtworkTheme = clampArtworkTheme(requestedArtworkTheme);
+        boolean unchanged = this.showBackground == showBackground
+                && this.shape == clampedShape
+                && this.backgroundColor == backgroundColor
+                && this.innerShapeColor == innerShapeColor
+                && this.artworkTheme == clampedArtworkTheme;
+        if (unchanged) return;
         if (this.showBackground != showBackground || this.shape != clampedShape) {
             shapePathDirty = true;
         }
         if (this.artworkTheme != clampedArtworkTheme) {
             this.artworkTheme = clampedArtworkTheme;
-            this.source = artworkForTheme(originalSource, clampedArtworkTheme);
+            this.source = artworkForTheme(originalSource, clampedArtworkTheme, sourceCacheToken);
             if (this.source != null) this.source.setBounds(getBounds());
         }
         this.showBackground = showBackground;
@@ -201,21 +234,42 @@ final class LauncherIconDrawable extends Drawable {
 
     void updateContent(Drawable source, boolean showBackground, int shape,
             int backgroundColor, int innerShapeColor, int requestedArtworkTheme) {
-        // Always transform the PackageManager's original icon, never a previously themed
-        // bitmap, so switching themes cannot progressively degrade or recolour old output.
+        updateContent(source, showBackground, shape, backgroundColor, innerShapeColor,
+                requestedArtworkTheme, sourceCacheToken);
+    }
+
+    void updateContent(Drawable source, boolean showBackground, int shape,
+            int backgroundColor, int innerShapeColor, int requestedArtworkTheme,
+            String stableCacheToken) {
+        // Android's GridView rebinds icon cells during normal scrolling. The previous
+        // implementation reset every drawable to Original and rebuilt its themed wrapper
+        // on every bind, causing avoidable allocation and repeated work on slow devices.
+        Drawable.ConstantState nextState = source == null ? null : source.getConstantState();
+        boolean sameSource = nextState != null
+                ? nextState == originalSourceState
+                : nextState == null && sourceCacheToken != null
+                    && sourceCacheToken.equals(stableCacheToken);
+        boolean sameAppearance = this.showBackground == showBackground
+                && this.shape == clampShape(shape)
+                && this.backgroundColor == backgroundColor
+                && this.innerShapeColor == innerShapeColor
+                && this.artworkTheme == clampArtworkTheme(requestedArtworkTheme);
         this.originalSource = source;
-        this.source = source;
-        this.artworkTheme = ARTWORK_ORIGINAL;
+        this.originalSourceState = nextState;
+        this.sourceCacheToken = stableCacheToken;
+        if (!sameSource) this.artworkTheme = -1;
         if (this.source != null) this.source.setBounds(getBounds());
+        if (sameSource && sameAppearance) return;
         updateAppearance(showBackground, shape, backgroundColor, innerShapeColor, requestedArtworkTheme);
     }
 
-    private static Drawable artworkForTheme(Drawable original, int theme) {
+    private static Drawable artworkForTheme(Drawable original, int theme, String stableCacheToken) {
         int clampedTheme = clampArtworkTheme(theme);
         if (original == null || clampedTheme == ARTWORK_ORIGINAL) return original;
 
         Drawable.ConstantState state = original.getConstantState();
-        ArtworkCacheKey key = state == null ? null : new ArtworkCacheKey(state, clampedTheme);
+        ArtworkCacheKey key = state == null && (stableCacheToken == null || stableCacheToken.isEmpty())
+                ? null : new ArtworkCacheKey(state, stableCacheToken, clampedTheme);
         Bitmap bitmap = key == null ? null : ARTWORK_CACHE.get(key);
         if (bitmap == null) {
             Bitmap rendered = rasterize(original);
@@ -279,16 +333,35 @@ final class LauncherIconDrawable extends Drawable {
         boolean[] backdrop = findOpaqueBackdrop(pixels, width, height);
         if (backdrop == null) return rendered;
 
+        float[] sourceHsv = new float[3];
+        float[] targetHsv = new float[3];
         for (int index = 0; index < count; index++) {
             int pixel = pixels[index];
             int alpha = Color.alpha(pixel);
             if (alpha == 0 || backdrop[index]) continue;
-            int x = index % width;
-            int y = index / width;
-            float nx = width <= 1 ? 0.5f : x / (float) (width - 1);
-            float ny = height <= 1 ? 0.5f : y / (float) (height - 1);
-            int themed = artworkColour(theme, nx, ny);
-            pixels[index] = Color.argb(alpha, Color.red(themed), Color.green(themed), Color.blue(themed));
+
+            // Recolour according to each pixel's original hue, not its screen position.
+            // That preserves separate coloured regions in logos (for example Chrome's
+            // ring and centre) so different apps no longer inherit the same colour bands.
+            Color.colorToHSV(pixel, sourceHsv);
+            float hue = sourceHsv[0];
+            float saturation = sourceHsv[1];
+            float value = sourceHsv[2];
+
+            // Keep near-black contours and near-white highlights neutral; they carry
+            // useful shape/contrast information at small launcher icon sizes.
+            if (saturation < 0.16f && (value < 0.12f || value > 0.96f)) continue;
+
+            int themed = artworkColour(theme, hue, saturation, value);
+            Color.colorToHSV(themed, targetHsv);
+            targetHsv[2] = value; // retain source shading and contour contrast
+            if (saturation < 0.16f) {
+                targetHsv[1] = Math.min(targetHsv[1], 0.58f);
+            } else {
+                targetHsv[1] = Math.max(0.52f, Math.min(0.92f, targetHsv[1]));
+            }
+            int rgb = Color.HSVToColor(targetHsv);
+            pixels[index] = Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));
         }
 
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
@@ -385,25 +458,28 @@ final class LauncherIconDrawable extends Drawable {
                 && Math.abs(Color.blue(pixel) - blue) <= 54;
     }
 
-    private static int artworkColour(int theme, float x, float y) {
-        float position;
+    private static int artworkColour(int theme, float originalHue, float saturation, float value) {
         if (theme == ARTWORK_SPECTRUM_MIX) {
-            position = x * 0.80f + y * 0.20f;
-            if (position < 0.34f) return Color.rgb(39, 117, 255);   // electric blue
-            if (position < 0.67f) return Color.rgb(139, 78, 220);  // violet
-            return Color.rgb(255, 74, 153);                         // pink
+            // Map original hue families onto the same three theme colours in every app.
+            // Six source hue sectors cycle through the three targets, preserving the
+            // separations between coloured parts rather than painting by x/y position.
+            int sector = ((int) ((originalHue + 30f) / 60f)) % 6;
+            int paletteIndex;
+            switch (sector) {
+                case 0: case 3: paletteIndex = 0; break;
+                case 1: case 4: paletteIndex = 1; break;
+                default: paletteIndex = 2; break;
+            }
+            return MIXED_PALETTE[paletteIndex];
         }
+        // The gradient follows the logo's original hue regions rather than drawing
+        // the same left-to-right gradient across every icon. Chromatic divisions stay
+        // recognisable while pixels within each region retain their original shading.
+        float position = Math.max(0f, Math.min(1f, originalHue / 360f));
         if (theme == ARTWORK_OCEAN_GRADIENT) {
-            position = x * 0.72f + y * 0.28f;
-            return interpolatePalette(new int[] {
-                    Color.rgb(21, 94, 239), Color.rgb(0, 184, 217), Color.rgb(104, 224, 181)
-            }, position);
+            return interpolatePalette(OCEAN_PALETTE, position);
         }
-        // Sunset gradient: warm amber flowing through coral-pink into violet.
-        position = x * 0.70f + (1f - y) * 0.30f;
-        return interpolatePalette(new int[] {
-                Color.rgb(255, 155, 39), Color.rgb(255, 79, 118), Color.rgb(138, 69, 234)
-        }, position);
+        return interpolatePalette(SUNSET_PALETTE, position);
     }
 
     private static int interpolatePalette(int[] palette, float position) {

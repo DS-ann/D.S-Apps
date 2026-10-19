@@ -190,10 +190,10 @@ public final class LauncherAppAdapter extends BaseAdapter {
             android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
             if (existingIcon instanceof LauncherIconDrawable) {
                 ((LauncherIconDrawable) existingIcon).updateContent(appIcon, roundedSquareBackground,
-                        iconShape, backgroundColor, innerShapeColor, artworkTheme);
+                        iconShape, backgroundColor, innerShapeColor, artworkTheme, key(app));
             } else {
                 icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground, iconShape,
-                        backgroundColor, innerShapeColor, artworkTheme));
+                        backgroundColor, innerShapeColor, artworkTheme, key(app)));
             }
         } else {
             icon.setImageDrawable(null);

@@ -3292,8 +3292,10 @@ public class MainActivity extends Activity {
         // our wrapper. Continuous colour dragging reuses the existing drawable.
         if (app == null) return;
         Drawable source = app.loadIcon(packageManager);
+        String cacheToken = app == null || app.activityInfo == null ? null
+                : app.activityInfo.packageName + "/" + app.activityInfo.name;
         icon.setImageDrawable(source == null ? null : new LauncherIconDrawable(
-                source, showBackground, shape, backgroundColor, innerShapeColor, artworkTheme));
+                source, showBackground, shape, backgroundColor, innerShapeColor, artworkTheme, cacheToken));
     }
 
     private void refreshWorkspaceIconAppearance() {
@@ -3401,7 +3403,8 @@ public class MainActivity extends Activity {
                             LauncherIconDrawable.backgroundColorFromPreferences(prefs),
                             LauncherIconDrawable.innerShapeColorFromPreferences(prefs),
                             LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
-                                    LauncherIconDrawable.ARTWORK_ORIGINAL))));
+                                    LauncherIconDrawable.ARTWORK_ORIGINAL)),
+                            packageName + "/" + app.activityInfo.name));
                     icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                             LauncherUiUtils.dp(this, iconSize), LauncherUiUtils.dp(this, iconSize), Gravity.CENTER);
