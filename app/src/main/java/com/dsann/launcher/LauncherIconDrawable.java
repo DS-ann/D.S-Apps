@@ -785,12 +785,18 @@ final class LauncherIconDrawable extends Drawable {
         // connected to the app backdrop/exterior are deliberately excluded, so the main logo
         // segments and app background keep the established universal conversion rules.
         boolean[] enclosedDetails = null;
+        boolean[] enclosedBackdropCounters = null;
         boolean[] repeatedTileInterior = null;
         boolean[] repeatedTileOutline = null;
         if (hasBackdrop || transparentCount > count * 0.025f) {
             boolean[] detectedBackdrop = hasBackdrop ? backdrop : null;
             enclosedDetails = findEnclosedContrastDetails(
                     pixels, detectedBackdrop, width, height);
+            // Edge flood-filling deliberately excludes closed counters in letters (A, B, D,
+            // O, P, R, etc.). Recover those negative-space pixels only when they match the
+            // detected backplate colour and are completely enclosed by contrasting artwork.
+            enclosedBackdropCounters = hasBackdrop
+                    ? findEnclosedBackdropCounters(pixels, backdrop, width, height) : null;
             repeatedTileInterior = new boolean[count];
             repeatedTileOutline = new boolean[count];
             findRepeatedTileArtwork(pixels, detectedBackdrop, width, height,
@@ -825,7 +831,9 @@ final class LauncherIconDrawable extends Drawable {
                 // White fill and white internal cut-lines preserve distinct pieces in divided
                 // logos; app-background pixels are never recoloured based on their original hue.
                 if (backdrop[index] || separators[index]
-                        || (enclosedDetails != null && enclosedDetails[index])) {
+                        || (enclosedDetails != null && enclosedDetails[index])
+                        || (enclosedBackdropCounters != null
+                                && enclosedBackdropCounters[index])) {
                     mono = backgroundTone;
                 } else {
                     mono = foregroundTone;
@@ -1504,6 +1512,145 @@ final class LauncherIconDrawable extends Drawable {
         return count >= minimumPixels && maxX >= minX && maxY >= minY
                 && maxX - minX + 1 >= minimumWidth
                 && maxY - minY + 1 >= minimumHeight;
+    }
+
+    /**
+     * Recovers enclosed negative-space counters from the detected backplate colour. The
+     * ordinary backdrop mask only flood-fills pixels connected to the canvas edge; that is
+     * correct for background isolation but fills closed letter counters with black. This pass
+     * identifies small regions matching the same backplate colour, and restores them to white
+     * only when every path is bounded by opaque foreground (not the exterior or another
+     * backplate pixel). It is universal geometry/colour analysis, not app-specific OCR.
+     */
+    private static boolean[] findEnclosedBackdropCounters(int[] pixels, boolean[] backdrop,
+            int width, int height) {
+        int count = pixels.length;
+        if (backdrop == null || backdrop.length != count || count == 0) return null;
+
+        long redTotal = 0, greenTotal = 0, blueTotal = 0;
+        int backgroundSamples = 0;
+        for (int i = 0; i < count; i++) {
+            if (!backdrop[i] || Color.alpha(pixels[i]) < 96) continue;
+            redTotal += Color.red(pixels[i]);
+            greenTotal += Color.green(pixels[i]);
+            blueTotal += Color.blue(pixels[i]);
+            backgroundSamples++;
+        }
+        if (backgroundSamples < count * 0.12f) return null;
+        int backgroundRed = Math.round(redTotal / (float) backgroundSamples);
+        int backgroundGreen = Math.round(greenTotal / (float) backgroundSamples);
+        int backgroundBlue = Math.round(blueTotal / (float) backgroundSamples);
+
+        boolean[] visited = new boolean[count];
+        boolean[] counters = new boolean[count];
+        int[] queue = new int[count];
+        int minArea = Math.max(3, Math.round(count * 0.00010f));
+        int maxArea = Math.max(minArea, Math.round(count * 0.075f));
+        int[] dx = {-1, 1, 0, 0};
+        int[] dy = {0, 0, -1, 1};
+
+        for (int start = 0; start < count; start++) {
+            if (visited[start] || backdrop[start] || Color.alpha(pixels[start]) < 160
+                    || !isNearColor(pixels[start], backgroundRed, backgroundGreen,
+                            backgroundBlue, 42)) {
+                continue;
+            }
+
+            int head = 0, tail = 0;
+            int minX = width, minY = height, maxX = -1, maxY = -1;
+            boolean touchesExterior = false;
+            boolean touchesBackdrop = false;
+            long surroundingLuminance = 0;
+            long surroundingRed = 0, surroundingGreen = 0, surroundingBlue = 0;
+            int surroundingSamples = 0;
+            queue[tail++] = start;
+            visited[start] = true;
+
+            while (head < tail) {
+                int index = queue[head++];
+                int x = index % width, y = index / width;
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+                if (x == 0 || x == width - 1 || y == 0 || y == height - 1) {
+                    touchesExterior = true;
+                }
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + dx[direction], ny = y + dy[direction];
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                        touchesExterior = true;
+                        continue;
+                    }
+                    int neighbour = ny * width + nx;
+                    if (backdrop[neighbour]) {
+                        touchesBackdrop = true;
+                        continue;
+                    }
+                    if (Color.alpha(pixels[neighbour]) < 96) {
+                        touchesExterior = true;
+                        continue;
+                    }
+                    if (isNearColor(pixels[neighbour], backgroundRed, backgroundGreen,
+                            backgroundBlue, 42)) {
+                        if (!visited[neighbour]) {
+                            visited[neighbour] = true;
+                            queue[tail++] = neighbour;
+                        }
+                    }
+                }
+            }
+
+            int componentWidth = maxX - minX + 1;
+            int componentHeight = maxY - minY + 1;
+            float aspect = Math.max(componentWidth, componentHeight)
+                    / (float) Math.max(1, Math.min(componentWidth, componentHeight));
+            if (touchesExterior || touchesBackdrop || tail < minArea || tail > maxArea
+                    || componentWidth < 2 || componentHeight < 2
+                    || componentWidth > width * 0.48f || componentHeight > height * 0.48f
+                    || aspect > 5.5f) {
+                continue;
+            }
+
+            for (int i = 0; i < tail; i++) {
+                int index = queue[i];
+                int x = index % width, y = index / width;
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + dx[direction], ny = y + dy[direction];
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                    int neighbour = ny * width + nx;
+                    if (backdrop[neighbour] || Color.alpha(pixels[neighbour]) < 160
+                            || isNearColor(pixels[neighbour], backgroundRed, backgroundGreen,
+                                    backgroundBlue, 42)) {
+                        continue;
+                    }
+                    int surrounding = pixels[neighbour];
+                    surroundingLuminance += Math.round(pixelLuminance(surrounding));
+                    surroundingRed += Color.red(surrounding);
+                    surroundingGreen += Color.green(surrounding);
+                    surroundingBlue += Color.blue(surrounding);
+                    surroundingSamples++;
+                }
+            }
+            if (surroundingSamples < Math.max(4, tail / 2)) continue;
+            float counterLuminance = 0f;
+            for (int i = 0; i < tail; i++) {
+                counterLuminance += pixelLuminance(pixels[queue[i]]);
+            }
+            counterLuminance /= tail;
+            float edgeLuminance = surroundingLuminance / (float) surroundingSamples;
+            int redDifference = Math.round(Math.abs(backgroundRed
+                    - surroundingRed / (float) surroundingSamples));
+            int greenDifference = Math.round(Math.abs(backgroundGreen
+                    - surroundingGreen / (float) surroundingSamples));
+            int blueDifference = Math.round(Math.abs(backgroundBlue
+                    - surroundingBlue / (float) surroundingSamples));
+            boolean distinctLuminance = Math.abs(counterLuminance - edgeLuminance) >= 22f;
+            boolean distinctColour = Math.max(redDifference,
+                    Math.max(greenDifference, blueDifference)) >= 30;
+            if (!distinctLuminance && !distinctColour) continue;
+
+            for (int i = 0; i < tail; i++) counters[queue[i]] = true;
+        }
+        return counters;
     }
 
     private static boolean hasTransparentOuterEdge(int[] pixels, int width, int height) {
