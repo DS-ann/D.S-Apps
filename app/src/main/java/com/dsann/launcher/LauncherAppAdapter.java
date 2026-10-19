@@ -187,16 +187,18 @@ public final class LauncherAppAdapter extends BaseAdapter {
             int artworkTheme = LauncherIconDrawable.clampArtworkTheme(preferences == null
                     ? LauncherIconDrawable.ARTWORK_ORIGINAL
                     : preferences.getInt("icon_artwork_theme", LauncherIconDrawable.ARTWORK_ORIGINAL));
+            boolean fitInsideBackground = preferences != null
+                    && preferences.getBoolean("icon_fit_inside_background", false);
             // GridView repeatedly binds recycled cells while scrolling. Keep the
             // existing drawable's Paint/Path/geometry objects instead of allocating
             // a new custom drawable for each app bind.
             android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
             if (existingIcon instanceof LauncherIconDrawable) {
                 ((LauncherIconDrawable) existingIcon).updateContent(appIcon, roundedSquareBackground,
-                        iconShape, backgroundColor, artworkTheme, key(app));
+                        iconShape, backgroundColor, artworkTheme, key(app), fitInsideBackground);
             } else {
                 icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground, iconShape,
-                        backgroundColor, artworkTheme, key(app)));
+                        backgroundColor, artworkTheme, key(app), fitInsideBackground));
             }
         } else {
             icon.setImageDrawable(null);

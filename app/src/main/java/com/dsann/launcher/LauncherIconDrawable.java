@@ -86,6 +86,7 @@ final class LauncherIconDrawable extends Drawable {
     private String sourceCacheToken;
     private int artworkTheme = ARTWORK_ORIGINAL;
     private boolean showBackground;
+    private boolean fitInsideBackground;
     private int shape;
     private int backgroundColor;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -98,25 +99,31 @@ final class LauncherIconDrawable extends Drawable {
     private final float[][] hexagonVertices = new float[6][2];
 
     LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor) {
-        this(source, showBackground, shape, backgroundColor, ARTWORK_ORIGINAL);
+        this(source, showBackground, shape, backgroundColor, ARTWORK_ORIGINAL, null, false);
     }
 
     LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
             int artworkTheme) {
-        this(source, showBackground, shape, backgroundColor, artworkTheme, null);
+        this(source, showBackground, shape, backgroundColor, artworkTheme, null, false);
     }
 
     LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
             int artworkTheme, String stableCacheToken) {
+        this(source, showBackground, shape, backgroundColor, artworkTheme, stableCacheToken, false);
+    }
+
+    LauncherIconDrawable(Drawable source, boolean showBackground, int shape, int backgroundColor,
+            int artworkTheme, String stableCacheToken, boolean fitInsideBackground) {
         this.originalSource = source;
         this.source = source;
         this.originalSourceState = source == null ? null : source.getConstantState();
         this.sourceCacheToken = stableCacheToken;
         this.showBackground = showBackground;
+        this.fitInsideBackground = fitInsideBackground;
         this.shape = clampShape(shape);
         this.backgroundColor = backgroundColor;
         if (source != null) setBounds(source.getBounds());
-        updateAppearance(showBackground, shape, backgroundColor, artworkTheme);
+        updateAppearance(showBackground, shape, backgroundColor, artworkTheme, fitInsideBackground);
     }
 
     static int clampShape(int shape) {
@@ -208,17 +215,24 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     void updateAppearance(boolean showBackground, int shape, int backgroundColor) {
-        updateAppearance(showBackground, shape, backgroundColor, artworkTheme);
+        updateAppearance(showBackground, shape, backgroundColor, artworkTheme, fitInsideBackground);
     }
 
     void updateAppearance(boolean showBackground, int shape, int backgroundColor,
             int requestedArtworkTheme) {
+        updateAppearance(showBackground, shape, backgroundColor, requestedArtworkTheme,
+                fitInsideBackground);
+    }
+
+    void updateAppearance(boolean showBackground, int shape, int backgroundColor,
+            int requestedArtworkTheme, boolean fitInsideBackground) {
         int clampedShape = clampShape(shape);
         int clampedArtworkTheme = clampArtworkTheme(requestedArtworkTheme);
         boolean unchanged = this.showBackground == showBackground
                 && this.shape == clampedShape
                 && this.backgroundColor == backgroundColor
-                && this.artworkTheme == clampedArtworkTheme;
+                && this.artworkTheme == clampedArtworkTheme
+                && this.fitInsideBackground == fitInsideBackground;
         if (unchanged) return;
         if (this.showBackground != showBackground || this.shape != clampedShape) {
             shapePathDirty = true;
@@ -228,6 +242,7 @@ final class LauncherIconDrawable extends Drawable {
             applyArtworkTheme();
         }
         this.showBackground = showBackground;
+        this.fitInsideBackground = fitInsideBackground;
         this.shape = clampedShape;
         this.backgroundColor = backgroundColor;
         invalidateSelf();
@@ -242,6 +257,13 @@ final class LauncherIconDrawable extends Drawable {
 
     void updateContent(Drawable source, boolean showBackground, int shape,
             int backgroundColor, int requestedArtworkTheme, String stableCacheToken) {
+        updateContent(source, showBackground, shape, backgroundColor, requestedArtworkTheme,
+                stableCacheToken, fitInsideBackground);
+    }
+
+    void updateContent(Drawable source, boolean showBackground, int shape,
+            int backgroundColor, int requestedArtworkTheme, String stableCacheToken,
+            boolean fitInsideBackground) {
         // Android's GridView rebinds icon cells during normal scrolling. The previous
         // implementation reset every drawable to Original and rebuilt its themed wrapper
         // on every bind, causing avoidable allocation and repeated work on slow devices.
@@ -253,14 +275,16 @@ final class LauncherIconDrawable extends Drawable {
         boolean sameAppearance = this.showBackground == showBackground
                 && this.shape == clampShape(shape)
                 && this.backgroundColor == backgroundColor
-                && this.artworkTheme == clampArtworkTheme(requestedArtworkTheme);
+                && this.artworkTheme == clampArtworkTheme(requestedArtworkTheme)
+                && this.fitInsideBackground == fitInsideBackground;
         this.originalSource = source;
         this.originalSourceState = nextState;
         this.sourceCacheToken = stableCacheToken;
         if (!sameSource) this.artworkTheme = -1;
         if (this.source != null) this.source.setBounds(getBounds());
         if (sameSource && sameAppearance) return;
-        updateAppearance(showBackground, shape, backgroundColor, requestedArtworkTheme);
+        updateAppearance(showBackground, shape, backgroundColor, requestedArtworkTheme,
+                fitInsideBackground);
     }
 
     private void applyArtworkTheme() {
@@ -444,16 +468,14 @@ final class LauncherIconDrawable extends Drawable {
             float saturation = sourceHsv[1];
             float value = sourceHsv[2];
 
-            // Nothing Monochrome desaturates the app-logo artwork itself. Preserve the
-            // source alpha and perceptual lightness so contours and internal details remain
-            // legible; transparent pixels and confidently detected built-in backdrops above
-            // are deliberately untouched.
+            // Nothing Monochrome is strictly binary black and white. Keep source alpha
+            // (including anti-aliased edges), but remove every intermediate RGB tone.
             if (theme == ARTWORK_NOTHING_MONOCHROME) {
-                int grey = Math.max(0, Math.min(255, Math.round(
-                        Color.red(pixel) * 0.2126f
+                float luminance = Color.red(pixel) * 0.2126f
                         + Color.green(pixel) * 0.7152f
-                        + Color.blue(pixel) * 0.0722f)));
-                pixels[index] = Color.argb(alpha, grey, grey, grey);
+                        + Color.blue(pixel) * 0.0722f;
+                int mono = luminance >= 128f ? 255 : 0;
+                pixels[index] = Color.argb(alpha, mono, mono, mono);
                 continue;
             }
 
@@ -745,8 +767,22 @@ final class LauncherIconDrawable extends Drawable {
         // clipping. Background ON applies the selected shape to both backing and artwork.
         rect.set(left, top, right, bottom);
         if (rect.width() <= 0 || rect.height() <= 0) return;
-        source.setBounds(Math.round(rect.left), Math.round(rect.top),
-                Math.round(rect.right), Math.round(rect.bottom));
+        // Fit inside the outer launcher shape only while the background option is enabled.
+        // The outer shape and the icon view's measured dimensions are not changed.
+        float artworkLeft = left;
+        float artworkTop = top;
+        float artworkRight = right;
+        float artworkBottom = bottom;
+        if (showBackground && fitInsideBackground) {
+            float insetX = width * 0.10f;
+            float insetY = height * 0.10f;
+            artworkLeft += insetX;
+            artworkTop += insetY;
+            artworkRight -= insetX;
+            artworkBottom -= insetY;
+        }
+        source.setBounds(Math.round(artworkLeft), Math.round(artworkTop),
+                Math.round(artworkRight), Math.round(artworkBottom));
         if (!showBackground) {
             source.draw(canvas);
             return;
