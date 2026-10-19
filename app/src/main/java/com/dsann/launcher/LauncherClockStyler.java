@@ -16,12 +16,12 @@ final class LauncherClockStyler {
         }
         switch (style) {
             case 1:
-                clock.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+                clock.setTypeface(Typeface.create("monospace", Typeface.BOLD));
                 clock.setLetterSpacing(0.12f);
                 clock.setShadowLayer(12f, 0f, 0f, Color.rgb(40, 190, 255));
                 break;
             case 2:
-                clock.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
+                clock.setTypeface(Typeface.create("cursive", Typeface.NORMAL));
                 clock.setLetterSpacing(0.035f);
                 clock.setShadowLayer(10f, 0f, 0f, Color.rgb(111, 90, 255));
                 break;
@@ -31,7 +31,7 @@ final class LauncherClockStyler {
                 clock.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
                 break;
             case 4:
-                clock.setTypeface(Typeface.create("monospace", Typeface.BOLD));
+                clock.setTypeface(Typeface.create("serif", Typeface.BOLD));
                 clock.setLetterSpacing(0.015f);
                 clock.setShadowLayer(5f, 0f, 0f, Color.rgb(75, 255, 160));
                 break;
@@ -41,7 +41,7 @@ final class LauncherClockStyler {
                 clock.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
                 break;
             default:
-                clock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+                clock.setTypeface(Typeface.create("sans-serif-condensed-light", Typeface.NORMAL));
                 clock.setLetterSpacing(0.04f);
                 clock.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
                 break;
