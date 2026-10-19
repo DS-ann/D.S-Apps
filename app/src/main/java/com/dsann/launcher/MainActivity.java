@@ -9933,33 +9933,30 @@ public class MainActivity extends Activity {
                 twoDigitNeonCircuitHour = style == 2 && hourDigits > 1;
             }
 
-            float horizontalOffset = LauncherUiUtils.dp(this, 5);
-            if (singleDigitHour) {
-                float singleDigitAdjustment;
-                if (style == 2) {
-                    // Neon Circuit uses a cursive, proportional font. Its figure-space
-                    // advance is not reliably 20dp, so a fixed compensation caused the
-                    // hour to jump horizontally when changing between 9 and 10.
-                    // Measure the exact reserved leading cell and account for tracking
-                    // and the glyph's own horizontal scale to keep both hour widths aligned.
-                    float figureSpaceWidth = clockText.getPaint().measureText("\u2007");
-                    float trackingWidth = clockText.getTextSize()
-                            * clockText.getLetterSpacing();
-                    singleDigitAdjustment = Math.max(0f, figureSpaceWidth + trackingWidth)
-                            * Math.abs(clockText.getScaleX());
-                } else {
-                    // Preserve the established alignment for the other clock presets.
-                    singleDigitAdjustment = LauncherUiUtils.dp(this, 20);
-                }
-                horizontalOffset += singleDigitAdjustment;
-            }
-            targetX = -horizontalOffset / panelScaleX;
-            // The Neon Circuit two-digit width reduction is 20dp total. Compensate
-            // by half that width so the rendered digits remain centered in the same
-            // background. Keep it here (rather than only during layout) because a live
-            // clock refresh also resets this translation.
             if (twoDigitNeonCircuitHour) {
-                targetX += LauncherUiUtils.dp(this, 10) / panelScaleX;
+                // For a two-digit Neon Circuit hour, the text itself is centered
+                // in its full-width clock group. The 20dp width reduction is applied
+                // around that group's center, so no compensating translation is needed.
+                targetX = 0f;
+            } else {
+                float horizontalOffset = LauncherUiUtils.dp(this, 5);
+                if (singleDigitHour) {
+                    float singleDigitAdjustment;
+                    if (style == 2) {
+                        // Neon Circuit reserves a leading figure-space for single-digit
+                        // hours. Measure its actual advance to avoid a 9-to-10 jump.
+                        float figureSpaceWidth = clockText.getPaint().measureText("\u2007");
+                        float trackingWidth = clockText.getTextSize()
+                                * clockText.getLetterSpacing();
+                        singleDigitAdjustment = Math.max(0f, figureSpaceWidth + trackingWidth)
+                                * Math.abs(clockText.getScaleX());
+                    } else {
+                        // Preserve the established alignment for other clock presets.
+                        singleDigitAdjustment = LauncherUiUtils.dp(this, 20);
+                    }
+                    horizontalOffset += singleDigitAdjustment;
+                }
+                targetX = -horizontalOffset / panelScaleX;
             }
         }
         // Avoid invalidating the view when the computed offset hasn't actually changed.
@@ -10213,11 +10210,13 @@ public class MainActivity extends Activity {
         // itself is aligned as a unit, leaving a dedicated slot to the right for AM/PM.
         // Non-seven-segment glyphs are vertically centered in the clock row so
         // their visual center aligns with the shortened, vertically centered background.
-        clockText.setGravity(Gravity.LEFT | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
+        clockText.setGravity((neonCircuitTwoDigitHour ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT)
+                | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
         // Use geometry derived from the current layout calculation, not getWidth()/getHeight()
         // from the previous frame. Those dimensions can be stale while the user resizes the
         // panel, causing scaled digits to jump or drift until the next layout pass.
-        clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
+        clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
+                ? contentWidth / 2f : 0f);
         // The LED renderer sizes its segments from its measured view height.
         // Keep that view at the natural 114dp height and scale the rendered digits
         // by breadthScale explicitly; otherwise layout/background breadth changes
@@ -10271,7 +10270,8 @@ public class MainActivity extends Activity {
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale
                 : nonLedDigitScale * neonCircuitWidthScale);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
-        clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
+        clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
+                ? contentWidth / 2f : 0f);
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
