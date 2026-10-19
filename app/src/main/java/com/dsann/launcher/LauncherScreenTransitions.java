@@ -15,6 +15,9 @@ final class LauncherScreenTransitions {
     private static float activeParallaxProgress;
     // Tracks finger-release settling for non-Parallax drawer effects too.
     private static android.animation.ValueAnimator activeDrawerSettleAnimator;
+    // ViewPropertyAnimator has no running-state query; track the known drawer
+    // transition duration instead, with explicit clearing for immediate-home resets.
+    private static long propertyTransitionEndUptime;
 
     private static float clampProgress(float progress) {
         return Math.max(0f, Math.min(1f, progress));
@@ -22,15 +25,30 @@ final class LauncherScreenTransitions {
 
     static boolean isDrawerTransitionRunning(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect) {
-        if (homeScreen == null || drawerScreen == null) return false;
         if (activeParallaxAnimator != null && activeParallaxAnimator.isRunning()
                 && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
             return true;
         }
         if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isRunning()) return true;
-        // Non-Parallax entrance/exit transitions run through ViewPropertyAnimator.
-        // Visibility alone is not enough: both views are also visible during a live finger drag.
-        return homeScreen.animate().isRunning() || drawerScreen.animate().isRunning();
+        if (propertyTransitionEndUptime == 0L) return false;
+        if (android.os.SystemClock.uptimeMillis() < propertyTransitionEndUptime) return true;
+        propertyTransitionEndUptime = 0L;
+        return false;
+    }
+
+    private static void trackPropertyTransition(long durationMillis) {
+        propertyTransitionEndUptime = android.os.SystemClock.uptimeMillis()
+                + Math.max(0L, durationMillis);
+    }
+
+    /** Cancel all tracked animations before snapping the launcher home immediately. */
+    static void cancelTrackedDrawerTransitions() {
+        propertyTransitionEndUptime = 0L;
+        cancelActiveParallaxAnimator();
+        activeParallaxHome = null;
+        activeParallaxDrawer = null;
+        activeParallaxProgress = 0f;
+        cancelActiveDrawerSettleAnimator();
     }
 
     static float getDrawerTransitionProgress(LinearLayout homeScreen,
@@ -170,6 +188,8 @@ final class LauncherScreenTransitions {
         markDrawerClosed.run();
         drawerScreen.animate().cancel();
         homeScreen.animate().cancel();
+        trackPropertyTransition(LauncherMotion.duration(activity,
+                effect == 3 ? 390L : (effect == 1 || effect == 2 ? 360L : 340L)));
         prepareTransitionLayers(homeScreen, drawerScreen);
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
@@ -437,6 +457,7 @@ final class LauncherScreenTransitions {
         float remaining = 1f - progress;
         long duration = LauncherMotion.duration(activity,
                 Math.max(100L, (long) ((effect == 0 ? 380L : 420L) * remaining)));
+        trackPropertyTransition(duration);
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
@@ -638,6 +659,7 @@ final class LauncherScreenTransitions {
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
+        trackPropertyTransition(LauncherMotion.duration(activity, 180L));
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
         float drawerExitY = effect == 0
