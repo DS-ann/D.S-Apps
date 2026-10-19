@@ -6426,10 +6426,10 @@ public class MainActivity extends Activity {
                             KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
             boolean useNothingInnerBorder = iconArtworkActive
                     && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
-            // Keep the outline subtle at high-density phone settings while ensuring
-            // it remains a visible, continuous line on the smallest clock size.
-            float innerBorderWidth = Math.max(1.5f,
-                    getResources().getDisplayMetrics().density * 1.1f);
+            // Use the same stronger inner-border thickness for 7-segment and standard
+            // clock fonts. This is 50% thicker than the previous outline.
+            float innerBorderWidth = Math.max(2.25f,
+                    getResources().getDisplayMetrics().density * 1.65f);
             clockRenderer.setContrastInnerBorderEnabled(
                     useNothingInnerBorder, digitColours, innerBorderWidth);
         }
@@ -6862,15 +6862,14 @@ public class MainActivity extends Activity {
 
         final int[] backgroundColours;
         if (nothingMonochrome) {
-            // Use black only for every gradient stop. Vary alpha to create a soft
-            // black gradient without introducing white, grey or coloured pixels.
-            // The opacity slider scales the full gradient; the centre is darkest.
-            int monoAlpha = Math.min(255, 128 * opacityScale / 100);
-            int edgeAlpha = monoAlpha * 28 / 100;
-            int midAlpha = monoAlpha * 62 / 100;
+            // Pure black at both edges, fading symmetrically toward 10% of that
+            // opacity at the centre. Keep the slider meaningful across the full range.
+            int edgeAlpha = Math.min(255, 255 * opacity / 100);
+            int midAlpha = edgeAlpha * 55 / 100;
+            int centreAlpha = edgeAlpha * 10 / 100;
             int edge = Color.argb(edgeAlpha, 0, 0, 0);
             int mid = Color.argb(midAlpha, 0, 0, 0);
-            int centre = Color.argb(monoAlpha, 0, 0, 0);
+            int centre = Color.argb(centreAlpha, 0, 0, 0);
             backgroundColours = new int[] {edge, mid, centre, mid, edge};
         } else {
             // Existing cool teal/blue and phase-driven violet/blue treatment for other themes.

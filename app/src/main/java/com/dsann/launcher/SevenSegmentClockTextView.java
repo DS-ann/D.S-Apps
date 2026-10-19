@@ -343,7 +343,6 @@ public final class SevenSegmentClockTextView extends TextView {
         float half = thickness / 2f;
         float mid = y + digitHeight / 2f;
         int color = segmentColor;
-        int unlitColor = Color.argb(34, Color.red(color), Color.green(color), Color.blue(color));
 
         canvas.save();
         canvas.clipRect(leftBound, topBound, rightBound, bottomBound);
@@ -395,13 +394,16 @@ public final class SevenSegmentClockTextView extends TextView {
             for (int j = 0; j < segments.length; j++) {
                 float[] seg = segments[j];
                 boolean lit = (litMask & (1 << j)) != 0;
+                // Do not draw unlit segments at all. Even a very low-alpha fill leaves
+                // faint ghost bars visible on dark backgrounds.
+                if (!lit) continue;
                 segmentPaint.setStyle(Paint.Style.FILL);
-                segmentPaint.setShader(segmentGradientEnabled && lit ? segmentGradient : null);
-                segmentPaint.setColor(lit ? (segmentGradientEnabled ? Color.WHITE : color) : unlitColor);
+                segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
+                segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : color);
                 canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
                         thickness * 0.45f, thickness * 0.45f, segmentPaint);
 
-                if (lit && contrastInnerBorderEnabled && segmentBorderGradient != null) {
+                if (contrastInnerBorderEnabled && segmentBorderGradient != null) {
                     // Inset the stroke by half its width so the outline stays inside the
                     // rounded segment, instead of growing the digit's visible bounds.
                     float inset = contrastInnerBorderWidth * 0.5f;
