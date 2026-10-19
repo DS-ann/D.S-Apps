@@ -45,6 +45,7 @@ final class LauncherIconDrawable extends Drawable {
     // Keep the cache large enough for a typical drawer page plus nearby rows, without
     // retaining multiple full-size copies of every installed icon on low-RAM devices.
     private static final int MAX_ARTWORK_CACHE_BYTES = 8 * 1024 * 1024;
+    private static final boolean[] NO_BACKDROP_MASK = new boolean[0];
     private static final LruCache<ArtworkCacheKey, Bitmap> ARTWORK_CACHE =
             new LruCache<ArtworkCacheKey, Bitmap>(MAX_ARTWORK_CACHE_BYTES) {
                 @Override protected int sizeOf(ArtworkCacheKey key, Bitmap value) {
@@ -332,13 +333,14 @@ final class LauncherIconDrawable extends Drawable {
         // than risk recolouring its built-in background.
         boolean[] backdrop = findOpaqueBackdrop(pixels, width, height);
         if (backdrop == null) return rendered;
+        boolean hasBackdrop = backdrop.length == count;
 
         float[] sourceHsv = new float[3];
         float[] targetHsv = new float[3];
         for (int index = 0; index < count; index++) {
             int pixel = pixels[index];
             int alpha = Color.alpha(pixel);
-            if (alpha == 0 || backdrop[index]) continue;
+            if (alpha == 0 || (hasBackdrop && backdrop[index])) continue;
 
             // Recolour according to each pixel's original hue, not its screen position.
             // That preserves separate coloured regions in logos (for example Chrome's
@@ -380,26 +382,34 @@ final class LauncherIconDrawable extends Drawable {
         int borderCount = width * 2 + Math.max(0, height - 2) * 2;
         int transparentBorder = 0;
         int opaqueBorder = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (x != 0 && x != width - 1 && y != 0 && y != height - 1) continue;
+                int alpha = Color.alpha(pixels[y * width + x]);
+                if (alpha < 24) transparentBorder++;
+                else if (alpha >= 232) opaqueBorder++;
+            }
+        }
+        // Transparent canvas edges already separate artwork from the outer background.
+        // Return a shared empty sentinel: do not allocate a full per-pixel mask for the
+        // overwhelmingly common transparent-icon case.
+        if (transparentBorder >= borderCount * 0.20f || opaqueBorder < borderCount * 0.70f) {
+            return NO_BACKDROP_MASK;
+        }
+
+        // Only opaque, edge-to-edge legacy icons need colour clustering. Deferring this
+        // 32K histogram avoids about 128 KiB of short-lived allocation per normal icon.
         int[] bucketCounts = new int[32768];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 if (x != 0 && x != width - 1 && y != 0 && y != height - 1) continue;
                 int pixel = pixels[y * width + x];
-                int alpha = Color.alpha(pixel);
-                if (alpha < 24) {
-                    transparentBorder++;
-                } else if (alpha >= 232) {
-                    opaqueBorder++;
-                    int bucket = ((Color.red(pixel) >> 3) << 10)
-                            | ((Color.green(pixel) >> 3) << 5)
-                            | (Color.blue(pixel) >> 3);
-                    bucketCounts[bucket]++;
-                }
+                if (Color.alpha(pixel) < 232) continue;
+                int bucket = ((Color.red(pixel) >> 3) << 10)
+                        | ((Color.green(pixel) >> 3) << 5)
+                        | (Color.blue(pixel) >> 3);
+                bucketCounts[bucket]++;
             }
-        }
-        // Transparent canvas edges already separate artwork from the outer background.
-        if (transparentBorder >= borderCount * 0.20f || opaqueBorder < borderCount * 0.70f) {
-            return new boolean[pixels.length];
         }
 
         int dominantBucket = 0;
