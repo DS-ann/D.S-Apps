@@ -507,15 +507,12 @@ final class LauncherIconDrawable extends Drawable {
             fullIcon.getPixels(fullPixels, 0, width, 0, 0, width, height);
             glyph.getPixels(glyphPixels, 0, width, 0, 0, width, height);
 
-            double backgroundLuminance = backgroundBitmap == null ? -1d
-                    : averageVisibleLuminance(backgroundBitmap);
             if (backgroundBitmap != null) backgroundBitmap.recycle();
-            if (backgroundLuminance < 0d) {
-                backgroundLuminance = averageLuminanceOutsideGlyph(fullPixels, glyphPixels);
-            }
-            if (backgroundLuminance < 0d) backgroundLuminance = averageLuminance(fullPixels);
-            int backgroundTone = backgroundLuminance >= 140d ? 255 : 0;
-            int foregroundTone = 255 - backgroundTone;
+            // Nothing-style artwork uses a white icon field and a black glyph. Do not let
+            // an app's original background colour invert this, which previously produced
+            // inconsistent dark/white circles for otherwise similar icons.
+            int backgroundTone = 255;
+            int foregroundTone = 0;
             int[] outputPixels = new int[count];
             for (int i = 0; i < count; i++) {
                 int iconAlpha = Color.alpha(fullPixels[i]);
@@ -537,37 +534,6 @@ final class LauncherIconDrawable extends Drawable {
             glyph.recycle();
             return output;
         }
-    }
-
-    private static double averageVisibleLuminance(Bitmap bitmap) {
-        if (bitmap == null) return -1d;
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        int[] pixels = new int[width * height];
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
-        return averageLuminance(pixels);
-    }
-
-    private static double averageLuminanceOutsideGlyph(int[] iconPixels, int[] glyphPixels) {
-        long sum = 0L;
-        int samples = 0;
-        for (int i = 0; i < iconPixels.length; i++) {
-            if (Color.alpha(iconPixels[i]) < 24 || Color.alpha(glyphPixels[i]) >= 32) continue;
-            sum += Math.round(pixelLuminance(iconPixels[i]));
-            samples++;
-        }
-        return samples == 0 ? -1d : sum / (double) samples;
-    }
-
-    private static double averageLuminance(int[] pixels) {
-        long sum = 0L;
-        int samples = 0;
-        for (int pixel : pixels) {
-            if (Color.alpha(pixel) < 24) continue;
-            sum += Math.round(pixelLuminance(pixel));
-            samples++;
-        }
-        return samples == 0 ? -1d : sum / (double) samples;
     }
 
     /**
@@ -630,72 +596,30 @@ final class LauncherIconDrawable extends Drawable {
 
         boolean[] backdrop = findMonochromeBackdrop(pixels, width, height);
         boolean hasBackdrop = backdrop != null && backdrop.length == count;
-        int opaqueCount = 0;
         int transparentCount = 0;
-        double allLuminance = 0d;
         for (int pixel : pixels) {
-            int alpha = Color.alpha(pixel);
-            if (alpha < 24) {
-                transparentCount++;
-                continue;
-            }
-            opaqueCount++;
-            allLuminance += pixelLuminance(pixel);
+            if (Color.alpha(pixel) < 24) transparentCount++;
         }
-        if (opaqueCount > 0) allLuminance /= opaqueCount;
 
-        int backdropRed = 0, backdropGreen = 0, backdropBlue = 0;
-        double backdropLuminance = 0d;
-        double sumRedSquared = 0d, sumGreenSquared = 0d, sumBlueSquared = 0d;
-        int backdropSampleCount = 0;
+        // Extend only the detected mask's immediate edge by matching neighbouring pixels.
+        // The previous image-wide colour match could mistakenly convert a similarly coloured
+        // part of the logo itself into background; local expansion keeps curved/antialiased
+        // icon edges clean without erasing matching details elsewhere.
         if (hasBackdrop) {
-            for (int i = 0; i < count; i++) {
-                if (!backdrop[i] || Color.alpha(pixels[i]) < 24) continue;
-                int pixel = pixels[i];
-                int red = Color.red(pixel), green = Color.green(pixel), blue = Color.blue(pixel);
-                backdropRed += red;
-                backdropGreen += green;
-                backdropBlue += blue;
-                backdropLuminance += pixelLuminance(pixel);
-                sumRedSquared += red * red;
-                sumGreenSquared += green * green;
-                sumBlueSquared += blue * blue;
-                backdropSampleCount++;
-            }
+            backdrop = expandMonochromeBackdropAtEdges(pixels, backdrop, width, height);
         }
-        if (backdropSampleCount > 0) {
-            backdropRed /= backdropSampleCount;
-            backdropGreen /= backdropSampleCount;
-            backdropBlue /= backdropSampleCount;
-            backdropLuminance /= backdropSampleCount;
-        }
-        double redVariance = backdropSampleCount == 0 ? 0d
-                : Math.max(0d, sumRedSquared / backdropSampleCount - backdropRed * backdropRed);
-        double greenVariance = backdropSampleCount == 0 ? 0d
-                : Math.max(0d, sumGreenSquared / backdropSampleCount - backdropGreen * backdropGreen);
-        double blueVariance = backdropSampleCount == 0 ? 0d
-                : Math.max(0d, sumBlueSquared / backdropSampleCount - backdropBlue * backdropBlue);
-        boolean flatBackdrop = hasBackdrop
-                && Math.sqrt(redVariance) < 25d
-                && Math.sqrt(greenVariance) < 25d
-                && Math.sqrt(blueVariance) < 25d;
 
-        // Light source backplates stay light with a dark mark; dark backplates stay dark
-        // with a light mark. This is more stable than thresholding each original RGB colour
-        // independently, which made multi-colour logos collapse into arbitrary black/white
-        // halves. Strong colour boundaries inside the logo are preserved as fine separators.
-        // Use the same Nothing-style polarity for every detected app backplate. Inferring
-        // polarity from the source colour turned some blue/light icons into blank white discs.
-        int backgroundTone = 0;
-        int foregroundTone = 255;
         boolean[] separators = thickenMonochromeSeparators(
                 findMonochromeSeparators(pixels, hasBackdrop ? backdrop : null, width, height),
                 pixels, hasBackdrop ? backdrop : null, width, height);
 
-        // Transparent logo artwork uses a clean white glyph; internal colour boundaries
-        // become dark seams. Preserve the original alpha so transparent outer areas stay clear.
-        int noBackdropForeground = 255;
-        int noBackdropSeparator = 0;
+        // Fixed Nothing-inspired palette: white original backplate, black foreground. For
+        // transparent standalone glyphs, transparency is retained and only the glyph is black.
+        final int backgroundTone = 255;
+        final int foregroundTone = 0;
+        final int noBackdropForeground = 0;
+        final int noBackdropSeparator = 255;
+
         for (int index = 0; index < count; index++) {
             int pixel = pixels[index];
             int alpha = Color.alpha(pixel);
@@ -703,26 +627,22 @@ final class LauncherIconDrawable extends Drawable {
 
             int mono;
             if (hasBackdrop) {
-                boolean isBackdropPixel = backdrop[index]
-                        || (flatBackdrop && isNearColor(pixel, backdropRed, backdropGreen,
-                                backdropBlue, 38));
-                if (isBackdropPixel || separators[index]) {
+                // White fill and white internal cut-lines preserve distinct pieces in divided
+                // logos; app-background pixels are never recoloured based on their original hue.
+                if (backdrop[index] || separators[index]) {
                     mono = backgroundTone;
                 } else {
                     mono = foregroundTone;
                 }
             } else if (transparentCount > count * 0.025f) {
-                // For artwork floating on transparency, keep the original alpha silhouette
-                // and make the visible logo a single readable tone. Multicolour sub-regions
-                // become contrasting seams rather than turning into unrelated black blocks.
+                // Source has genuine transparent margins: use a black silhouette and retain
+                // white seams only at meaningful internal colour divisions.
                 mono = separators[index] ? noBackdropSeparator : noBackdropForeground;
             } else {
-                // An opaque icon whose background cannot be identified confidently is
-                // ambiguous. A global threshold can turn unrelated regions into hard black
-                // and white blocks, so preserve the source's luminance and internal details
-                // in neutral greys rather than inventing a false background boundary.
+                // When no reliable background is present in an opaque legacy icon, do not
+                // invent a split through the logo. Keep its tonal detail as neutral greys.
                 float luminance = pixelLuminance(pixel);
-                float contrasted = 128f + (luminance - 128f) * 1.18f;
+                float contrasted = 128f + (luminance - 128f) * 1.24f;
                 mono = Math.max(0, Math.min(255, Math.round(contrasted)));
             }
             pixels[index] = Color.argb(alpha, mono, mono, mono);
@@ -733,6 +653,41 @@ final class LauncherIconDrawable extends Drawable {
         output.setPixels(pixels, 0, width, 0, 0, width, height);
         rendered.recycle();
         return output;
+    }
+
+    /**
+     * Preserve antialiased edges of a detected background without using a global colour
+     * replacement. Only pixels directly next to the already-connected background mask can
+     * be expanded, and each is compared to its adjacent background pixel(s) with a generous
+     * anti-alias tolerance. This works for flat colours and gently varying gradients.
+     */
+    private static boolean[] expandMonochromeBackdropAtEdges(int[] pixels,
+            boolean[] backdrop, int width, int height) {
+        if (backdrop == null || backdrop.length != pixels.length) return backdrop;
+        boolean[] expanded = backdrop.clone();
+        for (int index = 0; index < backdrop.length; index++) {
+            if (!backdrop[index]) continue;
+            int x = index % width;
+            int y = index / width;
+            int reference = pixels[index];
+            for (int dy = -1; dy <= 1; dy++) {
+                int ny = y + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (int dx = -1; dx <= 1; dx++) {
+                    int nx = x + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    int next = ny * width + nx;
+                    if (backdrop[next] || Color.alpha(pixels[next]) < 48) continue;
+                    int candidate = pixels[next];
+                    if (Math.abs(Color.red(candidate) - Color.red(reference)) <= 72
+                            && Math.abs(Color.green(candidate) - Color.green(reference)) <= 72
+                            && Math.abs(Color.blue(candidate) - Color.blue(reference)) <= 72) {
+                        expanded[next] = true;
+                    }
+                }
+            }
+        }
+        return expanded;
     }
 
     private static float pixelLuminance(int pixel) {
@@ -751,7 +706,8 @@ final class LauncherIconDrawable extends Drawable {
     /**
      * Finds strong colour changes between neighbouring non-background pixels. The resulting
      * one-pixel separators preserve structure inside logos such as segmented play symbols,
-     * while a plain glyph stays plain. This operates on all icons identically.
+     * while a plain glyph stays plain. Separators become white cut-lines on black glyphs.
+     * This operates on all icons identically.
      */
     private static boolean[] findMonochromeSeparators(int[] pixels, boolean[] backdrop,
             int width, int height) {
@@ -785,8 +741,8 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /**
-     * Widen meaningful internal colour boundaries slightly before converting them to dark
-     * seams. A one-source-pixel seam was almost invisible at launcher icon size, so divided
+     * Widen meaningful internal colour boundaries slightly before converting them to white
+     * cut-lines. A one-source-pixel seam was almost invisible at launcher icon size, so divided
      * logos (for example triangular/multisegment marks) lost their internal structure.
      * Never thicken through transparent edges or a detected backplate.
      */
