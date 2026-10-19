@@ -8,8 +8,7 @@ import android.widget.LinearLayout;
 final class LauncherScreenTransitions {
     private LauncherScreenTransitions() {}
 
-    // Parallex uses one progress animator for both surfaces. A new swipe can
-    // interrupt a settling animation without leaving two animators fighting.
+    // Parallex uses one progress animator for both surfaces.
     private static android.animation.ValueAnimator activeParallaxAnimator;
     private static LinearLayout activeParallaxHome;
     private static LinearLayout activeParallaxDrawer;
@@ -23,45 +22,15 @@ final class LauncherScreenTransitions {
 
     static boolean isDrawerTransitionRunning(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect) {
-        if (effect == 0 && activeParallaxAnimator != null
-                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) return true;
-        if (activeDrawerSettleAnimator != null) return true;
-        // Canned non-Parallax transitions use ViewPropertyAnimator. Both surfaces
-        // are visible only while that transition is in flight (or during a live drag).
-        return homeScreen != null && drawerScreen != null
-                && homeScreen.getVisibility() == View.VISIBLE
-                && drawerScreen.getVisibility() == View.VISIBLE;
-    }
-
-    /**
-     * Give a fresh touch inside the visible drawer to its grid immediately, even if
-     * an entrance/settling animation has not finished. This avoids interpreting a
-     * fast second swipe as another request to animate the drawer.
-     */
-    static void snapDrawerOpenForScrolling(LinearLayout homeScreen, LinearLayout drawerScreen,
-            Runnable markDrawerOpen) {
-        android.animation.ValueAnimator parallax = activeParallaxAnimator;
-        activeParallaxAnimator = null;
-        activeParallaxHome = null;
-        activeParallaxDrawer = null;
-        android.animation.ValueAnimator settle = activeDrawerSettleAnimator;
-        activeDrawerSettleAnimator = null;
-        if (parallax != null) parallax.cancel();
-        if (settle != null) settle.cancel();
-        if (homeScreen != null) homeScreen.animate().cancel();
-        if (drawerScreen != null) drawerScreen.animate().cancel();
-        if (markDrawerOpen != null) markDrawerOpen.run();
-        if (homeScreen != null) {
-            homeScreen.setVisibility(View.GONE);
-            resetTransitionPose(homeScreen);
-            releaseTransitionLayer(homeScreen);
+        if (homeScreen == null || drawerScreen == null) return false;
+        if (activeParallaxAnimator != null && activeParallaxAnimator.isRunning()
+                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
+            return true;
         }
-        if (drawerScreen != null) {
-            drawerScreen.setVisibility(View.VISIBLE);
-            resetTransitionPose(drawerScreen);
-            releaseTransitionLayer(drawerScreen);
-        }
-        activeParallaxProgress = 1f;
+        if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isRunning()) return true;
+        // Non-Parallax entrance/exit transitions run through ViewPropertyAnimator.
+        // Visibility alone is not enough: both views are also visible during a live finger drag.
+        return homeScreen.animate().isRunning() || drawerScreen.animate().isRunning();
     }
 
     static float getDrawerTransitionProgress(LinearLayout homeScreen,
@@ -76,28 +45,6 @@ final class LauncherScreenTransitions {
         if (drawerScreen != null && drawerScreen.getVisibility() == View.GONE) return 0f;
         if (homeScreen != null && homeScreen.getVisibility() == View.GONE) return 1f;
         return drawerOpen ? 1f : 0f;
-    }
-
-    /** Stop the settling animator at its current rendered progress for touch takeover. */
-    static float interruptDrawerTransition(Activity activity, LinearLayout homeScreen,
-            LinearLayout drawerScreen, int effect, boolean drawerOpen) {
-        float progress = getDrawerTransitionProgress(homeScreen, drawerScreen, effect, drawerOpen);
-        if (!isDrawerTransitionRunning(homeScreen, drawerScreen, effect)) return progress;
-        android.animation.ValueAnimator old = activeParallaxAnimator;
-        activeParallaxAnimator = null; // a cancelled end callback must not snap to an endpoint.
-        activeParallaxHome = null;
-        activeParallaxDrawer = null;
-        android.animation.ValueAnimator settle = activeDrawerSettleAnimator;
-        activeDrawerSettleAnimator = null;
-        if (old != null) old.cancel();
-        if (settle != null) settle.cancel();
-        homeScreen.animate().cancel();
-        drawerScreen.animate().cancel();
-        prepareTransitionLayers(homeScreen, drawerScreen);
-        homeScreen.setVisibility(View.VISIBLE);
-        drawerScreen.setVisibility(View.VISIBLE);
-        updateDrawerSwipe(activity, homeScreen, drawerScreen, effect, progress);
-        return progress;
     }
 
     private static void cancelActiveDrawerSettleAnimator() {
