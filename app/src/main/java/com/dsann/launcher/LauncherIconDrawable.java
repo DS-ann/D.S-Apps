@@ -94,10 +94,10 @@ final class LauncherIconDrawable extends Drawable {
             ARTWORK_CACHE.trimToSize(Math.max(1, MAX_ARTWORK_CACHE_BYTES / 4));
             COMPOSITION_CACHE.trimToSize(Math.max(1, MAX_COMPOSITION_CACHE_BYTES / 4));
         } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
-                || level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+                || level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
             ARTWORK_CACHE.trimToSize(Math.max(1, MAX_ARTWORK_CACHE_BYTES / 2));
             COMPOSITION_CACHE.trimToSize(Math.max(1, MAX_COMPOSITION_CACHE_BYTES / 2));
-        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+        } else if (level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             ARTWORK_CACHE.trimToSize(Math.max(1, MAX_ARTWORK_CACHE_BYTES * 3 / 4));
             COMPOSITION_CACHE.trimToSize(Math.max(1, MAX_COMPOSITION_CACHE_BYTES * 3 / 4));
         }
