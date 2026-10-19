@@ -777,9 +777,16 @@ final class LauncherIconDrawable extends Drawable {
         // connected to the app backdrop/exterior are deliberately excluded, so the main logo
         // segments and app background keep the established universal conversion rules.
         boolean[] enclosedDetails = null;
+        boolean[] repeatedTileInterior = null;
+        boolean[] repeatedTileOutline = null;
         if (hasBackdrop || transparentCount > count * 0.025f) {
+            boolean[] detectedBackdrop = hasBackdrop ? backdrop : null;
             enclosedDetails = findEnclosedContrastDetails(
-                    pixels, hasBackdrop ? backdrop : null, width, height);
+                    pixels, detectedBackdrop, width, height);
+            repeatedTileInterior = new boolean[count];
+            repeatedTileOutline = new boolean[count];
+            findRepeatedTileArtwork(pixels, detectedBackdrop, width, height,
+                    repeatedTileInterior, repeatedTileOutline);
         }
 
         // Fixed Nothing-inspired palette: white original backplate, black foreground. For
@@ -795,7 +802,18 @@ final class LauncherIconDrawable extends Drawable {
             if (alpha == 0) continue;
 
             int mono;
-            if (hasBackdrop) {
+            boolean tileInterior = repeatedTileInterior != null
+                    && repeatedTileInterior[index];
+            boolean tileOutline = repeatedTileOutline != null
+                    && repeatedTileOutline[index];
+            if (tileOutline) {
+                // A detected repeated key/button keeps a clear dark outline around its light
+                // interior. This prevents keyboard and calculator layouts from collapsing into
+                // one black mass when their key fills and foreground glyphs become monochrome.
+                mono = foregroundTone;
+            } else if (tileInterior) {
+                mono = backgroundTone;
+            } else if (hasBackdrop) {
                 // White fill and white internal cut-lines preserve distinct pieces in divided
                 // logos; app-background pixels are never recoloured based on their original hue.
                 if (backdrop[index] || separators[index]
@@ -1156,6 +1174,207 @@ final class LauncherIconDrawable extends Drawable {
             for (int i = 0; i < area; i++) details[queue[i]] = true;
         }
         return details;
+    }
+
+    private static final class TileCandidate {
+        final int label;
+        final int left, top, right, bottom, area;
+        final float centerX, centerY, aspectRatio, fillRatio;
+
+        TileCandidate(int label, int left, int top, int right, int bottom, int area) {
+            this.label = label;
+            this.left = left;
+            this.top = top;
+            this.right = right;
+            this.bottom = bottom;
+            this.area = area;
+            int componentWidth = right - left + 1;
+            int componentHeight = bottom - top + 1;
+            centerX = (left + right) * 0.5f;
+            centerY = (top + bottom) * 0.5f;
+            aspectRatio = Math.max(componentWidth, componentHeight)
+                    / (float) Math.max(1, Math.min(componentWidth, componentHeight));
+            fillRatio = area / (float) Math.max(1, componentWidth * componentHeight);
+        }
+
+        int width() { return right - left + 1; }
+        int height() { return bottom - top + 1; }
+        int maxDimension() { return Math.max(width(), height()); }
+    }
+
+    /**
+     * Detects repeated, compact, tile-like artwork arranged in a row/column grid. These often
+     * represent keyboard keys or calculator buttons. Their fills are converted to white with
+     * a black contour, while adjacent letters/symbols remain solid black. Geometry—not package
+     * names or icon identity—drives this pass, so irregular wordmarks and segmented brand marks
+     * are left alone.
+     *
+     * The image is already cached and processed off the UI thread. Component labelling stays
+     * bounded to the icon bitmap, and the pairwise layout check is skipped for unusually busy
+     * images to avoid quadratic work on noisy artwork.
+     */
+    private static void findRepeatedTileArtwork(int[] pixels, boolean[] backdrop,
+            int width, int height, boolean[] tileInterior, boolean[] tileOutline) {
+        int count = pixels.length;
+        if (count == 0 || width < 8 || height < 8) return;
+        int minTileArea = Math.max(12, Math.round(count * 0.0008f));
+        int maxTileArea = Math.round(count * 0.16f);
+        int minDimension = Math.max(4, Math.round(Math.min(width, height) * 0.025f));
+        int[] labels = new int[count];
+        java.util.Arrays.fill(labels, -1);
+        int[] queue = new int[count];
+        java.util.ArrayList<TileCandidate> candidates = new java.util.ArrayList<>();
+        int nextLabel = 0;
+
+        for (int start = 0; start < count; start++) {
+            if (labels[start] >= 0 || Color.alpha(pixels[start]) < 160
+                    || (backdrop != null && backdrop[start])) continue;
+            int head = 0, tail = 0;
+            int minX = width, minY = height, maxX = -1, maxY = -1;
+            boolean touchesBackground = false;
+            boolean touchesCanvasEdge = false;
+            queue[tail++] = start;
+            labels[start] = nextLabel;
+
+            while (head < tail) {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+                if (x == 0 || x == width - 1 || y == 0 || y == height - 1) {
+                    touchesCanvasEdge = true;
+                }
+                int current = pixels[index];
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + (direction == 0 ? -1 : direction == 1 ? 1 : 0);
+                    int ny = y + (direction == 2 ? -1 : direction == 3 ? 1 : 0);
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                        touchesCanvasEdge = true;
+                        continue;
+                    }
+                    int neighbour = ny * width + nx;
+                    if (Color.alpha(pixels[neighbour]) < 160
+                            || (backdrop != null && backdrop[neighbour])) {
+                        touchesBackground = true;
+                        continue;
+                    }
+                    if (labels[neighbour] >= 0) continue;
+                    if (detailColourBoundary(current, pixels[neighbour])) continue;
+                    labels[neighbour] = nextLabel;
+                    queue[tail++] = neighbour;
+                }
+            }
+
+            int componentWidth = maxX - minX + 1;
+            int componentHeight = maxY - minY + 1;
+            float aspect = Math.max(componentWidth, componentHeight)
+                    / (float) Math.max(1, Math.min(componentWidth, componentHeight));
+            float fill = tail / (float) Math.max(1, componentWidth * componentHeight);
+            if (touchesCanvasEdge || !touchesBackground || tail < minTileArea
+                    || tail > maxTileArea || componentWidth < minDimension
+                    || componentHeight < minDimension || aspect < 0.58f
+                    || aspect > 1.72f || fill < 0.40f) {
+                nextLabel++;
+                continue;
+            }
+
+            candidates.add(new TileCandidate(nextLabel, minX, minY, maxX, maxY, tail));
+            nextLabel++;
+            // Dense, highly fragmented artwork is not a reliable candidate for a tile-grid
+            // heuristic. Bail out rather than spend CPU on an unbounded pairwise comparison.
+            if (candidates.size() > 256) return;
+        }
+
+        if (candidates.size() < 3) return;
+        boolean[] repeatedLabels = new boolean[Math.max(1, nextLabel)];
+        for (int i = 0; i < candidates.size(); i++) {
+            TileCandidate a = candidates.get(i);
+            int rowNeighbours = 0;
+            int columnNeighbours = 0;
+            for (int j = 0; j < candidates.size(); j++) {
+                if (i == j) continue;
+                TileCandidate b = candidates.get(j);
+                float widthRatio = a.width() / (float) Math.max(1, b.width());
+                float heightRatio = a.height() / (float) Math.max(1, b.height());
+                if (widthRatio < 0.50f || widthRatio > 2.0f
+                        || heightRatio < 0.50f || heightRatio > 2.0f) continue;
+                float alignmentTolerance = Math.max(2f,
+                        Math.min(a.height(), b.height()) * 0.34f);
+                float rowDistance = Math.abs(a.centerY - b.centerY);
+                float columnDistance = Math.abs(a.centerX - b.centerX);
+                float xGap = Math.max(0f, Math.max(a.left, b.left)
+                        - Math.min(a.right, b.right) - 1f);
+                float yGap = Math.max(0f, Math.max(a.top, b.top)
+                        - Math.min(a.bottom, b.bottom) - 1f);
+                float maxDim = Math.max(a.maxDimension(), b.maxDimension());
+                if (rowDistance <= alignmentTolerance
+                        && columnDistance >= Math.min(a.width(), b.width()) * 0.70f
+                        && xGap <= maxDim * 3.2f) {
+                    rowNeighbours++;
+                }
+                alignmentTolerance = Math.max(2f,
+                        Math.min(a.width(), b.width()) * 0.34f);
+                if (columnDistance <= alignmentTolerance
+                        && rowDistance >= Math.min(a.height(), b.height()) * 0.70f
+                        && yGap <= maxDim * 3.2f) {
+                    columnNeighbours++;
+                }
+            }
+            if (rowNeighbours >= 2 || columnNeighbours >= 2) {
+                repeatedLabels[a.label] = true;
+            }
+        }
+
+        boolean[] selectedPixels = new boolean[count];
+        for (int i = 0; i < count; i++) {
+            int label = labels[i];
+            if (label >= 0 && label < repeatedLabels.length && repeatedLabels[label]) {
+                tileInterior[i] = true;
+                selectedPixels[i] = true;
+            }
+        }
+
+        // Draw a one-source-pixel contour plus a restrained adjacent pixel where opaque.
+        // Do not outline transparent exterior corners, and do not consume a different glyph.
+        for (int index = 0; index < count; index++) {
+            if (!selectedPixels[index]) continue;
+            int x = index % width;
+            int y = index / width;
+            boolean touchesBackground = false;
+            for (int dy = -1; dy <= 1 && !touchesBackground; dy++) {
+                int ny = y + dy;
+                if (ny < 0 || ny >= height) { touchesBackground = true; break; }
+                for (int dx = -1; dx <= 1; dx++) {
+                    int nx = x + dx;
+                    if (nx < 0 || nx >= width) { touchesBackground = true; break; }
+                    int neighbour = ny * width + nx;
+                    if (Color.alpha(pixels[neighbour]) < 80
+                            || (backdrop != null && backdrop[neighbour])) {
+                        touchesBackground = true;
+                        break;
+                    }
+                }
+            }
+            if (!touchesBackground) continue;
+            tileOutline[index] = true;
+            for (int dy = -1; dy <= 1; dy++) {
+                int ny = y + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (int dx = -1; dx <= 1; dx++) {
+                    int nx = x + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    int neighbour = ny * width + nx;
+                    if (Color.alpha(pixels[neighbour]) < 80) continue;
+                    if (selectedPixels[neighbour]
+                            || (backdrop != null && backdrop[neighbour])) {
+                        tileOutline[neighbour] = true;
+                    }
+                }
+            }
+        }
     }
 
     /**
