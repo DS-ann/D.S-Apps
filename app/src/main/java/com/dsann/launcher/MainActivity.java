@@ -1084,8 +1084,11 @@ public class MainActivity extends Activity {
                     // Dividing the touch delta by density made the clock lag behind the finger.
                     float moveX = event.getRawX() - clockWidgetDownRawX;
                     float moveY = event.getRawY() - clockWidgetDownRawY;
+                    // Keep gesture coordinates transient while the finger is moving.
+                    // ACTION_UP already commits the final position; cancellation restores
+                    // the start position. Writing preferences for every MOVE was wasteful.
                     setClampedClockTranslation(clockWidgetStartX + moveX,
-                            clockWidgetStartY + moveY, true);
+                            clockWidgetStartY + moveY, false);
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
@@ -1867,10 +1870,29 @@ public class MainActivity extends Activity {
         Intent query = new Intent(Intent.ACTION_MAIN, null);
         query.addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> result = packageManager.queryIntentActivities(query, 0);
+        // PackageManager label loading is relatively expensive on older devices. Sort
+        // by a single precomputed label per activity instead of loading both labels for
+        // every comparator invocation (O(n log n) resource lookups).
+        final java.util.IdentityHashMap<ResolveInfo, String> appLabels =
+                new java.util.IdentityHashMap<>();
+        for (ResolveInfo app : result) {
+            String label;
+            try {
+                label = String.valueOf(app.loadLabel(packageManager));
+            } catch (RuntimeException ignored) {
+                label = "";
+            }
+            appLabels.put(app, label);
+        }
+        final boolean descending = prefs != null
+                && prefs.getBoolean(KEY_DRAWER_DESCENDING, false);
         Collections.sort(result, new Comparator<ResolveInfo>() {
             @Override public int compare(ResolveInfo a, ResolveInfo b) {
-                int order = a.loadLabel(packageManager).toString().compareToIgnoreCase(b.loadLabel(packageManager).toString());
-                return prefs != null && prefs.getBoolean(KEY_DRAWER_DESCENDING, false) ? -order : order;
+                String labelA = appLabels.get(a);
+                String labelB = appLabels.get(b);
+                int order = (labelA == null ? "" : labelA)
+                        .compareToIgnoreCase(labelB == null ? "" : labelB);
+                return descending ? -order : order;
             }
         });
         // Keep the list objects stable: LauncherAppAdapter and the drawer's long-press
@@ -9643,7 +9665,11 @@ public class MainActivity extends Activity {
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         // Establish the selected preset's measurement font before measuring any width.
         // Otherwise switching away from seven-segment measures one frame with its old font.
-        clockText.setTextSize(sevenSegment ? 110f : 78f);
+        float targetClockTextSize = sevenSegment ? 110f : 78f;
+        if (Math.abs(clockText.getTextSize()
+                - targetClockTextSize * getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
+            clockText.setTextSize(targetClockTextSize);
+        }
 
         // The 7-segment view draws its own glyphs; Paint.measureText() does not
         // describe those glyphs and made its container too narrow. Calculate the

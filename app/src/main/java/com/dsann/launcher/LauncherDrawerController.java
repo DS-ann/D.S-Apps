@@ -168,12 +168,7 @@ final class LauncherDrawerController {
                         drawerApps.addAll(originalApps);
                     } else {
                         for (ResolveInfo app : originalApps) {
-                            String label;
-                            try {
-                                label = app.loadLabel(packageManager).toString();
-                            } catch (RuntimeException ignored) {
-                                label = "";
-                            }
+                            String label = adapter.cachedLabel(app);
                             if (label.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
                                 drawerApps.add(app);
                             }

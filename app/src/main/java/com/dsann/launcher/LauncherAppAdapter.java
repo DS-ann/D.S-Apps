@@ -93,11 +93,15 @@ public final class LauncherAppAdapter extends BaseAdapter {
         return app.activityInfo.packageName + "/" + app.activityInfo.name;
     }
 
-    private String cachedLabel(ResolveInfo app) {
+    String cachedLabel(ResolveInfo app) {
         String key = key(app);
         String value = labelCache.get(key);
         if (value == null) {
-            value = String.valueOf(app.loadLabel(packageManager));
+            try {
+                value = String.valueOf(app.loadLabel(packageManager));
+            } catch (RuntimeException ignored) {
+                value = "";
+            }
             labelCache.put(key, value);
         }
         return value;
@@ -192,7 +196,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
                         iconShape, backgroundColor, artworkTheme, key(app));
             } else {
                 icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground, iconShape,
-                        backgroundColor, artworkTheme, key(app));
+                        backgroundColor, artworkTheme, key(app)));
             }
         } else {
             icon.setImageDrawable(null);

@@ -277,9 +277,9 @@ final class HomePageController {
                     (host.getCurrentPage() + 1) + "  /  " + requiredPages);
         }
         strip.animate().cancel();
-        strip.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         float targetX = -host.getCurrentPage() * pageWidth;
         if (animate) {
+            strip.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             strip.setCameraDistance(12000f * activity.getResources().getDisplayMetrics().density);
             strip.setRotationY(host.getCurrentPage() > 0 ? 3f : -3f);
             strip.setScaleX(1f);
