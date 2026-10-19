@@ -913,8 +913,11 @@ final class LauncherIconDrawable extends Drawable {
                     final int right = index + 1;
                     final int delta = sourceColourTransitionDelta(
                             source, sourceWhite, index, right);
-                    if (delta > 0 && isLocalHorizontalTransitionPeak(
-                            source, sourceWhite, width, height, x, y, delta)) {
+                    if (delta > 0
+                            && !isThinColourStripBetweenColourAndWhite(
+                                    sourceWhite, width, height, index, right, 1, 0)
+                            && isLocalHorizontalTransitionPeak(
+                                    source, sourceWhite, width, height, x, y, delta)) {
                         final int maxDifference = largestSourceChannelDifference(
                                 source[index], source[right]);
                         if (maxDifference >= 46 && delta >= 76) {
@@ -937,8 +940,11 @@ final class LauncherIconDrawable extends Drawable {
                     final int down = index + width;
                     final int delta = sourceColourTransitionDelta(
                             source, sourceWhite, index, down);
-                    if (delta > 0 && isLocalVerticalTransitionPeak(
-                            source, sourceWhite, width, height, x, y, delta)) {
+                    if (delta > 0
+                            && !isThinColourStripBetweenColourAndWhite(
+                                    sourceWhite, width, height, index, down, 0, 1)
+                            && isLocalVerticalTransitionPeak(
+                                    source, sourceWhite, width, height, x, y, delta)) {
                         final int maxDifference = largestSourceChannelDifference(
                                 source[index], source[down]);
                         if (maxDifference >= 46 && delta >= 76) {
@@ -1072,6 +1078,39 @@ final class LauncherIconDrawable extends Drawable {
                 Math.max(
                         Math.abs(Color.green(first) - Color.green(second)),
                         Math.abs(Color.blue(first) - Color.blue(second))));
+    }
+
+    /**
+     * Prevent a generated white seam from erasing a one-source-pixel coloured strip between
+     * another colour and white. The artwork is normalized to 96–192 px before this pass, so
+     * one source pixel represents roughly a 0.5 dp detail at launcher-icon size.
+     *
+     * Only checks the pixel directly outward from either endpoint of the candidate colour
+     * transition. Wider colour regions have a non-white outward pixel and remain unchanged.
+     */
+    private static boolean isThinColourStripBetweenColourAndWhite(
+            boolean[] sourceWhite, int width, int height,
+            int firstIndex, int secondIndex, int dx, int dy) {
+        if (sourceWhite[firstIndex] || sourceWhite[secondIndex]) return false;
+
+        int firstX = firstIndex % width;
+        int firstY = firstIndex / width;
+        int secondX = secondIndex % width;
+        int secondY = secondIndex / width;
+
+        int firstOutX = firstX - dx;
+        int firstOutY = firstY - dy;
+        if (firstOutX >= 0 && firstOutX < width
+                && firstOutY >= 0 && firstOutY < height
+                && sourceWhite[firstOutY * width + firstOutX]) {
+            return true;
+        }
+
+        int secondOutX = secondX + dx;
+        int secondOutY = secondY + dy;
+        return secondOutX >= 0 && secondOutX < width
+                && secondOutY >= 0 && secondOutY < height
+                && sourceWhite[secondOutY * width + secondOutX];
     }
 
     /**
