@@ -54,9 +54,13 @@ final class LauncherIconDrawable extends Drawable {
     static final int ARTWORK_SUNSET_GRADIENT = 3;
     static final int ARTWORK_NOTHING_MONOCHROME = 4;
 
-    // Keep a bounded cache of processed artwork per app/theme. Sixteen MiB retains more
-    // variants when switching artwork styles without growing with the installed-app count.
-    private static final int MAX_ARTWORK_CACHE_BYTES = 16 * 1024 * 1024;
+    // Scale the processed-artwork cache with the VM heap, but keep it bounded for low-RAM
+    // phones. The small composite cache is independent so complex shape clipping is reused
+    // during later scrolls without retaining an unbounded second copy of every icon.
+    private static final int MAX_ARTWORK_CACHE_BYTES = calculateArtworkCacheCapacity();
+    private static final int MAX_COMPOSITION_CACHE_BYTES =
+            Math.max(4 * 1024 * 1024,
+                    Math.min(8 * 1024 * 1024, MAX_ARTWORK_CACHE_BYTES / 4));
     private static final boolean[] NO_BACKDROP_MASK = new boolean[0];
     private static final LruCache<ArtworkCacheKey, Bitmap> ARTWORK_CACHE =
             new LruCache<ArtworkCacheKey, Bitmap>(MAX_ARTWORK_CACHE_BYTES) {
@@ -64,6 +68,40 @@ final class LauncherIconDrawable extends Drawable {
                     return value == null ? 0 : value.getByteCount();
                 }
             };
+    private static final LruCache<CompositionCacheKey, Bitmap> COMPOSITION_CACHE =
+            new LruCache<CompositionCacheKey, Bitmap>(MAX_COMPOSITION_CACHE_BYTES) {
+                @Override protected int sizeOf(CompositionCacheKey key, Bitmap value) {
+                    return value == null ? 0 : value.getByteCount();
+                }
+            };
+    private static final Paint COMPOSITION_BITMAP_PAINT =
+            new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+
+    private static int calculateArtworkCacheCapacity() {
+        long maxHeap = Runtime.getRuntime().maxMemory();
+        long target = maxHeap / 8L;
+        target = Math.max(16L * 1024L * 1024L,
+                Math.min(32L * 1024L * 1024L, target));
+        return (int) target;
+    }
+
+    /** Trim cached bitmaps only under system memory pressure; keep them when another app opens. */
+    static void trimArtworkCaches(int level) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            ARTWORK_CACHE.evictAll();
+            COMPOSITION_CACHE.evictAll();
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
+            ARTWORK_CACHE.trimToSize(Math.max(1, MAX_ARTWORK_CACHE_BYTES / 4));
+            COMPOSITION_CACHE.trimToSize(Math.max(1, MAX_COMPOSITION_CACHE_BYTES / 4));
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+                || level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            ARTWORK_CACHE.trimToSize(Math.max(1, MAX_ARTWORK_CACHE_BYTES / 2));
+            COMPOSITION_CACHE.trimToSize(Math.max(1, MAX_COMPOSITION_CACHE_BYTES / 2));
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            ARTWORK_CACHE.trimToSize(Math.max(1, MAX_ARTWORK_CACHE_BYTES * 3 / 4));
+            COMPOSITION_CACHE.trimToSize(Math.max(1, MAX_COMPOSITION_CACHE_BYTES * 3 / 4));
+        }
+    }
     // Icon conversion must never run on GridView's UI-thread bind/scroll path. Results are
     // shared by cache key, then applied to any still-matching drawable instances on main.
     private static final Handler ARTWORK_HANDLER = new Handler(Looper.getMainLooper());
@@ -95,6 +133,9 @@ final class LauncherIconDrawable extends Drawable {
     private volatile Drawable.ConstantState originalSourceState;
     private volatile String sourceCacheToken;
     private volatile int artworkTheme = -1;
+    private boolean sourceIsProcessedArtwork;
+    private int drawableAlpha = 255;
+    private ColorFilter drawableColorFilter;
     // Force the first appearance bind through the cache so Original icons get the outline too.
     private boolean externalShapeClip;
     private boolean showBackground;
@@ -171,6 +212,47 @@ final class LauncherIconDrawable extends Drawable {
             if (state != key.state) return false;
             if (token == null) return key.token == null;
             return token.equals(key.token);
+        }
+    }
+
+    /** Cache key for the transparent, shape-clipped artwork layer. The background fill is
+     * deliberately excluded, so changing its colour does not force image processing again. */
+    private static final class CompositionCacheKey {
+        final ArtworkCacheKey artwork;
+        final int width;
+        final int height;
+        final int shape;
+        final boolean fitInsideBackground;
+        final boolean externalShapeClip;
+
+        CompositionCacheKey(ArtworkCacheKey artwork, int width, int height, int shape,
+                boolean fitInsideBackground, boolean externalShapeClip) {
+            this.artwork = artwork;
+            this.width = width;
+            this.height = height;
+            this.shape = shape;
+            this.fitInsideBackground = fitInsideBackground;
+            this.externalShapeClip = externalShapeClip;
+        }
+
+        @Override public int hashCode() {
+            int result = artwork.hashCode();
+            result = 31 * result + width;
+            result = 31 * result + height;
+            result = 31 * result + shape;
+            result = 31 * result + (fitInsideBackground ? 1 : 0);
+            result = 31 * result + (externalShapeClip ? 1 : 0);
+            return result;
+        }
+
+        @Override public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof CompositionCacheKey)) return false;
+            CompositionCacheKey key = (CompositionCacheKey) other;
+            return width == key.width && height == key.height && shape == key.shape
+                    && fitInsideBackground == key.fitInsideBackground
+                    && externalShapeClip == key.externalShapeClip
+                    && artwork.equals(key.artwork);
         }
     }
 
@@ -313,6 +395,7 @@ final class LauncherIconDrawable extends Drawable {
     private void applyArtworkTheme() {
         Drawable original = originalSource;
         int theme = clampArtworkTheme(artworkTheme);
+        sourceIsProcessedArtwork = false;
         if (original == null) {
             source = null;
             return;
@@ -347,6 +430,7 @@ final class LauncherIconDrawable extends Drawable {
         result.setDither(true);
         result.setBounds(getBounds());
         source = result;
+        sourceIsProcessedArtwork = true;
         invalidateSelf();
     }
 
@@ -2203,11 +2287,61 @@ final class LauncherIconDrawable extends Drawable {
             return;
         }
 
+        // For custom silhouettes, cache just the clipped icon layer (not the background
+        // colour). This removes repeated clipPath/source raster work on every scroll frame
+        // and lets background-colour changes reuse exactly the same processed artwork.
+        Bitmap clippedArtwork = getCachedClippedArtworkBitmap(
+                bounds.left, bounds.top, bounds.width(), bounds.height());
+        if (clippedArtwork != null) {
+            canvas.drawPath(path, paint);
+            canvas.drawBitmap(clippedArtwork, bounds.left, bounds.top,
+                    COMPOSITION_BITMAP_PAINT);
+            return;
+        }
+
         canvas.drawPath(path, paint);
         int save = canvas.save();
         canvas.clipPath(path);
         source.draw(canvas);
         canvas.restoreToCount(save);
+    }
+
+    private Bitmap getCachedClippedArtworkBitmap(int left, int top, int width, int height) {
+        // Do not cache the temporary un-themed logo shown while asynchronous artwork conversion
+        // is pending, or altered-alpha/filtered Drawables whose output depends on live state.
+        if (!sourceIsProcessedArtwork || !(source instanceof BitmapDrawable)
+                || drawableAlpha != 255 || drawableColorFilter != null
+                || originalSourceState == null || width <= 0 || height <= 0) {
+            return null;
+        }
+
+        ArtworkCacheKey artworkKey = new ArtworkCacheKey(
+                originalSourceState, sourceCacheToken, clampArtworkTheme(artworkTheme));
+        CompositionCacheKey key = new CompositionCacheKey(artworkKey, width, height, shape,
+                fitInsideBackground, externalShapeClip);
+        Bitmap cached = COMPOSITION_CACHE.get(key);
+        if (cached != null) return cached;
+
+        Bitmap rendered = null;
+        try {
+            rendered = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            rendered.setDensity(Resources.getSystem().getDisplayMetrics().densityDpi);
+            Canvas offscreen = new Canvas(rendered);
+            offscreen.translate(-left, -top);
+            int save = offscreen.save();
+            offscreen.clipPath(path);
+            source.draw(offscreen);
+            offscreen.restoreToCount(save);
+            if (rendered.getByteCount() > MAX_COMPOSITION_CACHE_BYTES) {
+                rendered.recycle();
+                return null;
+            }
+            COMPOSITION_CACHE.put(key, rendered);
+            return rendered;
+        } catch (RuntimeException | OutOfMemoryError ignored) {
+            if (rendered != null && !rendered.isRecycled()) rendered.recycle();
+            return null;
+        }
     }
 
     private void setShapePath(RectF target) {
@@ -2299,11 +2433,13 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     @Override public void setAlpha(int alpha) {
+        drawableAlpha = alpha;
         if (source != null) source.setAlpha(alpha);
         invalidateSelf();
     }
 
     @Override public void setColorFilter(ColorFilter colorFilter) {
+        drawableColorFilter = colorFilter;
         if (source != null) source.setColorFilter(colorFilter);
         invalidateSelf();
     }

@@ -1882,6 +1882,11 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    @Override public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        LauncherIconDrawable.trimArtworkCaches(level);
+    }
+
     @Override protected void onDestroy() {
         cancelPendingLiveDisplacementUpdate();
         liveDragGeometryCache.clear();
