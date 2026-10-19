@@ -92,7 +92,8 @@ final class LauncherIconDrawable extends Drawable {
     private Drawable originalSource;
     private Drawable.ConstantState originalSourceState;
     private String sourceCacheToken;
-    private int artworkTheme = ARTWORK_ORIGINAL;
+    // -1 forces the first bind to build the cached, outlined raster even for Original artwork.
+    private int artworkTheme = -1;
     private boolean showBackground;
     private boolean fitInsideBackground;
     private int shape;
@@ -303,9 +304,8 @@ final class LauncherIconDrawable extends Drawable {
     private void applyArtworkTheme() {
         Drawable original = originalSource;
         int theme = clampArtworkTheme(artworkTheme);
-        if (original == null || theme == ARTWORK_ORIGINAL) {
-            source = original;
-            if (source != null) source.setBounds(getBounds());
+        if (original == null) {
+            source = null;
             return;
         }
 
@@ -398,7 +398,7 @@ final class LauncherIconDrawable extends Drawable {
     /** Synchronous fallback for an unusual Drawable without a ConstantState. */
     private static Drawable artworkForTheme(Drawable original, int theme, String stableCacheToken) {
         int clampedTheme = clampArtworkTheme(theme);
-        if (original == null || clampedTheme == ARTWORK_ORIGINAL) return original;
+        if (original == null) return null;
 
         Drawable.ConstantState state = original.getConstantState();
         ArtworkCacheKey key = state == null && (stableCacheToken == null || stableCacheToken.isEmpty())
@@ -458,15 +458,63 @@ final class LauncherIconDrawable extends Drawable {
      */
     private static Bitmap createThemedArtworkBitmap(Drawable drawable, int theme) {
         if (drawable == null) return null;
+        Bitmap output = null;
         if (theme == ARTWORK_NOTHING_MONOCHROME && android.os.Build.VERSION.SDK_INT >= 33) {
             // Keep API-33-only framework references isolated so this class remains loadable
             // on the launcher's Android 6 minimum API.
-            Bitmap nativeMonochrome = Api33MonochromeRenderer.render(drawable);
-            if (nativeMonochrome != null) return nativeMonochrome;
+            output = Api33MonochromeRenderer.render(drawable);
         }
-        Bitmap rendered = rasterize(drawable);
-        if (rendered == null) return null;
-        return recolourArtwork(rendered, theme);
+        if (output == null) {
+            Bitmap rendered = rasterize(drawable);
+            if (rendered == null) return null;
+            output = theme == ARTWORK_ORIGINAL ? rendered : recolourArtwork(rendered, theme);
+        }
+        if (output != null) addInnerBlackBorder(output);
+        return output;
+    }
+
+    /**
+     * Adds a very fine black contour only to pixels already inside the drawable's alpha mask.
+     * This follows rounded/adaptive, circular, irregular and legacy square icons alike instead
+     * of drawing an external rectangle or changing the image bounds. It runs once per cached
+     * icon raster, never on the frame-by-frame draw path.
+     */
+    private static void addInnerBlackBorder(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        if (width < 3 || height < 3) return;
+        int count = width * height;
+        int[] pixels = new int[count];
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        int[] outlined = pixels.clone();
+        int radius = Math.max(1, Math.round(Math.min(width, height) * 0.009f));
+        int radiusSquared = radius * radius;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int index = y * width + x;
+                int alpha = Color.alpha(pixels[index]);
+                if (alpha < 24) continue;
+                boolean edge = false;
+                for (int dy = -radius; dy <= radius && !edge; dy++) {
+                    if (dy * dy > radiusSquared) continue;
+                    int ny = y + dy;
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        if (dx * dx + dy * dy > radiusSquared) continue;
+                        int nx = x + dx;
+                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                            edge = true;
+                            break;
+                        }
+                        if (Color.alpha(pixels[ny * width + nx]) < 32) {
+                            edge = true;
+                            break;
+                        }
+                    }
+                }
+                if (edge) outlined[index] = Color.argb(alpha, 0, 0, 0);
+            }
+        }
+        bitmap.setPixels(outlined, 0, width, 0, 0, width, height);
     }
 
     private static final class Api33MonochromeRenderer {
@@ -633,15 +681,17 @@ final class LauncherIconDrawable extends Drawable {
             if (hasBackdrop) {
                 // White fill and white internal cut-lines preserve distinct pieces in divided
                 // logos; app-background pixels are never recoloured based on their original hue.
-                if (backdrop[index] || separators[index]) {
+                if (backdrop[index] || separators[index] || isBrightLogoDetail(pixel)) {
                     mono = backgroundTone;
                 } else {
                     mono = foregroundTone;
                 }
             } else if (transparentCount > count * 0.025f) {
-                // Source has genuine transparent margins: use a black silhouette and retain
-                // white seams only at meaningful internal colour divisions.
-                mono = separators[index] ? noBackdropSeparator : noBackdropForeground;
+                // Keep bright, non-background logo cut-ins (such as a handset, camera ring or
+                // letter counter) white as well as colour-boundary seams; turning every source
+                // pixel black erased these details on older, flattened app icons.
+                mono = (separators[index] || isBrightLogoDetail(pixel))
+                        ? noBackdropSeparator : noBackdropForeground;
             } else {
                 // When no reliable background is present in an opaque legacy icon, do not
                 // invent a split through the logo. Keep its tonal detail as neutral greys.
@@ -710,6 +760,11 @@ final class LauncherIconDrawable extends Drawable {
             }
         }
         return expanded;
+    }
+
+    /** Recognises near-white internal logo detail independently of the source hue. */
+    private static boolean isBrightLogoDetail(int pixel) {
+        return Color.alpha(pixel) >= 96 && pixelLuminance(pixel) >= 222f;
     }
 
     private static float pixelLuminance(int pixel) {
@@ -817,7 +872,11 @@ final class LauncherIconDrawable extends Drawable {
         int blueDifference = Math.abs(Color.blue(first) - Color.blue(second));
         int largestDifference = Math.max(redDifference, Math.max(greenDifference, blueDifference));
         int totalDifference = redDifference + greenDifference + blueDifference;
-        return largestDifference >= 78 && totalDifference >= 135;
+        // Adjacent samples across narrow logo segments can have lower contrast than broad
+        // primaries (for example, tiny coloured dividers). Gradients change smoothly and do
+        // not meet both thresholds, so lowering these values recovers structure without
+        // outlining every pixel of a smooth fill.
+        return largestDifference >= 60 && totalDifference >= 105;
     }
 
     /**

@@ -3357,10 +3357,10 @@ public class MainActivity extends Activity {
                     LauncherIconDrawable.SHAPE_SQUARE, backgroundColor, requestedTheme, false);
             return;
         }
-        // The wrapper retains the exact original shortcut icon so disabling this option
-        // restores it without rewriting the saved image or changing the icon's geometry.
-        if (!enabled || requestedTheme == LauncherIconDrawable.ARTWORK_ORIGINAL
-                || current == null) return;
+        // Keep the shortcut on the same cached icon renderer even when artwork theming is
+        // disabled, so the inside contour stays consistent with app icons. Original artwork
+        // remains untouched apart from that fine border and the icon's geometry is unchanged.
+        if (current == null) return;
         String token = shortcutTile == null ? "shortcut:unknown"
                 : String.valueOf(shortcutTile.getContentDescription());
         icon.setImageDrawable(new LauncherIconDrawable(current, false,
