@@ -683,7 +683,20 @@ public class MainActivity extends Activity {
             drawerSwipeAnchorY = event.getY();
             drawerSwipeProgress = drawerSwipeStartProgress;
             drawerSwipeVisualActive = false;
-            gestureStartedOnDrawerGrid = drawerOpen && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
+            boolean touchOnVisibleDrawerGrid = drawerScreen != null
+                    && drawerScreen.getVisibility() == View.VISIBLE
+                    && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
+            if (touchOnVisibleDrawerGrid && drawerTransitionInterruptedAtDown) {
+                // The drawer is already under the finger. Finish its visual settle now,
+                // so the same DOWN/MOVE stream belongs to GridView scrolling, not to a
+                // second launcher transition gesture.
+                LauncherScreenTransitions.snapDrawerOpenForScrolling(
+                        homeScreen, drawerScreen, () -> drawerOpen = true);
+                drawerTransitionInterruptedAtDown = false;
+                drawerSwipeStartProgress = 1f;
+                drawerSwipeProgress = 1f;
+            }
+            gestureStartedOnDrawerGrid = touchOnVisibleDrawerGrid && drawerOpen;
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
