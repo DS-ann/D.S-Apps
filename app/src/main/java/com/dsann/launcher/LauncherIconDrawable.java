@@ -74,7 +74,15 @@ final class LauncherIconDrawable extends Drawable {
     private static final java.util.concurrent.ExecutorService ARTWORK_EXECUTOR =
             java.util.concurrent.Executors.newFixedThreadPool(2, new java.util.concurrent.ThreadFactory() {
                 @Override public Thread newThread(Runnable runnable) {
-                    Thread thread = new Thread(runnable, "LauncherIconArtwork");
+                    Thread thread = new Thread(() -> {
+                        try {
+                            // Icon recolouring is non-interactive work. Keep it below the UI
+                            // thread's priority so first-open bursts cannot starve animations.
+                            android.os.Process.setThreadPriority(
+                                    android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                        } catch (RuntimeException ignored) {}
+                        runnable.run();
+                    }, "LauncherIconArtwork");
                     thread.setDaemon(true);
                     return thread;
                 }
