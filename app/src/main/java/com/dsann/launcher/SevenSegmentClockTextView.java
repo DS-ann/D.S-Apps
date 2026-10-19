@@ -23,7 +23,6 @@ public final class SevenSegmentClockTextView extends TextView {
     private int baseTextColor = Color.rgb(196, 200, 209);
     private int iconArtworkTheme = LauncherIconDrawable.ARTWORK_ORIGINAL;
     private boolean iconArtworkEnabled;
-    private final Paint artworkOutlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean segmentGradientEnabled;
     private int segmentGradientWidth = -1;
     private int[] segmentGradientColors;

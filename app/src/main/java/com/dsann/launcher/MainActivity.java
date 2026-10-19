@@ -9666,10 +9666,16 @@ public class MainActivity extends Activity {
                 prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false) ? "On" : "Off", () -> {
             boolean enabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
             SharedPreferences.Editor edit = prefs.edit().putBoolean(KEY_CLOCK_DIGIT_GRADIENT, enabled);
-            if (enabled) edit.putBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+            if (enabled) {
+                edit.putBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+            } else {
+                // A disabled digit gradient cannot continue running a live transition.
+                edit.putBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+            }
             edit.apply();
             if (!enabled || !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
                 stopClockColorAnimator();
+                if (!enabled) clockColorPhase = 0f;
             }
             refreshClockArtworkAppearance();
             if (enabled && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {

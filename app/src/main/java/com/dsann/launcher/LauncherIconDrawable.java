@@ -1175,7 +1175,7 @@ final class LauncherIconDrawable extends Drawable {
      */
     static int clockArtworkColorForGlyph(int theme, int glyphIndex, int originalColor) {
         int boundedTheme = clampArtworkTheme(theme);
-        int index = Math.floorMod(Math.max(0, glyphIndex), 3);
+        int index = Math.max(0, glyphIndex) % 3;
         switch (boundedTheme) {
             case ARTWORK_SPECTRUM_MIX:
                 return MIXED_PALETTE[index];
