@@ -982,15 +982,17 @@ final class LauncherIconDrawable extends Drawable {
             pixels[index] = Color.argb(alpha, mono, mono, mono);
         }
 
-        // Strong reinforcement is reserved for thin/compact glyphs. Applying the same
-        // two-pixel growth to every logo segment can close gaps between adjacent colours
-        // (for example the sections of circular and triangular marks). Larger symbol geometry
-        // gets only a one-pixel reinforcement; glyphs retain the stronger setting that made
-        // small lettering readable.
-        boolean[] letterLikeForeground = findLetterLikeForegroundMask(pixels, width, height);
-        // A slightly wider source-resolution contour is needed on 144 px legacy icons;
-        // after downscaling, a one-pixel source stroke can disappear again.
-        final int letterStrokeRadius = Math.max(1, Math.round(Math.min(width, height) * 0.0115f));
+        // Reinforce likely lettering, but isolate this operation from the logo-structure
+        // masks. A one-source-pixel safety margin around seams and enclosed negative-space
+        // details prevents a wider text stroke from visually joining adjacent logo segments.
+        boolean[] reinforcementGuard = buildLetterReinforcementGuard(
+                separators, enclosedDetails, enclosedBackdropCounters, repeatedTileOutline,
+                width, height);
+        byte[] letterTypes = findLetterLikeForegroundMask(pixels, width, height);
+        // Keep enough radius for small letter strokes to survive icon downscaling. Expansion
+        // is nevertheless constrained by the guard above and by the detected backplate.
+        final int letterStrokeRadius = Math.max(1,
+                Math.round(Math.min(width, height) * 0.0115f));
         int[] reinforced = pixels.clone();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -999,41 +1001,45 @@ final class LauncherIconDrawable extends Drawable {
                         || (repeatedTileOutline != null && repeatedTileOutline[index])) {
                     continue;
                 }
-                boolean reinforceGlyph = letterLikeForeground[index];
-                int strokeRadius = reinforceGlyph ? letterStrokeRadius : 1;
+                byte letterType = letterTypes[index];
+                boolean reinforceGlyph = letterType != 0;
+                // Pixels beside protected seams keep the ordinary one-pixel contour. This
+                // stops the larger radius from squeezing the white divider from either side.
+                int strokeRadius = reinforceGlyph && !reinforcementGuard[index]
+                        ? letterStrokeRadius : 1;
                 for (int dy = -strokeRadius; dy <= strokeRadius; dy++) {
                     int ny = y + dy;
                     if (ny < 0 || ny >= height) continue;
                     for (int dx = -strokeRadius; dx <= strokeRadius; dx++) {
-                        if (dx == 0 && dy == 0 || dx * dx + dy * dy > strokeRadius * strokeRadius) {
-                            continue;
-                        }
+                        int distanceSquared = dx * dx + dy * dy;
+                        if ((dx == 0 && dy == 0)
+                                || distanceSquared > strokeRadius * strokeRadius) continue;
                         int nx = x + dx;
                         if (nx < 0 || nx >= width) continue;
                         int neighbour = ny * width + nx;
                         if (Color.alpha(pixels[neighbour]) < 240
                                 || Color.red(pixels[neighbour]) < 220) continue;
-                        // Separator pixels are hard-protected for every component.
-                        // Letting the lettering pass overwrite them caused multicolour logos
-                        // to collapse when a segment was classified as a compact wordmark.
-                        // Thin glyphs still thicken into ordinary antialiased/light pixels,
-                        // but never erase an already-detected internal logo seam.
+                        if (reinforcementGuard[neighbour]) continue;
                         if (separators[neighbour]) continue;
                         if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
                         if (enclosedBackdropCounters != null
                                 && enclosedBackdropCounters[neighbour]) continue;
                         if (repeatedTileOutline != null && repeatedTileOutline[neighbour]) continue;
-                        // Only letter-like components may grow into the detected outer/backplate
-                        // mask. Keeping that mask white elsewhere preserves open gaps between
-                        // logo segments instead of letting stroke reinforcement fill them black.
-                        if (hasBackdrop && backdrop[neighbour] && !reinforceGlyph) continue;
+                        // Compact/vertical components may grow only one source pixel into a
+                        // detected backplate; only a genuinely horizontal wordmark can use the
+                        // full radius. This prevents small logo lobes being fattened outward.
+                        if (hasBackdrop && backdrop[neighbour]) {
+                            if (!reinforceGlyph) continue;
+                            if (letterType != LETTER_HORIZONTAL_WORDMARK
+                                    && distanceSquared > 1) continue;
+                        }
                         reinforced[neighbour] = Color.argb(
                                 Color.alpha(pixels[neighbour]), 0, 0, 0);
                     }
                 }
             }
         }
-        pixels = reinforced;
+
 
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         output.setDensity(rendered.getDensity());
@@ -1042,16 +1048,56 @@ final class LauncherIconDrawable extends Drawable {
         return output;
     }
 
+    private static final byte LETTER_COMPACT_GLYPH = 1;
+    private static final byte LETTER_HORIZONTAL_WORDMARK = 2;
+    private static final byte LETTER_VERTICAL_GLYPH = 3;
+
     /**
-     * Marks compact or thin foreground components that behave like lettering. Only these
-     * components receive stronger stroke reinforcement and may grow slightly into the
-     * detected backplate; large symbol components retain their outline and internal gaps.
-     * This is geometry-based and applies uniformly to every app icon.
+     * Protects detected dividers and interior details, plus their immediate neighbourhood,
+     * from stroke expansion. A white seam then remains visibly white after the bitmap is
+     * reduced to launcher size.
      */
-    private static boolean[] findLetterLikeForegroundMask(int[] pixels, int width, int height) {
+    private static boolean[] buildLetterReinforcementGuard(boolean[] separators,
+            boolean[] enclosedDetails, boolean[] enclosedBackdropCounters,
+            boolean[] repeatedTileOutline, int width, int height) {
+        int count = width * height;
+        boolean[] guard = new boolean[count];
+        addGuardNeighbourhood(guard, separators, width, height);
+        addGuardNeighbourhood(guard, enclosedDetails, width, height);
+        addGuardNeighbourhood(guard, enclosedBackdropCounters, width, height);
+        addGuardNeighbourhood(guard, repeatedTileOutline, width, height);
+        return guard;
+    }
+
+    private static void addGuardNeighbourhood(boolean[] guard, boolean[] protectedMask,
+            int width, int height) {
+        if (protectedMask == null || protectedMask.length != guard.length) return;
+        for (int index = 0; index < protectedMask.length; index++) {
+            if (!protectedMask[index]) continue;
+            int x = index % width;
+            int y = index / width;
+            for (int dy = -1; dy <= 1; dy++) {
+                int ny = y + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (int dx = -1; dx <= 1; dx++) {
+                    int nx = x + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    guard[ny * width + nx] = true;
+                }
+            }
+        }
+    }
+
+    /**
+     * Classifies compact glyphs, broad horizontal wordmarks and narrow vertical glyphs.
+     * The limits are intentionally conservative: overly broad component geometry caused
+     * parts of logos to be mistaken for text. Each class is kept so only a continuous
+     * horizontal wordmark can expand fully into the backplate; small logo parts cannot.
+     */
+    private static byte[] findLetterLikeForegroundMask(int[] pixels, int width, int height) {
         final int count = pixels.length;
         final boolean[] visited = new boolean[count];
-        final boolean[] letterLike = new boolean[count];
+        final byte[] letterTypes = new byte[count];
         final int[] queue = new int[count];
 
         for (int start = 0; start < count; start++) {
@@ -1098,24 +1144,26 @@ final class LauncherIconDrawable extends Drawable {
             float heightFraction = componentHeight / (float) height;
             float areaFraction = tail / (float) count;
 
-            // Keep the text classifier tolerant of small, thick capitals and symbols.
-            // The previous limits missed compact letters whose connected black strokes occupy
-            // a few percent of the icon, leaving them hairline-thin after downscaling.
-            // These limits remain shape-constrained so broad logo parts and circular/triangular
-            // artwork do not receive the stronger stroke reserved for lettering.
-            boolean compactGlyph = widthFraction <= 0.36f && heightFraction <= 0.36f
-                    && areaFraction <= 0.035f;
-            boolean horizontalWordmark = heightFraction <= 0.25f
-                    && widthFraction <= 0.92f && componentWidth >= componentHeight * 1.2f
-                    && areaFraction <= 0.12f;
-            boolean verticalGlyph = widthFraction <= 0.22f && heightFraction <= 0.72f
-                    && componentHeight >= componentWidth * 1.2f && areaFraction <= 0.06f;
+            // These are a cautious compromise between the original classifier, which missed
+            // some legible strokes, and the later overly broad limits that thickened logo parts.
+            boolean compactGlyph = widthFraction <= 0.31f && heightFraction <= 0.31f
+                    && areaFraction <= 0.022f;
+            boolean horizontalWordmark = heightFraction <= 0.20f
+                    && widthFraction <= 0.86f && componentWidth >= componentHeight * 1.28f
+                    && areaFraction <= 0.075f;
+            boolean verticalGlyph = widthFraction <= 0.20f && heightFraction <= 0.64f
+                    && componentHeight >= componentWidth * 1.28f && areaFraction <= 0.042f;
 
-            if (compactGlyph || horizontalWordmark || verticalGlyph) {
-                for (int i = 0; i < tail; i++) letterLike[queue[i]] = true;
+            // Prefer the continuous-wordmark class when geometries overlap. It is the only
+            // class allowed to use the full stroke radius over a detected white backplate.
+            byte type = horizontalWordmark ? LETTER_HORIZONTAL_WORDMARK
+                    : verticalGlyph ? LETTER_VERTICAL_GLYPH
+                    : compactGlyph ? LETTER_COMPACT_GLYPH : 0;
+            if (type != 0) {
+                for (int i = 0; i < tail; i++) letterTypes[queue[i]] = type;
             }
         }
-        return letterLike;
+        return letterTypes;
     }
 
     /**
