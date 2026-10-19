@@ -771,6 +771,11 @@ final class LauncherIconDrawable extends Drawable {
         boolean[] separators = thickenMonochromeSeparators(
                 findMonochromeSeparators(pixels, hasBackdrop ? backdrop : null, width, height),
                 pixels, hasBackdrop ? backdrop : null, width, height);
+        // A few legacy wordmarks use touching glyphs with no colour boundary between letters.
+        // Split only very narrow vertical bridges in broad horizontal components; ordinary
+        // symbols and circular/multisegment logos fail the conservative projection checks.
+        addWordmarkSeparators(pixels, hasBackdrop ? backdrop : null,
+                width, height, separators);
 
         // Recover small, enclosed high-contrast details (for example a white mark inside a
         // coloured badge or a calculator symbol inside a key). Larger regions and any region
@@ -1174,6 +1179,85 @@ final class LauncherIconDrawable extends Drawable {
             for (int i = 0; i < area; i++) details[queue[i]] = true;
         }
         return details;
+    }
+
+    /**
+     * Looks for a narrow vertical projection valley inside a broad horizontal foreground
+     * component, which is a common sign that adjacent letters/numerals touch at a thin bridge.
+     * It does not run OCR or infer a specific character. It only adds a one-pixel white split
+     * where the original bitmap already has a strong, narrow constriction.
+     */
+    private static void addWordmarkSeparators(int[] pixels, boolean[] backdrop,
+            int width, int height, boolean[] separators) {
+        int count = pixels.length;
+        int[] labels = new int[count];
+        java.util.Arrays.fill(labels, -1);
+        int[] queue = new int[count];
+        int nextLabel = 0;
+        for (int start = 0; start < count; start++) {
+            if (labels[start] >= 0 || Color.alpha(pixels[start]) < 160
+                    || (backdrop != null && backdrop[start])) continue;
+            int head = 0, tail = 0;
+            int minX = width, minY = height, maxX = -1, maxY = -1;
+            boolean touchesCanvas = false;
+            queue[tail++] = start;
+            labels[start] = nextLabel++;
+            while (head < tail) {
+                int index = queue[head++];
+                int x = index % width, y = index / width;
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+                if (x == 0 || x == width - 1 || y == 0 || y == height - 1) {
+                    touchesCanvas = true;
+                }
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + (direction == 0 ? -1 : direction == 1 ? 1 : 0);
+                    int ny = y + (direction == 2 ? -1 : direction == 3 ? 1 : 0);
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                    int neighbour = ny * width + nx;
+                    if (labels[neighbour] >= 0 || Color.alpha(pixels[neighbour]) < 160
+                            || (backdrop != null && backdrop[neighbour])) continue;
+                    labels[neighbour] = labels[start];
+                    queue[tail++] = neighbour;
+                }
+            }
+            int componentWidth = maxX - minX + 1;
+            int componentHeight = maxY - minY + 1;
+            float aspect = componentWidth / (float) Math.max(1, componentHeight);
+            if (touchesCanvas || componentWidth < width * 0.30f
+                    || componentHeight < height * 0.18f
+                    || aspect < 0.90f || aspect > 4.0f
+                    || tail < count * 0.025f || tail > count * 0.45f) continue;
+
+            int[] projection = new int[componentWidth];
+            for (int i = 0; i < tail; i++) {
+                projection[queue[i] % width - minX]++;
+            }
+            int radius = Math.max(2, Math.round(componentWidth * 0.18f));
+            int minimumPeak = Math.max(3, Math.round(componentHeight * 0.18f));
+            int previousCut = -componentHeight;
+            for (int x = Math.max(2, Math.round(componentWidth * 0.12f));
+                    x < componentWidth - Math.max(2, Math.round(componentWidth * 0.12f)); x++) {
+                int valley = projection[x];
+                if (valley > projection[x - 1] || valley > projection[x + 1]) continue;
+                int leftPeak = 0, rightPeak = 0;
+                for (int offset = 1; offset <= radius; offset++) {
+                    if (x - offset >= 0) leftPeak = Math.max(leftPeak, projection[x - offset]);
+                    if (x + offset < componentWidth) {
+                        rightPeak = Math.max(rightPeak, projection[x + offset]);
+                    }
+                }
+                if (leftPeak < minimumPeak || rightPeak < minimumPeak
+                        || valley > Math.min(leftPeak, rightPeak) * 0.18f
+                        || x - previousCut < Math.max(3, componentHeight * 0.22f)) continue;
+                int cutX = minX + x;
+                for (int i = 0; i < tail; i++) {
+                    int index = queue[i];
+                    if (index % width == cutX) separators[index] = true;
+                }
+                previousCut = x;
+            }
+        }
     }
 
     private static final class TileCandidate {
