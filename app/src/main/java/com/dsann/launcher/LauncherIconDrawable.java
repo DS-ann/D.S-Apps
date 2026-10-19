@@ -1021,7 +1021,7 @@ final class LauncherIconDrawable extends Drawable {
                         int neighbour = ny * width + nx;
                         if (Color.alpha(pixels[neighbour]) < 240
                                 || Color.red(pixels[neighbour]) < 220) continue;
-                        if (reinforcementGuard[neighbour] && !reinforceGlyph) continue;
+                        if (reinforcementGuard[neighbour]) continue;
                         // Never overwrite the actual structure/detail pixels, even for a
                         // classified glyph. A letter may thicken beside a seam, not through it.
                         if (separators[neighbour]) continue;
@@ -1040,6 +1040,8 @@ final class LauncherIconDrawable extends Drawable {
             }
         }
 
+
+        pixels = reinforced;
 
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         output.setDensity(rendered.getDensity());
@@ -1144,18 +1146,17 @@ final class LauncherIconDrawable extends Drawable {
             float heightFraction = componentHeight / (float) height;
             float areaFraction = tail / (float) count;
 
-            // These are a cautious compromise between the original classifier, which missed
-            // some legible strokes, and the later overly broad limits that thickened logo parts.
-            // Restore the broader limits that recognised thicker capitals and short
-            // wordmarks. The monochrome seam/detail masks are now hard-protected independently,
-            // so text recognition no longer needs to be artificially narrow to save logo parts.
-            boolean compactGlyph = widthFraction <= 0.36f && heightFraction <= 0.36f
-                    && areaFraction <= 0.035f;
-            boolean horizontalWordmark = heightFraction <= 0.25f
-                    && widthFraction <= 0.92f && componentWidth >= componentHeight * 1.2f
-                    && areaFraction <= 0.12f;
-            boolean verticalGlyph = widthFraction <= 0.22f && heightFraction <= 0.72f
-                    && componentHeight >= componentWidth * 1.2f && areaFraction <= 0.06f;
+            // Keep recognition deliberately narrower than the lettering-only experiment.
+            // Small multicolour logo pieces can have letter-like bounds, so the classifier
+            // must not label every compact segment as text. Reinforcement is applied with a
+            // protected halo around separators, counters, enclosed details and tile edges.
+            boolean compactGlyph = widthFraction <= 0.31f && heightFraction <= 0.31f
+                    && areaFraction <= 0.022f;
+            boolean horizontalWordmark = heightFraction <= 0.20f
+                    && widthFraction <= 0.86f && componentWidth >= componentHeight * 1.28f
+                    && areaFraction <= 0.075f;
+            boolean verticalGlyph = widthFraction <= 0.20f && heightFraction <= 0.64f
+                    && componentHeight >= componentWidth * 1.28f && areaFraction <= 0.042f;
 
             // Prefer the continuous-wordmark class when geometries overlap. It is the only
             // class allowed to use the full stroke radius over a detected white backplate.
