@@ -2389,7 +2389,7 @@ public class MainActivity extends Activity {
      * With labels disabled, preserve the previous workspace capacity exactly.
      */
     private int homeGridBottomGapPx() {
-        return isHomeGridBottomAligned() ? LauncherUiUtils.dp(this, 25) : 0;
+        return isHomeGridBottomAligned() ? LauncherUiUtils.dp(this, 45) : 0;
     }
 
     /** Returns the row capacity after reserving any label-enabled dock clearance. */
