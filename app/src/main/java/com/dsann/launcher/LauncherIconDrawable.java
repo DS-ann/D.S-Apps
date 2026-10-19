@@ -1005,8 +1005,10 @@ final class LauncherIconDrawable extends Drawable {
                 boolean reinforceGlyph = letterType != 0;
                 // Pixels beside protected seams keep the ordinary one-pixel contour. This
                 // stops the larger radius from squeezing the white divider from either side.
-                int strokeRadius = reinforceGlyph && !reinforcementGuard[index]
-                        ? letterStrokeRadius : 1;
+                // Classified lettering keeps its stronger radius even beside a protected
+                // mask. The destination checks below still preserve the actual white seam/detail
+                // pixels; guarding the entire one-pixel halo was leaving these glyphs too thin.
+                int strokeRadius = reinforceGlyph ? letterStrokeRadius : 1;
                 for (int dy = -strokeRadius; dy <= strokeRadius; dy++) {
                     int ny = y + dy;
                     if (ny < 0 || ny >= height) continue;
@@ -1019,20 +1021,18 @@ final class LauncherIconDrawable extends Drawable {
                         int neighbour = ny * width + nx;
                         if (Color.alpha(pixels[neighbour]) < 240
                                 || Color.red(pixels[neighbour]) < 220) continue;
-                        if (reinforcementGuard[neighbour]) continue;
+                        if (reinforcementGuard[neighbour] && !reinforceGlyph) continue;
+                        // Never overwrite the actual structure/detail pixels, even for a
+                        // classified glyph. A letter may thicken beside a seam, not through it.
                         if (separators[neighbour]) continue;
                         if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
                         if (enclosedBackdropCounters != null
                                 && enclosedBackdropCounters[neighbour]) continue;
                         if (repeatedTileOutline != null && repeatedTileOutline[neighbour]) continue;
-                        // Compact/vertical components may grow only one source pixel into a
-                        // detected backplate; only a genuinely horizontal wordmark can use the
-                        // full radius. This prevents small logo lobes being fattened outward.
-                        if (hasBackdrop && backdrop[neighbour]) {
-                            if (!reinforceGlyph) continue;
-                            if (letterType != LETTER_HORIZONTAL_WORDMARK
-                                    && distanceSquared > 1) continue;
-                        }
+                        // Classified lettering may use its full stroke radius into the
+                        // detected backplate. Non-letter artwork cannot expand there, and the
+                        // exact separator/detail masks above remain immutable.
+                        if (hasBackdrop && backdrop[neighbour] && !reinforceGlyph) continue;
                         reinforced[neighbour] = Color.argb(
                                 Color.alpha(pixels[neighbour]), 0, 0, 0);
                     }
@@ -1146,13 +1146,16 @@ final class LauncherIconDrawable extends Drawable {
 
             // These are a cautious compromise between the original classifier, which missed
             // some legible strokes, and the later overly broad limits that thickened logo parts.
-            boolean compactGlyph = widthFraction <= 0.31f && heightFraction <= 0.31f
-                    && areaFraction <= 0.022f;
-            boolean horizontalWordmark = heightFraction <= 0.20f
-                    && widthFraction <= 0.86f && componentWidth >= componentHeight * 1.28f
-                    && areaFraction <= 0.075f;
-            boolean verticalGlyph = widthFraction <= 0.20f && heightFraction <= 0.64f
-                    && componentHeight >= componentWidth * 1.28f && areaFraction <= 0.042f;
+            // Restore the broader limits that recognised thicker capitals and short
+            // wordmarks. The monochrome seam/detail masks are now hard-protected independently,
+            // so text recognition no longer needs to be artificially narrow to save logo parts.
+            boolean compactGlyph = widthFraction <= 0.36f && heightFraction <= 0.36f
+                    && areaFraction <= 0.035f;
+            boolean horizontalWordmark = heightFraction <= 0.25f
+                    && widthFraction <= 0.92f && componentWidth >= componentHeight * 1.2f
+                    && areaFraction <= 0.12f;
+            boolean verticalGlyph = widthFraction <= 0.22f && heightFraction <= 0.72f
+                    && componentHeight >= componentWidth * 1.2f && areaFraction <= 0.06f;
 
             // Prefer the continuous-wordmark class when geometries overlap. It is the only
             // class allowed to use the full stroke radius over a detected white backplate.
