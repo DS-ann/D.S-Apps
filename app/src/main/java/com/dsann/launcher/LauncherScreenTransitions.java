@@ -177,12 +177,20 @@ final class LauncherScreenTransitions {
     // 0 = Parallex, 1 = 3D Card Flip, 2 = Depth Slide, 3 = Rotating Carousel.
     private static void prepareTransitionLayers(LinearLayout homeScreen, LinearLayout drawerScreen) {
         // Cache both surfaces during transforms to avoid display-list rebuild flashes.
-        if (homeScreen != null) homeScreen.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        if (drawerScreen != null) drawerScreen.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        // Avoid resetting an already-correct layer type: that can invalidate/rebuild
+        // expensive full-screen layers during rapid repeated transitions.
+        if (homeScreen != null && homeScreen.getLayerType() != View.LAYER_TYPE_HARDWARE) {
+            homeScreen.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
+        if (drawerScreen != null && drawerScreen.getLayerType() != View.LAYER_TYPE_HARDWARE) {
+            drawerScreen.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
     }
 
     private static void releaseTransitionLayer(View view) {
-        if (view != null) view.setLayerType(View.LAYER_TYPE_NONE, null);
+        if (view != null && view.getLayerType() != View.LAYER_TYPE_NONE) {
+            view.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
     }
 
     /** Travel distance is the actual layout height, not the physical display height. */
@@ -357,8 +365,15 @@ final class LauncherScreenTransitions {
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
-        homeScreen.setCameraDistance(10000f * density);
-        drawerScreen.setCameraDistance(10000f * density);
+        if (effect == 1 || effect == 3 || effect > 3) {
+            float cameraDistance = 10000f * density;
+            if (homeScreen.getCameraDistance() != cameraDistance) {
+                homeScreen.setCameraDistance(cameraDistance);
+            }
+            if (drawerScreen.getCameraDistance() != cameraDistance) {
+                drawerScreen.setCameraDistance(cameraDistance);
+            }
+        }
 
         // These poses are updated on every ACTION_MOVE: the drawer and home
         // surface now track the finger rather than merely inheriting progress
