@@ -118,7 +118,11 @@ final class LauncherScreenTransitions {
         cancelActiveParallaxAnimator();
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
-        prepareTransitionLayers(homeScreen, drawerScreen);
+        // Alpha/translation are render-thread properties on the hardware-accelerated
+        // launcher. Separate full-screen hardware layers cost two large textures and
+        // are repeatedly recreated on drawer open, producing the Parallax hitch.
+        releaseTransitionLayer(homeScreen);
+        releaseTransitionLayer(drawerScreen);
         homeScreen.setVisibility(View.VISIBLE);
         drawerScreen.setVisibility(View.VISIBLE);
         final float from = clampProgress(start);
@@ -280,9 +284,9 @@ final class LauncherScreenTransitions {
         if (homeScreen.getVisibility() != View.VISIBLE) homeScreen.setVisibility(View.VISIBLE);
         if (drawerScreen.getVisibility() != View.VISIBLE) drawerScreen.setVisibility(View.VISIBLE);
 
-        // Reuse the same layer caching used by the settle animator, so the first
-        // finger-controlled frames do not continuously redraw both full-screen surfaces.
-        prepareTransitionLayers(homeScreen, drawerScreen);
+        // Do not allocate full-screen hardware layers for property-only Parallax.
+        // This keeps partial swipes cheap and avoids a cached parent texture interfering
+        // with the drawer GridView when input becomes live near 80% progress.
         resetParallaxStaticPose(homeScreen);
         resetParallaxStaticPose(drawerScreen);
 

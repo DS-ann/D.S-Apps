@@ -12,7 +12,10 @@ import android.graphics.PixelFormat;
 import android.graphics.ColorFilter;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.LruCache;
+import java.lang.ref.WeakReference;
 
 /** Draws app icons with optional backing and selectable silhouettes. */
 final class LauncherIconDrawable extends Drawable {
@@ -60,6 +63,21 @@ final class LauncherIconDrawable extends Drawable {
                     return value == null ? 0 : value.getByteCount();
                 }
             };
+    // Icon conversion must never run on GridView's UI-thread bind/scroll path. Results are
+    // shared by cache key, then applied to any still-matching drawable instances on main.
+    private static final Handler ARTWORK_HANDLER = new Handler(Looper.getMainLooper());
+    private static final Object ARTWORK_REQUEST_LOCK = new Object();
+    private static final java.util.Map<ArtworkCacheKey, java.util.ArrayList<WeakReference<LauncherIconDrawable>>>
+            ARTWORK_WAITERS = new java.util.HashMap<>();
+    private static final java.util.Set<ArtworkCacheKey> ARTWORK_PENDING = new java.util.HashSet<>();
+    private static final java.util.concurrent.ExecutorService ARTWORK_EXECUTOR =
+            java.util.concurrent.Executors.newFixedThreadPool(2, new java.util.concurrent.ThreadFactory() {
+                @Override public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "LauncherIconArtwork");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
 
     private Drawable source;
     private Drawable originalSource;
@@ -225,8 +243,7 @@ final class LauncherIconDrawable extends Drawable {
         }
         if (this.artworkTheme != clampedArtworkTheme) {
             this.artworkTheme = clampedArtworkTheme;
-            this.source = artworkForTheme(originalSource, clampedArtworkTheme, sourceCacheToken);
-            if (this.source != null) this.source.setBounds(getBounds());
+            applyArtworkTheme();
         }
         this.showBackground = showBackground;
         this.shape = clampedShape;
@@ -272,6 +289,102 @@ final class LauncherIconDrawable extends Drawable {
         updateAppearance(showBackground, shape, backgroundColor, innerShapeColor, requestedArtworkTheme);
     }
 
+    private void applyArtworkTheme() {
+        Drawable original = originalSource;
+        int theme = clampArtworkTheme(artworkTheme);
+        if (original == null || theme == ARTWORK_ORIGINAL) {
+            source = original;
+            if (source != null) source.setBounds(getBounds());
+            return;
+        }
+
+        Drawable.ConstantState state = original.getConstantState();
+        // Drawables without ConstantState cannot safely be cloned for a worker. Keep this
+        // uncommon fallback correct; normal installed-app icons take the asynchronous path.
+        if (state == null) {
+            source = artworkForTheme(original, theme, sourceCacheToken);
+            if (source != null) source.setBounds(getBounds());
+            return;
+        }
+
+        ArtworkCacheKey key = new ArtworkCacheKey(state, sourceCacheToken, theme);
+        Bitmap cached = ARTWORK_CACHE.get(key);
+        if (cached != null) {
+            applyArtworkBitmap(cached);
+            return;
+        }
+
+        // Show the original logo temporarily instead of blocking the transition/scroll
+        // while its themed bitmap is prepared. Completion invalidates this drawable.
+        source = original;
+        source.setBounds(getBounds());
+        requestArtworkBitmap(key, state, theme, this);
+    }
+
+    private void applyArtworkBitmap(Bitmap bitmap) {
+        BitmapDrawable result = new BitmapDrawable(Resources.getSystem(), bitmap);
+        result.setFilterBitmap(true);
+        result.setDither(true);
+        result.setBounds(getBounds());
+        source = result;
+        invalidateSelf();
+    }
+
+    private boolean matchesArtworkRequest(ArtworkCacheKey key, int theme) {
+        if (artworkTheme != theme || originalSource == null) return false;
+        return key.equals(new ArtworkCacheKey(
+                originalSource.getConstantState(), sourceCacheToken, theme));
+    }
+
+    private static void requestArtworkBitmap(ArtworkCacheKey key,
+            Drawable.ConstantState state, int theme, LauncherIconDrawable waiter) {
+        boolean startWorker = false;
+        synchronized (ARTWORK_REQUEST_LOCK) {
+            java.util.ArrayList<WeakReference<LauncherIconDrawable>> waiters = ARTWORK_WAITERS.get(key);
+            if (waiters == null) {
+                waiters = new java.util.ArrayList<>();
+                ARTWORK_WAITERS.put(key, waiters);
+            }
+            waiters.add(new WeakReference<>(waiter));
+            if (ARTWORK_PENDING.add(key)) startWorker = true;
+        }
+        if (!startWorker) return;
+
+        ARTWORK_EXECUTOR.execute(() -> {
+            Bitmap themed = null;
+            try {
+                Drawable workerDrawable = state.newDrawable();
+                if (workerDrawable != null) workerDrawable = workerDrawable.mutate();
+                Bitmap rendered = rasterize(workerDrawable);
+                if (rendered != null) themed = recolourArtwork(rendered, theme);
+            } catch (RuntimeException ignored) {
+                // A vendor Drawable may not support worker-thread rasterisation; retain its
+                // original icon rather than crash the drawer.
+            }
+            final Bitmap result = themed;
+            ARTWORK_HANDLER.post(() -> finishArtworkRequest(key, theme, result));
+        });
+    }
+
+    private static void finishArtworkRequest(ArtworkCacheKey key, int theme, Bitmap bitmap) {
+        java.util.ArrayList<WeakReference<LauncherIconDrawable>> waiters;
+        synchronized (ARTWORK_REQUEST_LOCK) {
+            ARTWORK_PENDING.remove(key);
+            waiters = ARTWORK_WAITERS.remove(key);
+        }
+        if (bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES) {
+            ARTWORK_CACHE.put(key, bitmap);
+        }
+        if (waiters == null || bitmap == null) return;
+        for (WeakReference<LauncherIconDrawable> reference : waiters) {
+            LauncherIconDrawable drawable = reference.get();
+            if (drawable != null && drawable.matchesArtworkRequest(key, theme)) {
+                drawable.applyArtworkBitmap(bitmap);
+            }
+        }
+    }
+
+    /** Synchronous fallback for an unusual Drawable without a ConstantState. */
     private static Drawable artworkForTheme(Drawable original, int theme, String stableCacheToken) {
         int clampedTheme = clampArtworkTheme(theme);
         if (original == null || clampedTheme == ARTWORK_ORIGINAL) return original;
@@ -428,7 +541,12 @@ final class LauncherIconDrawable extends Drawable {
                 dominantBucket = i;
             }
         }
-        if (dominantCount < opaqueBorder * 0.16f) return null;
+        // Complex legacy icons sometimes use a smooth background gradient rather than a
+        // solid colour. Fit a conservative four-corner colour surface and mask only the
+        // edge-connected pixels that agree with it; ambiguous borders still remain intact.
+        if (dominantCount < opaqueBorder * 0.16f) {
+            return findGradientBackdrop(pixels, width, height, opaqueBorder);
+        }
         int red = ((dominantBucket >> 10) & 31) * 8 + 4;
         int green = ((dominantBucket >> 5) & 31) * 8 + 4;
         int blue = (dominantBucket & 31) * 8 + 4;
@@ -458,6 +576,119 @@ final class LauncherIconDrawable extends Drawable {
             }
         }
         return mask;
+    }
+
+    private static boolean[] findGradientBackdrop(int[] pixels, int width, int height,
+            int opaqueBorder) {
+        if (width < 4 || height < 4) return null;
+        int[] corners = new int[] {
+                averageCornerColor(pixels, width, height, false, false),
+                averageCornerColor(pixels, width, height, true, false),
+                averageCornerColor(pixels, width, height, false, true),
+                averageCornerColor(pixels, width, height, true, true)
+        };
+
+        int matchingBorder = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (x != 0 && x != width - 1 && y != 0 && y != height - 1) continue;
+                int pixel = pixels[y * width + x];
+                if (Color.alpha(pixel) >= 232
+                        && matchesGradientBackdrop(pixel, x, y, width, height, corners, 44)) {
+                    matchingBorder++;
+                }
+            }
+        }
+        if (matchingBorder < opaqueBorder * 0.68f) return null;
+
+        boolean[] mask = new boolean[pixels.length];
+        int[] queue = new int[pixels.length];
+        int tail = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (x != 0 && x != width - 1 && y != 0 && y != height - 1) continue;
+                int index = y * width + x;
+                if (!mask[index] && Color.alpha(pixels[index]) >= 80
+                        && matchesGradientBackdrop(pixels[index], x, y, width, height, corners, 44)) {
+                    mask[index] = true;
+                    queue[tail++] = index;
+                }
+            }
+        }
+        int head = 0;
+        while (head < tail) {
+            int index = queue[head++];
+            int x = index % width;
+            if (x > 0) tail = enqueueGradientBackdrop(index - 1, pixels, mask, queue,
+                    tail, width, height, corners);
+            if (x + 1 < width) tail = enqueueGradientBackdrop(index + 1, pixels, mask, queue,
+                    tail, width, height, corners);
+            if (index >= width) tail = enqueueGradientBackdrop(index - width, pixels, mask, queue,
+                    tail, width, height, corners);
+            if (index + width < pixels.length) {
+                tail = enqueueGradientBackdrop(index + width, pixels, mask, queue,
+                        tail, width, height, corners);
+            }
+        }
+        return mask;
+    }
+
+    private static int averageCornerColor(int[] pixels, int width, int height,
+            boolean right, boolean bottom) {
+        long red = 0L, green = 0L, blue = 0L;
+        int count = 0;
+        int sampleWidth = Math.min(4, width);
+        int sampleHeight = Math.min(4, height);
+        for (int sy = 0; sy < sampleHeight; sy++) {
+            int y = bottom ? height - 1 - sy : sy;
+            for (int sx = 0; sx < sampleWidth; sx++) {
+                int x = right ? width - 1 - sx : sx;
+                int pixel = pixels[y * width + x];
+                if (Color.alpha(pixel) < 232) continue;
+                red += Color.red(pixel);
+                green += Color.green(pixel);
+                blue += Color.blue(pixel);
+                count++;
+            }
+        }
+        if (count == 0) {
+            return pixels[(bottom ? height - 1 : 0) * width + (right ? width - 1 : 0)];
+        }
+        return Color.rgb((int) (red / count), (int) (green / count), (int) (blue / count));
+    }
+
+    private static boolean matchesGradientBackdrop(int pixel, int x, int y, int width, int height,
+            int[] corners, int tolerance) {
+        if (Color.alpha(pixel) < 80) return false;
+        float u = x / (float) Math.max(1, width - 1);
+        float v = y / (float) Math.max(1, height - 1);
+        float topWeight = 1f - v;
+        float leftWeight = 1f - u;
+        float expectedRed = Color.red(corners[0]) * leftWeight * topWeight
+                + Color.red(corners[1]) * u * topWeight
+                + Color.red(corners[2]) * leftWeight * v
+                + Color.red(corners[3]) * u * v;
+        float expectedGreen = Color.green(corners[0]) * leftWeight * topWeight
+                + Color.green(corners[1]) * u * topWeight
+                + Color.green(corners[2]) * leftWeight * v
+                + Color.green(corners[3]) * u * v;
+        float expectedBlue = Color.blue(corners[0]) * leftWeight * topWeight
+                + Color.blue(corners[1]) * u * topWeight
+                + Color.blue(corners[2]) * leftWeight * v
+                + Color.blue(corners[3]) * u * v;
+        return Math.abs(Color.red(pixel) - expectedRed) <= tolerance
+                && Math.abs(Color.green(pixel) - expectedGreen) <= tolerance
+                && Math.abs(Color.blue(pixel) - expectedBlue) <= tolerance;
+    }
+
+    private static int enqueueGradientBackdrop(int index, int[] pixels, boolean[] mask, int[] queue,
+            int tail, int width, int height, int[] corners) {
+        if (!mask[index] && matchesGradientBackdrop(pixels[index], index % width, index / width,
+                width, height, corners, 44)) {
+            mask[index] = true;
+            queue[tail++] = index;
+        }
+        return tail;
     }
 
     private static int enqueueBackdrop(int index, int[] pixels, boolean[] mask, int[] queue,

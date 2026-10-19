@@ -76,9 +76,10 @@ final class LauncherDrawerController {
         grid.setVerticalSpacing(LauncherUiUtils.dp(activity, spacing));
         grid.setHorizontalSpacing(LauncherUiUtils.dp(activity, spacing / 2));
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        // Keep list-cell reuse enabled while avoiding a coloured cache flash behind
-        // icons as GridView scrolls. No extra layers or per-frame scroll callbacks.
-        grid.setScrollingCacheEnabled(true);
+        // GridView already reuses child cells. Its legacy scrolling bitmap cache adds
+        // per-cell allocations and memory pressure; icon artwork conversion now runs off
+        // the UI thread, so keep native scrolling/render-node reuse instead.
+        grid.setScrollingCacheEnabled(false);
         grid.setSmoothScrollbarEnabled(true);
         grid.setCacheColorHint(android.graphics.Color.TRANSPARENT);
         grid.setSelector(android.R.color.transparent);
