@@ -17,6 +17,8 @@ final class LauncherScreenTransitions {
     private static android.animation.ValueAnimator activeDrawerSettleAnimator;
     // ViewPropertyAnimator completion is tracked across its two screen animations.
     private static int propertyTransitionAnimationsRemaining;
+    // True while the active transition is settling toward the fully open drawer.
+    private static boolean activeDrawerTransitionToOpen;
 
     private static float clampProgress(float progress) {
         return Math.max(0f, Math.min(1f, progress));
@@ -32,8 +34,13 @@ final class LauncherScreenTransitions {
         return propertyTransitionAnimationsRemaining > 0;
     }
 
-    private static void beginPropertyTransition() {
+    static boolean isDrawerTransitionOpening() {
+        return activeDrawerTransitionToOpen;
+    }
+
+    private static void beginPropertyTransition(boolean opening) {
         propertyTransitionAnimationsRemaining = 2;
+        activeDrawerTransitionToOpen = opening;
     }
 
     private static void finishPropertyTransitionAnimation() {
@@ -45,6 +52,7 @@ final class LauncherScreenTransitions {
     /** Cancel all tracked animations before snapping the launcher home immediately. */
     static void cancelTrackedDrawerTransitions() {
         propertyTransitionAnimationsRemaining = 0;
+        activeDrawerTransitionToOpen = false;
         cancelActiveParallaxAnimator();
         activeParallaxHome = null;
         activeParallaxDrawer = null;
@@ -54,12 +62,22 @@ final class LauncherScreenTransitions {
 
     static float getDrawerTransitionProgress(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect, boolean drawerOpen) {
-        if (effect == 0 && activeParallaxAnimator != null
+        if (activeParallaxAnimator != null && activeParallaxAnimator.isRunning()
                 && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
             Object value = activeParallaxAnimator.getAnimatedValue();
             if (value instanceof Number) activeParallaxProgress =
                     clampProgress(((Number) value).floatValue());
             return activeParallaxProgress;
+        }
+        if (activeDrawerSettleAnimator != null && activeDrawerSettleAnimator.isRunning()) {
+            Object value = activeDrawerSettleAnimator.getAnimatedValue();
+            if (value instanceof Number) return clampProgress(((Number) value).floatValue());
+        }
+        // Property-animator effects expose their in-flight opening fraction through alpha.
+        // Reading it avoids adding a second per-frame progress animator for touch readiness.
+        if (propertyTransitionAnimationsRemaining > 0 && drawerScreen != null
+                && drawerScreen.getVisibility() == View.VISIBLE) {
+            return clampProgress(drawerScreen.getAlpha());
         }
         if (drawerScreen != null && drawerScreen.getVisibility() == View.GONE) return 0f;
         if (homeScreen != null && homeScreen.getVisibility() == View.GONE) return 1f;
@@ -119,6 +137,7 @@ final class LauncherScreenTransitions {
         drawerScreen.setVisibility(View.VISIBLE);
         final float from = clampProgress(start);
         final float to = clampProgress(end);
+        activeDrawerTransitionToOpen = to >= 0.5f;
         activeParallaxProgress = from;
         activeParallaxHome = homeScreen;
         activeParallaxDrawer = drawerScreen;
@@ -189,7 +208,7 @@ final class LauncherScreenTransitions {
         markDrawerClosed.run();
         drawerScreen.animate().cancel();
         homeScreen.animate().cancel();
-        beginPropertyTransition();
+        beginPropertyTransition(false);
         prepareTransitionLayers(homeScreen, drawerScreen);
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
@@ -462,7 +481,7 @@ final class LauncherScreenTransitions {
         float remaining = 1f - progress;
         long duration = LauncherMotion.duration(activity,
                 Math.max(100L, (long) ((effect == 0 ? 380L : 420L) * remaining)));
-        beginPropertyTransition();
+        beginPropertyTransition(true);
         float density = activity.getResources().getDisplayMetrics().density;
         float width = Math.max(1, activity.getResources().getDisplayMetrics().widthPixels);
         float height = Math.max(1, activity.getResources().getDisplayMetrics().heightPixels);
@@ -550,6 +569,7 @@ final class LauncherScreenTransitions {
     static void finishDrawerSwipeToHome(Activity activity, LinearLayout homeScreen,
                                         LinearLayout drawerScreen, Runnable markDrawerClosed,
                                         int effect, float swipeProgress) {
+        activeDrawerTransitionToOpen = false;
         final float start = clampProgress(swipeProgress);
         if (effect == 0) {
             animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 300L, () -> {
@@ -605,6 +625,7 @@ final class LauncherScreenTransitions {
     static void finishDrawerSwipeToDrawer(Activity activity, LinearLayout homeScreen,
                                           LinearLayout drawerScreen, Runnable markDrawerOpen,
                                           int effect, float swipeProgress) {
+        activeDrawerTransitionToOpen = true;
         final float start = clampProgress(swipeProgress);
         if (effect == 0) {
             animateParallaxProgress(activity, homeScreen, drawerScreen, start, 1f, 300L, () -> {
@@ -660,6 +681,7 @@ final class LauncherScreenTransitions {
 
     static void cancelDrawerSwipe(Activity activity, LinearLayout homeScreen,
                                  LinearLayout drawerScreen, int effect) {
+        activeDrawerTransitionToOpen = false;
         if (effect == 0) {
             float start = clampProgress(activeParallaxProgress);
             animateParallaxProgress(activity, homeScreen, drawerScreen, start, 0f, 180L,
