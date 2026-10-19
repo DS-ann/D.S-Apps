@@ -982,13 +982,13 @@ final class LauncherIconDrawable extends Drawable {
             pixels[index] = Color.argb(alpha, mono, mono, mono);
         }
 
-        // Thicken dark foreground strokes before scaling to launcher size. One source pixel
-        // is often sub-pixel after density scaling, so use a radius derived from the raster size
-        // (usually two pixels at this bitmap resolution). Grow into white fills/backgrounds,
-        // while keeping meaningful seams, enclosed counters, bright internal details and tile
-        // borders clear. Tile interiors are intentionally allowed: text printed on a key must
-        // grow into the key fill or the letters remain hairline-thin.
-        final int strokeRadius = Math.max(1, Math.round(Math.min(width, height) * 0.009f));
+        // Strong reinforcement is reserved for thin/compact glyphs. Applying the same
+        // two-pixel growth to every logo segment can close gaps between adjacent colours
+        // (for example the sections of circular and triangular marks). Larger symbol geometry
+        // gets only a one-pixel reinforcement; glyphs retain the stronger setting that made
+        // small lettering readable.
+        boolean[] letterLikeForeground = findLetterLikeForegroundMask(pixels, width, height);
+        final int letterStrokeRadius = Math.max(1, Math.round(Math.min(width, height) * 0.009f));
         int[] reinforced = pixels.clone();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -997,6 +997,8 @@ final class LauncherIconDrawable extends Drawable {
                         || (repeatedTileOutline != null && repeatedTileOutline[index])) {
                     continue;
                 }
+                boolean reinforceGlyph = letterLikeForeground[index];
+                int strokeRadius = reinforceGlyph ? letterStrokeRadius : 1;
                 for (int dy = -strokeRadius; dy <= strokeRadius; dy++) {
                     int ny = y + dy;
                     if (ny < 0 || ny >= height) continue;
@@ -1014,6 +1016,10 @@ final class LauncherIconDrawable extends Drawable {
                         if (enclosedBackdropCounters != null
                                 && enclosedBackdropCounters[neighbour]) continue;
                         if (repeatedTileOutline != null && repeatedTileOutline[neighbour]) continue;
+                        // Only letter-like components may grow into the detected outer/backplate
+                        // mask. Keeping that mask white elsewhere preserves open gaps between
+                        // logo segments instead of letting stroke reinforcement fill them black.
+                        if (hasBackdrop && backdrop[neighbour] && !reinforceGlyph) continue;
                         reinforced[neighbour] = Color.argb(
                                 Color.alpha(pixels[neighbour]), 0, 0, 0);
                     }
@@ -1027,6 +1033,79 @@ final class LauncherIconDrawable extends Drawable {
         output.setPixels(pixels, 0, width, 0, 0, width, height);
         rendered.recycle();
         return output;
+    }
+
+    /**
+     * Marks compact or thin foreground components that behave like lettering. Only these
+     * components receive stronger stroke reinforcement and may grow slightly into the
+     * detected backplate; large symbol components retain their outline and internal gaps.
+     * This is geometry-based and applies uniformly to every app icon.
+     */
+    private static boolean[] findLetterLikeForegroundMask(int[] pixels, int width, int height) {
+        final int count = pixels.length;
+        final boolean[] visited = new boolean[count];
+        final boolean[] letterLike = new boolean[count];
+        final int[] queue = new int[count];
+
+        for (int start = 0; start < count; start++) {
+            if (visited[start] || Color.alpha(pixels[start]) < 180
+                    || Color.red(pixels[start]) > 24) {
+                continue;
+            }
+
+            int head = 0;
+            int tail = 0;
+            int minX = width, minY = height, maxX = -1, maxY = -1;
+            queue[tail++] = start;
+            visited[start] = true;
+
+            while (head < tail) {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+
+                // Eight-way connectivity keeps diagonal strokes and joined glyphs together.
+                for (int dy = -1; dy <= 1; dy++) {
+                    int ny = y + dy;
+                    if (ny < 0 || ny >= height) continue;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx;
+                        if (nx < 0 || nx >= width) continue;
+                        int neighbour = ny * width + nx;
+                        if (visited[neighbour] || Color.alpha(pixels[neighbour]) < 180
+                                || Color.red(pixels[neighbour]) > 24) continue;
+                        visited[neighbour] = true;
+                        queue[tail++] = neighbour;
+                    }
+                }
+            }
+
+            int componentWidth = maxX - minX + 1;
+            int componentHeight = maxY - minY + 1;
+            float widthFraction = componentWidth / (float) width;
+            float heightFraction = componentHeight / (float) height;
+            float areaFraction = tail / (float) count;
+
+            // Small individual letters/digits and short wordmarks are reinforced more
+            // strongly; broad or large components remain on the lighter symbol path.
+            boolean compactGlyph = widthFraction <= 0.28f && heightFraction <= 0.28f
+                    && areaFraction <= 0.015f;
+            boolean horizontalWordmark = heightFraction <= 0.18f
+                    && widthFraction <= 0.82f && componentWidth >= componentHeight * 1.3f
+                    && areaFraction <= 0.065f;
+            boolean verticalGlyph = widthFraction <= 0.18f && heightFraction <= 0.60f
+                    && componentHeight >= componentWidth * 1.25f && areaFraction <= 0.035f;
+
+            if (compactGlyph || horizontalWordmark || verticalGlyph) {
+                for (int i = 0; i < tail; i++) letterLike[queue[i]] = true;
+            }
+        }
+        return letterLike;
     }
 
     /**
@@ -1146,10 +1225,13 @@ final class LauncherIconDrawable extends Drawable {
             componentSizes[label] = tail;
         }
 
-        // Thin letterforms often occupy only 1–2% of the source icon. Marking every colour
-        // boundary on those components white creates a bright halo that erases the letter at
-        // drawer size. Reserve white seams for boundaries between two substantial logo regions.
-        final int minLogoSegmentArea = Math.max(12, Math.round(count * 0.025f));
+        // When a reliable outer/backplate mask exists, allow smaller adjacent logo sections
+        // to retain their seams; otherwise multi-part marks can merge after dark-stroke growth.
+        // With transparent artwork there is no dependable backplate to protect text, so keep
+        // the higher cutoff there to avoid outlining small glyph components.
+        boolean hasBackdropMask = backdrop != null && backdrop.length == count;
+        final int minLogoSegmentArea = Math.max(12,
+                Math.round(count * (hasBackdropMask ? 0.005f : 0.025f)));
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
