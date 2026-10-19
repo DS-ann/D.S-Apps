@@ -895,33 +895,40 @@ final class LauncherIconDrawable extends Drawable {
             pixels[index] = Color.argb(alpha, mono, mono, mono);
         }
 
-        // Reinforce fragile foreground strokes before the icon is scaled down. One
-        // source-pixel expansion is allowed into the white backplate; otherwise ordinary
-        // letter edges never grow because those pixels are marked as backdrop. Preserve
-        // deliberately white separators, enclosed counters/details, and key interiors.
+        // Thicken dark foreground strokes before scaling to launcher size. One source pixel
+        // is often sub-pixel after density scaling, so use a radius derived from the raster size
+        // (usually two pixels at this bitmap resolution). Grow into white fills/backgrounds,
+        // while keeping meaningful seams, enclosed counters, bright internal details and tile
+        // borders clear. Tile interiors are intentionally allowed: text printed on a key must
+        // grow into the key fill or the letters remain hairline-thin.
+        final int strokeRadius = Math.max(1, Math.round(Math.min(width, height) * 0.009f));
         int[] reinforced = pixels.clone();
-        for (int y = 1; y < height - 1; y++) {
-            for (int x = 1; x < width - 1; x++) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
                 int index = y * width + x;
-                if (Color.alpha(pixels[index]) < 180
-                        || Color.red(pixels[index]) > 24) continue;
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        if (dx == 0 && dy == 0) continue;
-                        int neighbour = (y + dy) * width + x + dx;
-                        if (Color.alpha(pixels[neighbour]) < 180
+                if (Color.alpha(pixels[index]) < 180 || Color.red(pixels[index]) > 24
+                        || (repeatedTileOutline != null && repeatedTileOutline[index])) {
+                    continue;
+                }
+                for (int dy = -strokeRadius; dy <= strokeRadius; dy++) {
+                    int ny = y + dy;
+                    if (ny < 0 || ny >= height) continue;
+                    for (int dx = -strokeRadius; dx <= strokeRadius; dx++) {
+                        if (dx == 0 && dy == 0 || dx * dx + dy * dy > strokeRadius * strokeRadius) {
+                            continue;
+                        }
+                        int nx = x + dx;
+                        if (nx < 0 || nx >= width) continue;
+                        int neighbour = ny * width + nx;
+                        if (Color.alpha(pixels[neighbour]) < 240
                                 || Color.red(pixels[neighbour]) < 220) continue;
                         if (separators[neighbour]) continue;
                         if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
                         if (enclosedBackdropCounters != null
                                 && enclosedBackdropCounters[neighbour]) continue;
-                        if (repeatedTileInterior != null && repeatedTileInterior[neighbour]) continue;
-                        // Preserve the existing alpha edge; reinforce only real source
-                        // artwork pixels, never transparent canvas pixels.
-                        if (Color.alpha(pixels[neighbour]) >= 240) {
-                            reinforced[neighbour] = Color.argb(
-                                    Color.alpha(pixels[neighbour]), 0, 0, 0);
-                        }
+                        if (repeatedTileOutline != null && repeatedTileOutline[neighbour]) continue;
+                        reinforced[neighbour] = Color.argb(
+                                Color.alpha(pixels[neighbour]), 0, 0, 0);
                     }
                 }
             }
@@ -1009,16 +1016,64 @@ final class LauncherIconDrawable extends Drawable {
      */
     private static boolean[] findMonochromeSeparators(int[] pixels, boolean[] backdrop,
             int width, int height) {
-        boolean[] separators = new boolean[pixels.length];
+        final int count = pixels.length;
+        final boolean[] separators = new boolean[count];
+        final int[] labels = new int[count];
+        java.util.Arrays.fill(labels, -1);
+        final int[] componentSizes = new int[count];
+        final int[] queue = new int[count];
+        int nextLabel = 0;
+
+        // Label colour components against their seed colour, not neighbour-to-neighbour. This
+        // prevents slow antialiasing/gradients from chaining a tiny letter into a large logo area.
+        for (int start = 0; start < count; start++) {
+            if (labels[start] >= 0 || Color.alpha(pixels[start]) < 160
+                    || (backdrop != null && backdrop.length == count && backdrop[start])) {
+                continue;
+            }
+            int head = 0, tail = 0;
+            final int seedColour = pixels[start];
+            final int label = nextLabel++;
+            queue[tail++] = start;
+            labels[start] = label;
+
+            while (head < tail) {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + (direction == 0 ? -1 : direction == 1 ? 1 : 0);
+                    int ny = y + (direction == 2 ? -1 : direction == 3 ? 1 : 0);
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                    int neighbour = ny * width + nx;
+                    if (labels[neighbour] >= 0 || Color.alpha(pixels[neighbour]) < 160
+                            || (backdrop != null && backdrop.length == count
+                                    && backdrop[neighbour])) {
+                        continue;
+                    }
+                    if (strongColourBoundary(seedColour, pixels[neighbour])) continue;
+                    labels[neighbour] = label;
+                    queue[tail++] = neighbour;
+                }
+            }
+            componentSizes[label] = tail;
+        }
+
+        // Thin letterforms often occupy only 1–2% of the source icon. Marking every colour
+        // boundary on those components white creates a bright halo that erases the letter at
+        // drawer size. Reserve white seams for boundaries between two substantial logo regions.
+        final int minLogoSegmentArea = Math.max(12, Math.round(count * 0.025f));
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
-                if (Color.alpha(pixels[index]) < 160
-                        || (backdrop != null && backdrop[index])) continue;
+                int label = labels[index];
+                if (label < 0 || Color.alpha(pixels[index]) < 160) continue;
                 if (x + 1 < width) {
                     int right = index + 1;
-                    if (Color.alpha(pixels[right]) >= 160
-                            && (backdrop == null || !backdrop[right])
+                    int rightLabel = labels[right];
+                    if (rightLabel >= 0 && rightLabel != label
+                            && componentSizes[label] >= minLogoSegmentArea
+                            && componentSizes[rightLabel] >= minLogoSegmentArea
                             && strongColourBoundary(pixels[index], pixels[right])) {
                         separators[index] = true;
                         separators[right] = true;
@@ -1026,8 +1081,10 @@ final class LauncherIconDrawable extends Drawable {
                 }
                 if (y + 1 < height) {
                     int down = index + width;
-                    if (Color.alpha(pixels[down]) >= 160
-                            && (backdrop == null || !backdrop[down])
+                    int downLabel = labels[down];
+                    if (downLabel >= 0 && downLabel != label
+                            && componentSizes[label] >= minLogoSegmentArea
+                            && componentSizes[downLabel] >= minLogoSegmentArea
                             && strongColourBoundary(pixels[index], pixels[down])) {
                         separators[index] = true;
                         separators[down] = true;
@@ -1249,15 +1306,18 @@ final class LauncherIconDrawable extends Drawable {
             int largestChannelDifference = Math.max(redDifference,
                     Math.max(greenDifference, blueDifference));
             int totalChannelDifference = redDifference + greenDifference + blueDifference;
-            float luminanceDifference = Math.abs(componentMean - surroundingMean);
-            boolean strongLuminanceContrast = luminanceDifference >= 34f;
-            boolean strongColourContrast = largestChannelDifference >= 36
-                    && totalChannelDifference >= 72;
-            // Larger candidates are accepted only with clearly separated luminance, not merely
-            // a hue change. This keeps broad adjacent logo segments from becoming white while
-            // allowing enclosed letter/digit strokes to survive monochrome conversion.
+            float signedLuminanceDifference = componentMean - surroundingMean;
+            float luminanceDifference = Math.abs(signedLuminanceDifference);
+            // This mask represents light negative-space marks, not arbitrary high-contrast
+            // colour regions. Darker components must stay black; otherwise dark wordmarks such
+            // as ASK are converted to white and disappear against the light key/backplate.
+            boolean strongLuminanceContrast = signedLuminanceDifference >= 30f;
+            boolean strongColourContrast = signedLuminanceDifference >= 22f
+                    && largestChannelDifference >= 36 && totalChannelDifference >= 72;
+            // Larger candidates need to be distinctly brighter than their surroundings, not
+            // just different in hue or darker. This protects real dark glyphs from being erased.
             if ((!strongLuminanceContrast && !strongColourContrast)
-                    || (area > count * 0.09f && luminanceDifference < 66f)) continue;
+                    || (area > count * 0.09f && signedLuminanceDifference < 66f)) continue;
 
             // The accepted region is small, interior, and demonstrably distinct from its
             // surrounding colour. Preserve all its core pixels as white negative-space detail.
