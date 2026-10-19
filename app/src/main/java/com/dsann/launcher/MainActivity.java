@@ -9941,8 +9941,8 @@ public class MainActivity extends Activity {
 
     private void updateClockDigitHorizontalOffset() {
         if (clockPanel == null || clockText == null) return;
-        boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
-                && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+        boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
         float targetX;
         if (sevenSegment) {
@@ -9959,8 +9959,27 @@ public class MainActivity extends Activity {
                 }
                 singleDigitHour = hourDigits == 1;
             }
-            int horizontalOffset = LauncherUiUtils.dp(this, 5)
-                    + (singleDigitHour ? LauncherUiUtils.dp(this, 20) : 0);
+
+            float horizontalOffset = LauncherUiUtils.dp(this, 5);
+            if (singleDigitHour) {
+                float singleDigitAdjustment;
+                if (style == 2) {
+                    // Neon Circuit uses a cursive, proportional font. Its figure-space
+                    // advance is not reliably 20dp, so a fixed compensation caused the
+                    // hour to jump horizontally when changing between 9 and 10.
+                    // Measure the exact reserved leading cell and account for tracking
+                    // and the glyph's own horizontal scale to keep both hour widths aligned.
+                    float figureSpaceWidth = clockText.getPaint().measureText("\u2007");
+                    float trackingWidth = clockText.getTextSize()
+                            * clockText.getLetterSpacing();
+                    singleDigitAdjustment = Math.max(0f, figureSpaceWidth + trackingWidth)
+                            * Math.abs(clockText.getScaleX());
+                } else {
+                    // Preserve the established alignment for the other clock presets.
+                    singleDigitAdjustment = LauncherUiUtils.dp(this, 20);
+                }
+                horizontalOffset += singleDigitAdjustment;
+            }
             targetX = -horizontalOffset / panelScaleX;
         }
         // Avoid invalidating the view when the computed offset hasn't actually changed.
