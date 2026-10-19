@@ -10211,6 +10211,24 @@ public class MainActivity extends Activity {
             clockGroup.setClipToPadding(false);
         }
 
+        // Neon Circuit needs a little extra clearance only once the hour is two digits.
+        // Count the hour digits in the live value so single-digit hours keep their exact
+        // existing size and alignment.
+        String clockValueForWidthAdjustment = clockText.getText() == null
+                ? "" : clockText.getText().toString();
+        int clockColonForWidthAdjustment = clockValueForWidthAdjustment.indexOf(':');
+        int hourDigitCountForWidthAdjustment = 0;
+        if (clockColonForWidthAdjustment > 0) {
+            for (int i = 0; i < clockColonForWidthAdjustment; i++) {
+                if (Character.digit(clockValueForWidthAdjustment.charAt(i), 10) >= 0) {
+                    hourDigitCountForWidthAdjustment++;
+                }
+            }
+        }
+        final boolean neonCircuitTwoDigitHour = !sevenSegment
+                && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2
+                && hourDigitCountForWidthAdjustment > 1;
+
         // Keep the glyph view at the left edge of its content group. The group
         // itself is aligned as a unit, leaving a dedicated slot to the right for AM/PM.
         // Non-seven-segment glyphs are vertically centered in the clock row so
@@ -10260,7 +10278,18 @@ public class MainActivity extends Activity {
         // 1.4x setting, keeping the background dimensions unchanged.
         // The custom colon span remains vertically centered in the background.
         final float nonLedDigitScale = 1.12f;
-        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale : nonLedDigitScale);
+        // When Neon Circuit shows a two-digit hour, reduce the total clock-glyph
+        // width by 20dp to leave clearance inside the unchanged background. Derive
+        // the factor from the stable widest-digit measurement so the clock won't
+        // wobble as individual minute digits change.
+        float neonCircuitWidthScale = 1f;
+        if (neonCircuitTwoDigitHour) {
+            float currentGlyphWidth = Math.max(1f, naturalClockWidth * nonLedDigitScale);
+            neonCircuitWidthScale = Math.max(0.01f,
+                    (currentGlyphWidth - LauncherUiUtils.dp(this, 20)) / currentGlyphWidth);
+        }
+        clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale
+                : nonLedDigitScale * neonCircuitWidthScale);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(sevenSegment ? contentWidth / 2f : 0f);
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
@@ -10274,6 +10303,13 @@ public class MainActivity extends Activity {
         // Keep the horizontal glyph anchor synchronized with the current hour shape
         // without recalculating or changing the background geometry.
         updateClockDigitHorizontalOffset();
+        // The text view normally scales from its left edge. Add half of the
+        // width reduction back as an offset so the two-digit Neon Circuit clock
+        // stays centred while its left and right sides each gain about 10dp.
+        if (neonCircuitTwoDigitHour) {
+            clockText.setTranslationX(clockText.getTranslationX()
+                    + LauncherUiUtils.dp(this, 10));
+        }
         // Keep the non-seven-segment upper edge fixed while the added glyph height
         // extends downward; preserve a net 5 dp upward offset from the original center.
         // The panel itself no longer uses scaleY, so this offset must remain a
