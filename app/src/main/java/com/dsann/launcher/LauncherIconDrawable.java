@@ -780,6 +780,40 @@ final class LauncherIconDrawable extends Drawable {
             pixels[index] = Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));
         }
 
+        // Reinforce fragile one-pixel foreground strokes before the icon is scaled down.
+        // Expand only into opaque source pixels that are not confidently identified as
+        // backdrop, separators, enclosed counters, or light key interiors. This keeps
+        // letter strokes legible at launcher size without closing A/O/P/R counters.
+        int[] reinforced = pixels.clone();
+        for (int y = 1; y < height - 1; y++) {
+            for (int x = 1; x < width - 1; x++) {
+                int index = y * width + x;
+                if (Color.alpha(pixels[index]) < 180
+                        || Color.red(pixels[index]) > 24) continue;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        if (dx == 0 && dy == 0) continue;
+                        int neighbour = (y + dy) * width + x + dx;
+                        if (Color.alpha(pixels[neighbour]) < 180
+                                || Color.red(pixels[neighbour]) < 220) continue;
+                        if (hasBackdrop && backdrop[neighbour]) continue;
+                        if (separators[neighbour]) continue;
+                        if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
+                        if (enclosedBackdropCounters != null
+                                && enclosedBackdropCounters[neighbour]) continue;
+                        if (repeatedTileInterior != null && repeatedTileInterior[neighbour]) continue;
+                        // Preserve the existing alpha edge; reinforce only real source
+                        // artwork pixels, never transparent canvas pixels.
+                        if (Color.alpha(pixels[neighbour]) >= 240) {
+                            reinforced[neighbour] = Color.argb(
+                                    Color.alpha(pixels[neighbour]), 0, 0, 0);
+                        }
+                    }
+                }
+            }
+        }
+        pixels = reinforced;
+
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         output.setDensity(rendered.getDensity());
         output.setPixels(pixels, 0, width, 0, 0, width, height);
