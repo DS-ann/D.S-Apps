@@ -6428,8 +6428,8 @@ public class MainActivity extends Activity {
                     && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
             // Keep the outline subtle at high-density phone settings while ensuring
             // it remains a visible, continuous line on the smallest clock size.
-            float innerBorderWidth = Math.max(0.75f,
-                    getResources().getDisplayMetrics().density * 0.55f);
+            float innerBorderWidth = Math.max(1.5f,
+                    getResources().getDisplayMetrics().density * 1.1f);
             clockRenderer.setContrastInnerBorderEnabled(
                     useNothingInnerBorder, digitColours, innerBorderWidth);
         }
