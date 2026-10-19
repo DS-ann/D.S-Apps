@@ -33,7 +33,7 @@ final class LauncherIconDrawable extends Drawable {
             Color.RED                 // Red
     };
 
-    private final Drawable source;
+    private Drawable source;
     private boolean showBackground;
     private int shape;
     private int backgroundColor;
@@ -123,6 +123,14 @@ final class LauncherIconDrawable extends Drawable {
         this.backgroundColor = backgroundColor;
         this.innerShapeColor = innerShapeColor;
         invalidateSelf();
+    }
+
+    /** Reuse the per-cell drawing objects when GridView binds a recycled cell. */
+    void updateContent(Drawable source, boolean showBackground, int shape,
+            int backgroundColor, int innerShapeColor) {
+        this.source = source;
+        if (this.source != null) this.source.setBounds(getBounds());
+        updateAppearance(showBackground, shape, backgroundColor, innerShapeColor);
     }
 
     @Override public void draw(Canvas canvas) {
