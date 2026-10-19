@@ -220,6 +220,13 @@ final class WidgetInteractionController {
 
     void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
                             int x, int y, int width, int height, boolean showNoSpaceToast) {
+        addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height,
+                showNoSpaceToast, false);
+    }
+
+    void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
+                            int x, int y, int width, int height, boolean showNoSpaceToast,
+                            boolean preserveGeometry) {
         final FrameLayout container = new FrameLayout(activity);
         container.setTag("launcher_widget:" + widgetId);
         widget.setTag("launcher_widget_content:" + widgetId);
@@ -262,7 +269,13 @@ final class WidgetInteractionController {
         // Choose a free rectangle before the widget becomes visible. The post-layout
         // collision pass remains as a safety net, but initial placement must not flash
         // or persist on top of an app, another widget, shortcut, or clock.
-        if (page.getWidth() > 0 && page.getHeight() > 0) {
+        if (preserveGeometry && page.getWidth() > 0 && page.getHeight() > 0) {
+            // A restoration must not be re-laid out based on transient provider/app
+            // positions; retain the saved rectangle and only enforce page boundaries.
+            lp.leftMargin = Math.max(0, Math.min(Math.max(0, page.getWidth() - lp.width), x));
+            lp.topMargin = Math.max(0, Math.min(Math.max(0, page.getHeight() - lp.height), y));
+        }
+        if (!preserveGeometry && page.getWidth() > 0 && page.getHeight() > 0) {
             int maxX = Math.max(0, page.getWidth() - lp.width);
             int maxY = Math.max(0, page.getHeight() - lp.height);
             int desiredX = Math.max(0, Math.min(maxX, x));
@@ -392,7 +405,11 @@ final class WidgetInteractionController {
         // First placement needs the same collision pass as a completed drag/resize.
         // Post it so the page and widget have measured geometry before bounds are tested.
         page.post(() -> {
-            if (container.getParent() == page) listener.resolveWidgetCollisions(page, container);
+            // Restoration must not run the placement resolver: provider updates can
+            // temporarily change measured bounds and otherwise overwrite saved geometry.
+            if (!preserveGeometry && container.getParent() == page) {
+                listener.resolveWidgetCollisions(page, container);
+            }
         });
 
         // A transparent interaction layer observes long presses across the full widget.

@@ -5944,8 +5944,15 @@ public class MainActivity extends Activity {
 
     private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
             int x, int y, int width, int height, boolean showNoSpaceToast) {
+        addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height,
+                showNoSpaceToast, false);
+    }
+
+    private void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
+            int x, int y, int width, int height, boolean showNoSpaceToast, boolean preserveGeometry) {
         widgetInteractionController.addWidgetContainer(
-                page, widget, widgetId, pageIndex, x, y, width, height, showNoSpaceToast);
+                page, widget, widgetId, pageIndex, x, y, width, height,
+                showNoSpaceToast, preserveGeometry);
     }
 
     private void saveWidgetGeometry(int widgetId, int pageIndex, FrameLayout container) {
@@ -6080,69 +6087,33 @@ public class MainActivity extends Activity {
                             Math.max(LauncherUiUtils.dp(this, 140), availableWidth - LauncherUiUtils.dp(this, 16)));
                     int defaultHeight = Math.min(Math.max(LauncherUiUtils.dp(this, 100), LauncherUiUtils.dp(this, Math.max(0, info.minHeight))),
                             Math.max(LauncherUiUtils.dp(this, 90), availableHeight - LauncherUiUtils.dp(this, 80)));
-                    int width = Math.min(Math.max(LauncherUiUtils.dp(this, 140), prefs.getInt("widget_w_" + id, defaultWidth)),
-                            Math.max(LauncherUiUtils.dp(this, 140), availableWidth));
-                    int height = Math.min(Math.max(LauncherUiUtils.dp(this, 90), prefs.getInt("widget_h_" + id, defaultHeight)),
-                            Math.max(LauncherUiUtils.dp(this, 90), availableHeight));
-                    int x = Math.max(0, Math.min(prefs.getInt("widget_x_" + id, LauncherUiUtils.dp(this, 8)),
+                    // Saved geometry is authoritative during restoration. Do not impose
+                    // new minimum dimensions or move a widget to another screen just because
+                    // app icons/provider views are still rebuilding after an app/launcher update.
+                    // Only clamp to the current page bounds if the available workspace changed.
+                    int width = Math.max(1, Math.min(
+                            prefs.getInt("widget_w_" + id, defaultWidth), availableWidth));
+                    int height = Math.max(1, Math.min(
+                            prefs.getInt("widget_h_" + id, defaultHeight), availableHeight));
+                    int x = Math.max(0, Math.min(
+                            prefs.getInt("widget_x_" + id, LauncherUiUtils.dp(this, 8)),
                             Math.max(0, availableWidth - width)));
-                    int y = Math.max(0, Math.min(prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8)),
+                    int y = Math.max(0, Math.min(
+                            prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8)),
                             Math.max(0, availableHeight - height)));
                     FrameLayout restorePage = page;
                     int resolvedPageIndex = pageIndex;
-                    // Restoring a saved widget must not fail merely because its original
-                    // page became crowded after an update. Keep the saved page when any
-                    // valid placement exists there; otherwise try the other page.
-                    if (findFreeWidgetPosition(restorePage, width, height) == null) {
-                        int otherPageIndex = pageIndex == 0 ? 1 : 0;
-                        if (otherPageIndex < pagesStrip.getChildCount()
-                                && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
-                            FrameLayout otherPage = (FrameLayout) pagesStrip.getChildAt(otherPageIndex);
-                            int[] otherPosition = findFreeWidgetPosition(otherPage, width, height);
-                            if (otherPosition != null) {
-                                restorePage = otherPage;
-                                resolvedPageIndex = otherPageIndex;
-                                x = otherPosition[0];
-                                y = otherPosition[1];
-                            }
-                        }
-                    }
-                    // If neither page has enough room at the saved size, try the same
-                    // two-page search at 50% before leaving the stored widget for retry.
-                    if (findFreeWidgetPosition(restorePage, width, height) == null) {
-                        int smallerWidth = Math.max(LauncherUiUtils.dp(this, 48), Math.round(width * 0.5f));
-                        int smallerHeight = Math.max(LauncherUiUtils.dp(this, 48), Math.round(height * 0.5f));
-                        int[] smallerPosition = findFreeWidgetPosition(restorePage, smallerWidth, smallerHeight);
-                        if (smallerPosition == null) {
-                            int otherPageIndex = resolvedPageIndex == 0 ? 1 : 0;
-                            if (otherPageIndex < pagesStrip.getChildCount()
-                                    && pagesStrip.getChildAt(otherPageIndex) instanceof FrameLayout) {
-                                FrameLayout otherPage = (FrameLayout) pagesStrip.getChildAt(otherPageIndex);
-                                smallerPosition = findFreeWidgetPosition(otherPage, smallerWidth, smallerHeight);
-                                if (smallerPosition != null) {
-                                    restorePage = otherPage;
-                                    resolvedPageIndex = otherPageIndex;
-                                }
-                            }
-                        }
-                        if (smallerPosition != null) {
-                            width = smallerWidth;
-                            height = smallerHeight;
-                            x = smallerPosition[0];
-                            y = smallerPosition[1];
-                        }
-                    }
                     AppWidgetHostView widget = widgetHost.createView(this, id, info);
                     widget.setAppWidget(id, info);
-                    addWidgetContainer(restorePage, widget, id, resolvedPageIndex, x, y, width, height, false);
-                    WidgetController.updateWidgetSize(widgetManager, id, widget, getResources().getDisplayMetrics().density, width, height);
-                    final int savedPageIndex = resolvedPageIndex;
-                    final FrameLayout finalRestorePage = restorePage;
-                    final View candidate = finalRestorePage.findViewWithTag("launcher_widget:" + id);
+                    addWidgetContainer(restorePage, widget, id, resolvedPageIndex,
+                            x, y, width, height, false, true);
+                    WidgetController.updateWidgetSize(widgetManager, id, widget,
+                            getResources().getDisplayMetrics().density, width, height);
+                    final View candidate = restorePage.findViewWithTag("launcher_widget:" + id);
                     if (candidate instanceof FrameLayout) {
-                        saveWidgetGeometry(id, savedPageIndex, (FrameLayout) candidate);
-                        finalRestorePage.post(() ->
-                                resolveWidgetIconCollisions(finalRestorePage, (FrameLayout) candidate));
+                        // Persist only the geometry actually restored (including any
+                        // unavoidable page-bound clamp), without a second collision pass.
+                        saveWidgetGeometry(id, resolvedPageIndex, (FrameLayout) candidate);
                     }
                 } catch (Exception ignored) {
                     // Failures during a provider refresh must be retried. The saved host ID
