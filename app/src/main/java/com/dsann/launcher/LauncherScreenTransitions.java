@@ -85,7 +85,12 @@ final class LauncherScreenTransitions {
         if (!isDrawerTransitionRunning(homeScreen, drawerScreen, effect)) return progress;
         android.animation.ValueAnimator old = activeParallaxAnimator;
         activeParallaxAnimator = null; // a cancelled end callback must not snap to an endpoint.
+        activeParallaxHome = null;
+        activeParallaxDrawer = null;
+        android.animation.ValueAnimator settle = activeDrawerSettleAnimator;
+        activeDrawerSettleAnimator = null;
         if (old != null) old.cancel();
+        if (settle != null) settle.cancel();
         homeScreen.animate().cancel();
         drawerScreen.animate().cancel();
         prepareTransitionLayers(homeScreen, drawerScreen);
