@@ -56,7 +56,8 @@ final class LauncherIconDrawable extends Drawable {
 
     // Keep the cache large enough for a typical drawer page plus nearby rows, without
     // retaining multiple full-size copies of every installed icon on low-RAM devices.
-    private static final int MAX_ARTWORK_CACHE_BYTES = 8 * 1024 * 1024;
+    // Bounded cache large enough to retain more recently seen icons while scrolling back.
+    private static final int MAX_ARTWORK_CACHE_BYTES = 12 * 1024 * 1024;
     private static final boolean[] NO_BACKDROP_MASK = new boolean[0];
     private static final LruCache<ArtworkCacheKey, Bitmap> ARTWORK_CACHE =
             new LruCache<ArtworkCacheKey, Bitmap>(MAX_ARTWORK_CACHE_BYTES) {
@@ -72,14 +73,14 @@ final class LauncherIconDrawable extends Drawable {
             ARTWORK_WAITERS = new java.util.HashMap<>();
     private static final java.util.Set<ArtworkCacheKey> ARTWORK_PENDING = new java.util.HashSet<>();
     private static final java.util.concurrent.ExecutorService ARTWORK_EXECUTOR =
-            java.util.concurrent.Executors.newFixedThreadPool(2, new java.util.concurrent.ThreadFactory() {
+            java.util.concurrent.Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
                 @Override public Thread newThread(Runnable runnable) {
                     Thread thread = new Thread(() -> {
                         try {
                             // Icon recolouring is non-interactive work. Keep it below the UI
                             // thread's priority so first-open bursts cannot starve animations.
                             android.os.Process.setThreadPriority(
-                                    android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                                    android.os.Process.THREAD_PRIORITY_LOWEST);
                         } catch (RuntimeException ignored) {}
                         runnable.run();
                     }, "LauncherIconArtwork");
@@ -89,11 +90,14 @@ final class LauncherIconDrawable extends Drawable {
             });
 
     private Drawable source;
-    private Drawable originalSource;
-    private Drawable.ConstantState originalSourceState;
-    private String sourceCacheToken;
+    // Read from the worker before starting an expensive icon conversion; make these fields
+    // visible across the UI/worker boundary as GridView recycles drawables during scrolling.
+    private volatile Drawable originalSource;
+    private volatile Drawable.ConstantState originalSourceState;
+    private volatile String sourceCacheToken;
+    private volatile int artworkTheme = -1;
     // Force the first appearance bind through the cache so Original icons get the outline too.
-    private int artworkTheme = -1;
+    private boolean externalShapeClip;
     private boolean showBackground;
     private boolean fitInsideBackground;
     private int shape;
@@ -226,6 +230,12 @@ final class LauncherIconDrawable extends Drawable {
             case BACKGROUND_BLACK:
             default: return Color.BLACK;
         }
+    }
+
+    void setExternalShapeClip(boolean enabled) {
+        if (externalShapeClip == enabled) return;
+        externalShapeClip = enabled;
+        invalidateSelf();
     }
 
     void updateAppearance(boolean showBackground, int shape, int backgroundColor) {
@@ -363,6 +373,10 @@ final class LauncherIconDrawable extends Drawable {
         if (!startWorker) return;
 
         ARTWORK_EXECUTOR.execute(() -> {
+            // GridView recycles visible cells rapidly. Skip queued theme conversion if no
+            // drawable still represents this app/style; otherwise old icons compete with the
+            // current fling for CPU and can make the scroll feel sticky.
+            if (!hasCurrentArtworkWaiter(key, theme)) return;
             Bitmap themed = null;
             try {
                 Drawable workerDrawable = state.newDrawable();
@@ -375,6 +389,33 @@ final class LauncherIconDrawable extends Drawable {
             final Bitmap result = themed;
             ARTWORK_HANDLER.post(() -> finishArtworkRequest(key, theme, result));
         });
+    }
+
+    private static boolean hasCurrentArtworkWaiter(ArtworkCacheKey key, int theme) {
+        synchronized (ARTWORK_REQUEST_LOCK) {
+            java.util.ArrayList<WeakReference<LauncherIconDrawable>> waiters =
+                    ARTWORK_WAITERS.get(key);
+            if (waiters == null || waiters.isEmpty()) {
+                ARTWORK_WAITERS.remove(key);
+                ARTWORK_PENDING.remove(key);
+                return false;
+            }
+            java.util.Iterator<WeakReference<LauncherIconDrawable>> iterator = waiters.iterator();
+            boolean current = false;
+            while (iterator.hasNext()) {
+                LauncherIconDrawable drawable = iterator.next().get();
+                if (drawable == null || !drawable.matchesArtworkRequest(key, theme)) {
+                    iterator.remove();
+                } else {
+                    current = true;
+                }
+            }
+            if (!current) {
+                ARTWORK_WAITERS.remove(key);
+                ARTWORK_PENDING.remove(key);
+            }
+            return current;
+        }
     }
 
     private static void finishArtworkRequest(ArtworkCacheKey key, int theme, Bitmap bitmap) {
@@ -2056,8 +2097,20 @@ final class LauncherIconDrawable extends Drawable {
         }
         paint.setColor(backgroundColor);
         paint.setStyle(Paint.Style.FILL);
-        canvas.drawPath(path, paint);
+        if (externalShapeClip) {
+            // The containing ImageView clips these supported shapes natively. Drawing the
+            // backing and artwork directly avoids Canvas.clipPath on every scroll frame.
+            if (shape == SHAPE_ROUND) {
+                canvas.drawOval(rect, paint);
+            } else {
+                float corner = Math.min(rect.width(), rect.height()) * 0.23f;
+                canvas.drawRoundRect(rect, corner, corner, paint);
+            }
+            source.draw(canvas);
+            return;
+        }
 
+        canvas.drawPath(path, paint);
         int save = canvas.save();
         canvas.clipPath(path);
         source.draw(canvas);

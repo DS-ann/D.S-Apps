@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
+import android.graphics.Outline;
+import android.view.ViewOutlineProvider;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -48,6 +50,31 @@ public final class LauncherAppAdapter extends BaseAdapter {
 
     // PackageManager icon resolution is I/O/resource-heavy on Android 6. Never do it on the
     // UI thread during the drawer's opening animation or while GridView is scrolling.
+    private static final ViewOutlineProvider ROUNDED_SQUARE_OUTLINE =
+            new ViewOutlineProvider() {
+                @Override public void getOutline(View view, Outline outline) {
+                    int width = view.getWidth();
+                    int height = view.getHeight();
+                    if (width <= 0 || height <= 0) {
+                        outline.setEmpty();
+                        return;
+                    }
+                    float radius = Math.min(width, height) * 0.23f;
+                    outline.setRoundRect(0, 0, width, height, radius);
+                }
+            };
+    private static final ViewOutlineProvider ROUND_OUTLINE = new ViewOutlineProvider() {
+        @Override public void getOutline(View view, Outline outline) {
+            int width = view.getWidth();
+            int height = view.getHeight();
+            if (width <= 0 || height <= 0) {
+                outline.setEmpty();
+                return;
+            }
+            outline.setOval(0, 0, width, height);
+        }
+    };
+
     private static final java.util.concurrent.ExecutorService ICON_LOAD_EXECUTOR =
             java.util.concurrent.Executors.newFixedThreadPool(1,
                     new java.util.concurrent.ThreadFactory() {
@@ -227,14 +254,39 @@ public final class LauncherAppAdapter extends BaseAdapter {
                 : preferences.getInt("icon_artwork_theme", LauncherIconDrawable.ARTWORK_ORIGINAL));
         boolean fitInsideBackground = preferences != null
                 && preferences.getBoolean("icon_fit_inside_background", false);
-        android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
-        if (existingIcon instanceof LauncherIconDrawable) {
-            ((LauncherIconDrawable) existingIcon).updateContent(appIcon, roundedSquareBackground,
-                    iconShape, backgroundColor, artworkTheme, appKey, fitInsideBackground);
-        } else {
-            icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground,
-                    iconShape, backgroundColor, artworkTheme, appKey, fitInsideBackground));
+        // Native outlines move circle/rounded-square clipping out of the per-frame Canvas
+        // clipPath path. These are the common shapes and are natively clip-capable on API 21+.
+        boolean outlineClip = roundedSquareBackground
+                && (iconShape == LauncherIconDrawable.SHAPE_SQUARE
+                    || iconShape == LauncherIconDrawable.SHAPE_ROUND)
+                && android.os.Build.VERSION.SDK_INT >= 21;
+        if (outlineClip) {
+            ViewOutlineProvider provider = iconShape == LauncherIconDrawable.SHAPE_ROUND
+                    ? ROUND_OUTLINE : ROUNDED_SQUARE_OUTLINE;
+            if (icon.getOutlineProvider() != provider) {
+                icon.setOutlineProvider(provider);
+                icon.invalidateOutline();
+            }
+            if (!icon.getClipToOutline()) {
+                icon.setClipToOutline(true);
+                icon.invalidateOutline();
+            }
+        } else if (icon.getClipToOutline()) {
+            icon.setClipToOutline(false);
         }
+
+        android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
+        LauncherIconDrawable wrapped;
+        if (existingIcon instanceof LauncherIconDrawable) {
+            wrapped = (LauncherIconDrawable) existingIcon;
+            wrapped.updateContent(appIcon, roundedSquareBackground, iconShape,
+                    backgroundColor, artworkTheme, appKey, fitInsideBackground);
+        } else {
+            wrapped = new LauncherIconDrawable(appIcon, roundedSquareBackground,
+                    iconShape, backgroundColor, artworkTheme, appKey, fitInsideBackground);
+            icon.setImageDrawable(wrapped);
+        }
+        wrapped.setExternalShapeClip(outlineClip);
     }
 
     /** Called only when PackageManager reports an installed-app change. */
