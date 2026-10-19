@@ -1011,7 +1011,9 @@ final class LauncherIconDrawable extends Drawable {
                         int neighbour = ny * width + nx;
                         if (Color.alpha(pixels[neighbour]) < 240
                                 || Color.red(pixels[neighbour]) < 220) continue;
-                        if (separators[neighbour]) continue;
+                        // Symbol boundaries stay white, but letter-like components may
+                        // reinforce through their seam pixels so thin text remains legible.
+                        if (separators[neighbour] && !reinforceGlyph) continue;
                         if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
                         if (enclosedBackdropCounters != null
                                 && enclosedBackdropCounters[neighbour]) continue;
@@ -1182,66 +1184,22 @@ final class LauncherIconDrawable extends Drawable {
      */
     private static boolean[] findMonochromeSeparators(int[] pixels, boolean[] backdrop,
             int width, int height) {
-        final int count = pixels.length;
-        final boolean[] separators = new boolean[count];
-        final int[] labels = new int[count];
-        java.util.Arrays.fill(labels, -1);
-        final int[] componentSizes = new int[count];
-        final int[] queue = new int[count];
-        int nextLabel = 0;
-
-        // Label colour components against their seed colour, not neighbour-to-neighbour. This
-        // prevents slow antialiasing/gradients from chaining a tiny letter into a large logo area.
-        for (int start = 0; start < count; start++) {
-            if (labels[start] >= 0 || Color.alpha(pixels[start]) < 160
-                    || (backdrop != null && backdrop.length == count && backdrop[start])) {
-                continue;
-            }
-            int head = 0, tail = 0;
-            final int seedColour = pixels[start];
-            final int label = nextLabel++;
-            queue[tail++] = start;
-            labels[start] = label;
-
-            while (head < tail) {
-                int index = queue[head++];
-                int x = index % width;
-                int y = index / width;
-                for (int direction = 0; direction < 4; direction++) {
-                    int nx = x + (direction == 0 ? -1 : direction == 1 ? 1 : 0);
-                    int ny = y + (direction == 2 ? -1 : direction == 3 ? 1 : 0);
-                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-                    int neighbour = ny * width + nx;
-                    if (labels[neighbour] >= 0 || Color.alpha(pixels[neighbour]) < 160
-                            || (backdrop != null && backdrop.length == count
-                                    && backdrop[neighbour])) {
-                        continue;
-                    }
-                    if (strongColourBoundary(seedColour, pixels[neighbour])) continue;
-                    labels[neighbour] = label;
-                    queue[tail++] = neighbour;
-                }
-            }
-            componentSizes[label] = tail;
-        }
-
-        // Recover internal boundaries in transparent and opaque artwork alike. The earlier
-        // 2.5% cutoff discarded smaller colour regions in multisegment logos, allowing dark
-        // stroke reinforcement to merge those regions. Keep the region floor low, while the
-        // seed-colour component labels and strongColourBoundary checks above still reject
-        // most gradient/shading differences. This also preserves the stronger lettering path.
-        final int minLogoSegmentArea = Math.max(12, Math.round(count * 0.005f));
+        // Keep the proven pre-lettering-fix boundary detector. Component-size cutoffs can
+        // discard real segments in compact multicolour logos (Chrome/Play Store are typical
+        // examples). Detect each strong source-colour boundary locally instead of requiring
+        // both sides to belong to large connected components. Stroke reinforcement is handled
+        // separately, with stronger growth reserved for letter-like foreground components.
+        final boolean[] separators = new boolean[pixels.length];
+        final boolean hasBackdrop = backdrop != null && backdrop.length == pixels.length;
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
-                int label = labels[index];
-                if (label < 0 || Color.alpha(pixels[index]) < 160) continue;
+                if (Color.alpha(pixels[index]) < 160
+                        || (hasBackdrop && backdrop[index])) continue;
                 if (x + 1 < width) {
                     int right = index + 1;
-                    int rightLabel = labels[right];
-                    if (rightLabel >= 0 && rightLabel != label
-                            && componentSizes[label] >= minLogoSegmentArea
-                            && componentSizes[rightLabel] >= minLogoSegmentArea
+                    if (Color.alpha(pixels[right]) >= 160
+                            && (!hasBackdrop || !backdrop[right])
                             && strongColourBoundary(pixels[index], pixels[right])) {
                         separators[index] = true;
                         separators[right] = true;
@@ -1249,10 +1207,8 @@ final class LauncherIconDrawable extends Drawable {
                 }
                 if (y + 1 < height) {
                     int down = index + width;
-                    int downLabel = labels[down];
-                    if (downLabel >= 0 && downLabel != label
-                            && componentSizes[label] >= minLogoSegmentArea
-                            && componentSizes[downLabel] >= minLogoSegmentArea
+                    if (Color.alpha(pixels[down]) >= 160
+                            && (!hasBackdrop || !backdrop[down])
                             && strongColourBoundary(pixels[index], pixels[down])) {
                         separators[index] = true;
                         separators[down] = true;
