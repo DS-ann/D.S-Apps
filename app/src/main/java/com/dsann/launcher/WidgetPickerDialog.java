@@ -5,7 +5,6 @@ import android.app.Dialog;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
@@ -42,15 +41,13 @@ final class WidgetPickerDialog {
     private final AppWidgetManager widgetManager;
     private final PackageManager packageManager;
     private final Listener listener;
-    private final SharedPreferences preferences;
 
     WidgetPickerDialog(Activity activity, AppWidgetManager widgetManager,
-            PackageManager packageManager, Listener listener, SharedPreferences preferences) {
+            PackageManager packageManager, Listener listener) {
         this.activity = activity;
         this.widgetManager = widgetManager;
         this.packageManager = packageManager;
         this.listener = listener;
-        this.preferences = preferences;
     }
 
     void show() {
@@ -127,38 +124,13 @@ final class WidgetPickerDialog {
             preview.setPadding(LauncherUiUtils.dp(activity,4),LauncherUiUtils.dp(activity,4),
                     LauncherUiUtils.dp(activity,4),LauncherUiUtils.dp(activity,4));
             Drawable image = null;
-            boolean iconArtworkOnly = false;
             if (entry.widget != null) {
-                // Preserve a provider's full widget preview exactly as the app designed it.
-                // If there is no preview, its provider icon can use the selected artwork theme.
                 try { if (entry.widget.previewImage != 0) image = entry.widget.loadPreviewImage(activity,
                         activity.getResources().getDisplayMetrics().densityDpi); } catch (Exception ignored) {}
-                if (image == null) {
-                    try {
-                        image = entry.widget.loadIcon(activity,
-                                activity.getResources().getDisplayMetrics().densityDpi);
-                        iconArtworkOnly = image != null;
-                    } catch (Exception ignored) {}
-                }
+                if (image == null) try { image = entry.widget.loadIcon(activity,
+                        activity.getResources().getDisplayMetrics().densityDpi); } catch (Exception ignored) {}
             } else {
-                try {
-                    image = entry.shortcut.loadIcon(packageManager);
-                    iconArtworkOnly = image != null;
-                } catch (Exception ignored) {}
-            }
-            boolean themeWidgetShortcutArtwork = preferences != null
-                    && preferences.getBoolean("theme_widget_shortcut_artwork", false);
-            int artworkTheme = LauncherIconDrawable.clampArtworkTheme(preferences == null
-                    ? LauncherIconDrawable.ARTWORK_ORIGINAL
-                    : preferences.getInt("icon_artwork_theme", LauncherIconDrawable.ARTWORK_ORIGINAL));
-            if (image != null && iconArtworkOnly && themeWidgetShortcutArtwork
-                    && artworkTheme != LauncherIconDrawable.ARTWORK_ORIGINAL) {
-                String cacheToken = entry.widget != null
-                        ? "widget-provider:" + entry.widget.provider.flattenToShortString()
-                        : "shortcut-activity:" + entry.shortcut.activityInfo.packageName
-                                + "/" + entry.shortcut.activityInfo.name;
-                image = new LauncherIconDrawable(image, false, LauncherIconDrawable.SHAPE_SQUARE,
-                        Color.BLACK, artworkTheme, cacheToken, false);
+                try { image = entry.shortcut.loadIcon(packageManager); } catch (Exception ignored) {}
             }
             if (image != null) preview.setImageDrawable(image);
             row.addView(preview,new LinearLayout.LayoutParams(LauncherUiUtils.dp(activity,100),LauncherUiUtils.dp(activity,86)));

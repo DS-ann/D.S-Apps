@@ -684,13 +684,18 @@ final class LauncherIconDrawable extends Drawable {
         // with a light mark. This is more stable than thresholding each original RGB colour
         // independently, which made multi-colour logos collapse into arbitrary black/white
         // halves. Strong colour boundaries inside the logo are preserved as fine separators.
-        int backgroundTone = backdropLuminance >= 140d ? 255 : 0;
-        int foregroundTone = 255 - backgroundTone;
-        boolean[] separators = findMonochromeSeparators(
+        // Use the same Nothing-style polarity for every detected app backplate. Inferring
+        // polarity from the source colour turned some blue/light icons into blank white discs.
+        int backgroundTone = 0;
+        int foregroundTone = 255;
+        boolean[] separators = thickenMonochromeSeparators(
+                findMonochromeSeparators(pixels, hasBackdrop ? backdrop : null, width, height),
                 pixels, hasBackdrop ? backdrop : null, width, height);
 
-        int noBackdropForeground = allLuminance >= 140d ? 0 : 255;
-        int noBackdropSeparator = 255 - noBackdropForeground;
+        // Transparent logo artwork uses a clean white glyph; internal colour boundaries
+        // become dark seams. Preserve the original alpha so transparent outer areas stay clear.
+        int noBackdropForeground = 255;
+        int noBackdropSeparator = 0;
         for (int index = 0; index < count; index++) {
             int pixel = pixels[index];
             int alpha = Color.alpha(pixel);
@@ -777,6 +782,55 @@ final class LauncherIconDrawable extends Drawable {
             }
         }
         return separators;
+    }
+
+    /**
+     * Widen meaningful internal colour boundaries slightly before converting them to dark
+     * seams. A one-source-pixel seam was almost invisible at launcher icon size, so divided
+     * logos (for example triangular/multisegment marks) lost their internal structure.
+     * Never thicken through transparent edges or a detected backplate.
+     */
+    private static boolean[] thickenMonochromeSeparators(boolean[] source, int[] pixels,
+            boolean[] backdrop, int width, int height) {
+        if (source == null || source.length != pixels.length) return source;
+        boolean[] expanded = source.clone();
+        for (int index = 0; index < source.length; index++) {
+            if (!source[index]) continue;
+            int x = index % width;
+            int y = index / width;
+            for (int dy = -1; dy <= 1; dy++) {
+                int ny = y + dy;
+                if (ny < 0 || ny >= height) continue;
+                for (int dx = -1; dx <= 1; dx++) {
+                    int nx = x + dx;
+                    if (nx < 0 || nx >= width) continue;
+                    int next = ny * width + nx;
+                    if (Color.alpha(pixels[next]) < 160
+                            || (backdrop != null && backdrop.length == pixels.length
+                                    && backdrop[next])) continue;
+                    // Do not expand a seam onto an exterior edge, which would shrink a
+                    // paper-plane, handset or letter-shaped silhouette.
+                    boolean exteriorEdge = false;
+                    for (int ey = -1; ey <= 1 && !exteriorEdge; ey++) {
+                        int yy = ny + ey;
+                        if (yy < 0 || yy >= height) {
+                            exteriorEdge = true;
+                            break;
+                        }
+                        for (int ex = -1; ex <= 1; ex++) {
+                            int xx = nx + ex;
+                            if (xx < 0 || xx >= width
+                                    || Color.alpha(pixels[yy * width + xx]) < 24) {
+                                exteriorEdge = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!exteriorEdge) expanded[next] = true;
+                }
+            }
+        }
+        return expanded;
     }
 
     private static boolean strongColourBoundary(int first, int second) {

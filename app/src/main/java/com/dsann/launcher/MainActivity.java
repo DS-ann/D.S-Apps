@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_SHAPE_MIGRATION = "app_icon_shape_migration_v2";
     private static final String KEY_ICON_ARTWORK_THEME = "icon_artwork_theme";
     private static final String KEY_ICON_FIT_BACKGROUND = "icon_fit_inside_background";
-    private static final String KEY_THEME_WIDGET_SHORTCUT_ARTWORK = "theme_widget_shortcut_artwork";
+    private static final String KEY_THEME_SHORTCUT_ARTWORK = "theme_widget_shortcut_artwork";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
@@ -3347,7 +3347,7 @@ public class MainActivity extends Activity {
     private void updateShortcutIconAppearance(ImageView icon, View shortcutTile,
             int artworkTheme, int backgroundColor) {
         if (icon == null || prefs == null) return;
-        boolean enabled = prefs.getBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK, false);
+        boolean enabled = prefs.getBoolean(KEY_THEME_SHORTCUT_ARTWORK, false);
         int requestedTheme = enabled
                 ? LauncherIconDrawable.clampArtworkTheme(artworkTheme)
                 : LauncherIconDrawable.ARTWORK_ORIGINAL;
@@ -5356,7 +5356,7 @@ public class MainActivity extends Activity {
             @Override public void onShortcutSelected(ResolveInfo shortcutActivity) {
                 beginCreateShortcut(shortcutActivity);
             }
-        }, prefs).show();
+        }).show();
     }
 
     private void beginCreateShortcut(ResolveInfo shortcutActivity) {
@@ -9415,10 +9415,10 @@ public class MainActivity extends Activity {
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSettingRow(content, "◈", "Theme widget & shortcut icons",
-                prefs.getBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK, false) ? "On" : "Off", () -> {
-            prefs.edit().putBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK,
-                    !prefs.getBoolean(KEY_THEME_WIDGET_SHORTCUT_ARTWORK, false)).apply();
+        addSettingRow(content, "◈", "Theme shortcut icons",
+                prefs.getBoolean(KEY_THEME_SHORTCUT_ARTWORK, false) ? "On" : "Off", () -> {
+            prefs.edit().putBoolean(KEY_THEME_SHORTCUT_ARTWORK,
+                    !prefs.getBoolean(KEY_THEME_SHORTCUT_ARTWORK, false)).apply();
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
