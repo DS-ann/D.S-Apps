@@ -6416,8 +6416,22 @@ public class MainActivity extends Activity {
         float digitPhase = digitGradient ? displayPhase : 0f;
 
         if (clockText instanceof SevenSegmentClockTextView) {
-            ((SevenSegmentClockTextView) clockText).setSegmentGradientEnabled(
+            SevenSegmentClockTextView clockRenderer = (SevenSegmentClockTextView) clockText;
+            clockRenderer.setSegmentGradientEnabled(
                     useDigitGradient && sevenSegment, digitPhase, digitColours);
+
+            int artworkTheme = prefs == null
+                    ? LauncherIconDrawable.ARTWORK_ORIGINAL
+                    : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                            KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+            boolean useNothingInnerBorder = iconArtworkActive
+                    && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+            // Keep the outline subtle at high-density phone settings while ensuring
+            // it remains a visible, continuous line on the smallest clock size.
+            float innerBorderWidth = Math.max(0.75f,
+                    getResources().getDisplayMetrics().density * 0.55f);
+            clockRenderer.setContrastInnerBorderEnabled(
+                    useNothingInnerBorder, digitColours, innerBorderWidth);
         }
 
         if (sevenSegment) {
