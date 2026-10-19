@@ -20,9 +20,6 @@ public final class SevenSegmentClockTextView extends TextView {
     private boolean sevenSegmentMode;
     private boolean segmentModeInitialized;
     private int segmentColor = Color.rgb(196, 200, 209);
-    private int baseTextColor = Color.rgb(196, 200, 209);
-    private int iconArtworkTheme = LauncherIconDrawable.ARTWORK_ORIGINAL;
-    private boolean iconArtworkEnabled;
     private boolean segmentGradientEnabled;
     private int segmentGradientWidth = -1;
     private int[] segmentGradientColors;
@@ -54,26 +51,8 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     @Override public void setTextColor(int color) {
-        if (Color.alpha(color) != 0) baseTextColor = color;
-        applyEffectiveTextColor();
-    }
-
-    /** Uses the selected app-icon artwork palette for the clock's digit glyphs. */
-    public void setIconArtworkTheme(int theme, boolean enabled) {
-        int boundedTheme = LauncherIconDrawable.clampArtworkTheme(theme);
-        if (iconArtworkTheme == boundedTheme && iconArtworkEnabled == enabled) return;
-        iconArtworkTheme = boundedTheme;
-        iconArtworkEnabled = enabled;
-        applyEffectiveTextColor();
-    }
-
-    private void applyEffectiveTextColor() {
-        int resolvedColor = iconArtworkEnabled && sevenSegmentMode
-                ? LauncherIconDrawable.clockArtworkColorForGlyph(
-                        iconArtworkTheme, 0, baseTextColor)
-                : baseTextColor;
-        super.setTextColor(resolvedColor);
-        if (Color.alpha(resolvedColor) != 0) segmentColor = resolvedColor;
+        super.setTextColor(color);
+        if (Color.alpha(color) != 0) segmentColor = color;
         invalidate();
     }
 
@@ -131,14 +110,16 @@ public final class SevenSegmentClockTextView extends TextView {
             setTextSize(targetSize);
         }
         if (enabled) {
+            int current = getCurrentTextColor();
+            if (Color.alpha(current) != 0) segmentColor = current;
             sevenSegmentMode = true;
             // Keep the normal text color as a visible fallback for unsupported
             // locale/time formats. In LED mode onDraw skips TextView glyphs and
             // paints the segments itself, so transparent text is unnecessary.
         } else {
             sevenSegmentMode = false;
+            super.setTextColor(segmentColor);
         }
-        applyEffectiveTextColor();
         // Do not re-enable a cached software bitmap when switching clock styles.
         // Let Android draw typography and the custom segment geometry at display scale.
         if (getLayerType() == android.view.View.LAYER_TYPE_SOFTWARE) {
@@ -225,32 +206,17 @@ public final class SevenSegmentClockTextView extends TextView {
         float thickness = Math.max(3f, digitWidth * 0.17f);
         float half = thickness / 2f;
         float mid = y + digitHeight / 2f;
-        int glyphIndex = 0;
-        float outlineWidth = Math.max(0.7f, getResources().getDisplayMetrics().density * 0.65f);
-        boolean monochromeArtwork = iconArtworkEnabled
-                && iconArtworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME
-                && !segmentGradientEnabled;
+        int color = segmentColor;
+        int unlitColor = Color.argb(34, Color.red(color), Color.green(color), Color.blue(color));
 
         canvas.save();
         canvas.clipRect(leftBound, topBound, rightBound, bottomBound);
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
             if (ch == ':') {
-                int colonColor = iconArtworkEnabled && !segmentGradientEnabled
-                        ? LauncherIconDrawable.clockArtworkColorForGlyph(
-                                iconArtworkTheme, glyphIndex, segmentColor)
-                        : segmentColor;
-                float radius = Math.max(2.5f, thickness * 0.38f);
-                if (monochromeArtwork) {
-                    segmentPaint.setShader(null);
-                    segmentPaint.setColor(Color.BLACK);
-                    canvas.drawCircle(dotX, y + digitHeight * 0.34f,
-                            radius + outlineWidth, segmentPaint);
-                    canvas.drawCircle(dotX, y + digitHeight * 0.68f,
-                            radius + outlineWidth, segmentPaint);
-                }
                 segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
-                segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : colonColor);
+                segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : color);
+                float radius = Math.max(2.5f, thickness * 0.38f);
                 // The colon is the fixed anchor between hour and minute.
                 canvas.drawCircle(dotX, y + digitHeight * 0.34f, radius, segmentPaint);
                 canvas.drawCircle(dotX, y + digitHeight * 0.68f, radius, segmentPaint);
@@ -275,32 +241,15 @@ public final class SevenSegmentClockTextView extends TextView {
             setSegment(segments[4], l, m + half, l + thickness, b - half);
             setSegment(segments[5], l, t + half, l + thickness, m - half);
             setSegment(segments[6], l + half, m - half, r - half, m + half);
-            boolean numericGlyph = Character.digit(ch, 10) >= 0;
-            int color = iconArtworkEnabled && !segmentGradientEnabled && numericGlyph
-                    ? LauncherIconDrawable.clockArtworkColorForGlyph(
-                            iconArtworkTheme, glyphIndex, segmentColor)
-                    : segmentColor;
-            int unlitColor = Color.argb(34, Color.red(color), Color.green(color), Color.blue(color));
             int litMask = segmentMask(ch);
             for (int j = 0; j < segments.length; j++) {
                 float[] seg = segments[j];
                 boolean lit = (litMask & (1 << j)) != 0;
-                if (lit && monochromeArtwork) {
-                    // Dark separator/keyline around each white LED segment, echoing
-                    // the black/white boundaries in the selected app-icon treatment.
-                    segmentPaint.setShader(null);
-                    segmentPaint.setColor(Color.BLACK);
-                    canvas.drawRoundRect(seg[0] - outlineWidth, seg[1] - outlineWidth,
-                            seg[2] + outlineWidth, seg[3] + outlineWidth,
-                            thickness * 0.45f + outlineWidth,
-                            thickness * 0.45f + outlineWidth, segmentPaint);
-                }
                 segmentPaint.setShader(segmentGradientEnabled && lit ? segmentGradient : null);
                 segmentPaint.setColor(lit ? (segmentGradientEnabled ? Color.WHITE : color) : unlitColor);
                 canvas.drawRoundRect(seg[0], seg[1], seg[2], seg[3],
                         thickness * 0.45f, thickness * 0.45f, segmentPaint);
             }
-            if (numericGlyph) glyphIndex++;
             x += advance;
         }
         segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);

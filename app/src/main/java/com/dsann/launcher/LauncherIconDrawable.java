@@ -1168,29 +1168,6 @@ final class LauncherIconDrawable extends Drawable {
         return interpolatePalette(SUNSET_PALETTE, position);
     }
 
-    /**
-     * Static clock-glyph palette mapped to the exact palette families selected for app icons.
-     * The artwork switch is not an animation: successive glyphs use stable palette regions.
-     * Nothing Monochrome uses white glyphs; its black keyline is rendered by the clock view.
-     */
-    static int clockArtworkColorForGlyph(int theme, int glyphIndex, int originalColor) {
-        int boundedTheme = clampArtworkTheme(theme);
-        int index = Math.max(0, glyphIndex) % 3;
-        switch (boundedTheme) {
-            case ARTWORK_SPECTRUM_MIX:
-                return MIXED_PALETTE[index];
-            case ARTWORK_OCEAN_GRADIENT:
-                return OCEAN_PALETTE[index];
-            case ARTWORK_SUNSET_GRADIENT:
-                return SUNSET_PALETTE[index];
-            case ARTWORK_NOTHING_MONOCHROME:
-                return Color.WHITE;
-            case ARTWORK_ORIGINAL:
-            default:
-                return originalColor;
-        }
-    }
-
     private static int interpolatePalette(int[] palette, float position) {
         float bounded = Math.max(0f, Math.min(1f, position));
         float scaled = bounded * (palette.length - 1f);

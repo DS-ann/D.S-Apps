@@ -143,7 +143,6 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler();
     private boolean clockUpdatesActive = false;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
-    private final java.util.Map<TextView, Integer> appliedClockArtworkModes = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
     private int homeStudioAccentColor = Color.rgb(119, 205, 255);
@@ -6231,34 +6230,6 @@ public class MainActivity extends Activity {
                 && !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
     }
 
-    /** Zero means normal rendering; positive values encode the selected icon-artwork theme. */
-    private int getEffectiveClockArtworkMode() {
-        if (!isClockIconArtworkActive()) return 0;
-        int theme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
-                KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
-        return theme + 1;
-    }
-
-    private void applyClockArtworkSpans(
-            android.text.SpannableStringBuilder text, int theme) {
-        int glyphIndex = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (Character.digit(ch, 10) >= 0) {
-                int color = LauncherIconDrawable.clockArtworkColorForGlyph(
-                        theme, glyphIndex, CLOCK_DIGIT_SILVER);
-                text.setSpan(new android.text.style.ForegroundColorSpan(color),
-                        i, i + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                glyphIndex++;
-            } else if (ch == ':' || ch == '.' || ch == '\u2236') {
-                int color = LauncherIconDrawable.clockArtworkColorForGlyph(
-                        theme, glyphIndex, CLOCK_DIGIT_SILVER);
-                text.setSpan(new android.text.style.ForegroundColorSpan(color),
-                        i, i + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-        }
-    }
-
     private void refreshClockArtworkAppearance() {
         int restorePage = Math.max(0, Math.min(1, currentPage));
         // Restore each style's own typography/shadow before applying the chosen
@@ -6401,14 +6372,9 @@ public class MainActivity extends Activity {
         float displayPhase = live ? phase : 0f;
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
-        boolean iconArtworkRequested = prefs != null
-                && prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
-        int iconArtworkTheme = prefs == null ? LauncherIconDrawable.ARTWORK_ORIGINAL
-                : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
-                        LauncherIconDrawable.ARTWORK_ORIGINAL));
-        boolean iconArtworkActive = iconArtworkRequested && !digitGradient && !live;
-        // Date and AM/PM follow the same master gradient switch as the digits:
-        // enabled = Home Studio palette, disabled = the original silver treatment.
+        boolean iconArtworkActive = isClockIconArtworkActive();
+
+        // Date and AM/PM use the existing animated palette only in gradient mode.
         if (dateText != null) {
             if (digitGradient) {
                 applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
@@ -6427,52 +6393,50 @@ public class MainActivity extends Activity {
         if (clockText == null) return;
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+
+        // "Match app icon artwork" uses a fixed Home Studio brand gradient. It does
+        // not advance its phase or start an animator; animated/fixed gradient settings
+        // continue to use their existing palette and precedence.
+        boolean useDigitGradient = digitGradient || iconArtworkActive;
+        int[] digitColours = iconArtworkActive
+                ? CLOCK_DATE_GRADIENT_COLORS : CLOCK_DIGIT_GRADIENT_COLORS;
+        float digitPhase = digitGradient ? displayPhase : 0f;
+
         if (clockText instanceof SevenSegmentClockTextView) {
             ((SevenSegmentClockTextView) clockText).setSegmentGradientEnabled(
-                    digitGradient && sevenSegment, displayPhase, CLOCK_DIGIT_GRADIENT_COLORS);
+                    useDigitGradient && sevenSegment, digitPhase, digitColours);
         }
-        if (digitGradient) {
-            if (sevenSegment) {
-                // The custom LED renderer owns its gradient paint; do not assign
-                // a redundant TextView shader to the hidden standard glyph pass.
-                clockDigitGradients.remove(clockText);
-                if (clockText.getPaint().getShader() != null) {
-                    clockText.getPaint().setShader(null);
-                }
-                clockText.invalidate();
-            } else {
-                applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
-                        displayPhase, clockDigitGradients);
+
+        if (sevenSegment) {
+            // SevenSegmentClockTextView paints its segments itself.
+            clockDigitGradients.remove(clockText);
+            if (clockText.getPaint().getShader() != null) {
+                clockText.getPaint().setShader(null);
             }
+            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
+                clockText.setTextColor(CLOCK_DIGIT_SILVER);
+            }
+            clockText.invalidate();
+        } else if (digitGradient) {
+            applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
+                    displayPhase, clockDigitGradients);
+        } else if (iconArtworkActive) {
+            // Phase zero pins the Home Studio cyan/lavender/pink/orange gradient in
+            // place. It is static until this separate artwork switch is turned off.
+            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
+                clockText.setTextColor(CLOCK_DIGIT_SILVER);
+            }
+            applyAnimatedTextGradient(clockText, CLOCK_DATE_GRADIENT_COLORS,
+                    0f, clockDigitGradients);
         } else {
             clockDigitGradients.remove(clockText);
             if (clockText.getPaint().getShader() != null) {
                 clockText.getPaint().setShader(null);
                 clockText.invalidate();
             }
-            if (!iconArtworkActive
-                    && clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
+            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
                 clockText.setTextColor(CLOCK_DIGIT_SILVER);
             }
-        }
-        if (clockText instanceof SevenSegmentClockTextView) {
-            ((SevenSegmentClockTextView) clockText)
-                    .setIconArtworkTheme(iconArtworkTheme, iconArtworkActive);
-        } else if (!digitGradient) {
-            int requestedColor = iconArtworkActive
-                    ? LauncherIconDrawable.clockArtworkColorForGlyph(
-                            iconArtworkTheme, 0, CLOCK_DIGIT_SILVER)
-                    : CLOCK_DIGIT_SILVER;
-            if (clockText.getCurrentTextColor() != requestedColor) {
-                clockText.setTextColor(requestedColor);
-            }
-        }
-        if (iconArtworkActive && !sevenSegment
-                && iconArtworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME) {
-            // The app-icon monochrome theme relies on crisp white details against
-            // black regions. A restrained dark keyline makes the clock glyphs read
-            // like that artwork rather than looking identical to unthemed silver text.
-            clockText.setShadowLayer(LauncherUiUtils.dp(this, 1.1f), 0f, 0f, Color.BLACK);
         }
     }
 
@@ -6610,25 +6574,15 @@ public class MainActivity extends Activity {
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
-            int artworkMode = getEffectiveClockArtworkMode();
-            Integer previousArtworkMode = appliedClockArtworkModes.get(clockText);
-            boolean artworkModeChanged = previousArtworkMode == null
-                    || previousArtworkMode.intValue() != artworkMode;
-            if (artworkMode > 0 && !sevenSegmentClock) {
-                int selectedArtworkTheme = artworkMode - 1;
-                applyClockArtworkSpans(displayClock, selectedArtworkTheme);
-            }
-            // Rebind on a theme/switch change even when time has not changed. In
-            // particular this removes old ForegroundColorSpans when gradients take over.
-            if (!displayClock.toString().contentEquals(clockText.getText())
-                    || artworkModeChanged) {
+            if (!displayClock.toString().contentEquals(clockText.getText())) {
+                // The seven-segment renderer owns its glyph geometry; standard styles
+                // keep the normal TextView formatting and use a separate static shader.
                 if (sevenSegmentClock) {
                     clockText.setText(displayClock, TextView.BufferType.NORMAL);
                     clockText.postInvalidateOnAnimation();
                 } else {
                     clockText.setText(displayClock);
                 }
-                appliedClockArtworkModes.put(clockText, artworkMode);
             }
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
