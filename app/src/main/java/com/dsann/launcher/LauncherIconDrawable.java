@@ -1027,7 +1027,10 @@ final class LauncherIconDrawable extends Drawable {
         final int[] dx = { -1, 1, 0, 0 };
         final int[] dy = { 0, 0, -1, 1 };
         final int minArea = Math.max(3, Math.round(count * 0.00012f));
-        final int maxArea = Math.max(minArea, Math.round(count * 0.09f));
+        // Small glyphs such as numerals and keyboard legends can occupy more than 9% of a
+        // low-resolution icon. Permit larger candidates only when the shape/contrast checks
+        // below identify a compact, strongly contrasted interior region.
+        final int maxArea = Math.max(minArea, Math.round(count * 0.18f));
         int nextLabel = 0;
 
         for (int start = 0; start < count; start++) {
@@ -1087,7 +1090,9 @@ final class LauncherIconDrawable extends Drawable {
             // Reject long seams and sparse gradient fragments. Text counters and icon symbols
             // are compact, bounded shapes; the limits still allow thin minus/I-like glyphs.
             if (touchesExterior || area < minArea || area > maxArea
-                    || aspectRatio > 9f || fillRatio < 0.035f) continue;
+                    || aspectRatio > 9f || fillRatio < 0.035f
+                    || (area > count * 0.09f
+                            && (aspectRatio > 4f || fillRatio < 0.12f))) continue;
 
             long componentLuminance = 0;
             long componentRed = 0, componentGreen = 0, componentBlue = 0;
@@ -1136,10 +1141,15 @@ final class LauncherIconDrawable extends Drawable {
             int largestChannelDifference = Math.max(redDifference,
                     Math.max(greenDifference, blueDifference));
             int totalChannelDifference = redDifference + greenDifference + blueDifference;
-            boolean strongLuminanceContrast = Math.abs(componentMean - surroundingMean) >= 34f;
+            float luminanceDifference = Math.abs(componentMean - surroundingMean);
+            boolean strongLuminanceContrast = luminanceDifference >= 34f;
             boolean strongColourContrast = largestChannelDifference >= 36
                     && totalChannelDifference >= 72;
-            if (!strongLuminanceContrast && !strongColourContrast) continue;
+            // Larger candidates are accepted only with clearly separated luminance, not merely
+            // a hue change. This keeps broad adjacent logo segments from becoming white while
+            // allowing enclosed letter/digit strokes to survive monochrome conversion.
+            if ((!strongLuminanceContrast && !strongColourContrast)
+                    || (area > count * 0.09f && luminanceDifference < 66f)) continue;
 
             // The accepted region is small, interior, and demonstrably distinct from its
             // surrounding colour. Preserve all its core pixels as white negative-space detail.
