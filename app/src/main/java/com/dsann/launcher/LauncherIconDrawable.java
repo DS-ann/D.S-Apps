@@ -772,6 +772,16 @@ final class LauncherIconDrawable extends Drawable {
                 findMonochromeSeparators(pixels, hasBackdrop ? backdrop : null, width, height),
                 pixels, hasBackdrop ? backdrop : null, width, height);
 
+        // Recover small, enclosed high-contrast details (for example a white mark inside a
+        // coloured badge or a calculator symbol inside a key). Larger regions and any region
+        // connected to the app backdrop/exterior are deliberately excluded, so the main logo
+        // segments and app background keep the established universal conversion rules.
+        boolean[] enclosedDetails = null;
+        if (hasBackdrop || transparentCount > count * 0.025f) {
+            enclosedDetails = findEnclosedContrastDetails(
+                    pixels, hasBackdrop ? backdrop : null, width, height);
+        }
+
         // Fixed Nothing-inspired palette: white original backplate, black foreground. For
         // transparent standalone glyphs, transparency is retained and only the glyph is black.
         final int backgroundTone = 255;
@@ -788,7 +798,8 @@ final class LauncherIconDrawable extends Drawable {
             if (hasBackdrop) {
                 // White fill and white internal cut-lines preserve distinct pieces in divided
                 // logos; app-background pixels are never recoloured based on their original hue.
-                if (backdrop[index] || separators[index]) {
+                if (backdrop[index] || separators[index]
+                        || (enclosedDetails != null && enclosedDetails[index])) {
                     mono = backgroundTone;
                 } else {
                     mono = foregroundTone;
@@ -796,7 +807,9 @@ final class LauncherIconDrawable extends Drawable {
             } else if (transparentCount > count * 0.025f) {
                 // Source has genuine transparent margins: use a black silhouette and retain
                 // white seams only at meaningful internal colour divisions.
-                mono = separators[index] ? noBackdropSeparator : noBackdropForeground;
+                mono = separators[index]
+                        || (enclosedDetails != null && enclosedDetails[index])
+                        ? noBackdropSeparator : noBackdropForeground;
             } else {
                 // When no reliable background is present in an opaque legacy icon, do not
                 // invent a split through the logo. Keep its tonal detail as neutral greys.
@@ -975,6 +988,112 @@ final class LauncherIconDrawable extends Drawable {
         // Recover boundaries between small adjacent logo segments at icon resolution. The
         // dual threshold still avoids marking gradual gradients as seams.
         return largestDifference >= 48 && totalDifference >= 88;
+    }
+
+    /**
+     * Finds small, enclosed high-contrast colour regions that carry internal logo meaning.
+     * The component is segmented using the same universal colour-boundary threshold as the
+     * separator pass. A candidate is retained as a white detail only when it is compact,
+     * does not touch transparent space or the detected app backplate, and differs strongly
+     * in luminance from its surrounding foreground. This preserves things such as letters,
+     * digits, handset shapes, camera details and symbols without special-casing any package.
+     *
+     * This intentionally does not recolour broad logo regions: the size and enclosure checks
+     * stop major multicolour segments from being mistaken for small foreground details.
+     */
+    private static boolean[] findEnclosedContrastDetails(int[] pixels, boolean[] backdrop,
+            int width, int height) {
+        final int count = pixels.length;
+        final boolean[] details = new boolean[count];
+        final int[] labels = new int[count];
+        java.util.Arrays.fill(labels, -1);
+        final int[] queue = new int[count];
+        final int[] dx = { -1, 1, 0, 0 };
+        final int[] dy = { 0, 0, -1, 1 };
+        final int minArea = Math.max(3, Math.round(count * 0.00020f));
+        final int maxArea = Math.max(minArea, Math.round(count * 0.09f));
+        int nextLabel = 0;
+
+        for (int start = 0; start < count; start++) {
+            if (labels[start] >= 0 || Color.alpha(pixels[start]) < 160
+                    || (backdrop != null && backdrop[start])) {
+                continue;
+            }
+
+            final int label = nextLabel++;
+            int head = 0;
+            int tail = 0;
+            queue[tail++] = start;
+            labels[start] = label;
+            boolean touchesExterior = false;
+
+            while (head < tail) {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+                int current = pixels[index];
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + dx[direction];
+                    int ny = y + dy[direction];
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                        touchesExterior = true;
+                        continue;
+                    }
+                    int neighbour = ny * width + nx;
+                    if (backdrop != null && backdrop[neighbour]) {
+                        touchesExterior = true;
+                        continue;
+                    }
+                    if (Color.alpha(pixels[neighbour]) < 160) {
+                        // Do not reinterpret details at the outer alpha edge as enclosed marks.
+                        touchesExterior = true;
+                        continue;
+                    }
+                    if (labels[neighbour] >= 0) continue;
+                    if (strongColourBoundary(current, pixels[neighbour])) continue;
+                    labels[neighbour] = label;
+                    queue[tail++] = neighbour;
+                }
+            }
+
+            int area = tail;
+            if (touchesExterior || area < minArea || area > maxArea) continue;
+
+            long componentLuminance = 0;
+            long surroundingLuminance = 0;
+            int surroundingSamples = 0;
+            for (int i = 0; i < area; i++) {
+                int index = queue[i];
+                componentLuminance += Math.round(pixelLuminance(pixels[index]));
+                int x = index % width;
+                int y = index / width;
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + dx[direction];
+                    int ny = y + dy[direction];
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                    int neighbour = ny * width + nx;
+                    if (labels[neighbour] == label
+                            || (backdrop != null && backdrop[neighbour])
+                            || Color.alpha(pixels[neighbour]) < 160) {
+                        continue;
+                    }
+                    if (strongColourBoundary(pixels[index], pixels[neighbour])) {
+                        surroundingLuminance += Math.round(pixelLuminance(pixels[neighbour]));
+                        surroundingSamples++;
+                    }
+                }
+            }
+
+            if (surroundingSamples < Math.max(4, area / 2)) continue;
+            float componentMean = componentLuminance / (float) area;
+            float surroundingMean = surroundingLuminance / (float) surroundingSamples;
+            if (Math.abs(componentMean - surroundingMean) < 52f) continue;
+
+            // The accepted region is small, interior, and demonstrably distinct from its
+            // surrounding colour. Preserve all its core pixels as white negative-space detail.
+            for (int i = 0; i < area; i++) details[queue[i]] = true;
+        }
+        return details;
     }
 
     /**
