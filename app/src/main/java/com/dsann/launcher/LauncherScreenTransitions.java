@@ -66,7 +66,8 @@ final class LauncherScreenTransitions {
 
     static float getDrawerTransitionProgress(LinearLayout homeScreen,
             LinearLayout drawerScreen, int effect, boolean drawerOpen) {
-        if (isDrawerTransitionRunning(homeScreen, drawerScreen, effect)) {
+        if (effect == 0 && activeParallaxAnimator != null
+                && activeParallaxHome == homeScreen && activeParallaxDrawer == drawerScreen) {
             Object value = activeParallaxAnimator.getAnimatedValue();
             if (value instanceof Number) activeParallaxProgress =
                     clampProgress(((Number) value).floatValue());
