@@ -199,6 +199,10 @@ final class LauncherIconDrawable extends Drawable {
 
     static int backgroundPositionFromPreferences(SharedPreferences preferences) {
         if (preferences == null) return 125;
+        if (preferences.getInt("icon_artwork_theme", ARTWORK_ORIGINAL)
+                == ARTWORK_NOTHING_MONOCHROME) {
+            return 0;
+        }
         int saved = preferences.getInt("icon_background_color_position", -1);
         if (saved >= 0) return Math.max(0, Math.min(SPECTRUM_STEPS, saved));
         int legacyChoice = preferences.getInt("icon_background_color", BACKGROUND_BLACK);
@@ -658,8 +662,8 @@ final class LauncherIconDrawable extends Drawable {
     /**
      * Preserve antialiased edges of a detected background without using a global colour
      * replacement. Only pixels directly next to the already-connected background mask can
-     * be expanded, and each is compared to its adjacent background pixel(s) with a generous
-     * anti-alias tolerance. This works for flat colours and gently varying gradients.
+     * be expanded, and only when multiple adjacent background pixels agree with the candidate.
+     * This avoids wiping similarly coloured glyph details while retaining flat/gradient edges.
      */
     private static boolean[] expandMonochromeBackdropAtEdges(int[] pixels,
             boolean[] backdrop, int width, int height) {
@@ -679,11 +683,29 @@ final class LauncherIconDrawable extends Drawable {
                     int next = ny * width + nx;
                     if (backdrop[next] || Color.alpha(pixels[next]) < 48) continue;
                     int candidate = pixels[next];
-                    if (Math.abs(Color.red(candidate) - Color.red(reference)) <= 72
-                            && Math.abs(Color.green(candidate) - Color.green(reference)) <= 72
-                            && Math.abs(Color.blue(candidate) - Color.blue(reference)) <= 72) {
-                        expanded[next] = true;
+                    if (Math.abs(Color.red(candidate) - Color.red(reference)) > 60
+                            || Math.abs(Color.green(candidate) - Color.green(reference)) > 60
+                            || Math.abs(Color.blue(candidate) - Color.blue(reference)) > 60) {
+                        continue;
                     }
+                    int agreeingNeighbours = 0;
+                    for (int by = -1; by <= 1; by++) {
+                        int sy = ny + by;
+                        if (sy < 0 || sy >= height) continue;
+                        for (int bx = -1; bx <= 1; bx++) {
+                            int sx = nx + bx;
+                            if (sx < 0 || sx >= width) continue;
+                            int neighbour = sy * width + sx;
+                            if (!backdrop[neighbour] || Color.alpha(pixels[neighbour]) < 80) continue;
+                            int sample = pixels[neighbour];
+                            if (Math.abs(Color.red(candidate) - Color.red(sample)) <= 60
+                                    && Math.abs(Color.green(candidate) - Color.green(sample)) <= 60
+                                    && Math.abs(Color.blue(candidate) - Color.blue(sample)) <= 60) {
+                                agreeingNeighbours++;
+                            }
+                        }
+                    }
+                    if (agreeingNeighbours >= 2) expanded[next] = true;
                 }
             }
         }
@@ -995,7 +1017,7 @@ final class LauncherIconDrawable extends Drawable {
         // Complex legacy icons sometimes use a smooth background gradient rather than a
         // solid colour. Fit a conservative four-corner colour surface and mask only the
         // edge-connected pixels that agree with it; ambiguous borders still remain intact.
-        if (dominantCount < opaqueBorder * 0.16f) {
+        if (dominantCount < opaqueBorder * 0.24f) {
             return findGradientBackdrop(pixels, width, height, opaqueBorder);
         }
         int red = ((dominantBucket >> 10) & 31) * 8 + 4;

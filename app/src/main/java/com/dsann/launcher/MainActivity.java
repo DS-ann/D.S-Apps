@@ -9390,8 +9390,21 @@ public class MainActivity extends Activity {
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
+        boolean nothingMonochrome = prefs.getInt(KEY_ICON_ARTWORK_THEME,
+                LauncherIconDrawable.ARTWORK_ORIGINAL)
+                == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+        if (nothingMonochrome
+                && (prefs.getInt(KEY_ICON_BACKGROUND_COLOR_POSITION, -1) != 0
+                        || prefs.getInt(KEY_ICON_BACKGROUND_COLOR, -1)
+                                != LauncherIconDrawable.BACKGROUND_WHITE)) {
+            prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR_POSITION, 0)
+                    .putInt(KEY_ICON_BACKGROUND_COLOR, LauncherIconDrawable.BACKGROUND_WHITE)
+                    .apply();
+        }
         addColorSliderRow(content, "App icon background colour",
-                LauncherIconDrawable.backgroundPositionFromPreferences(prefs), value -> {
+                nothingMonochrome ? 0
+                        : LauncherIconDrawable.backgroundPositionFromPreferences(prefs),
+                !nothingMonochrome, value -> {
             // The background switch alone controls whether shapes/backgrounds are active.
             // Changing the selected colour must not silently turn the feature back on.
             prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR_POSITION, value).apply();
@@ -9410,8 +9423,14 @@ public class MainActivity extends Activity {
                 LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
                         LauncherIconDrawable.ARTWORK_ORIGINAL)),
                 new String[]{"Original Colours", "Spectrum Mix", "Ocean Gradient", "Sunset Gradient", "Nothing Monochrome"}, value -> {
-            prefs.edit().putInt(KEY_ICON_ARTWORK_THEME,
-                    LauncherIconDrawable.clampArtworkTheme(value)).apply();
+            int selectedTheme = LauncherIconDrawable.clampArtworkTheme(value);
+            SharedPreferences.Editor themeEdit = prefs.edit()
+                    .putInt(KEY_ICON_ARTWORK_THEME, selectedTheme);
+            if (selectedTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME) {
+                themeEdit.putInt(KEY_ICON_BACKGROUND_COLOR_POSITION, 0)
+                        .putInt(KEY_ICON_BACKGROUND_COLOR, LauncherIconDrawable.BACKGROUND_WHITE);
+            }
+            themeEdit.apply();
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
@@ -10250,7 +10269,7 @@ public class MainActivity extends Activity {
     private interface IntSliderAction { void onChange(int value); }
 
     private void addColorSliderRow(LinearLayout panel, String title, int current,
-            IntSliderAction action) {
+            boolean enabled, IntSliderAction action) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
@@ -10277,9 +10296,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams sliderFrameParams = new LinearLayout.LayoutParams(
                 -1, LauncherUiUtils.dp(this, 42));
         View spectrumRail = new View(this);
-        GradientDrawable spectrumBackground = new GradientDrawable(
-                GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors);
+        GradientDrawable spectrumBackground = enabled
+                ? new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, spectrumColors)
+                : new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                        new int[]{Color.WHITE, Color.WHITE});
         spectrumBackground.setCornerRadius(LauncherUiUtils.dp(this, 5));
+        if (!enabled) spectrumBackground.setStroke(LauncherUiUtils.dp(this, 1),
+                Color.rgb(205, 210, 220));
         spectrumRail.setBackground(spectrumBackground);
         FrameLayout.LayoutParams railParams = new FrameLayout.LayoutParams(
                 -1, LauncherUiUtils.dp(this, 8), Gravity.CENTER_VERTICAL);
@@ -10291,6 +10314,7 @@ public class MainActivity extends Activity {
         seekBar.setMax(1000);
         int initial = Math.max(0, Math.min(1000, current));
         seekBar.setProgress(initial);
+        seekBar.setEnabled(enabled);
         seekBar.setSplitTrack(false);
         seekBar.setBackgroundColor(Color.TRANSPARENT);
         seekBar.setPadding(LauncherUiUtils.dp(this, 9), 0,
@@ -10305,17 +10329,19 @@ public class MainActivity extends Activity {
         pickerThumb.setShape(GradientDrawable.OVAL);
         pickerThumb.setSize(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 18));
         pickerThumb.setColor(LauncherIconDrawable.spectrumColorForPosition(initial));
-        pickerThumb.setStroke(LauncherUiUtils.dp(this, 2), Color.WHITE);
+        pickerThumb.setStroke(LauncherUiUtils.dp(this, 2),
+                enabled ? Color.WHITE : Color.rgb(160, 166, 178));
         seekBar.setThumb(pickerThumb);
         sliderFrame.addView(seekBar, new FrameLayout.LayoutParams(-1, -1));
         block.addView(sliderFrame, sliderFrameParams);
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                int color = LauncherIconDrawable.spectrumColorForPosition(progress);
+                int color = enabled ? LauncherIconDrawable.spectrumColorForPosition(progress)
+                        : Color.WHITE;
                 valueLabel.setText(colorValueLabel(color));
                 pickerThumb.setColor(color);
                 pickerThumb.invalidateSelf();
-                if (fromUser) action.onChange(progress);
+                if (enabled && fromUser) action.onChange(progress);
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
             @Override public void onStopTrackingTouch(SeekBar bar) {}
