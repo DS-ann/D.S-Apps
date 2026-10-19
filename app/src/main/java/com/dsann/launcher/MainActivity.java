@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     private static final String KEY_FONT_SIZE_SLIDER_VALUES = "font_size_slider_values_v1";
     private static final String KEY_CLOCK_STYLE = "clock_style";
     private static final String KEY_CLOCK_DIGIT_GRADIENT = "animated_clock_digit_colours";
+    private static final String KEY_CLOCK_LIVE_GRADIENT = "live_clock_colour_transition";
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
@@ -252,10 +253,41 @@ public class MainActivity extends Activity {
     private int activeClockPage = 0;
     // Each clock panel has its own drawable; remember the last applied five-minute colour phase.
     private int lastClockPanelColorPhase = -1;
-    private android.animation.ValueAnimator clockColorAnimator;
     private float clockColorPhase;
     private long clockColorLastFrameUptime;
     private long clockGradientResumeAtUptime;
+    private boolean pageFlipOverflowEnabled;
+    private boolean pageFlipSavedHomeClipChildren;
+    private boolean pageFlipSavedHomeClipToPadding;
+    private boolean pageFlipSavedViewportClipChildren;
+    private boolean pageFlipSavedViewportClipToPadding;
+    private boolean pageFlipSavedStripClipChildren;
+    private boolean pageFlipSavedStripClipToPadding;
+    private int pageFlipSavedViewportLayerType = View.LAYER_TYPE_HARDWARE;
+    private int pageFlipSavedStripLayerType = View.LAYER_TYPE_HARDWARE;
+    private final Runnable clockColorFrame = new Runnable() {
+        @Override public void run() {
+            if (!clockUpdatesActive || prefs == null
+                    || !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
+                clockColorLastFrameUptime = 0L;
+                return;
+            }
+            // Stop scheduling work during the finger-driven turn. Resume with the
+            // current colour phase when the page has settled.
+            if (pageTransitionBusy) {
+                clockColorLastFrameUptime = 0L;
+                return;
+            }
+            long now = android.os.SystemClock.uptimeMillis();
+            if (clockColorLastFrameUptime > 0L) {
+                long elapsed = Math.max(0L, Math.min(500L, now - clockColorLastFrameUptime));
+                clockColorPhase = (clockColorPhase + elapsed / 10000f) % 1f;
+            }
+            clockColorLastFrameUptime = now;
+            applyClockColorEffectsToActivePage(clockColorPhase);
+            handler.postDelayed(this, 125L);
+        }
+    };
     private static final class ClockTextGradientState {
         int viewWidth;
         float spanWidth;
@@ -1069,6 +1101,10 @@ public class MainActivity extends Activity {
                     if (!pageSwipeActive) {
                         pageSwipeActive = true;
                         pageTransitionBusy = true;
+                        if (prefs != null && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
+                            handler.removeCallbacks(clockColorFrame);
+                            clockColorLastFrameUptime = 0L;
+                        }
                         pageSwipeChildCancelled = false;
                         wheelSwipeProgress = 0f;
                         wheelSwipeDirection = direction;
@@ -4273,6 +4309,10 @@ public class MainActivity extends Activity {
                 ? pagesStrip.getChildAt(to) : null;
 
         if (effect == 3) {
+            // The 3D projection can extend the bottom edge beyond the viewport.
+            // Disable only the outer clipping/cached surfaces for this brief turn;
+            // the outgoing/incoming page textures stay hardware accelerated.
+            setPageFlipOverflowEnabled(true);
             // Page Flip hinges each face around the top horizontal edge. Align the
             // incoming page once beneath the outgoing page; no horizontal motion or
             // vertical strip travel is animated during the turn.
@@ -4387,6 +4427,7 @@ public class MainActivity extends Activity {
             wheelSwipeProgress = 0f;
             wheelSwipeDirection = 0;
             pageTransitionBusy = false;
+            startClockColorAnimator();
             return;
         }
 
@@ -4417,6 +4458,7 @@ public class MainActivity extends Activity {
                 // exact final frame of its entrance animation.
                 clockGradientResumeAtUptime = android.os.SystemClock.uptimeMillis() + 180L;
                 pageTransitionBusy = false;
+                startClockColorAnimator();
                 if (pageIndicator != null) {
                     boolean show = pages.size() > 1 && prefs.getBoolean(KEY_SHOW_PAGE_INDICATOR, true);
                     pageIndicator.setVisibility(show ? View.VISIBLE : View.GONE);
@@ -4425,6 +4467,54 @@ public class MainActivity extends Activity {
             }
         });
         animator.start();
+    }
+
+    private void setPageFlipOverflowEnabled(boolean enabled) {
+        if (enabled) {
+            if (pageFlipOverflowEnabled) return;
+            pageFlipOverflowEnabled = true;
+            if (homeScreen != null) {
+                pageFlipSavedHomeClipChildren = homeScreen.getClipChildren();
+                pageFlipSavedHomeClipToPadding = homeScreen.getClipToPadding();
+                homeScreen.setClipChildren(false);
+                homeScreen.setClipToPadding(false);
+            }
+            if (pageViewport != null) {
+                pageFlipSavedViewportClipChildren = pageViewport.getClipChildren();
+                pageFlipSavedViewportClipToPadding = pageViewport.getClipToPadding();
+                pageFlipSavedViewportLayerType = pageViewport.getLayerType();
+                pageViewport.setClipChildren(false);
+                pageViewport.setClipToPadding(false);
+                // The viewport's fixed-size hardware layer was clipping the rotated
+                // lower edge even though the incoming page itself was still moving.
+                pageViewport.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
+            if (pagesStrip != null) {
+                pageFlipSavedStripClipChildren = pagesStrip.getClipChildren();
+                pageFlipSavedStripClipToPadding = pagesStrip.getClipToPadding();
+                pageFlipSavedStripLayerType = pagesStrip.getLayerType();
+                pagesStrip.setClipChildren(false);
+                pagesStrip.setClipToPadding(false);
+                pagesStrip.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
+        } else {
+            if (!pageFlipOverflowEnabled) return;
+            pageFlipOverflowEnabled = false;
+            if (homeScreen != null) {
+                homeScreen.setClipChildren(pageFlipSavedHomeClipChildren);
+                homeScreen.setClipToPadding(pageFlipSavedHomeClipToPadding);
+            }
+            if (pageViewport != null) {
+                pageViewport.setClipChildren(pageFlipSavedViewportClipChildren);
+                pageViewport.setClipToPadding(pageFlipSavedViewportClipToPadding);
+                pageViewport.setLayerType(pageFlipSavedViewportLayerType, null);
+            }
+            if (pagesStrip != null) {
+                pagesStrip.setClipChildren(pageFlipSavedStripClipChildren);
+                pagesStrip.setClipToPadding(pageFlipSavedStripClipToPadding);
+                pagesStrip.setLayerType(pageFlipSavedStripLayerType, null);
+            }
+        }
     }
 
     private void resetPageTransforms() {
@@ -4441,6 +4531,8 @@ public class MainActivity extends Activity {
             face.setTranslationY(0f);
             face.setTranslationZ(0f);
         }
+        // Restore clipping only after the destination page is aligned and unrotated.
+        setPageFlipOverflowEnabled(false);
     }
 
     /**
@@ -5833,32 +5925,23 @@ public class MainActivity extends Activity {
     }
 
     private void startClockColorAnimator() {
-        if (clockColorAnimator != null && clockColorAnimator.isRunning()) return;
-        android.animation.ValueAnimator animator = android.animation.ValueAnimator.ofFloat(
-                clockColorPhase, clockColorPhase + 1f);
-        animator.setDuration(8200L);
-        animator.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        animator.setInterpolator(new android.view.animation.LinearInterpolator());
-        animator.addUpdateListener(value -> {
-            float raw = (Float) value.getAnimatedValue();
-            clockColorPhase = raw - (float) Math.floor(raw);
-            long now = android.os.SystemClock.uptimeMillis();
-            if (!clockUpdatesActive || pageTransitionBusy
-                    || now < clockGradientResumeAtUptime
-                    || now - clockColorLastFrameUptime < 33L) return;
-            clockColorLastFrameUptime = now;
-            applyClockColorEffectsToActivePage(clockColorPhase);
-        });
-        clockColorAnimator = animator;
-        animator.start();
-        applyClockColorEffectsToActivePage(clockColorPhase);
+        if (prefs == null || !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false)) {
+            stopClockColorAnimator();
+            clockColorPhase = 0f;
+            applyClockColorEffects(0f, true);
+            return;
+        }
+        if (!clockUpdatesActive || pageTransitionBusy) return;
+        handler.removeCallbacks(clockColorFrame);
+        clockColorLastFrameUptime = 0L;
+        long now = android.os.SystemClock.uptimeMillis();
+        long waitForStablePage = Math.max(0L, clockGradientResumeAtUptime - now);
+        handler.postDelayed(clockColorFrame, Math.max(100L, waitForStablePage));
     }
 
     private void stopClockColorAnimator() {
-        if (clockColorAnimator != null) {
-            clockColorAnimator.cancel();
-            clockColorAnimator = null;
-        }
+        handler.removeCallbacks(clockColorFrame);
+        clockColorLastFrameUptime = 0L;
     }
 
     private void applyClockColorEffects(float phase, boolean bothPages) {
@@ -5874,22 +5957,36 @@ public class MainActivity extends Activity {
     }
 
     private void applyClockColorEffectsToActivePage(float phase) {
+        boolean live = prefs != null && prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+        float displayPhase = live ? phase : 0f;
+        // Date and AM/PM always retain the Home Studio palette. With live mode off
+        // its shader is fixed at phase zero; with live mode on it moves alongside digits.
         if (dateText != null) {
             applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
-                    phase, clockDateGradients);
+                    displayPhase, clockDateGradients);
         }
         if (clockText == null) return;
-        boolean digitsAnimated = prefs != null
+        boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         if (clockText instanceof SevenSegmentClockTextView) {
             ((SevenSegmentClockTextView) clockText).setSegmentGradientEnabled(
-                    digitsAnimated && sevenSegment, phase, CLOCK_DIGIT_GRADIENT_COLORS);
+                    digitGradient && sevenSegment, displayPhase, CLOCK_DIGIT_GRADIENT_COLORS);
         }
-        if (digitsAnimated) {
-            applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
-                    phase, clockDigitGradients);
+        if (digitGradient) {
+            if (sevenSegment) {
+                // The custom LED renderer owns its gradient paint; do not assign
+                // a redundant TextView shader to the hidden standard glyph pass.
+                clockDigitGradients.remove(clockText);
+                if (clockText.getPaint().getShader() != null) {
+                    clockText.getPaint().setShader(null);
+                }
+                clockText.invalidate();
+            } else {
+                applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
+                        displayPhase, clockDigitGradients);
+            }
         } else {
             clockDigitGradients.remove(clockText);
             if (clockText.getPaint().getShader() != null) {
@@ -8976,11 +9073,30 @@ public class MainActivity extends Activity {
             activateClockForPage(restorePage);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSettingRow(content, "✦", "Animated clock digit colours",
+        addSettingRow(content, "✦", "Gradient clock digits",
                 prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false) ? "On" : "Off", () -> {
             boolean enabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
             prefs.edit().putBoolean(KEY_CLOCK_DIGIT_GRADIENT, enabled).apply();
             applyClockColorEffects(clockColorPhase, true);
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addSettingRow(content, "↻", "Live clock colour transition",
+                prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false) ? "Live" : "Fixed", () -> {
+            boolean enabled = !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
+            SharedPreferences.Editor edit = prefs.edit().putBoolean(KEY_CLOCK_LIVE_GRADIENT, enabled);
+            // Enabling live colour also enables the digit gradient so the date,
+            // AM/PM and digits move through their palettes together. Turning live
+            // mode back off leaves that gradient in place as a fixed colour sweep.
+            if (enabled) edit.putBoolean(KEY_CLOCK_DIGIT_GRADIENT, true);
+            edit.apply();
+            if (enabled) {
+                applyClockColorEffects(clockColorPhase, true);
+                startClockColorAnimator();
+            } else {
+                stopClockColorAnimator();
+                clockColorPhase = 0f;
+                applyClockColorEffects(0f, true);
+            }
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
