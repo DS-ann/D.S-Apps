@@ -62,7 +62,6 @@ public class MainActivity extends Activity {
     private static final String KEY_ICON_BACKGROUND_COLOR_POSITION = "icon_background_color_position";
     private static final String KEY_ICON_SHAPE_MIGRATION = "app_icon_shape_migration_v2";
     private static final String KEY_ICON_ARTWORK_THEME = "icon_artwork_theme";
-    private static final String KEY_ICON_INNER_COLOR_POSITION = "icon_inner_shape_color_position";
     private static final String KEY_DRAWER_COLUMNS = "drawer_columns";
     private static final String KEY_DRAWER_ICON_SIZE = "drawer_icon_size";
     private static final String KEY_HOME_FONT_SIZE = "home_font_size";
@@ -3281,12 +3280,12 @@ public class MainActivity extends Activity {
      * which caused visible flicker and could make icons appear to move or vanish briefly.
      */
     private void updateIconAppearance(ImageView icon, ResolveInfo app, boolean showBackground,
-            int shape, int backgroundColor, int innerShapeColor, int artworkTheme) {
+            int shape, int backgroundColor, int artworkTheme) {
         if (icon == null) return;
         Drawable current = icon.getDrawable();
         if (current instanceof LauncherIconDrawable) {
             ((LauncherIconDrawable) current).updateAppearance(
-                    showBackground, shape, backgroundColor, innerShapeColor, artworkTheme);
+                    showBackground, shape, backgroundColor, artworkTheme);
             return;
         }
         // A package-manager icon is only loaded when the view has not yet received
@@ -3296,7 +3295,7 @@ public class MainActivity extends Activity {
         String cacheToken = app == null || app.activityInfo == null ? null
                 : app.activityInfo.packageName + "/" + app.activityInfo.name;
         icon.setImageDrawable(source == null ? null : new LauncherIconDrawable(
-                source, showBackground, shape, backgroundColor, innerShapeColor, artworkTheme, cacheToken));
+                source, showBackground, shape, backgroundColor, artworkTheme, cacheToken));
     }
 
     private void refreshWorkspaceIconAppearance() {
@@ -3305,7 +3304,6 @@ public class MainActivity extends Activity {
         int shape = LauncherIconDrawable.clampShape(
                 prefs.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL));
         int backgroundColor = LauncherIconDrawable.backgroundColorFromPreferences(prefs);
-        int innerShapeColor = LauncherIconDrawable.innerShapeColorFromPreferences(prefs);
         int artworkTheme = LauncherIconDrawable.clampArtworkTheme(
                 prefs.getInt(KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
 
@@ -3326,7 +3324,7 @@ public class MainActivity extends Activity {
                     View iconView = ((ViewGroup) child).getChildAt(0);
                     if (iconView instanceof ImageView) {
                         updateIconAppearance((ImageView) iconView, app, showBackground, shape,
-                                backgroundColor, innerShapeColor, artworkTheme);
+                                backgroundColor, artworkTheme);
                     }
                 }
             }
@@ -3342,7 +3340,7 @@ public class MainActivity extends Activity {
                     View child = group.getChildAt(j);
                     if (child instanceof ImageView) {
                         updateIconAppearance((ImageView) child, null, showBackground, shape,
-                                backgroundColor, innerShapeColor, artworkTheme);
+                                backgroundColor, artworkTheme);
                     }
                 }
             }
@@ -3357,7 +3355,7 @@ public class MainActivity extends Activity {
                 ViewGroup group = (ViewGroup) cell;
                 if (group.getChildCount() > 0 && group.getChildAt(0) instanceof ImageView) {
                     updateIconAppearance((ImageView) group.getChildAt(0), null, showBackground,
-                            shape, backgroundColor, innerShapeColor, artworkTheme);
+                            shape, backgroundColor, artworkTheme);
                 }
             }
         }
@@ -3402,7 +3400,6 @@ public class MainActivity extends Activity {
                             LauncherIconDrawable.clampShape(prefs.getInt("app_icon_shape",
                                     LauncherIconDrawable.SHAPE_ORIGINAL)),
                             LauncherIconDrawable.backgroundColorFromPreferences(prefs),
-                            LauncherIconDrawable.innerShapeColorFromPreferences(prefs),
                             LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
                                     LauncherIconDrawable.ARTWORK_ORIGINAL)),
                             packageName + "/" + app.activityInfo.name));
@@ -9278,13 +9275,9 @@ public class MainActivity extends Activity {
         });
         addColorSliderRow(content, "App icon background colour",
                 LauncherIconDrawable.backgroundPositionFromPreferences(prefs), value -> {
-            prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR_POSITION, value)
-                    .putBoolean("icon_rounded_square_background", true).apply();
-            refreshWorkspaceIconAppearance();
-        });
-        addColorSliderRow(content, "App icon inner shape colour",
-                LauncherIconDrawable.innerShapePositionFromPreferences(prefs), value -> {
-            prefs.edit().putInt(KEY_ICON_INNER_COLOR_POSITION, value).apply();
+            // The background switch alone controls whether shapes/backgrounds are active.
+            // Changing the selected colour must not silently turn the feature back on.
+            prefs.edit().putInt(KEY_ICON_BACKGROUND_COLOR_POSITION, value).apply();
             refreshWorkspaceIconAppearance();
         });
         addChoiceRow(content, "App background shape",

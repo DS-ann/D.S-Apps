@@ -180,7 +180,6 @@ public final class LauncherAppAdapter extends BaseAdapter {
                     ? LauncherIconDrawable.SHAPE_ORIGINAL
                     : preferences.getInt("app_icon_shape", LauncherIconDrawable.SHAPE_ORIGINAL));
             int backgroundColor = LauncherIconDrawable.backgroundColorFromPreferences(preferences);
-            int innerShapeColor = LauncherIconDrawable.innerShapeColorFromPreferences(preferences);
             int artworkTheme = LauncherIconDrawable.clampArtworkTheme(preferences == null
                     ? LauncherIconDrawable.ARTWORK_ORIGINAL
                     : preferences.getInt("icon_artwork_theme", LauncherIconDrawable.ARTWORK_ORIGINAL));
@@ -190,10 +189,10 @@ public final class LauncherAppAdapter extends BaseAdapter {
             android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
             if (existingIcon instanceof LauncherIconDrawable) {
                 ((LauncherIconDrawable) existingIcon).updateContent(appIcon, roundedSquareBackground,
-                        iconShape, backgroundColor, innerShapeColor, artworkTheme, key(app));
+                        iconShape, backgroundColor, artworkTheme, key(app));
             } else {
                 icon.setImageDrawable(new LauncherIconDrawable(appIcon, roundedSquareBackground, iconShape,
-                        backgroundColor, innerShapeColor, artworkTheme, key(app)));
+                        backgroundColor, artworkTheme, key(app));
             }
         } else {
             icon.setImageDrawable(null);
