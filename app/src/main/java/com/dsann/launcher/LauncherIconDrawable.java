@@ -1013,9 +1013,12 @@ final class LauncherIconDrawable extends Drawable {
                         int neighbour = ny * width + nx;
                         if (Color.alpha(pixels[neighbour]) < 240
                                 || Color.red(pixels[neighbour]) < 220) continue;
-                        // Symbol boundaries stay white, but letter-like components may
-                        // reinforce through their seam pixels so thin text remains legible.
-                        if (separators[neighbour] && !reinforceGlyph) continue;
+                        // Separator pixels are hard-protected for every component.
+                        // Letting the lettering pass overwrite them caused multicolour logos
+                        // to collapse when a segment was classified as a compact wordmark.
+                        // Thin glyphs still thicken into ordinary antialiased/light pixels,
+                        // but never erase an already-detected internal logo seam.
+                        if (separators[neighbour]) continue;
                         if (enclosedDetails != null && enclosedDetails[neighbour]) continue;
                         if (enclosedBackdropCounters != null
                                 && enclosedBackdropCounters[neighbour]) continue;
