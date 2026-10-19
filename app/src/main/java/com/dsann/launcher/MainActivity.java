@@ -9314,7 +9314,7 @@ public class MainActivity extends Activity {
         addChoiceRow(content, "Icon artwork theme",
                 LauncherIconDrawable.clampArtworkTheme(prefs.getInt(KEY_ICON_ARTWORK_THEME,
                         LauncherIconDrawable.ARTWORK_ORIGINAL)),
-                new String[]{"Original Colours", "Spectrum Mix", "Ocean Gradient", "Sunset Gradient"}, value -> {
+                new String[]{"Original Colours", "Spectrum Mix", "Ocean Gradient", "Sunset Gradient", "Nothing Monochrome"}, value -> {
             prefs.edit().putInt(KEY_ICON_ARTWORK_THEME,
                     LauncherIconDrawable.clampArtworkTheme(value)).apply();
             refreshWorkspaceIconAppearance();

@@ -52,6 +52,7 @@ final class LauncherIconDrawable extends Drawable {
     static final int ARTWORK_SPECTRUM_MIX = 1;
     static final int ARTWORK_OCEAN_GRADIENT = 2;
     static final int ARTWORK_SUNSET_GRADIENT = 3;
+    static final int ARTWORK_NOTHING_MONOCHROME = 4;
 
     // Keep the cache large enough for a typical drawer page plus nearby rows, without
     // retaining multiple full-size copies of every installed icon on low-RAM devices.
@@ -123,7 +124,7 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     static int clampArtworkTheme(int theme) {
-        return Math.max(ARTWORK_ORIGINAL, Math.min(ARTWORK_SUNSET_GRADIENT, theme));
+        return Math.max(ARTWORK_ORIGINAL, Math.min(ARTWORK_NOTHING_MONOCHROME, theme));
     }
 
     private static final class ArtworkCacheKey {
@@ -443,6 +444,19 @@ final class LauncherIconDrawable extends Drawable {
             float hue = sourceHsv[0];
             float saturation = sourceHsv[1];
             float value = sourceHsv[2];
+
+            // Nothing Monochrome desaturates the app-logo artwork itself. Preserve the
+            // source alpha and perceptual lightness so contours and internal details remain
+            // legible; transparent pixels and confidently detected built-in backdrops above
+            // are deliberately untouched.
+            if (theme == ARTWORK_NOTHING_MONOCHROME) {
+                int grey = Math.max(0, Math.min(255, Math.round(
+                        Color.red(pixel) * 0.2126f
+                        + Color.green(pixel) * 0.7152f
+                        + Color.blue(pixel) * 0.0722f)));
+                pixels[index] = Color.argb(alpha, grey, grey, grey);
+                continue;
+            }
 
             // Keep near-black contours and near-white highlights neutral; they carry
             // useful shape/contrast information at small launcher icon sizes.
