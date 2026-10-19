@@ -4604,6 +4604,7 @@ public class MainActivity extends Activity {
 
     /** Fast path for the system HOME intent: no overlapping screen/page animations. */
     private void showHomeImmediately() {
+        LauncherScreenTransitions.cancelTrackedDrawerTransitions();
         drawerOpen = false;
         if (homeScreen != null) {
             homeScreen.animate().cancel();
