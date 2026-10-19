@@ -1225,13 +1225,12 @@ final class LauncherIconDrawable extends Drawable {
             componentSizes[label] = tail;
         }
 
-        // When a reliable outer/backplate mask exists, allow smaller adjacent logo sections
-        // to retain their seams; otherwise multi-part marks can merge after dark-stroke growth.
-        // With transparent artwork there is no dependable backplate to protect text, so keep
-        // the higher cutoff there to avoid outlining small glyph components.
-        boolean hasBackdropMask = backdrop != null && backdrop.length == count;
-        final int minLogoSegmentArea = Math.max(12,
-                Math.round(count * (hasBackdropMask ? 0.005f : 0.025f)));
+        // Recover internal boundaries in transparent and opaque artwork alike. The earlier
+        // 2.5% cutoff discarded smaller colour regions in multisegment logos, allowing dark
+        // stroke reinforcement to merge those regions. Keep the region floor low, while the
+        // seed-colour component labels and strongColourBoundary checks above still reject
+        // most gradient/shading differences. This also preserves the stronger lettering path.
+        final int minLogoSegmentArea = Math.max(12, Math.round(count * 0.005f));
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int index = y * width + x;
