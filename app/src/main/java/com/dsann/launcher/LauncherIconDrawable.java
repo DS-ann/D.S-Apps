@@ -768,14 +768,17 @@ final class LauncherIconDrawable extends Drawable {
             backdrop = expandMonochromeBackdropAtEdges(pixels, backdrop, width, height);
         }
 
-        boolean[] separators = thickenMonochromeSeparators(
-                findMonochromeSeparators(pixels, hasBackdrop ? backdrop : null, width, height),
+        boolean[] separators = findMonochromeSeparators(
                 pixels, hasBackdrop ? backdrop : null, width, height);
         // A few legacy wordmarks use touching glyphs with no colour boundary between letters.
         // Split only very narrow vertical bridges in broad horizontal components; ordinary
         // symbols and circular/multisegment logos fail the conservative projection checks.
         addWordmarkSeparators(pixels, hasBackdrop ? backdrop : null,
                 width, height, separators);
+        // Thicken after adding projection-derived splits too; otherwise they remain too thin
+        // to survive reduction to launcher icon size.
+        separators = thickenMonochromeSeparators(separators, pixels,
+                hasBackdrop ? backdrop : null, width, height);
 
         // Recover small, enclosed high-contrast details (for example a white mark inside a
         // coloured badge or a calculator symbol inside a key). Larger regions and any region
@@ -1319,6 +1322,10 @@ final class LauncherIconDrawable extends Drawable {
             boolean touchesCanvasEdge = false;
             queue[tail++] = start;
             labels[start] = nextLabel;
+            // Compare every pixel to this region's seed colour rather than just the previous
+            // pixel. Local-neighbour flood fills can chain a slow antialiased gradient from a
+            // gray key through the background, merging all keys and text into one component.
+            final int seedColour = pixels[start];
 
             while (head < tail) {
                 int index = queue[head++];
@@ -1331,7 +1338,6 @@ final class LauncherIconDrawable extends Drawable {
                 if (x == 0 || x == width - 1 || y == 0 || y == height - 1) {
                     touchesCanvasEdge = true;
                 }
-                int current = pixels[index];
                 for (int direction = 0; direction < 4; direction++) {
                     int nx = x + (direction == 0 ? -1 : direction == 1 ? 1 : 0);
                     int ny = y + (direction == 2 ? -1 : direction == 3 ? 1 : 0);
@@ -1345,8 +1351,11 @@ final class LauncherIconDrawable extends Drawable {
                         touchesBackground = true;
                         continue;
                     }
-                    if (labels[neighbour] >= 0) continue;
-                    if (detailColourBoundary(current, pixels[neighbour])) continue;
+                    if (labels[neighbour] >= 0) {
+                        if (labels[neighbour] != nextLabel) touchesBackground = true;
+                        continue;
+                    }
+                    if (detailColourBoundary(seedColour, pixels[neighbour])) continue;
                     labels[neighbour] = nextLabel;
                     queue[tail++] = neighbour;
                 }
