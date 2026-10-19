@@ -988,7 +988,9 @@ final class LauncherIconDrawable extends Drawable {
         // gets only a one-pixel reinforcement; glyphs retain the stronger setting that made
         // small lettering readable.
         boolean[] letterLikeForeground = findLetterLikeForegroundMask(pixels, width, height);
-        final int letterStrokeRadius = Math.max(1, Math.round(Math.min(width, height) * 0.009f));
+        // A slightly wider source-resolution contour is needed on 144 px legacy icons;
+        // after downscaling, a one-pixel source stroke can disappear again.
+        final int letterStrokeRadius = Math.max(1, Math.round(Math.min(width, height) * 0.0115f));
         int[] reinforced = pixels.clone();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -1093,15 +1095,18 @@ final class LauncherIconDrawable extends Drawable {
             float heightFraction = componentHeight / (float) height;
             float areaFraction = tail / (float) count;
 
-            // Small individual letters/digits and short wordmarks are reinforced more
-            // strongly; broad or large components remain on the lighter symbol path.
-            boolean compactGlyph = widthFraction <= 0.28f && heightFraction <= 0.28f
-                    && areaFraction <= 0.015f;
-            boolean horizontalWordmark = heightFraction <= 0.18f
-                    && widthFraction <= 0.82f && componentWidth >= componentHeight * 1.3f
-                    && areaFraction <= 0.065f;
-            boolean verticalGlyph = widthFraction <= 0.18f && heightFraction <= 0.60f
-                    && componentHeight >= componentWidth * 1.25f && areaFraction <= 0.035f;
+            // Keep the text classifier tolerant of small, thick capitals and symbols.
+            // The previous limits missed compact letters whose connected black strokes occupy
+            // a few percent of the icon, leaving them hairline-thin after downscaling.
+            // These limits remain shape-constrained so broad logo parts and circular/triangular
+            // artwork do not receive the stronger stroke reserved for lettering.
+            boolean compactGlyph = widthFraction <= 0.36f && heightFraction <= 0.36f
+                    && areaFraction <= 0.035f;
+            boolean horizontalWordmark = heightFraction <= 0.25f
+                    && widthFraction <= 0.92f && componentWidth >= componentHeight * 1.2f
+                    && areaFraction <= 0.12f;
+            boolean verticalGlyph = widthFraction <= 0.22f && heightFraction <= 0.72f
+                    && componentHeight >= componentWidth * 1.2f && areaFraction <= 0.06f;
 
             if (compactGlyph || horizontalWordmark || verticalGlyph) {
                 for (int i = 0; i < tail; i++) letterLike[queue[i]] = true;
