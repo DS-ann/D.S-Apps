@@ -765,6 +765,7 @@ public class MainActivity extends Activity {
                     LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
                             () -> drawerOpen = false, getDrawerTransition(), progress);
                 } else {
+                    refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             () -> drawerOpen = true, getDrawerTransition(), progress);
                 }
@@ -5009,10 +5010,14 @@ public class MainActivity extends Activity {
 
     private void showDrawer() { showDrawer(0f); }
 
-    private void showDrawer(float swipeProgress) {
+    private void refreshDrawerIconAppearances() {
         if (drawerAdapter != null) {
             drawerAdapter.refreshVisibleIconAppearance(drawerGrid);
         }
+    }
+
+    private void showDrawer(float swipeProgress) {
+        refreshDrawerIconAppearances();
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
             drawerOpen = true;
         }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
