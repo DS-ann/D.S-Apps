@@ -164,7 +164,9 @@ final class LauncherDrawerController {
                              String iconSizeKey, String fontSizeKey, String showLabelsKey,
                              Actions actions) {
         LinearLayout screen = new LinearLayout(activity);
-        screen.setVisibility(View.GONE);
+        // INVISIBLE still participates in layout, allowing GridView cells to warm up in the
+        // background before the first drawer opening; transition helpers later use GONE.
+        screen.setVisibility(View.INVISIBLE);
         screen.setOrientation(LinearLayout.VERTICAL);
         int side = LauncherUiUtils.dp(activity, 18);
         screen.setPadding(side, side, side, LauncherUiUtils.dp(activity, 8));
