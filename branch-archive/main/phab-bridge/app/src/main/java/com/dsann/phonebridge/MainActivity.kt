@@ -529,6 +529,45 @@ class MainActivity : Activity() {
             echo '=== ALSA DEVICE NODES ==='; ls -l /dev/snd 2>&1; cat /proc/asound/cards /proc/asound/pcm 2>&1
             echo '=== AUDIO UTILITIES ==='; command -v tinymix; command -v tinycap; command -v tinyplay; command -v tinyhostless; ls -l /system/bin/tiny* /system/xbin/tiny* /vendor/bin/tiny* 2>&1
             echo '=== AUDIO HAL LIBRARIES ==='; ls -l /system/lib/hw/audio* /system/lib64/hw/audio* /vendor/lib/hw/audio* /vendor/lib64/hw/audio* 2>&1
+            echo '=== AUDIO POLICY CONFIG HINTS ==='
+            for f in /system/etc/audio_policy.conf /system/etc/audio_policy*.conf /system/etc/audio_policy*.xml /system/etc/*audio*policy*.xml /vendor/etc/audio_policy.conf /vendor/etc/audio_policy*.conf /vendor/etc/audio_policy*.xml /vendor/etc/*audio*policy*.xml; do
+                if [ -f "${'$'}f" ]; then
+                    echo "--- ${'$'}f"; ls -l "${'$'}f"
+                    grep -inE 'voice|call|modem|downlink|uplink|pcm|hfp|bluetooth|capture|input|output' "${'$'}f" 2>&1 | head -n 100
+                fi
+            done
+            echo '=== TARGET VOICE PCM NODES ==='
+            ls -l /dev/snd/pcmC0D2p /dev/snd/pcmC0D2c /dev/snd/pcmC0D17p /dev/snd/pcmC0D17c /dev/snd/pcmC0D10p /dev/snd/pcmC0D11p /dev/snd/pcmC0D12c /dev/snd/pcmC0D19p 2>&1
+            echo '=== TARGET VOICE PCM PROC STATUS ==='
+            for d in /proc/asound/card0/pcm2p /proc/asound/card0/pcm2c /proc/asound/card0/pcm17p /proc/asound/card0/pcm17c /proc/asound/card0/pcm10p /proc/asound/card0/pcm11p /proc/asound/card0/pcm12c /proc/asound/card0/pcm19p; do
+                if [ -d "${'$'}d" ]; then
+                    echo "--- ${'$'}d"; cat "${'$'}d/info" 2>&1
+                    for f in "${'$'}d"/sub*/status "${'$'}d"/sub*/hw_params; do
+                        if [ -f "${'$'}f" ]; then echo "--- ${'$'}f"; cat "${'$'}f" 2>&1; fi
+                    done
+                fi
+            done
+            echo '=== PROCESSES HOLDING TARGET VOICE PCM NODES ==='
+            for fd in /proc/[0-9]*/fd/*; do
+                target=${'$'}(readlink "${'$'}fd" 2>/dev/null)
+                case "${'$'}target" in
+                    *pcmC0D2p*|*pcmC0D2c*|*pcmC0D17p*|*pcmC0D17c*|*pcmC0D10p*|*pcmC0D11p*|*pcmC0D12c*|*pcmC0D19p*)
+                        rest=${'$'}{fd#/proc/}; pid=${'$'}{rest%%/*}
+                        printf 'pid=%s comm=' "${'$'}pid"; cat "/proc/${'$'}pid/comm" 2>/dev/null
+                        echo "fd=${'$'}fd target=${'$'}target"
+                        ;;
+                esac
+            done
+            echo '=== AVAILABLE AUDIO INSPECTION TOOLS ==='; command -v strings; command -v nm; command -v readelf; command -v tinymix; command -v amixer
+            echo '=== HAL VOICE STRING HINTS (READ-ONLY) ==='
+            if command -v strings >/dev/null 2>&1; then
+                for f in /system/lib/hw/audio.primary.mt6753.so /system/lib/hw/audio.primary.default.so /vendor/lib/hw/audio.primary.mt6753.so /vendor/lib/hw/audio.primary.default.so /system/lib64/hw/audio.primary.mt6753.so /vendor/lib64/hw/audio.primary.mt6753.so; do
+                    if [ -f "${'$'}f" ]; then
+                        echo "--- ${'$'}f"
+                        strings "${'$'}f" 2>/dev/null | grep -iE 'voice|call|modem|downlink|uplink|pcm|audio source|voip|bluetooth|hfp|record' | head -n 100
+                    fi
+                done
+            fi
             echo '=== DUMPSYS AUDIO ==='; dumpsys audio 2>&1 | head -n 180
             echo '=== AUDIO FLINGER ==='; dumpsys media.audio_flinger 2>&1 | head -n 200
             echo '=== TELECOM ==='; dumpsys telecom 2>&1 | head -n 100
@@ -544,7 +583,7 @@ class MainActivity : Activity() {
             val buffer = StringBuilder()
             while (true) {
                 val line = reader.readLine() ?: break
-                if (buffer.length < 26000) buffer.append(line).append('\n')
+                if (buffer.length < 36000) buffer.append(line).append('\n')
             }
             reader.close()
             exitStatus = process.waitFor().toString()
@@ -552,7 +591,7 @@ class MainActivity : Activity() {
         } catch (e: Throwable) {
             output = "Root diagnostics failed: " + e.javaClass.simpleName + ": " + (e.message ?: "")
         }
-        return header + "exit=" + exitStatus + "\n" + output.take(26000)
+        return header + "exit=" + exitStatus + "\n" + output.take(36000)
     }
 
     private fun copyDiagnosticReport() {
