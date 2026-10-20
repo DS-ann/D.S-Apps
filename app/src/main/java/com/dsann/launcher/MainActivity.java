@@ -6522,6 +6522,26 @@ public class MainActivity extends Activity {
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
             if (!sevenSegmentClock && !clockValue.isEmpty()) {
+                // Reserve a leading invisible '1' when the hour has one digit.
+                int firstDigit = -1;
+                for (int i = 0; i < clockValue.length(); i++) {
+                    if (Character.digit(clockValue.charAt(i), 10) >= 0) {
+                        firstDigit = i;
+                        break;
+                    }
+                }
+                if (firstDigit >= 0) {
+                    int hourEnd = firstDigit;
+                    while (hourEnd < clockValue.length()
+                            && Character.digit(clockValue.charAt(hourEnd), 10) >= 0) {
+                        hourEnd++;
+                    }
+                    if (hourEnd - firstDigit == 1 && hourEnd < clockValue.length()) {
+                        // Figure space reserves a digit-width cell without drawing a '1'.
+                        // Two-digit hours (10–12) are left untouched and display normally.
+                        displayClock.insert(0, "\u2007");
+                    }
+                }
                 // Draw the colon's two dots at the vertical center of the clock
                 // view/background instead of using the font's naturally raised colon.
                 int colonAt = displayClock.toString().indexOf(':');
@@ -9887,52 +9907,56 @@ public class MainActivity extends Activity {
         return position == 0 ? Gravity.LEFT : (position == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.RIGHT);
     }
 
-    private static int countClockHourDigits(CharSequence clockValue) {
-        if (clockValue == null) return 0;
-        int count = 0;
-        for (int i = 0; i < clockValue.length(); i++) {
-            char ch = clockValue.charAt(i);
-            if (ch == ':') break;
-            if (Character.digit(ch, 10) >= 0) count++;
-        }
-        return count;
-    }
-
     private void updateClockDigitHorizontalOffset() {
         if (clockPanel == null || clockText == null) return;
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
-        String currentClock = clockText.getText() == null
-                ? "" : clockText.getText().toString();
-        int hourDigits = countClockHourDigits(currentClock);
-        boolean singleDigitHour = hourDigits == 1;
-        boolean twoDigitNeonCircuitHour = style == 2 && hourDigits > 1;
-        boolean centerWholeTime = sevenSegment || singleDigitHour || twoDigitNeonCircuitHour;
-
-        // Re-evaluate gravity as soon as the hour changes, without rebuilding the
-        // panel. A one-digit hour centres the actual visible string, not an empty slot.
-        int verticalGravity = sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL;
-        clockText.setGravity((centerWholeTime ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT)
-                | verticalGravity);
-        float pivotX = centerWholeTime
-                ? (clockText.getWidth() > 0 ? clockText.getWidth() / 2f
-                        : (clockGroup != null ? clockGroup.getWidth() / 2f : 0f))
-                : 0f;
-        if (Math.abs(clockText.getPivotX() - pivotX) > 0.5f) {
-            clockText.setPivotX(pivotX);
-        }
-
         float targetX;
         if (sevenSegment) {
-            // The one-digit layout includes the full colon/minute group in its own
-            // centring calculation, so do not apply the regular LED left shift there.
-            targetX = singleDigitHour ? 0f : -LauncherUiUtils.dp(this, 15) / panelScaleX;
-        } else if (singleDigitHour || twoDigitNeonCircuitHour) {
-            targetX = 0f;
+            targetX = -LauncherUiUtils.dp(this, 15) / panelScaleX;
         } else {
-            targetX = -LauncherUiUtils.dp(this, 5) / panelScaleX;
+            boolean singleDigitHour = false;
+            boolean twoDigitNeonCircuitHour = false;
+            String currentClock = clockText.getText() == null
+                    ? "" : clockText.getText().toString();
+            int colon = currentClock.indexOf(':');
+            if (colon > 0) {
+                int hourDigits = 0;
+                for (int i = 0; i < colon; i++) {
+                    if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
+                }
+                singleDigitHour = hourDigits == 1;
+                twoDigitNeonCircuitHour = style == 2 && hourDigits > 1;
+            }
+
+            if (twoDigitNeonCircuitHour) {
+                // For a two-digit Neon Circuit hour, the text itself is centered
+                // in its full-width clock group. The 20dp width reduction is applied
+                // around that group's center, so no compensating translation is needed.
+                targetX = 0f;
+            } else {
+                float horizontalOffset = LauncherUiUtils.dp(this, 5);
+                if (singleDigitHour) {
+                    float singleDigitAdjustment;
+                    if (style == 2) {
+                        // Neon Circuit reserves a leading figure-space for single-digit
+                        // hours. Measure its actual advance to avoid a 9-to-10 jump.
+                        float figureSpaceWidth = clockText.getPaint().measureText("\u2007");
+                        float trackingWidth = clockText.getTextSize()
+                                * clockText.getLetterSpacing();
+                        singleDigitAdjustment = Math.max(0f, figureSpaceWidth + trackingWidth)
+                                * Math.abs(clockText.getScaleX());
+                    } else {
+                        // Preserve the established alignment for other clock presets.
+                        singleDigitAdjustment = LauncherUiUtils.dp(this, 20);
+                    }
+                    horizontalOffset += singleDigitAdjustment;
+                }
+                targetX = -horizontalOffset / panelScaleX;
+            }
         }
+        // Avoid invalidating the view when the computed offset hasn't actually changed.
         if (Math.abs(clockText.getTranslationX() - targetX) > 0.5f) {
             clockText.setTranslationX(targetX);
         }
@@ -10166,25 +10190,30 @@ public class MainActivity extends Activity {
         // existing size and alignment.
         String clockValueForWidthAdjustment = clockText.getText() == null
                 ? "" : clockText.getText().toString();
-        final int hourDigitCountForWidthAdjustment =
-                countClockHourDigits(clockValueForWidthAdjustment);
-        final boolean singleDigitHour = hourDigitCountForWidthAdjustment == 1;
+        int clockColonForWidthAdjustment = clockValueForWidthAdjustment.indexOf(':');
+        int hourDigitCountForWidthAdjustment = 0;
+        if (clockColonForWidthAdjustment > 0) {
+            for (int i = 0; i < clockColonForWidthAdjustment; i++) {
+                if (Character.digit(clockValueForWidthAdjustment.charAt(i), 10) >= 0) {
+                    hourDigitCountForWidthAdjustment++;
+                }
+            }
+        }
         final boolean neonCircuitTwoDigitHour = !sevenSegment
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2
                 && hourDigitCountForWidthAdjustment > 1;
-        final boolean centerWholeTime =
-                sevenSegment || singleDigitHour || neonCircuitTwoDigitHour;
 
         // Keep the glyph view at the left edge of its content group. The group
         // itself is aligned as a unit, leaving a dedicated slot to the right for AM/PM.
         // Non-seven-segment glyphs are vertically centered in the clock row so
         // their visual center aligns with the shortened, vertically centered background.
-        clockText.setGravity((centerWholeTime ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT)
+        clockText.setGravity((neonCircuitTwoDigitHour ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT)
                 | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
         // Use geometry derived from the current layout calculation, not getWidth()/getHeight()
         // from the previous frame. Those dimensions can be stale while the user resizes the
         // panel, causing scaled digits to jump or drift until the next layout pass.
-        clockText.setPivotX(centerWholeTime ? contentWidth / 2f : 0f);
+        clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
+                ? contentWidth / 2f : 0f);
         // The LED renderer sizes its segments from its measured view height.
         // Keep that view at the natural 114dp height and scale the rendered digits
         // by breadthScale explicitly; otherwise layout/background breadth changes
@@ -10238,7 +10267,8 @@ public class MainActivity extends Activity {
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale
                 : nonLedDigitScale * neonCircuitWidthScale);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
-        clockText.setPivotX(centerWholeTime ? contentWidth / 2f : 0f);
+        clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
+                ? contentWidth / 2f : 0f);
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
