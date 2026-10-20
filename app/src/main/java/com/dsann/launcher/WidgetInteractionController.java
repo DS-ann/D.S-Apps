@@ -36,7 +36,7 @@ final class WidgetInteractionController {
                 int left, int top, int width, int height);
         void updateLiveDisplacements(FrameLayout page, View movingView);
         void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView);
-        void finishLiveDisplacements(boolean commit, View movingView);
+        boolean finishLiveDisplacements(boolean commit, View movingView);
         void setWorkspaceGridVisible(boolean visible, View movingView);
         void beginWorkspaceTransferDrag(View item, int sourcePage, float rawX, float rawY,
                 float fingerOffsetX, float fingerOffsetY);
@@ -431,7 +431,6 @@ final class WidgetInteractionController {
         final float[] down = {0f, 0f};
         final float[] fingerOffset = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
-        final boolean[] moveRejectedAtLastPosition = {false};
         final boolean[] resizeRejectedAtLastPosition = {false};
         final int[] widgetPage = {pageIndex};
         final int[] originalPageAtDown = {pageIndex};
@@ -548,7 +547,6 @@ final class WidgetInteractionController {
                 widgetPage[0] = originalPageAtDown[0];
                 editMode[0] = 0;
                 dragging[0] = false;
-                moveRejectedAtLastPosition[0] = false;
                 resizeRejectedAtLastPosition[0] = false;
                 childCanceled[0] = false;
                 menuShown[0] = false;
@@ -628,18 +626,14 @@ final class WidgetInteractionController {
                 int candidateLeft = Math.max(0, Math.min(maxX, left));
                 int candidateTop = Math.max(0, Math.min(maxY, top));
                 boolean crossPagePreview = destinationPage != originalPageAtDown[0];
-                if (!crossPagePreview && !listener.canPlaceWorkspaceItem(sourcePage, container,
-                        candidateLeft, candidateTop, dropWidth, dropHeight)) {
-                    moveRejectedAtLastPosition[0] = true;
-                    return true;
-                }
                 current.leftMargin = candidateLeft;
                 current.topMargin = candidateTop;
                 container.setLayoutParams(current);
-                moveRejectedAtLastPosition[0] = false;
                 if (crossPagePreview) {
                     listener.updateWorkspaceTransferDisplacements(container, event.getRawX(),
                             event.getRawY(), fingerOffset[0], fingerOffset[1]);
+                } else {
+                    listener.scheduleLiveDisplacementUpdate(sourcePage, container);
                 }
                 widgetPage[0] = destinationPage;
                 return true;
@@ -669,24 +663,6 @@ final class WidgetInteractionController {
                         targetPage = (FrameLayout) strip.getChildAt(targetIndex);
                     }
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    if (commit && targetPage == sourcePage) {
-                        int finalWidth = current.width > 0 ? current.width : container.getWidth();
-                        int finalHeight = current.height > 0 ? current.height : container.getHeight();
-                        if (!listener.canPlaceWorkspaceItem(targetPage, container,
-                                current.leftMargin, current.topMargin, finalWidth, finalHeight)) {
-                            current.leftMargin = origin[0];
-                            current.topMargin = origin[1];
-                            current.width = origin[2];
-                            current.height = origin[3];
-                            container.setTranslationX(0f);
-                            container.setTranslationY(0f);
-                            container.setLayoutParams(current);
-                            commit = false;
-                            Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
-                        } else if (moveRejectedAtLastPosition[0]) {
-                            Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
-                        }
-                    }
                     if (commit && targetPage != sourcePage) {
                         // Cross-page drops are recalculated in the target page's coordinate
                         // space and then passed through prepareWidgetDrop() for collision-safe
@@ -750,9 +726,31 @@ final class WidgetInteractionController {
                         }
                         listener.finishWorkspaceTransferDrag(container, commit);
                         listener.setWorkspaceGridVisible(false, null);
-                        // One collision transaction: commit on finger-up, roll back on cancel.
-                        listener.finishLiveDisplacements(commit, container);
-                        if (commit) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
+                        boolean accepted = listener.finishLiveDisplacements(commit, container);
+                        if (commit && !accepted) {
+                            FrameLayout.LayoutParams rejectedParams =
+                                    (FrameLayout.LayoutParams) container.getLayoutParams();
+                            rejectedParams.leftMargin = origin[0];
+                            rejectedParams.topMargin = origin[1];
+                            rejectedParams.width = origin[2];
+                            rejectedParams.height = origin[3];
+                            container.setTranslationX(0f);
+                            container.setTranslationY(0f);
+                            if (container.getParent() instanceof ViewGroup
+                                    && container.getParent() != sourcePage) {
+                                ViewGroup rejectedParent = (ViewGroup) container.getParent();
+                                reparenting[0] = true;
+                                rejectedParent.removeView(container);
+                                sourcePage.addView(container, rejectedParams);
+                                reparenting[0] = false;
+                            } else {
+                                container.setLayoutParams(rejectedParams);
+                            }
+                            widgetPage[0] = originalPageAtDown[0];
+                            listener.setCurrentPage(originalPageAtDown[0]);
+                            listener.showPage(originalPageAtDown[0], false);
+                        }
+                        if (commit && accepted) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     }
                 } else {
                     listener.setWorkspaceGridVisible(false, null);
