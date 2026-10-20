@@ -425,6 +425,10 @@ final class LauncherIconDrawable extends Drawable {
     // The stable logical source for the bitmap currently being shown. This lets us keep the
     // already-themed art visible if Android returns a fresh ConstantState for the same app icon.
     private String processedArtworkSourceToken;
+    private int processedArtworkTheme = -1;
+    // While a non-original theme is being loaded from disk or generated, do not draw the
+    // unprocessed app icon. This prevents a visible original-colour -> themed-colour flash.
+    private boolean awaitingThemedArtwork;
     private int drawableAlpha = 255;
     private ColorFilter drawableColorFilter;
     // Force the first appearance bind through the cache so Original icons get the outline too.
@@ -736,8 +740,14 @@ final class LauncherIconDrawable extends Drawable {
         boolean keepProcessedArtwork = sourceIsProcessedArtwork
                 && source instanceof BitmapDrawable
                 && processedArtworkSourceToken != null
-                && processedArtworkSourceToken.equals(sourceCacheToken);
-        sourceIsProcessedArtwork = false;
+                && processedArtworkSourceToken.equals(sourceCacheToken)
+                && processedArtworkTheme == theme;
+        if (!keepProcessedArtwork) {
+            sourceIsProcessedArtwork = false;
+            processedArtworkSourceToken = null;
+            processedArtworkTheme = -1;
+        }
+        awaitingThemedArtwork = false;
         if (original == null) {
             source = null;
             processedArtworkSourceToken = null;
@@ -753,6 +763,7 @@ final class LauncherIconDrawable extends Drawable {
                 source = themed;
                 sourceIsProcessedArtwork = themed != original;
                 processedArtworkSourceToken = sourceIsProcessedArtwork ? sourceCacheToken : null;
+                processedArtworkTheme = sourceIsProcessedArtwork ? theme : -1;
                 source.setBounds(getBounds());
             } else if (!keepProcessedArtwork) {
                 source = original;
@@ -776,6 +787,10 @@ final class LauncherIconDrawable extends Drawable {
             source = original;
             source.setBounds(getBounds());
             processedArtworkSourceToken = null;
+            processedArtworkTheme = -1;
+            // Keep Original Colours immediately available; suppress only a pending recolour
+            // so that cached/generated artwork appears once, already in its final palette.
+            awaitingThemedArtwork = theme != ARTWORK_ORIGINAL;
         }
         requestArtworkBitmap(key, state, theme, sourceCacheToken, this);
     }
@@ -788,6 +803,8 @@ final class LauncherIconDrawable extends Drawable {
         source = result;
         sourceIsProcessedArtwork = true;
         processedArtworkSourceToken = sourceCacheToken;
+        processedArtworkTheme = artworkTheme;
+        awaitingThemedArtwork = false;
         invalidateSelf();
     }
 
@@ -1592,7 +1609,7 @@ final class LauncherIconDrawable extends Drawable {
         source.setBounds(Math.round(artworkLeft), Math.round(artworkTop),
                 Math.round(artworkRight), Math.round(artworkBottom));
         if (!showBackground) {
-            source.draw(canvas);
+            if (!awaitingThemedArtwork) source.draw(canvas);
             return;
         }
 
@@ -1621,14 +1638,14 @@ final class LauncherIconDrawable extends Drawable {
                 float corner = Math.min(rect.width(), rect.height()) * 0.23f;
                 canvas.drawRoundRect(rect, corner, corner, paint);
             }
-            source.draw(canvas);
+            if (!awaitingThemedArtwork) source.draw(canvas);
             return;
         }
 
         canvas.drawPath(path, paint);
         int save = canvas.save();
         canvas.clipPath(path);
-        source.draw(canvas);
+        if (!awaitingThemedArtwork) source.draw(canvas);
         canvas.restoreToCount(save);
     }
 
