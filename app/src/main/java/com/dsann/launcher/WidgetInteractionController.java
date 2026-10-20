@@ -812,8 +812,6 @@ final class WidgetInteractionController {
                     top = Math.max(0, Math.min(top, activePage.getHeight() - minH));
                     resizeWidth = Math.max(minW, Math.min(resizeWidth, activePage.getWidth() - left));
                     resizeHeight = Math.max(minH, Math.min(resizeHeight, activePage.getHeight() - top));
-                    FrameLayout activePage = container.getParent() instanceof FrameLayout
-                            ? (FrameLayout) container.getParent() : page;
                     if (!listener.canPlaceWorkspaceItem(activePage, container,
                             left, top, resizeWidth, resizeHeight)) {
                         resizeRejectedAtLastPosition[0] = true;
