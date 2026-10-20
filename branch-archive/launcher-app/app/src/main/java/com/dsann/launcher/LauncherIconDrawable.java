@@ -164,8 +164,7 @@ final class LauncherIconDrawable extends Drawable {
         if (context == null) return;
         final int theme = clampArtworkTheme(selectedTheme);
         final File root = new File(context.getCacheDir(), "launcher-icon-artwork-v1");
-        final File active = theme == ARTWORK_ORIGINAL
-                ? null : new File(root, "theme-" + theme);
+        final File active = new File(root, "theme-" + theme);
         File priorRoot = DISK_ARTWORK_CACHE_ROOT;
         boolean rootChanged = priorRoot == null || !priorRoot.equals(root);
         if (!rootChanged && selectedPersistentArtworkTheme == theme) return;
@@ -185,16 +184,14 @@ final class LauncherIconDrawable extends Drawable {
                 File[] children = root.listFiles();
                 if (children != null) {
                     for (File child : children) {
-                        if (active == null || !child.equals(active)) {
+                        if (!child.equals(active)) {
                             deleteRecursively(child);
                         }
                     }
                 }
-                if (active != null) {
-                    if (active.exists() && !active.isDirectory()) deleteRecursively(active);
-                    if (!active.exists()) active.mkdirs();
-                    pruneDiskArtworkCache(active);
-                }
+                if (active.exists() && !active.isDirectory()) deleteRecursively(active);
+                if (!active.exists()) active.mkdirs();
+                pruneDiskArtworkCache(active);
             }
         });
     }
@@ -209,7 +206,7 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     private static File persistentArtworkFile(ArtworkCacheKey key, int theme) {
-        if (key == null || !key.hasStableToken() || theme == ARTWORK_ORIGINAL
+        if (key == null || !key.hasStableToken()
                 || key.theme != theme || selectedPersistentArtworkTheme != theme) return null;
         File directory = ACTIVE_DISK_ARTWORK_CACHE_DIR;
         if (directory == null) return null;
