@@ -713,8 +713,8 @@ final class WidgetInteractionController {
                                     event.getRawX(), event.getRawY(),
                                     fingerOffset[0], fingerOffset[1]) : null;
                     if (commit && targetPage != sourcePage && preparedDrop == null) {
-                        // The destination cannot hold this widget after the preview
-                        // rearrangement. Roll back instead of committing an overlap.
+                        // The destination cannot hold the widget at the exact requested size
+                        // and position. Roll back instead of committing an overlap.
                         current.leftMargin = origin[0];
                         current.topMargin = origin[1];
                         container.setTranslationX(0f);
@@ -724,8 +724,8 @@ final class WidgetInteractionController {
                         listener.finishWorkspaceTransferDrag(container, false);
                         listener.setWorkspaceGridVisible(false, null);
                         listener.finishLiveDisplacements(false, container);
-                        Toast.makeText(activity, "No space available, remove first.",
-                                Toast.LENGTH_LONG).show();
+                        Toast.makeText(activity, "Not possible due to overlap",
+                                Toast.LENGTH_SHORT).show();
                     } else {
                         if (commit && targetPage != sourcePage) {
                             int oldWidth = current.width;
