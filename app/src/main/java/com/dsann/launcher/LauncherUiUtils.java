@@ -2,6 +2,7 @@ package com.dsann.launcher;
 
 import android.animation.ObjectAnimator;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
@@ -91,6 +92,27 @@ final class LauncherUiUtils {
     static int dp(Context context, float value) {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value,
                 context.getResources().getDisplayMetrics()));
+    }
+
+    /**
+     * Reads a floating-point preference and repairs legacy numeric values written
+     * with another SharedPreferences type. This prevents reconstruction crashes
+     * after an app update or process recreation.
+     */
+    static float getFloatPreferenceCompat(SharedPreferences preferences, String key,
+                                          float fallback) {
+        if (preferences == null) return fallback;
+        try {
+            return preferences.getFloat(key, fallback);
+        } catch (ClassCastException legacyNumericType) {
+            Object value = preferences.getAll().get(key);
+            if (value instanceof Number) {
+                float converted = ((Number) value).floatValue();
+                preferences.edit().putFloat(key, converted).apply();
+                return converted;
+            }
+            return fallback;
+        }
     }
 
     static TextView text(Context context, String value, float sizeSp, int color, boolean bold) {
