@@ -574,7 +574,7 @@ class MainActivity : Activity() {
         Thread({
             val report = collectTinymixDiagnostics()
             val controls = extractMixerControlBlocks(report)
-            val valid = controls.isNotEmpty() && report.contains("contents_exit=0")
+            val valid = controls.isNotEmpty()
             val capturedAt = diagnosticTimestamp()
             if (valid) {
                 getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE).edit()
@@ -616,7 +616,7 @@ class MainActivity : Activity() {
         tinymixDiagnosticsView?.text = "Collecting active-call mixer state and comparing with the idle baseline…"
         Thread({
             val current = collectTinymixDiagnostics()
-            val valid = extractMixerControlBlocks(current).isNotEmpty() && current.contains("contents_exit=0")
+            val valid = extractMixerControlBlocks(current).isNotEmpty()
             val comparison = if (valid) {
                 compareMixerReports(baseline, current, baselineAt, diagnosticTimestamp())
             } else {
@@ -637,7 +637,7 @@ class MainActivity : Activity() {
         val marker = "--- Mixer current values ---"
         if (!report.contains(marker)) return controls
         val values = report.substringAfter(marker, "")
-        val controlStart = Regex("""^\\s*ctl\\s+(\\d+)\\s*:""")
+        val controlStart = Regex("""^\s*ctl\s+(\d+)\s*:""")
         var currentId: String? = null
         val currentLines = ArrayList<String>()
 
@@ -741,7 +741,11 @@ class MainActivity : Activity() {
             echo '--- Mixer controls ---'
             "$binary" controls 2>&1
             controls_exit=$?
-            printf 'controls_exit=%s\n' "${'
+            printf 'controls_exit=%s\n' "${'$'}controls_exit"
+            echo '--- Mixer current values ---'
+            "$binary" contents 2>&1
+            contents_exit=$?
+            printf 'contents_exit=%s\n' "${'$'}contents_exit"
         """.trimIndent()
         return try {
             val process = ProcessBuilder("su", "-c", script).redirectErrorStream(true).start()
