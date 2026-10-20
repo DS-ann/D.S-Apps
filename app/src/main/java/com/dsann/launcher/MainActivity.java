@@ -2533,23 +2533,10 @@ public class MainActivity extends Activity {
         activateClockForPage(0);
     }
 
-    // SharedPreferences.getFloat() throws ClassCastException when an older build
-    // stored the same setting as an Integer. Convert legacy numeric values once so
-    // process recreation after lock-screen/background memory pressure cannot crash
-    // launcher restoration. Correct Float preferences use the fast normal read path.
+    // Keep the Activity's preference reads on the same safe path used by the
+    // page renderer and model, so legacy numeric types cannot crash restoration.
     private float getFloatPreferenceCompat(String key, float fallback) {
-        if (prefs == null) return fallback;
-        try {
-            return prefs.getFloat(key, fallback);
-        } catch (ClassCastException legacyNumericType) {
-            Object value = prefs.getAll().get(key);
-            if (value instanceof Number) {
-                float converted = ((Number) value).floatValue();
-                prefs.edit().putFloat(key, converted).apply();
-                return converted;
-            }
-            return fallback;
-        }
+        return LauncherUiUtils.getFloatPreferenceCompat(prefs, key, fallback);
     }
 
     private void attachClockPanelsToPages() {
