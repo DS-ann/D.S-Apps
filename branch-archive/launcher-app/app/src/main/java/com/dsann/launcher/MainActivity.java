@@ -344,7 +344,7 @@ public class MainActivity extends Activity {
         }
 
         @Override public void draw(Canvas canvas, CharSequence text, int start, int end,
-                float x, int top, int y, int bottom, android.text.TextPaint paint) {
+                float x, int top, int y, int bottom, Paint paint) {
             int oldColor = paint.getColor();
             Paint.Style oldStyle = paint.getStyle();
             float oldStrokeWidth = paint.getStrokeWidth();
@@ -6627,6 +6627,8 @@ public class MainActivity extends Activity {
                 dateText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
                 dateText.invalidate();
             } else if (digitGradient) {
+                dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f,
+                        LauncherUiUtils.dp(this, 1), Color.argb(220, 0, 0, 0));
                 applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
                         displayPhase, clockDateGradients);
             } else {
