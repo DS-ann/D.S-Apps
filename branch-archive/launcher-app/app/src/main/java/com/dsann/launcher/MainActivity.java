@@ -329,11 +329,14 @@ public class MainActivity extends Activity {
         private final int fillColor;
         private final int outlineColor;
         private final float borderPx;
+        private final float innerBlackBorderPx;
 
-        ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx) {
+        ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
+                float innerBlackBorderPx) {
             this.fillColor = fillColor;
             this.outlineColor = outlineColor;
             this.borderPx = Math.max(0.1f, borderPx);
+            this.innerBlackBorderPx = Math.max(0f, innerBlackBorderPx);
         }
 
         @Override public int getSize(Paint paint, CharSequence text, int start, int end,
@@ -350,8 +353,10 @@ public class MainActivity extends Activity {
             Paint.Join oldJoin = paint.getStrokeJoin();
             Paint.Cap oldCap = paint.getStrokeCap();
             android.graphics.Shader oldShader = paint.getShader();
+            android.graphics.Xfermode oldXfermode = paint.getXfermode();
             try {
                 paint.setShader(null);
+                paint.setXfermode(null);
                 paint.setColor(outlineColor);
                 paint.setStyle(Paint.Style.STROKE);
                 paint.setStrokeWidth(borderPx * 2f);
@@ -363,6 +368,33 @@ public class MainActivity extends Activity {
                 paint.setStrokeWidth(0f);
                 paint.setColor(fillColor);
                 canvas.drawText(text, start, end, x, y, paint);
+
+                if (innerBlackBorderPx > 0f) {
+                    // Mask the fine black stroke to the glyph fill, retaining the
+                    // existing matched-artwork outline while adding a true inner contour.
+                    float textWidth = Math.max(1f, paint.measureText(text, start, end));
+                    int innerLayer = canvas.saveLayer(x, top,
+                            x + textWidth + borderPx * 2f, bottom, null);
+                    try {
+                        paint.setShader(null);
+                        paint.setXfermode(null);
+                        paint.setColor(Color.BLACK);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setStrokeWidth(innerBlackBorderPx * 2f);
+                        paint.setStrokeJoin(Paint.Join.ROUND);
+                        paint.setStrokeCap(Paint.Cap.ROUND);
+                        canvas.drawText(text, start, end, x, y, paint);
+
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setStrokeWidth(0f);
+                        paint.setColor(Color.WHITE);
+                        paint.setXfermode(new android.graphics.PorterDuffXfermode(
+                                android.graphics.PorterDuff.Mode.DST_IN));
+                        canvas.drawText(text, start, end, x, y, paint);
+                    } finally {
+                        canvas.restoreToCount(innerLayer);
+                    }
+                }
             } finally {
                 paint.setColor(oldColor);
                 paint.setStyle(oldStyle);
@@ -370,6 +402,7 @@ public class MainActivity extends Activity {
                 paint.setStrokeJoin(oldJoin);
                 paint.setStrokeCap(oldCap);
                 paint.setShader(oldShader);
+                paint.setXfermode(oldXfermode);
             }
         }
     }
@@ -6568,6 +6601,18 @@ public class MainActivity extends Activity {
         return !nothingArtwork || !artworkMatchingEnabled;
     }
 
+    private boolean shouldApplyClockDateBlackInnerBorder() {
+        if (prefs == null) return false;
+        boolean gradientEnabled = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+        boolean artworkMatchingEnabled = prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+        int artworkTheme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+        // The black inner contour supplements gradient/matched-artwork modes,
+        // but never alters the dedicated Nothing Monochrome artwork treatment.
+        return (gradientEnabled || artworkMatchingEnabled)
+                && artworkTheme != LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+    }
+
     private void applyClockTextInnerBorder(TextView view, boolean enabled, float strokeWidthPx) {
         if (!(view instanceof SevenSegmentClockTextView)) return;
         SevenSegmentClockTextView renderer = (SevenSegmentClockTextView) view;
@@ -6575,6 +6620,13 @@ public class MainActivity extends Activity {
         renderer.setContrastInnerBorderEnabled(enabled,
                 CLOCK_DATE_GRADIENT_COLORS, strokeWidthPx,
                 enabled ? CLOCK_WHITE_BORDER_COLORS : null);
+    }
+
+    private void applyClockDateBlackInnerBorder(TextView view, boolean enabled,
+            float innerWidthPx) {
+        if (!(view instanceof SevenSegmentClockTextView)) return;
+        ((SevenSegmentClockTextView) view).setSecondaryInnerBorderEnabled(
+                enabled, Color.BLACK, innerWidthPx);
     }
 
     private void refreshClockArtworkAppearance() {
@@ -6741,11 +6793,17 @@ public class MainActivity extends Activity {
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
+        boolean useBlackDateInnerBorder = shouldApplyClockDateBlackInnerBorder();
         float borderDensity = getResources().getDisplayMetrics().density;
-        // The renderer clips the outer half of its centered stroke. A 1dp stroke leaves
-        // the requested 0.5dp white inner contour on the date line, including AM/PM.
+        // The normal text renderer masks the outside half of the stroke, leaving a 0.5dp
+        // white inner contour. The thinner black contour is drawn as a separate inner pass.
         applyClockTextInnerBorder(dateText, useWhiteGradientInnerBorder, 1f * borderDensity);
         applyClockTextInnerBorder(amPmText, useWhiteGradientInnerBorder, 1f * borderDensity);
+        // Matched-artwork mode styles the date and AM/PM spans directly, so those spans
+        // receive their own black inner contour instead of a duplicate whole-view pass.
+        boolean useBlackViewInnerBorder = useBlackDateInnerBorder && !isClockIconArtworkActive();
+        applyClockDateBlackInnerBorder(dateText, useBlackViewInnerBorder, 0.2f * borderDensity);
+        applyClockDateBlackInnerBorder(amPmText, useBlackViewInnerBorder, 0.2f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
         int[] artworkTextColours = iconArtworkActive
                 ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
@@ -6931,15 +6989,17 @@ public class MainActivity extends Activity {
                 // with a grey AM/PM prefix / 1dp black outline.
                 int dateStart = use24Hour ? 0 : periodLength + 2;
                 float density = getResources().getDisplayMetrics().density;
+                float blackInnerWidth = shouldApplyClockDateBlackInnerBorder()
+                        ? 0.2f * density : 0f;
                 if (dateStart < dateLine.length()) {
                     dateLine.setSpan(new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
-                                    0.5f * density),
+                                    0.5f * density, blackInnerWidth),
                             dateStart, dateLine.length(),
                             android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
                 if (!use24Hour && periodLength > 0) {
                     dateLine.setSpan(new ClockTextOutlineSpan(Color.rgb(160, 163, 170),
-                                    Color.BLACK, 1f * density),
+                                    Color.BLACK, 1f * density, blackInnerWidth),
                             0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
@@ -10668,6 +10728,9 @@ public class MainActivity extends Activity {
         final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
                 + markerWidth + LauncherUiUtils.dp(this, 1) + ledGroupSpacing;
+        // Keep the digit group's layout width independent from the date-line width.
+        // Enlarging date/AM-PM text may widen the background, but must not move the digits.
+        final int clockGroupWidth = clockWithMarkerWidth + LauncherUiUtils.dp(this, 4);
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth)
                 + LauncherUiUtils.dp(this, 4);
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
@@ -10754,7 +10817,7 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams groupParams =
                     (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
             groupParams.gravity = alignment | Gravity.TOP;
-            groupParams.width = contentWidth;
+            groupParams.width = clockGroupWidth;
             groupParams.height = rowHeight;
             clockGroup.setLayoutParams(groupParams);
             clockGroup.setClipChildren(false);
@@ -10789,7 +10852,7 @@ public class MainActivity extends Activity {
         // from the previous frame. Those dimensions can be stale while the user resizes the
         // panel, causing scaled digits to jump or drift until the next layout pass.
         clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
-                ? contentWidth / 2f : 0f);
+                ? clockGroupWidth / 2f : 0f);
         // The LED renderer sizes its segments from its measured view height.
         // Keep that view at the natural 114dp height and scale the rendered digits
         // by breadthScale explicitly; otherwise layout/background breadth changes
@@ -10844,7 +10907,7 @@ public class MainActivity extends Activity {
                 : nonLedDigitScale * neonCircuitWidthScale);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
-                ? contentWidth / 2f : 0f);
+                ? clockGroupWidth / 2f : 0f);
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
