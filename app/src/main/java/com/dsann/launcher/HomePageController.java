@@ -197,9 +197,9 @@ final class HomePageController {
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
                 int defaultRow = (itemIndex / columns) % rows;
-                float savedX = prefs.getFloat(iconXKey + packageName,
+                float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + packageName,
                         defaultCol / (float) Math.max(1, columns - 1));
-                float savedY = prefs.getFloat(iconYKey + packageName,
+                float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + packageName,
                         defaultRow / (float) Math.max(1, rows - 1));
                 int col = Math.max(0, Math.min(columns - 1,
                         Math.round(savedX * Math.max(1, columns - 1))));
@@ -249,9 +249,9 @@ final class HomePageController {
                     if (orderIndex < 0) continue;
                     int defaultCol = orderIndex % columns;
                     int defaultRow = (orderIndex / columns) % rows;
-                    float savedX = prefs.getFloat(iconXKey + childPackage,
+                    float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + childPackage,
                             defaultCol / (float) Math.max(1, columns - 1));
-                    float savedY = prefs.getFloat(iconYKey + childPackage,
+                    float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + childPackage,
                             defaultRow / (float) Math.max(1, actualRows - 1));
                     int col = Math.max(0, Math.min(columns - 1,
                             Math.round(savedX * Math.max(1, columns - 1))));
