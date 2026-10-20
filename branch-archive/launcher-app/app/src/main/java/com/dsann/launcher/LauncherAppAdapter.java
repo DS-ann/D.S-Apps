@@ -144,6 +144,11 @@ public final class LauncherAppAdapter extends BaseAdapter {
         return app.activityInfo.packageName + "/" + app.activityInfo.name;
     }
 
+    /** Keep the drawable stable across routine binds, but invalidate it after package changes. */
+    private String artworkSourceToken(String appKey) {
+        return appKey + "#icon-generation=" + iconCacheGeneration;
+    }
+
     String cachedLabel(ResolveInfo app) {
         String key = key(app);
         String value = labelCache.get(key);
@@ -277,13 +282,14 @@ public final class LauncherAppAdapter extends BaseAdapter {
 
         android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
         LauncherIconDrawable wrapped;
+        String artworkToken = artworkSourceToken(appKey);
         if (existingIcon instanceof LauncherIconDrawable) {
             wrapped = (LauncherIconDrawable) existingIcon;
             wrapped.updateContent(appIcon, roundedSquareBackground, iconShape,
-                    backgroundColor, artworkTheme, appKey, fitInsideBackground);
+                    backgroundColor, artworkTheme, artworkToken, fitInsideBackground);
         } else {
             wrapped = new LauncherIconDrawable(appIcon, roundedSquareBackground,
-                    iconShape, backgroundColor, artworkTheme, appKey, fitInsideBackground);
+                    iconShape, backgroundColor, artworkTheme, artworkToken, fitInsideBackground);
             icon.setImageDrawable(wrapped);
         }
         wrapped.setExternalShapeClip(outlineClip);
