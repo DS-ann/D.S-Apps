@@ -136,6 +136,12 @@ public class MainActivity extends Activity {
             Color.rgb(169, 139, 255), Color.rgb(255, 120, 191),
             Color.rgb(217, 247, 255)
     };
+    // Neon Circuit's glyph fill stays strictly white-to-near-white, even when
+    // gradient or icon-artwork matching is enabled.
+    private static final int CLOCK_NEON_CIRCUIT_SOLID = Color.rgb(248, 248, 248);
+    private static final int[] CLOCK_NEON_CIRCUIT_GRADIENT_COLORS = new int[] {
+            Color.WHITE, Color.rgb(248, 248, 248), Color.WHITE
+    };
     private static final long ICON_EDGE_SWITCH_DELAY_MS = 200L;
     private static final int ICON_EDGE_SWITCH_ZONE_DP = 24;
     private interface IntAction { void onSelect(int value); }
@@ -6235,8 +6241,9 @@ public class MainActivity extends Activity {
                 || clockText instanceof SevenSegmentClockTextView) {
             LauncherClockStyler.apply(this, clockText, style);
         }
-        // Apply the same restrained silver tone to every clock preset, including 7-segment.
-        clockText.setTextColor(Color.rgb(196, 200, 209));
+        // Neon Circuit's fill remains near-white; other presets retain the shared silver tone.
+        clockText.setTextColor(style == 2
+                ? CLOCK_NEON_CIRCUIT_SOLID : CLOCK_DIGIT_SILVER);
         if (clockText instanceof SevenSegmentClockTextView) {
             SevenSegmentClockTextView ledClock = (SevenSegmentClockTextView) clockText;
             // Reassert the selected mode after every style refresh (including the
@@ -6376,12 +6383,17 @@ public class MainActivity extends Activity {
         if (clockText == null) return;
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        boolean neonCircuit = prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
+        int solidDigitColour = neonCircuit
+                ? CLOCK_NEON_CIRCUIT_SOLID : CLOCK_DIGIT_SILVER;
 
         // Artwork matching uses the selected icon artwork's actual theme palette,
-        // held stationary at phase zero. It never starts or advances the colour animator.
+        // held stationary at phase zero. Neon Circuit intentionally stays achromatic.
         boolean useDigitGradient = digitGradient || iconArtworkActive;
-        int[] digitColours = iconArtworkActive
-                ? getClockArtworkTransitionColours() : CLOCK_DIGIT_GRADIENT_COLORS;
+        int[] digitColours = neonCircuit
+                ? CLOCK_NEON_CIRCUIT_GRADIENT_COLORS
+                : iconArtworkActive ? getClockArtworkTransitionColours()
+                : CLOCK_DIGIT_GRADIENT_COLORS;
         float digitPhase = digitGradient ? displayPhase : 0f;
 
         if (clockText instanceof SevenSegmentClockTextView) {
@@ -6393,7 +6405,7 @@ public class MainActivity extends Activity {
                     ? LauncherIconDrawable.ARTWORK_ORIGINAL
                     : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
                             KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
-            boolean useNothingInnerBorder = iconArtworkActive
+            boolean useNothingInnerBorder = !neonCircuit && iconArtworkActive
                     && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
             // The cursive Neon Circuit font has much thinner strokes than the other
             // presets. Its standard text stroke is masked to the glyph interior, leaving
@@ -6420,12 +6432,12 @@ public class MainActivity extends Activity {
             }
             clockText.invalidate();
         } else if (digitGradient) {
-            applyAnimatedTextGradient(clockText, CLOCK_DIGIT_GRADIENT_COLORS,
+            applyAnimatedTextGradient(clockText, digitColours,
                     displayPhase, clockDigitGradients);
         } else if (iconArtworkActive) {
             // Phase zero pins the selected artwork theme's colours in place.
-            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
-                clockText.setTextColor(CLOCK_DIGIT_SILVER);
+            if (clockText.getCurrentTextColor() != solidDigitColour) {
+                clockText.setTextColor(solidDigitColour);
             }
             applyAnimatedTextGradient(clockText, digitColours,
                     0f, clockDigitGradients);
@@ -6435,8 +6447,8 @@ public class MainActivity extends Activity {
                 clockText.getPaint().setShader(null);
                 clockText.invalidate();
             }
-            if (clockText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
-                clockText.setTextColor(CLOCK_DIGIT_SILVER);
+            if (clockText.getCurrentTextColor() != solidDigitColour) {
+                clockText.setTextColor(solidDigitColour);
             }
         }
     }
