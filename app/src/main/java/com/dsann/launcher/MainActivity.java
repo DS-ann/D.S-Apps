@@ -26,6 +26,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -120,6 +121,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_WIDGET_CONFIGURE = 7304;
     private static final int REQUEST_CALL_PERMISSION = 7305;
     private static final int REQUEST_CREATE_SHORTCUT = 7306;
+    private static final int REQUEST_HOME_ROLE = 7307;
     private int pendingWidgetId = -1;
     private AppWidgetProviderInfo pendingWidgetInfo;
     private Intent pendingShortcutCallIntent;
@@ -148,6 +150,8 @@ public class MainActivity extends Activity {
     private final int BG = Color.rgb(10, 13, 24);
     private final Handler handler = new Handler();
     private boolean clockUpdatesActive = false;
+    // Avoid reopening the system Home-role prompt repeatedly during a single Activity lifetime.
+    private boolean homeRoleRequestAttempted = false;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
@@ -1871,6 +1875,32 @@ public class MainActivity extends Activity {
         }, 500L);
         // Avoid a PackageManager scan on every resume. Install, removal, update, and
         // component-enabled broadcasts refresh the drawer through packageChangesReceiver.
+        // Android 10+ uses ROLE_HOME as the authoritative default-launcher selection.
+        // If that role was never granted or has been revoked, request it visibly;
+        // Android does not allow a launcher to silently reclaim the role.
+        ensureHomeRoleOnAndroid10Plus();
+    }
+
+    private void ensureHomeRoleOnAndroid10Plus() {
+        if (Build.VERSION.SDK_INT < 29 || homeRoleRequestAttempted || isFinishing()) return;
+        android.app.role.RoleManager roleManager =
+                (android.app.role.RoleManager) getSystemService("role");
+        if (roleManager == null) return;
+        try {
+            if (!roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)
+                    || roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
+                return;
+            }
+            homeRoleRequestAttempted = true;
+            Toast.makeText(this,
+                    "Choose PhoneBridge as the Home app to keep it as your default launcher.",
+                    Toast.LENGTH_LONG).show();
+            startActivityForResult(roleManager.createRequestRoleIntent(
+                    android.app.role.RoleManager.ROLE_HOME), REQUEST_HOME_ROLE);
+        } catch (RuntimeException ignored) {
+            // Some OEM builds restrict role UI integration. Keep the launcher usable.
+            homeRoleRequestAttempted = true;
+        }
     }
 
     @Override protected void onPause() {
@@ -2504,11 +2534,22 @@ public class MainActivity extends Activity {
     }
 
     // SharedPreferences.getFloat() throws ClassCastException when an older build
-    // stored the same setting as an Integer. Accept any numeric representation so
-    // legacy clock positions cannot crash a page rebuild or launcher startup.
+    // stored the same setting as an Integer. Convert legacy numeric values once so
+    // process recreation after lock-screen/background memory pressure cannot crash
+    // launcher restoration. Correct Float preferences use the fast normal read path.
     private float getFloatPreferenceCompat(String key, float fallback) {
-        Object value = prefs.getAll().get(key);
-        return value instanceof Number ? ((Number) value).floatValue() : fallback;
+        if (prefs == null) return fallback;
+        try {
+            return prefs.getFloat(key, fallback);
+        } catch (ClassCastException legacyNumericType) {
+            Object value = prefs.getAll().get(key);
+            if (value instanceof Number) {
+                float converted = ((Number) value).floatValue();
+                prefs.edit().putFloat(key, converted).apply();
+                return converted;
+            }
+            return fallback;
+        }
     }
 
     private void attachClockPanelsToPages() {
@@ -2711,8 +2752,10 @@ public class MainActivity extends Activity {
 
         FrameLayout chosenPage = null;
         int chosenLeft = 0, chosenTop = 0; // Logical grid-cell origin.
-        float savedX = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
-        float savedY = prefs.getFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
+        float savedX = getFloatPreferenceCompat(
+                shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
+        float savedY = getFloatPreferenceCompat(
+                shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
         boolean savedAsGrid = prefs.getBoolean(
                 shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), false);
         int lastSavedLeft = -1;
@@ -5210,8 +5253,8 @@ public class MainActivity extends Activity {
         if (!sawAppView) {
             for (String existing : homePackages) {
                 if (prefs.getInt(KEY_ICON_PAGE + existing, 0) != pageIndex) continue;
-                float sx = prefs.getFloat(KEY_ICON_X + existing, 0f);
-                float sy = prefs.getFloat(KEY_ICON_Y + existing, 0f);
+                float sx = getFloatPreferenceCompat(KEY_ICON_X + existing, 0f);
+                float sy = getFloatPreferenceCompat(KEY_ICON_Y + existing, 0f);
                 int col = Math.max(0, Math.min(columns - 1,
                         Math.round(sx * Math.max(1, columns - 1))));
                 int row = Math.max(0, Math.min(rows - 1,
@@ -5499,6 +5542,22 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_HOME_ROLE) {
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.app.role.RoleManager roleManager =
+                        (android.app.role.RoleManager) getSystemService("role");
+                if (roleManager != null
+                        && roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
+                    Toast.makeText(this, "PhoneBridge is now the default Home app.",
+                            Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this,
+                            "PhoneBridge is not the default Home app. Select it under Settings > Default apps > Home app.",
+                            Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if (requestCode == REQUEST_CREATE_SHORTCUT) {
             if (resultCode != RESULT_OK || data == null) return;
             try {
@@ -7327,8 +7386,8 @@ public class MainActivity extends Activity {
                             .remove("workspace_base_scale_y_" + tag).apply();
                 }
             } else {
-                float sx = prefs == null ? 1f : prefs.getFloat("workspace_scale_x_" + tag, 1f);
-                float sy = prefs == null ? 1f : prefs.getFloat("workspace_scale_y_" + tag, 1f);
+                float sx = getFloatPreferenceCompat("workspace_scale_x_" + tag, 1f);
+                float sy = getFloatPreferenceCompat("workspace_scale_y_" + tag, 1f);
                 if (sx > 0f && sy > 0f && (sx < 0.999f || sy < 0.999f)) {
                     view.setScaleX(sx);
                     view.setScaleY(sy);
@@ -8541,8 +8600,8 @@ public class MainActivity extends Activity {
                 String baseXKey = "workspace_base_scale_x_" + tag;
                 String baseYKey = "workspace_base_scale_y_" + tag;
                 if (prefs.contains(baseXKey) || prefs.contains(baseYKey)) {
-                    item.setScaleX(prefs.getFloat(baseXKey, 1f));
-                    item.setScaleY(prefs.getFloat(baseYKey, 1f));
+                    item.setScaleX(getFloatPreferenceCompat(baseXKey, 1f));
+                    item.setScaleY(getFloatPreferenceCompat(baseYKey, 1f));
                     prefs.edit().remove("workspace_scale_x_" + tag)
                             .remove("workspace_scale_y_" + tag)
                             .remove(baseXKey).remove(baseYKey).apply();
