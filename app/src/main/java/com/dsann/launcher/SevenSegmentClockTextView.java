@@ -382,18 +382,29 @@ public final class SevenSegmentClockTextView extends TextView {
         float advance = unit * 0.72f;
         float totalWidth = digits * advance + colons * unit * 0.34f;
         int colonIndex = value.indexOf(':');
-        // Intentionally let the left half of the first hour digit sit beyond
-        // the clock background's left edge, matching the requested clipped LED look.
-        // The colon and minute digits move together with the hour digits.
-        float baseDotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
-        // Keep the hour digits anchored where they were. Move the colon 15dp
-        // right, then leave a further 15dp gap before the minute group.
-        float hourStartX = colonIndex >= 0
-                ? baseDotX - unit * 0.17f - (colonIndex * advance)
-                : leftBound + (availableWidth - totalWidth) / 2f;
         float dp = getResources().getDisplayMetrics().density;
-        float dotX = baseDotX + 15f * dp;
-        float minuteStartX = dotX + unit * 0.17f + 15f * dp;
+        float hourStartX;
+        float dotX;
+        float minuteStartX;
+        if (colonIndex == 1) {
+            // Centre the actual visible H:MM group. The colon follows the hour and
+            // does not act as the centring anchor. Preserve 15dp clearances on both
+            // sides of the colon so the minute pair retains its established spacing.
+            float colonSideGap = 15f * dp;
+            float visibleGroupWidth = (digits - 1) * advance + unit * 0.34f
+                    + digitWidth + colonSideGap * 2f;
+            hourStartX = leftBound + (availableWidth - visibleGroupWidth) / 2f;
+            dotX = hourStartX + colonIndex * advance + unit * 0.17f + colonSideGap;
+            minuteStartX = dotX + unit * 0.17f + colonSideGap;
+        } else {
+            // Preserve the established two-digit LED placement and its centre colon.
+            float baseDotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
+            hourStartX = colonIndex >= 0
+                    ? baseDotX - unit * 0.17f - (colonIndex * advance)
+                    : leftBound + (availableWidth - totalWidth) / 2f;
+            dotX = baseDotX + 15f * dp;
+            minuteStartX = dotX + unit * 0.17f + 15f * dp;
+        }
         int horizontalGravity = getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
         if (colonIndex < 0 && horizontalGravity == Gravity.LEFT) hourStartX = leftBound;
         else if (colonIndex < 0 && horizontalGravity == Gravity.RIGHT) {
