@@ -13,8 +13,8 @@ android {
         applicationId 'com.dsann.launcher'
         minSdk 23
         targetSdk 37
-        versionCode 1
-        versionName '1.0.0'
+        versionCode 180700
+        versionName '18.7.0'
     }
 
     signingConfigs {
