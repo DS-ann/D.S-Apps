@@ -191,11 +191,11 @@ object AudioClient {
 
     private fun updateStatus(context: Context) {
         context.getSharedPreferences("audio", Context.MODE_PRIVATE)
-            .edit().putString("status", status(context)).apply()
+            .edit().putString("status", statusLine()).apply()
     }
 
-    private fun status(context: Context): String {
-        return "RUNNING:" + localPortValue.get() +
+    private fun statusLine(): String {
+        return (if (running.get()) "RUNNING:" else "STOPPED:") + localPortValue.get() +
             " TX:" + txFrames.get() + " RX:" + rxFrames.get() +
             " MIC_RMS:" + micRms.get() + " MIC_PEAK:" + micPeak.get() +
             " RX_RMS:" + speakerRms.get() + " RX_PEAK:" + speakerPeak.get()
@@ -214,7 +214,7 @@ object AudioClient {
             ";rxRms=" + speakerRms.get() +
             ";rxPeak=" + speakerPeak.get() +
             ";lastRxMsAgo=" + age(lastRxAt.get()) +
-            ";status=" + status(context)
+            ";status=" + statusLine()
     }
 
     private fun findPort(): Int {
