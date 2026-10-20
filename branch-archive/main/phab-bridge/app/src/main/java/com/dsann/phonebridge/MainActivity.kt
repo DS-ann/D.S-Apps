@@ -575,11 +575,11 @@ class MainActivity : Activity() {
             echo '--- Mixer controls ---'
             "$binary" controls 2>&1
             controls_exit=$?
-            echo "controls_exit=$controls_exit"
+            printf 'controls_exit=%s\n' "$?"
             echo '--- Mixer current values ---'
             "$binary" contents 2>&1
             contents_exit=$?
-            echo "contents_exit=$contents_exit"
+            printf 'contents_exit=%s\n' "$?"
         """.trimIndent()
         return try {
             val process = ProcessBuilder("su", "-c", script).redirectErrorStream(true).start()
