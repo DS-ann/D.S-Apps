@@ -404,12 +404,16 @@ final class LauncherIconDrawable extends Drawable {
         // ConstantState wrapper from newDrawable() on each bind. The app/activity token is the
         // stable identity for that icon within one package-cache generation, so prefer it over
         // object identity. clearPackageCaches() advances that generation after package updates.
-        boolean sameStableSource = stableCacheToken != null && !stableCacheToken.isEmpty()
-                && stableCacheToken.equals(sourceCacheToken);
-        boolean sameSource = sameStableSource || (nextState != null
-                ? nextState == originalSourceState
-                : nextState == null && sourceCacheToken != null
-                    && sourceCacheToken.equals(stableCacheToken));
+        boolean hasStableSourceTokens = stableCacheToken != null && !stableCacheToken.isEmpty()
+                && sourceCacheToken != null && !sourceCacheToken.isEmpty();
+        // When stable tokens are available, they are authoritative. A package refresh advances
+        // the token generation, forcing a rebuild even if Android reuses the same ConstantState.
+        boolean sameSource = hasStableSourceTokens
+                ? stableCacheToken.equals(sourceCacheToken)
+                : (nextState != null
+                    ? nextState == originalSourceState
+                    : nextState == null && sourceCacheToken != null
+                        && sourceCacheToken.equals(stableCacheToken));
         boolean sameAppearance = this.showBackground == showBackground
                 && this.shape == clampShape(shape)
                 && this.backgroundColor == backgroundColor
