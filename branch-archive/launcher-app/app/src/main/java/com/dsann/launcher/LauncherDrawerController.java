@@ -219,9 +219,8 @@ final class LauncherDrawerController {
         grid.setAdapter(adapter);
         grid.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override public void onScrollStateChanged(AbsListView view, int scrollState) {
-                if (scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE
-                        && drawerBody.isShowingCachedSnapshot()) {
-                    // Scrolling must reveal the live grid rather than a stationary screenshot.
+                if (scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE) {
+                    // A scroll changes the cached viewport even if it is not currently displayed.
                     drawerBody.invalidateSnapshot();
                 }
             }
