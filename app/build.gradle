@@ -6,6 +6,8 @@ def releaseKeystorePath = System.getenv('BATTERYPULSE_KEYSTORE_PATH')
 
 android {
     namespace 'com.dsann.launcher'
+    // This launcher is Java-only. AGP 9 otherwise adds Kotlin stdlib automatically.
+    enableKotlin = false
     compileSdk 37
     defaultConfig {
         applicationId 'com.dsann.launcher'
