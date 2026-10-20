@@ -28,6 +28,10 @@ public final class SevenSegmentClockTextView extends TextView {
     private final Matrix segmentGradientMatrix = new Matrix();
     private boolean contrastInnerBorderEnabled;
     private float contrastInnerBorderWidth;
+    private boolean secondaryInnerBorderEnabled;
+    private int secondaryInnerBorderColor = Color.BLACK;
+    // Actual Paint stroke width; half of this remains visible inside the glyph mask.
+    private float secondaryInnerBorderWidth;
     private boolean digitOnlyInnerBorder;
     private int[] contrastBorderColors;
     private float[] contrastBorderStops;
@@ -100,6 +104,24 @@ public final class SevenSegmentClockTextView extends TextView {
             textBorderGradient = null;
             textBorderGradientWidth = -1;
         }
+        invalidate();
+    }
+
+    /**
+     * Adds a second, solid-color inner contour alongside the existing contrast border.
+     * innerWidthPx is the requested visible inner thickness; the outside half is masked.
+     */
+    public void setSecondaryInnerBorderEnabled(boolean enabled, int color, float innerWidthPx) {
+        boolean nextEnabled = enabled && innerWidthPx > 0f;
+        float nextStrokeWidth = nextEnabled ? Math.max(0.1f, innerWidthPx * 2f) : 0f;
+        if (secondaryInnerBorderEnabled == nextEnabled
+                && secondaryInnerBorderColor == color
+                && Math.abs(secondaryInnerBorderWidth - nextStrokeWidth) < 0.01f) {
+            return;
+        }
+        secondaryInnerBorderEnabled = nextEnabled;
+        secondaryInnerBorderColor = color;
+        secondaryInnerBorderWidth = nextStrokeWidth;
         invalidate();
     }
 
@@ -291,14 +313,18 @@ public final class SevenSegmentClockTextView extends TextView {
 
     @Override protected void onDraw(Canvas canvas) {
         if (!sevenSegmentMode) {
-            if (!contrastInnerBorderEnabled || contrastBorderColors == null) {
+            boolean drawContrastBorder = contrastInnerBorderEnabled
+                    && contrastBorderColors != null;
+            boolean drawSecondaryBorder = secondaryInnerBorderEnabled
+                    && secondaryInnerBorderWidth > 0f;
+            if (!drawContrastBorder && !drawSecondaryBorder) {
                 super.onDraw(canvas);
                 return;
             }
 
-            // Draw the normal glyphs, then create a stroked copy in a temporary layer.
-            // A glyph-shaped DST_IN mask removes the half of the stroke outside the text,
-            // leaving a thin inner contour rather than a halo around each character.
+            // Draw the normal glyphs, then stroke them in a temporary layer. A glyph-shaped
+            // DST_IN mask removes all stroke pixels outside the fill, keeping both contours
+            // genuinely inside the text instead of producing a halo around each character.
             super.onDraw(canvas);
             Paint textPaint = getPaint();
             Paint.Style previousStyle = textPaint.getStyle();
@@ -314,18 +340,28 @@ public final class SevenSegmentClockTextView extends TextView {
             int previousShadowColor = configuredTextShadowColor;
             int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
             try {
-                // Blur expands the alpha mask and can swallow the thin Neon Circuit outline.
-                // Keep both stroke and mask passes sharp; the regular text still keeps its glow.
+                // Keep both strokes sharp; the regular text still retains its normal glow.
                 textPaint.clearShadowLayer();
                 textPaint.setXfermode(null);
                 textPaint.setStyle(Paint.Style.STROKE);
-                textPaint.setStrokeWidth(contrastInnerBorderWidth);
                 textPaint.setStrokeJoin(Paint.Join.ROUND);
                 textPaint.setStrokeCap(Paint.Cap.ROUND);
-                textPaint.setShader(ensureTextBorderGradient());
-                super.onDraw(canvas);
+                if (drawContrastBorder) {
+                    textPaint.setStrokeWidth(contrastInnerBorderWidth);
+                    textPaint.setShader(ensureTextBorderGradient());
+                    super.onDraw(canvas);
+                }
+                if (drawSecondaryBorder) {
+                    // Draw the fine black contour second, so it stays visible at the glyph
+                    // edge while the remaining inner strip of the existing border is retained.
+                    textPaint.setStrokeWidth(secondaryInnerBorderWidth);
+                    textPaint.setShader(null);
+                    textPaint.setColor(secondaryInnerBorderColor);
+                    textPaint.setXfermode(null);
+                    super.onDraw(canvas);
+                }
 
-                // Keep only outline pixels that fall within the filled glyph silhouette.
+                // Preserve only the stroke pixels within the filled glyph silhouette.
                 textPaint.setStyle(Paint.Style.FILL);
                 textPaint.setStrokeWidth(previousStrokeWidth);
                 textPaint.setShader(null);
