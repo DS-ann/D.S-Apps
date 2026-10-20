@@ -138,6 +138,13 @@ public class MainActivity extends Activity {
             Color.rgb(169, 139, 255), Color.rgb(255, 120, 191),
             Color.rgb(217, 247, 255)
     };
+    private static final int[] CLOCK_NOTHING_MATCH_DIGIT_GRADIENT_COLORS = new int[] {
+            Color.BLACK, Color.rgb(68, 71, 78), Color.rgb(166, 170, 178),
+            Color.rgb(82, 85, 92), Color.BLACK
+    };
+    private static final int[] CLOCK_WHITE_BORDER_COLORS = new int[] {
+            Color.WHITE, Color.WHITE
+    };
     private static final long ICON_EDGE_SWITCH_DELAY_MS = 200L;
     private static final int ICON_EDGE_SWITCH_ZONE_DP = 24;
     private interface IntAction { void onSelect(int value); }
@@ -316,6 +323,56 @@ public class MainActivity extends Activity {
         int[] colors;
         android.graphics.LinearGradient shader;
         final android.graphics.Matrix matrix = new android.graphics.Matrix();
+    }
+
+    /** Draws a text run with a controlled fill colour and a thin external glyph outline. */
+    private static final class ClockTextOutlineSpan extends android.text.style.ReplacementSpan {
+        private final int fillColor;
+        private final int outlineColor;
+        private final float borderPx;
+
+        ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx) {
+            this.fillColor = fillColor;
+            this.outlineColor = outlineColor;
+            this.borderPx = Math.max(0.1f, borderPx);
+        }
+
+        @Override public int getSize(Paint paint, CharSequence text, int start, int end,
+                android.graphics.Paint.FontMetricsInt fontMetrics) {
+            if (fontMetrics != null) paint.getFontMetricsInt(fontMetrics);
+            return Math.round(paint.measureText(text, start, end));
+        }
+
+        @Override public void draw(Canvas canvas, CharSequence text, int start, int end,
+                float x, int top, int y, int bottom, android.text.TextPaint paint) {
+            int oldColor = paint.getColor();
+            Paint.Style oldStyle = paint.getStyle();
+            float oldStrokeWidth = paint.getStrokeWidth();
+            Paint.Join oldJoin = paint.getStrokeJoin();
+            Paint.Cap oldCap = paint.getStrokeCap();
+            android.graphics.Shader oldShader = paint.getShader();
+            try {
+                paint.setShader(null);
+                paint.setColor(outlineColor);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(borderPx * 2f);
+                paint.setStrokeJoin(Paint.Join.ROUND);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                canvas.drawText(text, start, end, x, y, paint);
+
+                paint.setStyle(Paint.Style.FILL);
+                paint.setStrokeWidth(0f);
+                paint.setColor(fillColor);
+                canvas.drawText(text, start, end, x, y, paint);
+            } finally {
+                paint.setColor(oldColor);
+                paint.setStyle(oldStyle);
+                paint.setStrokeWidth(oldStrokeWidth);
+                paint.setStrokeJoin(oldJoin);
+                paint.setStrokeCap(oldCap);
+                paint.setShader(oldShader);
+            }
+        }
     }
     private final java.util.WeakHashMap<TextView, ClockTextGradientState> clockDateGradients =
             new java.util.WeakHashMap<>();
@@ -6558,13 +6615,20 @@ public class MainActivity extends Activity {
         int[] artworkTextColours = iconArtworkActive
                 ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
 
-        // When Match Artwork is enabled, date and AM/PM share the same palette as
-        // the digits for every artwork theme. Nothing Monochrome is white-to-near-white.
+        // Match Artwork gives the date a white fill and AM/PM a grey fill with
+        // independent black outlines. Their exact spans are applied to dateLine below.
         if (dateText != null) {
-            if (digitGradient || iconArtworkActive) {
-                applyAnimatedTextGradient(dateText,
-                        iconArtworkActive ? artworkTextColours : CLOCK_DATE_GRADIENT_COLORS,
-                        digitGradient ? displayPhase : 0f, clockDateGradients);
+            if (iconArtworkActive) {
+                clockDateGradients.remove(dateText);
+                if (dateText.getPaint().getShader() != null) {
+                    dateText.getPaint().setShader(null);
+                }
+                dateText.setTextColor(Color.WHITE);
+                dateText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+                dateText.invalidate();
+            } else if (digitGradient) {
+                applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
+                        displayPhase, clockDateGradients);
             } else {
                 clockDateGradients.remove(dateText);
                 if (dateText.getPaint().getShader() != null) {
@@ -6574,6 +6638,8 @@ public class MainActivity extends Activity {
                 if (dateText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
                     dateText.setTextColor(CLOCK_DIGIT_SILVER);
                 }
+                dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f,
+                        LauncherUiUtils.dp(this, 1), Color.argb(220, 0, 0, 0));
             }
         }
         if (amPmText != null) {
@@ -6594,9 +6660,16 @@ public class MainActivity extends Activity {
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         boolean neonCircuit = prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
-        int[] digitColours = iconArtworkActive
-                ? getClockArtworkTransitionColours()
-                : CLOCK_DIGIT_GRADIENT_COLORS;
+        int artworkTheme = prefs == null
+                ? LauncherIconDrawable.ARTWORK_ORIGINAL
+                : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                        KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+        boolean nothingArtworkMatch = iconArtworkActive
+                && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+        int[] digitColours = nothingArtworkMatch && !neonCircuit
+                ? CLOCK_NOTHING_MATCH_DIGIT_GRADIENT_COLORS
+                : (iconArtworkActive ? getClockArtworkTransitionColours()
+                        : CLOCK_DIGIT_GRADIENT_COLORS);
         int solidDigitColour = neonCircuit && iconArtworkActive
                 ? digitColours[0] : CLOCK_DIGIT_SILVER;
 
@@ -6610,24 +6683,13 @@ public class MainActivity extends Activity {
             clockRenderer.setSegmentGradientEnabled(
                     useDigitGradient && sevenSegment, digitPhase, digitColours);
 
-            int artworkTheme = prefs == null
-                    ? LauncherIconDrawable.ARTWORK_ORIGINAL
-                    : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
-                            KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
-            boolean useNothingInnerBorder = !neonCircuit && iconArtworkActive
-                    && artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
-            // The cursive Neon Circuit font has much thinner strokes than the other
-            // presets. Its standard text stroke is masked to the glyph interior, leaving
-            // only half the requested stroke visible; double its source width so the inner
-            // contour is as visible as the 7-segment outline. This affects borders only,
-            // not the glyph geometry or its already-correct position.
-            float innerBorderWidth = Math.max(2.25f,
-                    getResources().getDisplayMetrics().density * 1.65f);
-            if (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2) {
-                innerBorderWidth *= 2f;
-            }
+            boolean useNothingInnerBorder = nothingArtworkMatch && !neonCircuit;
+            float innerBorderWidth = useNothingInnerBorder
+                    ? 3f * getResources().getDisplayMetrics().density
+                    : Math.max(2.25f, getResources().getDisplayMetrics().density * 1.65f);
             clockRenderer.setContrastInnerBorderEnabled(
-                    useNothingInnerBorder, digitColours, innerBorderWidth);
+                    useNothingInnerBorder, digitColours, innerBorderWidth,
+                    useNothingInnerBorder ? CLOCK_WHITE_BORDER_COLORS : null);
         }
 
         if (sevenSegment) {
@@ -6697,25 +6759,39 @@ public class MainActivity extends Activity {
         String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
         android.text.SpannableStringBuilder dateLine =
                 new android.text.SpannableStringBuilder(dateValue);
+        int periodLength = 0;
         if (!use24Hour) {
             String period = new SimpleDateFormat("a", Locale.getDefault()).format(now);
+            periodLength = period.length();
             // Separate AM/PM from the date with a comma and style only the marker.
             dateLine.insert(0, period + ", ");
-            // AM/PM follows the date-size slider exactly and uses a silver,
-            // bold-italic treatment without a separate size override.
-            dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0, period.length(),
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0,
+                    periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
-                    0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) {
-                // In the non-gradient mode, AM/PM uses the same restrained silver as
-                // the clock digits. When enabled, the date TextView shader paints it
-                // with the Home Studio gradient instead.
                 dateLine.setSpan(new android.text.style.ForegroundColorSpan(CLOCK_DIGIT_SILVER),
-                        0, period.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            dateLine.setSpan(new android.text.style.RelativeSizeSpan(1f), 0, period.length(),
+            dateLine.setSpan(new android.text.style.RelativeSizeSpan(1f), 0, periodLength,
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        if (isClockIconArtworkActive()) {
+            // Match Artwork gives every date character a white fill / 0.5dp black
+            // outline, while the AM/PM run uses grey fill / 1dp black outline.
+            int dateStart = use24Hour ? 0 : periodLength + 2;
+            float density = getResources().getDisplayMetrics().density;
+            if (dateStart < dateLine.length()) {
+                dateLine.setSpan(new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
+                                0.5f * density),
+                        dateStart, dateLine.length(),
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (!use24Hour && periodLength > 0) {
+                dateLine.setSpan(new ClockTextOutlineSpan(Color.rgb(160, 163, 170),
+                                Color.BLACK, 1f * density),
+                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
         }
         int restorePage = Math.max(0, Math.min(1, currentPage));
         for (int page = 0; page < clockPanelsByPage.length; page++) {
@@ -6804,7 +6880,8 @@ public class MainActivity extends Activity {
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
-            boolean useDateGradient = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+            boolean useDateGradient = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                    || isClockIconArtworkActive();
             Boolean previousDateGradient = dateGradientModeApplied.get(dateText);
             boolean dateModeChanged = previousDateGradient == null
                     || previousDateGradient.booleanValue() != useDateGradient;
