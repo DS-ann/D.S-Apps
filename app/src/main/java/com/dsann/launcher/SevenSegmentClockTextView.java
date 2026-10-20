@@ -32,24 +32,11 @@ public final class SevenSegmentClockTextView extends TextView {
     private LinearGradient segmentBorderGradient;
     private int segmentBorderGradientWidth = -1;
     private final Matrix segmentBorderGradientMatrix = new Matrix();
-    // Remember the clock's normal shadow so the inner-border mask can be rendered sharply.
-    private float configuredTextShadowRadius;
-    private float configuredTextShadowDx;
-    private float configuredTextShadowDy;
-    private int configuredTextShadowColor = Color.TRANSPARENT;
     private LinearGradient textBorderGradient;
     private int textBorderGradientWidth = -1;
     private float textBorderSpanWidth = -1f;
     private String textBorderValue = "";
     private final float[][] segmentRects = new float[7][4];
-
-    @Override public void setShadowLayer(float radius, float dx, float dy, int color) {
-        configuredTextShadowRadius = radius;
-        configuredTextShadowDx = dx;
-        configuredTextShadowDy = dy;
-        configuredTextShadowColor = color;
-        super.setShadowLayer(radius, dx, dy, color);
-    }
 
     public SevenSegmentClockTextView(Context context) {
         super(context);
@@ -266,16 +253,8 @@ public final class SevenSegmentClockTextView extends TextView {
             Shader previousShader = textPaint.getShader();
             android.graphics.Xfermode previousXfermode = textPaint.getXfermode();
             int previousColor = textPaint.getColor();
-            float previousShadowRadius = configuredTextShadowRadius;
-            float previousShadowDx = configuredTextShadowDx;
-            float previousShadowDy = configuredTextShadowDy;
-            int previousShadowColor = configuredTextShadowColor;
             int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
             try {
-                // A blurred shadow also expands the DST_IN mask, which can swallow the
-                // fine inner contour on Neon Circuit's cursive glyphs. Keep both border
-                // passes shadow-free; the regular filled text above retains its glow.
-                textPaint.clearShadowLayer();
                 textPaint.setXfermode(null);
                 textPaint.setStyle(Paint.Style.STROKE);
                 textPaint.setStrokeWidth(contrastInnerBorderWidth);
@@ -301,12 +280,6 @@ public final class SevenSegmentClockTextView extends TextView {
                 textPaint.setShader(previousShader);
                 textPaint.setXfermode(previousXfermode);
                 textPaint.setColor(previousColor);
-                if (previousShadowRadius > 0f && Color.alpha(previousShadowColor) != 0) {
-                    textPaint.setShadowLayer(previousShadowRadius, previousShadowDx,
-                            previousShadowDy, previousShadowColor);
-                } else {
-                    textPaint.clearShadowLayer();
-                }
             }
             return;
         }
@@ -319,6 +292,10 @@ public final class SevenSegmentClockTextView extends TextView {
             if (digit >= 0) {
                 display.append((char) ('0' + digit));
             } else if (ch == ':' || ch == '\uFF1A' || ch == '.' || ch == '\u2236') {
+                // Reserve the first hour digit cell when the hour is 1–9. Leave it
+                // visually blank (not a zero) so the time and AM/PM edge stay aligned
+                // with the two-digit 10–12 hour layout.
+                if (display.length() == 1) display.insert(0, ' ');
                 // Normalize common locale-specific time separators for LED rendering.
                 display.append(':');
             }
@@ -348,22 +325,32 @@ public final class SevenSegmentClockTextView extends TextView {
             return;
         }
 
-        // Centre the actual rendered glyphs as one unit. Each digit advances by
-        // 0.72 units, while its visible ink is 0.56 units wide. The colon occupies
-        // its own separator slot with 15dp of breathing room on either side.
-        float dp = getResources().getDisplayMetrics().density;
-        float fixedColonGap = 30f * dp;
-        float widthUnits = Math.max(0.01f,
-                (digits - 1) * 0.72f + colons * 0.34f + 0.56f);
-        float availableGlyphWidth = Math.max(1f, availableWidth - colons * fixedColonGap);
-        float unit = Math.min(availableHeight * 0.91f, availableGlyphWidth / widthUnits);
+        // The whole string is sized as one unit, so 12-hour and 24-hour formats fit.
+        float widthUnits = digits * 0.72f + colons * 0.34f;
+        float unit = Math.min(availableHeight * 0.91f, availableWidth / widthUnits);
         float digitWidth = unit * 0.56f;
         float digitHeight = unit * 0.92f;
         float advance = unit * 0.72f;
-        float colonAdvance = unit * 0.34f + fixedColonGap;
-        float totalWidth = Math.max(1f, (digits - 1) * advance
-                + colons * colonAdvance + digitWidth);
-        float x = leftBound + (availableWidth - totalWidth) / 2f;
+        float totalWidth = digits * advance + colons * unit * 0.34f;
+        int colonIndex = value.indexOf(':');
+        // Intentionally let the left half of the first hour digit sit beyond
+        // the clock background's left edge, matching the requested clipped LED look.
+        // The colon and minute digits move together with the hour digits.
+        float baseDotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
+        // Keep the hour digits anchored where they were. Move the colon 15dp
+        // right, then leave a further 15dp gap before the minute group.
+        float hourStartX = colonIndex >= 0
+                ? baseDotX - unit * 0.17f - (colonIndex * advance)
+                : leftBound + (availableWidth - totalWidth) / 2f;
+        float dp = getResources().getDisplayMetrics().density;
+        float dotX = baseDotX + 15f * dp;
+        float minuteStartX = dotX + unit * 0.17f + 15f * dp;
+        int horizontalGravity = getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
+        if (colonIndex < 0 && horizontalGravity == Gravity.LEFT) hourStartX = leftBound;
+        else if (colonIndex < 0 && horizontalGravity == Gravity.RIGHT) {
+            hourStartX = rightBound - totalWidth;
+        }
+        float x = hourStartX;
         float y = topBound + (availableHeight - digitHeight) / 2f;
         float thickness = Math.max(3f, digitWidth * 0.17f);
         float half = thickness / 2f;
@@ -379,9 +366,7 @@ public final class SevenSegmentClockTextView extends TextView {
                 segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
                 segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : color);
                 float radius = Math.max(2.5f, thickness * 0.38f);
-                // The colon follows the hour inside its own slot; it is not the
-                // centring anchor for the entire time.
-                float dotX = x + colonAdvance * 0.5f;
+                // The colon is the fixed anchor between hour and minute.
                 float upperDotY = y + digitHeight * 0.34f;
                 float lowerDotY = y + digitHeight * 0.68f;
                 canvas.drawCircle(dotX, upperDotY, radius, segmentPaint);
@@ -397,10 +382,14 @@ public final class SevenSegmentClockTextView extends TextView {
                     segmentPaint.setStyle(Paint.Style.FILL);
                     segmentPaint.setStrokeWidth(0f);
                 }
-                x += colonAdvance;
+                x = minuteStartX;
                 continue;
             }
 
+            if (colonIndex >= 0 && i > colonIndex) {
+                int minuteDigitIndex = i - colonIndex - 1;
+                x = minuteStartX + minuteDigitIndex * advance;
+            }
             float l = x;
             float r = x + digitWidth;
             float t = y;
