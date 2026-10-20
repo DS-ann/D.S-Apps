@@ -380,6 +380,8 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> dateGradientModeApplied =
             new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, String> dateTextAppearanceApplied =
+            new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
@@ -6759,45 +6761,50 @@ public class MainActivity extends Activity {
         if (currentColourPhase != lastClockPanelColorPhase) applyClockPanelColor(false);
         boolean use24Hour = DateFormat.is24HourFormat(this);
         String dateValue = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(now);
-        android.text.SpannableStringBuilder dateLine =
-                new android.text.SpannableStringBuilder(dateValue);
-        int periodLength = 0;
-        if (!use24Hour) {
-            String period = new SimpleDateFormat("a", Locale.getDefault()).format(now);
-            periodLength = period.length();
-            // Separate AM/PM from the date with a comma and style only the marker.
-            dateLine.insert(0, period + ", ");
-            dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0,
-                    periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
-                    0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) {
-                dateLine.setSpan(new android.text.style.ForegroundColorSpan(CLOCK_DIGIT_SILVER),
-                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            dateLine.setSpan(new android.text.style.RelativeSizeSpan(1f), 0, periodLength,
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-        if (isClockIconArtworkActive()) {
-            // Match Artwork gives every date character a white fill / 0.5dp black
-            // outline, while the AM/PM run uses grey fill / 1dp black outline.
-            int dateStart = use24Hour ? 0 : periodLength + 2;
-            float density = getResources().getDisplayMetrics().density;
-            if (dateStart < dateLine.length()) {
-                dateLine.setSpan(new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
-                                0.5f * density),
-                        dateStart, dateLine.length(),
-                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            if (!use24Hour && periodLength > 0) {
-                dateLine.setSpan(new ClockTextOutlineSpan(Color.rgb(160, 163, 170),
-                                Color.BLACK, 1f * density),
-                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-        }
         int restorePage = Math.max(0, Math.min(1, currentPage));
         for (int page = 0; page < clockPanelsByPage.length; page++) {
             activateClockForPage(page);
+            int configuredDateSize = Math.max(8, Math.min(24,
+                    prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15)));
+            int configuredPmSize = Math.max(8, Math.min(24,
+                    prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, activeClockPage), 14)));
+            android.text.SpannableStringBuilder dateLine =
+                    new android.text.SpannableStringBuilder(dateValue);
+            int periodLength = 0;
+            if (!use24Hour) {
+                String period = new SimpleDateFormat("a", Locale.getDefault()).format(now);
+                periodLength = period.length();
+                // Separate AM/PM from the date with a comma and size it independently per page.
+                dateLine.insert(0, period + ", ");
+                dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0,
+                        periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
+                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) {
+                    dateLine.setSpan(new android.text.style.ForegroundColorSpan(CLOCK_DIGIT_SILVER),
+                            0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                float periodScale = configuredPmSize / (float) configuredDateSize;
+                dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
+                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (isClockIconArtworkActive()) {
+                // Match Artwork gives the date a white fill / 0.5dp black outline,
+                // with a grey AM/PM prefix / 1dp black outline.
+                int dateStart = use24Hour ? 0 : periodLength + 2;
+                float density = getResources().getDisplayMetrics().density;
+                if (dateStart < dateLine.length()) {
+                    dateLine.setSpan(new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
+                                    0.5f * density),
+                            dateStart, dateLine.length(),
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                if (!use24Hour && periodLength > 0) {
+                    dateLine.setSpan(new ClockTextOutlineSpan(Color.rgb(160, 163, 170),
+                                    Color.BLACK, 1f * density),
+                            0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+            }
             String clockValue = formatClockDigits(now, use24Hour);
             if (amPmText != null) {
                 if (use24Hour) {
@@ -6887,9 +6894,14 @@ public class MainActivity extends Activity {
             Boolean previousDateGradient = dateGradientModeApplied.get(dateText);
             boolean dateModeChanged = previousDateGradient == null
                     || previousDateGradient.booleanValue() != useDateGradient;
-            if (!dateLine.toString().contentEquals(dateText.getText()) || dateModeChanged) {
+            String dateAppearanceKey = configuredDateSize + ":" + configuredPmSize + ":"
+                    + useDateGradient + ":" + isClockIconArtworkActive();
+            String previousDateAppearance = dateTextAppearanceApplied.get(dateText);
+            if (!dateLine.toString().contentEquals(dateText.getText())
+                    || dateModeChanged || !dateAppearanceKey.equals(previousDateAppearance)) {
                 dateText.setText(dateLine);
                 dateGradientModeApplied.put(dateText, useDateGradient);
+                dateTextAppearanceApplied.put(dateText, dateAppearanceKey);
             }
             // Layout, typography and panel appearance are configuration-driven and
             // are applied when the clock is created or settings change, not every minute.
@@ -10062,11 +10074,33 @@ public class MainActivity extends Activity {
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
 
-        addSliderRow(content, "Date font size", 8, 24,
-                Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15))), " sp", value -> {
-            prefs.edit().putInt(KEY_CLOCK_DATE_SIZE, value).apply();
-            refreshClockTypographyAndGeometry();
-        });
+        addSection(content, "Clock text sizes");
+        addSideBySideSliderPair(content,
+                "Date size — Screen 1", 8, 24,
+                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 0), 15))),
+                " sp", value -> {
+                    prefs.edit().putInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 0), value).apply();
+                    refreshClockTypographyAndGeometry();
+                },
+                "Date size — Screen 2",
+                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 1), 15))),
+                value -> {
+                    prefs.edit().putInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 1), value).apply();
+                    refreshClockTypographyAndGeometry();
+                });
+        addSideBySideSliderPair(content,
+                "AM/PM size — Screen 1", 8, 24,
+                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 0), 14))),
+                " sp", value -> {
+                    prefs.edit().putInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 0), value).apply();
+                    refreshClockTypographyAndGeometry();
+                },
+                "AM/PM size — Screen 2",
+                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 1), 14))),
+                value -> {
+                    prefs.edit().putInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 1), value).apply();
+                    refreshClockTypographyAndGeometry();
+                });
         addSection(content, "Page animations");
         addChoiceRow(content, "Page transition effect", getPageTransition(),
                 new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
@@ -10293,9 +10327,14 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
+        // Preserve the established physical offset when the widget is at normal or
+        // enlarged size, but scale the offset with the background as the widget shrinks.
+        // Inverse scaling held this shift fixed while the background narrowed, cutting
+        // digits against the left edge at small clock lengths.
+        float offsetScaleDenominator = Math.max(1f, panelScaleX);
         float targetX;
         if (sevenSegment) {
-            targetX = -LauncherUiUtils.dp(this, 15) / panelScaleX;
+            targetX = -LauncherUiUtils.dp(this, 15) / offsetScaleDenominator;
         } else {
             boolean singleDigitHour = false;
             boolean twoDigitNeonCircuitHour = false;
@@ -10334,14 +10373,14 @@ public class MainActivity extends Activity {
                     }
                     horizontalOffset += singleDigitAdjustment;
                 }
-                targetX = -horizontalOffset / panelScaleX;
+                targetX = -horizontalOffset / offsetScaleDenominator;
                 // Neon Circuit single-digit hours should sit 20dp farther right than
                 // the normal figure-space-compensated position. Apply this in the
                 // geometry path, independently of the active colour mode, so colour
                 // changes cannot alter the alignment. Divide by the panel scale so the
                 // visible shift remains exactly 20dp while the clock is resized.
                 if (style == 2 && singleDigitHour) {
-                    targetX += LauncherUiUtils.dp(this, 20) / panelScaleX;
+                    targetX += LauncherUiUtils.dp(this, 20) / offsetScaleDenominator;
                 }
             }
         }
@@ -10449,8 +10488,10 @@ public class MainActivity extends Activity {
         // groups. Without reserving it, the max-width cap compresses the custom
         // glyph layout and the left grip appears to stop widening the background.
         int measuredDateWidth = 0;
-        final int configuredDateSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15)));
-        final int configuredPmSize = Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_PM_SIZE, 14)));
+        final int configuredDateSize = Math.max(8, Math.min(24,
+                prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15)));
+        final int configuredPmSize = Math.max(8, Math.min(24,
+                prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, activeClockPage), 14)));
         if (dateText != null) {
             dateText.setTextSize(configuredDateSize);
             String measuredDate = dateText.getText().toString();
@@ -10478,13 +10519,13 @@ public class MainActivity extends Activity {
         // Measure the panel at its natural width, then scale the complete panel.
         // This keeps the background, digits, AM/PM marker, and date in one resize
         // operation instead of shrinking only the clock glyphs inside a fixed panel.
+        final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
-                + markerWidth + LauncherUiUtils.dp(this, 1);
+                + markerWidth + LauncherUiUtils.dp(this, 1) + ledGroupSpacing;
         final int contentWidth = Math.max(clockWithMarkerWidth, dateWidth)
                 + LauncherUiUtils.dp(this, 4);
-        final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int naturalPanelWidth = Math.max(LauncherUiUtils.dp(this, 96),
-                contentWidth + LauncherUiUtils.dp(this, 8) + ledGroupSpacing);
+                contentWidth + LauncherUiUtils.dp(this, 8));
         // Treat the clock as a workspace widget: its visual rectangle may grow
         // across the full page, but never beyond the page's horizontal bounds.
         // The cap is based on the actual page width (not half-width/grid columns),
@@ -10700,7 +10741,8 @@ public class MainActivity extends Activity {
             }
             // Use the same date size for every clock style. Counter-scale it so
             // panel resizing does not change the date's visual size.
-            dateText.setTextSize(Math.max(8, Math.min(24, prefs.getInt(KEY_CLOCK_DATE_SIZE, 15))));
+            dateText.setTextSize(Math.max(8, Math.min(24,
+                    prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15))));
             // Only counter-scale horizontally for the panel's width transform.
             // The panel no longer scales vertically, so leave Y at 1 to preserve
             // the date's glyph proportions as clock breadth changes.
@@ -10716,7 +10758,7 @@ public class MainActivity extends Activity {
             amPmText.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
             // Keep the marker's font size independent of workspace resizing.
             // 13.5sp is 50% taller than the previous 9sp setting.
-            amPmText.setTextSize(13.5f);
+            amPmText.setTextSize(configuredPmSize);
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
@@ -10986,6 +11028,71 @@ public class MainActivity extends Activity {
             @Override public void onStopTrackingTouch(SeekBar bar) {}
         });
         panel.addView(block, blockParams);
+    }
+
+    /** Adds two compact slider cards on one row for the two independent home-screen clocks. */
+    private void addSideBySideSliderPair(LinearLayout panel,
+            String leftTitle, int min, int max, int leftCurrent, String suffix,
+            IntSliderAction leftAction, String rightTitle, int rightCurrent,
+            IntSliderAction rightAction) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+        rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+        panel.addView(row, rowParams);
+        addCompactSliderCard(row, leftTitle, min, max, leftCurrent, suffix, leftAction, true);
+        addCompactSliderCard(row, rightTitle, min, max, rightCurrent, suffix, rightAction, false);
+    }
+
+    private void addCompactSliderCard(LinearLayout row, String title, int min, int max,
+            int current, String suffix, IntSliderAction action, boolean leftCard) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 5));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
+
+        LinearLayout.LayoutParams blockParams =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        if (leftCard) blockParams.rightMargin = LauncherUiUtils.dp(this, 3);
+        else blockParams.leftMargin = LauncherUiUtils.dp(this, 3);
+        row.addView(block, blockParams);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = LauncherUiUtils.text(this, title, 12.5f,
+                Color.rgb(247, 249, 255), true);
+        label.setMaxLines(2);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView valueLabel = LauncherUiUtils.text(this,
+                Math.max(min, Math.min(max, current)) + suffix, 12,
+                homeStudioAccentColor, true);
+        heading.addView(valueLabel);
+        block.addView(heading);
+
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(max - min);
+        seekBar.setProgress(Math.max(0, Math.min(max - min, current - min)));
+        android.content.res.ColorStateList tint =
+                android.content.res.ColorStateList.valueOf(Color.rgb(222, 255, 112));
+        seekBar.setProgressTintList(tint);
+        seekBar.setThumbTintList(tint);
+        seekBar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(82, 96, 122)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, 38)));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int value = min + progress;
+                valueLabel.setText(value + suffix);
+                if (fromUser && action != null) action.onChange(value);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
     }
 
     private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,

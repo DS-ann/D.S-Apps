@@ -373,6 +373,7 @@ public final class SevenSegmentClockTextView extends TextView {
         float bottomBound = getHeight() - getPaddingBottom();
         float availableWidth = Math.max(1f, rightBound - leftBound);
         float availableHeight = Math.max(1f, bottomBound - topBound);
+        float dp = getResources().getDisplayMetrics().density;
 
         int digits = 0;
         int colons = 0;
@@ -385,24 +386,25 @@ public final class SevenSegmentClockTextView extends TextView {
             return;
         }
 
-        // The whole string is sized as one unit, so 12-hour and 24-hour formats fit.
+        // Reserve the fixed colon/minute gaps in the width budget. Without this, the
+        // hour group can extend beyond the left edge when the clock is resized narrow.
         float widthUnits = digits * 0.72f + colons * 0.34f;
-        float unit = Math.min(availableHeight * 0.91f, availableWidth / widthUnits);
+        float fixedGapPx = colons > 0 ? 30f * dp : 0f;
+        float usableGlyphWidth = Math.max(1f, availableWidth - fixedGapPx);
+        float unit = Math.min(availableHeight * 0.91f, usableGlyphWidth / widthUnits);
         float digitWidth = unit * 0.56f;
         float digitHeight = unit * 0.92f;
         float advance = unit * 0.72f;
         float totalWidth = digits * advance + colons * unit * 0.34f;
         int colonIndex = value.indexOf(':');
-        // Intentionally let the left half of the first hour digit sit beyond
-        // the clock background's left edge, matching the requested clipped LED look.
-        // The colon and minute digits move together with the hour digits.
+        // Keep all digits inside the widget. The width budget above already includes
+        // the colon and minute-group gaps, so no portion of the first digit is clipped.
         float baseDotX = leftBound + availableWidth * 0.5f - unit * 0.28f;
         // Keep the hour digits anchored where they were. Move the colon 15dp
         // right, then leave a further 15dp gap before the minute group.
         float hourStartX = colonIndex >= 0
                 ? baseDotX - unit * 0.17f - (colonIndex * advance)
                 : leftBound + (availableWidth - totalWidth) / 2f;
-        float dp = getResources().getDisplayMetrics().density;
         float dotX = baseDotX + 15f * dp;
         float minuteStartX = dotX + unit * 0.17f + 15f * dp;
         int horizontalGravity = getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
