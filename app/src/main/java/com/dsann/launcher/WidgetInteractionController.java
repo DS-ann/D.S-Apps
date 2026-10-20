@@ -724,8 +724,9 @@ final class WidgetInteractionController {
                         } else {
                             widgetPage[0] = originalPageAtDown[0];
                         }
-                        listener.finishWorkspaceTransferDrag(container, commit);
-                        listener.setWorkspaceGridVisible(false, null);
+                        // Flush the final collision pass BEFORE transfer cleanup. The cleanup
+                        // clears the mover's last-safe geometry; doing it first lets a pending
+                        // ACTION_UP frame miss its rollback point and commit under a clock.
                         boolean accepted = listener.finishLiveDisplacements(commit, container);
                         if (commit && !accepted) {
                             FrameLayout.LayoutParams rejectedParams =
@@ -747,9 +748,13 @@ final class WidgetInteractionController {
                                 container.setLayoutParams(rejectedParams);
                             }
                             widgetPage[0] = originalPageAtDown[0];
+                            listener.finishWorkspaceTransferDrag(container, false);
                             listener.setCurrentPage(originalPageAtDown[0]);
                             listener.showPage(originalPageAtDown[0], false);
+                        } else {
+                            listener.finishWorkspaceTransferDrag(container, commit);
                         }
+                        listener.setWorkspaceGridVisible(false, null);
                         if (commit && accepted) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     }
                 } else {
