@@ -89,6 +89,8 @@ final class LauncherIconDrawable extends Drawable {
     // application and bounded independently from the RAM LRU caches.
     private static final long MAX_DISK_ARTWORK_CACHE_BYTES = 64L * 1024L * 1024L;
     private static final Object DISK_ARTWORK_CACHE_LOCK = new Object();
+    private static final java.util.Map<String, Integer> PACKAGE_ARTWORK_EPOCHS =
+            new java.util.HashMap<>();
     private static volatile File DISK_ARTWORK_CACHE_ROOT;
     private static volatile File ACTIVE_DISK_ARTWORK_CACHE_DIR;
     private static volatile int selectedPersistentArtworkTheme = -1;
@@ -163,7 +165,8 @@ final class LauncherIconDrawable extends Drawable {
     static void configurePersistentArtworkCache(Context context, int selectedTheme) {
         if (context == null) return;
         final int theme = clampArtworkTheme(selectedTheme);
-        final File root = new File(context.getCacheDir(), "launcher-icon-artwork-v1");
+        final File root = new File(context.getCacheDir(), "launcher-icon-artwork-v2");
+        final File legacyRoot = new File(context.getCacheDir(), "launcher-icon-artwork-v1");
         final File active = new File(root, "theme-" + theme);
         File priorRoot = DISK_ARTWORK_CACHE_ROOT;
         boolean rootChanged = priorRoot == null || !priorRoot.equals(root);
@@ -181,6 +184,8 @@ final class LauncherIconDrawable extends Drawable {
                 if (selectedPersistentArtworkTheme != theme
                         || !root.equals(DISK_ARTWORK_CACHE_ROOT)) return;
                 if (!root.exists()) root.mkdirs();
+                // Delete the older format whose filenames did not encode package identity.
+                deleteRecursively(legacyRoot);
                 File[] children = root.listFiles();
                 if (children != null) {
                     for (File child : children) {
@@ -205,26 +210,105 @@ final class LauncherIconDrawable extends Drawable {
         }
     }
 
+    private static String packageNameFromArtworkToken(String token) {
+        if (token == null) return null;
+        int slash = token.indexOf('/');
+        if (slash <= 0) return null;
+        return token.substring(0, slash);
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] bytes = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            char[] digits = "0123456789abcdef".toCharArray();
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte item : bytes) {
+                int part = item & 0xff;
+                hex.append(digits[part >>> 4]).append(digits[part & 0x0f]);
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException ignored) {
+            return null;
+        }
+    }
+
+    private static int packageArtworkEpoch(String packageName) {
+        if (packageName == null) return 0;
+        synchronized (ARTWORK_REQUEST_LOCK) {
+            Integer epoch = PACKAGE_ARTWORK_EPOCHS.get(packageName);
+            return epoch == null ? 0 : epoch;
+        }
+    }
+
+    private static boolean isPackageArtworkEpochCurrent(String packageName, int expectedEpoch) {
+        return packageName == null || packageArtworkEpoch(packageName) == expectedEpoch;
+    }
+
+    /**
+     * Invalidate only one package's generated artwork. This is called after install, uninstall,
+     * or update; enabled/disabled component changes intentionally keep the saved files.
+     */
+    static void invalidatePackageArtworkCache(String packageName, boolean deletePersistentFiles) {
+        if (packageName == null || packageName.isEmpty()) return;
+        final String packagePrefix = packageName + "/";
+        final String diskPrefix = sha256Hex(packageName) + "-";
+        synchronized (ARTWORK_REQUEST_LOCK) {
+            Integer oldEpoch = PACKAGE_ARTWORK_EPOCHS.get(packageName);
+            PACKAGE_ARTWORK_EPOCHS.put(packageName, oldEpoch == null ? 1 : oldEpoch + 1);
+            java.util.Iterator<ArtworkCacheKey> keys = ARTWORK_CACHE.snapshot().keySet().iterator();
+            while (keys.hasNext()) {
+                ArtworkCacheKey key = keys.next();
+                if (key.token != null && key.token.startsWith(packagePrefix)) {
+                    ARTWORK_CACHE.remove(key);
+                }
+            }
+            for (CompositionCacheKey key : COMPOSITION_CACHE.snapshot().keySet()) {
+                if (key.artwork.token != null && key.artwork.token.startsWith(packagePrefix)) {
+                    COMPOSITION_CACHE.remove(key);
+                }
+            }
+            java.util.Iterator<ArtworkCacheKey> pending = ARTWORK_PENDING.iterator();
+            while (pending.hasNext()) {
+                ArtworkCacheKey key = pending.next();
+                if (key.token != null && key.token.startsWith(packagePrefix)) {
+                    pending.remove();
+                    ARTWORK_WAITERS.remove(key);
+                }
+            }
+            java.util.Iterator<ArtworkCacheKey> waiters = ARTWORK_WAITERS.keySet().iterator();
+            while (waiters.hasNext()) {
+                ArtworkCacheKey key = waiters.next();
+                if (key.token != null && key.token.startsWith(packagePrefix)) {
+                    waiters.remove();
+                }
+            }
+        }
+        if (!deletePersistentFiles || diskPrefix.equals("null-")) return;
+        DISK_ARTWORK_EXECUTOR.execute(() -> {
+            synchronized (DISK_ARTWORK_CACHE_LOCK) {
+                File directory = ACTIVE_DISK_ARTWORK_CACHE_DIR;
+                if (directory == null || selectedPersistentArtworkTheme < 0) return;
+                File[] files = directory.listFiles();
+                if (files == null) return;
+                for (File file : files) {
+                    if (file.isFile() && file.getName().startsWith(diskPrefix)) file.delete();
+                }
+            }
+        });
+    }
+
     private static File persistentArtworkFile(ArtworkCacheKey key, int theme) {
         if (key == null || !key.hasStableToken()
                 || key.theme != theme || selectedPersistentArtworkTheme != theme) return null;
         File directory = ACTIVE_DISK_ARTWORK_CACHE_DIR;
         if (directory == null) return null;
-        String digest;
-        try {
-            byte[] bytes = MessageDigest.getInstance("SHA-256")
-                    .digest(key.token.getBytes(StandardCharsets.UTF_8));
-            char[] digits = "0123456789abcdef".toCharArray();
-            StringBuilder hex = new StringBuilder(bytes.length * 2);
-            for (byte item : bytes) {
-                int value = item & 0xff;
-                hex.append(digits[value >>> 4]).append(digits[value & 0x0f]);
-            }
-            digest = hex.toString();
-        } catch (NoSuchAlgorithmException ignored) {
-            return null;
-        }
-        return new File(directory, digest + ".png");
+        String packageName = packageNameFromArtworkToken(key.token);
+        String packageDigest = packageName == null ? null : sha256Hex(packageName);
+        String tokenDigest = sha256Hex(key.token);
+        if (packageDigest == null || tokenDigest == null) return null;
+        // The package prefix permits fast, targeted deletion without scanning or decoding files.
+        return new File(directory, packageDigest + "-" + tokenDigest + ".png");
     }
 
     /** Read and touch an already-themed bitmap without doing disk I/O on the UI thread. */
@@ -244,15 +328,18 @@ final class LauncherIconDrawable extends Drawable {
     }
 
     /** Write a finished bitmap in the background; failures fall back to normal RAM caching. */
-    private static void writePersistentArtwork(ArtworkCacheKey key, int theme, Bitmap bitmap) {
-        if (bitmap == null || bitmap.getByteCount() > MAX_ARTWORK_CACHE_BYTES) return;
+    private static void writePersistentArtwork(ArtworkCacheKey key, int theme, Bitmap bitmap,
+            String packageName, int expectedEpoch) {
+        if (bitmap == null || bitmap.getByteCount() > MAX_ARTWORK_CACHE_BYTES
+                || !isPackageArtworkEpochCurrent(packageName, expectedEpoch)) return;
         final File file = persistentArtworkFile(key, theme);
         if (file == null) return;
         DISK_ARTWORK_EXECUTOR.execute(() -> {
             synchronized (DISK_ARTWORK_CACHE_LOCK) {
                 File active = ACTIVE_DISK_ARTWORK_CACHE_DIR;
                 if (selectedPersistentArtworkTheme != theme || active == null
-                        || !active.equals(file.getParentFile())) return;
+                        || !active.equals(file.getParentFile())
+                        || !isPackageArtworkEpochCurrent(packageName, expectedEpoch)) return;
                 if (file.isFile()) {
                     file.setLastModified(System.currentTimeMillis());
                     return;
@@ -271,7 +358,8 @@ final class LauncherIconDrawable extends Drawable {
                 }
                 // A theme may have been switched while the image was being encoded.
                 if (selectedPersistentArtworkTheme != theme
-                        || !active.equals(ACTIVE_DISK_ARTWORK_CACHE_DIR)) {
+                        || !active.equals(ACTIVE_DISK_ARTWORK_CACHE_DIR)
+                        || !isPackageArtworkEpochCurrent(packageName, expectedEpoch)) {
                     temporary.delete();
                     return;
                 }
@@ -731,11 +819,14 @@ final class LauncherIconDrawable extends Drawable {
         }
         if (!startWorker) return;
 
+        final String packageName = packageNameFromArtworkToken(key.token);
+        final int requestEpoch = packageArtworkEpoch(packageName);
         ARTWORK_EXECUTOR.execute(() -> {
             // GridView recycles visible cells rapidly. Skip queued theme conversion if no
             // drawable still represents this app/style; otherwise old icons compete with the
             // current fling for CPU and can make the scroll feel sticky.
-            if (!hasCurrentArtworkWaiter(key, theme)) return;
+            if (!hasCurrentArtworkWaiter(key, theme)
+                    || !isPackageArtworkEpochCurrent(packageName, requestEpoch)) return;
             Bitmap themed = readPersistentArtwork(key, theme);
             boolean generated = themed == null;
             if (generated) {
@@ -749,9 +840,12 @@ final class LauncherIconDrawable extends Drawable {
                 }
             }
             final Bitmap result = themed;
-            ARTWORK_HANDLER.post(() -> finishArtworkRequest(key, theme, result));
+            ARTWORK_HANDLER.post(() ->
+                    finishArtworkRequest(key, theme, result, packageName, requestEpoch));
             // Persist after posting the result so PNG encoding cannot delay the visible icon.
-            if (generated && result != null) writePersistentArtwork(key, theme, result);
+            if (generated && result != null) {
+                writePersistentArtwork(key, theme, result, packageName, requestEpoch);
+            }
         });
     }
 
@@ -782,12 +876,18 @@ final class LauncherIconDrawable extends Drawable {
         }
     }
 
-    private static void finishArtworkRequest(ArtworkCacheKey key, int theme, Bitmap bitmap) {
+    private static void finishArtworkRequest(ArtworkCacheKey key, int theme, Bitmap bitmap,
+            String packageName, int expectedEpoch) {
         java.util.ArrayList<WeakReference<LauncherIconDrawable>> waiters;
+        boolean currentEpoch;
         synchronized (ARTWORK_REQUEST_LOCK) {
             ARTWORK_PENDING.remove(key);
             waiters = ARTWORK_WAITERS.remove(key);
+            Integer current = packageName == null ? null : PACKAGE_ARTWORK_EPOCHS.get(packageName);
+            currentEpoch = packageName == null
+                    || (current == null ? 0 : current) == expectedEpoch;
         }
+        if (!currentEpoch) return;
         if (bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES
                 && selectedPersistentArtworkTheme == theme) {
             ARTWORK_CACHE.put(key, bitmap);

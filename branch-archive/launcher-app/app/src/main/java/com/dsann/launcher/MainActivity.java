@@ -589,6 +589,9 @@ public class MainActivity extends Activity {
             if (intent == null) return;
             String action = intent.getAction();
             if (Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
+                String replacedPackage = intent.getData() == null ? null
+                        : intent.getData().getSchemeSpecificPart();
+                invalidatePackageArtwork(replacedPackage, true);
                 // Reset bounded retries after every replacement. Provider metadata and
                 // AppWidgetHostView state can be briefly unavailable during app updates.
                 handler.removeCallbacks(widgetRestoreRetry);
@@ -611,11 +614,22 @@ public class MainActivity extends Activity {
             if ((packageAdded || packageRemoved)
                     && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return;
 
-            // PACKAGE_CHANGED is also sent for enabled/disabled component changes. Debounce
-            // broadcasts so multi-component state changes cause only one PackageManager scan.
+            String changedPackage = intent.getData() == null ? null
+                    : intent.getData().getSchemeSpecificPart();
+            // A fresh install or full uninstall invalidates only this package. PACKAGE_CHANGED
+            // also covers component enable/disable, so preserve its cache for quick re-enable.
+            if (packageAdded || packageRemoved) invalidatePackageArtwork(changedPackage, true);
+
+            // Debounce broadcasts so multi-component state changes cause only one PackageManager scan.
             scheduleAppDrawerRefresh();
         }
     };
+    private void invalidatePackageArtwork(String packageName, boolean deletePersistentFiles) {
+        if (packageName == null || packageName.isEmpty()) return;
+        LauncherIconDrawable.invalidatePackageArtworkCache(packageName, deletePersistentFiles);
+        if (drawerAdapter != null) drawerAdapter.invalidatePackageArtworkIdentity(packageName);
+    }
+
     private final Runnable refreshAppsAfterPackageChange = new Runnable() {
         @Override public void run() { loadApps(); }
     };

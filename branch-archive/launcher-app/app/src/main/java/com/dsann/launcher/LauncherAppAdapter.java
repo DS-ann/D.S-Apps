@@ -40,6 +40,8 @@ public final class LauncherAppAdapter extends BaseAdapter {
     private final String showLabelsKey;
     private final Actions actions;
     private final Map<String, String> labelCache = new HashMap<>();
+    private final Map<String, String> packageArtworkIdentityCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, android.graphics.drawable.Drawable.ConstantState> iconCache = new HashMap<>();
     // A recycled GridView cell can be rebound before its icon arrives. Track weak view waiters
     // so the completion updates only cells still representing that app.
@@ -144,9 +146,60 @@ public final class LauncherAppAdapter extends BaseAdapter {
         return app.activityInfo.packageName + "/" + app.activityInfo.name;
     }
 
-    /** Keep the drawable stable across routine binds, but invalidate it after package changes. */
-    private String artworkSourceToken(String appKey) {
-        return appKey + "#icon-generation=" + iconCacheGeneration;
+    /**
+     * Artwork keys are scoped to one installed package version, not to a global package-list
+     * generation. This keeps every unaffected application's artwork reusable across installs.
+     */
+    private String artworkSourceToken(String appKey, ResolveInfo app) {
+        String packageName = app != null && app.activityInfo != null
+                ? app.activityInfo.packageName : null;
+        if (packageName == null) return appKey;
+        String identity = packageArtworkIdentityCache.get(packageName);
+        if (identity == null) identity = resolveAndCachePackageArtworkIdentity(app);
+        return appKey + "#package-identity=" + identity;
+    }
+
+    /** Called by the drawer's icon worker so PackageManager metadata lookup stays off the UI thread. */
+    private String resolveAndCachePackageArtworkIdentity(ResolveInfo app) {
+        if (app == null || app.activityInfo == null) return "unknown";
+        String packageName = app.activityInfo.packageName;
+        String cached = packageArtworkIdentityCache.get(packageName);
+        if (cached != null) return cached;
+        String identity;
+        try {
+            android.content.pm.PackageInfo info = packageManager.getPackageInfo(packageName, 0);
+            android.content.pm.ApplicationInfo application = info.applicationInfo;
+            String sourceDir = application == null ? "" : String.valueOf(application.sourceDir);
+            int uid = application == null ? -1 : application.uid;
+            identity = "version=" + info.versionCode
+                    + ";firstInstall=" + info.firstInstallTime
+                    + ";lastUpdate=" + info.lastUpdateTime
+                    + ";uid=" + uid
+                    + ";source=" + sourceDir;
+        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+            android.content.pm.ApplicationInfo application = app.activityInfo.applicationInfo;
+            String sourceDir = application == null ? "" : String.valueOf(application.sourceDir);
+            long modified = 0L;
+            long length = 0L;
+            try {
+                java.io.File source = application == null || application.sourceDir == null
+                        ? null : new java.io.File(application.sourceDir);
+                if (source != null) {
+                    modified = source.lastModified();
+                    length = source.length();
+                }
+            } catch (RuntimeException ignoredFile) {}
+            identity = "fallback=" + sourceDir + ";uid="
+                    + (application == null ? -1 : application.uid)
+                    + ";modified=" + modified + ";length=" + length;
+        }
+        String prior = packageArtworkIdentityCache.putIfAbsent(packageName, identity);
+        return prior == null ? identity : prior;
+    }
+
+    /** Forget one package's metadata after install/removal/update, without touching other apps. */
+    void invalidatePackageArtworkIdentity(String packageName) {
+        if (packageName != null) packageArtworkIdentityCache.remove(packageName);
     }
 
     String cachedLabel(ResolveInfo app) {
@@ -208,6 +261,9 @@ public final class LauncherAppAdapter extends BaseAdapter {
             android.graphics.drawable.Drawable loaded = null;
             android.graphics.drawable.Drawable.ConstantState loadedState = null;
             try {
+                // Resolve the package-specific artwork identity alongside the icon, on this
+                // background worker. Unrelated package changes do not alter this identity.
+                resolveAndCachePackageArtworkIdentity(app);
                 loaded = app.loadIcon(packageManager);
                 if (loaded != null) loadedState = loaded.getConstantState();
             } catch (RuntimeException ignored) {
@@ -282,7 +338,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
 
         android.graphics.drawable.Drawable existingIcon = icon.getDrawable();
         LauncherIconDrawable wrapped;
-        String artworkToken = artworkSourceToken(appKey);
+        String artworkToken = artworkSourceToken(appKey, app);
         if (existingIcon instanceof LauncherIconDrawable) {
             wrapped = (LauncherIconDrawable) existingIcon;
             wrapped.updateContent(appIcon, roundedSquareBackground, iconShape,
@@ -358,6 +414,8 @@ public final class LauncherAppAdapter extends BaseAdapter {
 
     /** Called only when PackageManager reports an installed-app change. */
     public void clearPackageCaches() {
+        // Keep per-package artwork identities. Re-reading unchanged package metadata after
+        // every install/uninstall would add needless PackageManager work during drawer refresh.
         iconCacheGeneration++;
         labelCache.clear();
         iconCache.clear();
