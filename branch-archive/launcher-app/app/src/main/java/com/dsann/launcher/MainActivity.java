@@ -6556,14 +6556,16 @@ public class MainActivity extends Activity {
     }
 
     private boolean shouldApplyClockGradientInnerBorder() {
-        if (prefs == null
-                || !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
-                || prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false)) return false;
+        if (prefs == null || !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) return false;
         int artworkTheme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
                 KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
-        // Add this subtle white inner border only when Nothing artwork is selected, matching is
-        // off, and gradient colour is on. The separate Nothing + artwork-match path stays intact.
-        return artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+        boolean nothingArtwork = artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+        boolean artworkMatchingEnabled = prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
+
+        // Preserve the original gradient inner border for every non-Nothing artwork theme.
+        // Additionally enable it for Nothing Monochrome when artwork matching is disabled.
+        // When Nothing artwork matching is enabled, leave its existing border treatment unchanged.
+        return !nothingArtwork || !artworkMatchingEnabled;
     }
 
     private void applyClockTextInnerBorder(TextView view, boolean enabled, float strokeWidthPx) {
