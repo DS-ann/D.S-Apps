@@ -112,6 +112,39 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Package reversible Magisk privileged-app test module
+        run: |
+          set -euo pipefail
+          MODULE_ROOT="$RUNNER_TEMP/phonebridge-privileged-module"
+          MODULE_ZIP="$RUNNER_TEMP/PhoneBridge-Privileged-Test-Magisk.zip"
+          APK="branch-archive/main/phab-bridge/app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk"
+          mkdir -p "$MODULE_ROOT/system/priv-app/PhoneBridge" "$MODULE_ROOT/META-INF/com/google/android"
+          cp "$APK" "$MODULE_ROOT/system/priv-app/PhoneBridge/PhoneBridge.apk"
+          cat > "$MODULE_ROOT/module.prop" <<'EOF'
+          id=phonebridge_privileged_capture
+          name=PhoneBridge Privileged Capture Test
+          version=1.0
+          versionCode=1
+          author=DS-ann
+          description=Reversible systemless privileged install test for CAPTURE_AUDIO_OUTPUT on Android 6; remove this module in Magisk to revert.
+          EOF
+          curl -fsSL "https://raw.githubusercontent.com/topjohnwu/Magisk/v30.7/scripts/module_installer.sh" -o "$MODULE_ROOT/META-INF/com/google/android/update-binary"
+          printf '#MAGISK\n' > "$MODULE_ROOT/META-INF/com/google/android/updater-script"
+          chmod 0755 "$MODULE_ROOT/META-INF/com/google/android/update-binary"
+          chmod 0644 "$MODULE_ROOT/META-INF/com/google/android/updater-script" "$MODULE_ROOT/module.prop" "$MODULE_ROOT/system/priv-app/PhoneBridge/PhoneBridge.apk"
+          (cd "$MODULE_ROOT" && zip -qr "$MODULE_ZIP" .)
+          unzip -t "$MODULE_ZIP"
+          unzip -l "$MODULE_ZIP"
+
+      - name: Upload privileged-app test module
+        uses: actions/upload-artifact@v7
+        with:
+          name: PhoneBridge-Privileged-Test-Magisk.zip
+          path: ${{ runner.temp }}/PhoneBridge-Privileged-Test-Magisk.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload direct phone APK
         uses: actions/upload-artifact@v7
         with:
