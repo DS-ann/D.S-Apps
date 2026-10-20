@@ -325,6 +325,93 @@ public class MainActivity extends Activity {
         final android.graphics.Matrix matrix = new android.graphics.Matrix();
     }
 
+    /**
+     * Keeps the normal TextView layout, shaping, spacing and per-run typography, then overlays
+     * a clipped white inner contour. The contour is only enabled for gradient-colour clocks.
+     */
+    private static final class ClockTextInnerBorderTextView extends TextView {
+        private boolean innerBorderEnabled;
+        private float innerBorderWidthPx;
+        private float configuredShadowRadius;
+        private float configuredShadowDx;
+        private float configuredShadowDy;
+        private int configuredShadowColor = Color.TRANSPARENT;
+
+        ClockTextInnerBorderTextView(android.content.Context context) {
+            super(context);
+        }
+
+        void setInnerBorderEnabled(boolean enabled, float widthPx) {
+            float nextWidth = enabled ? Math.max(0f, widthPx) : 0f;
+            boolean nextEnabled = enabled && nextWidth > 0f;
+            if (innerBorderEnabled == nextEnabled
+                    && Math.abs(innerBorderWidthPx - nextWidth) < 0.01f) return;
+            innerBorderEnabled = nextEnabled;
+            innerBorderWidthPx = nextWidth;
+            invalidate();
+        }
+
+        @Override public void setShadowLayer(float radius, float dx, float dy, int color) {
+            super.setShadowLayer(radius, dx, dy, color);
+            configuredShadowRadius = radius;
+            configuredShadowDx = dx;
+            configuredShadowDy = dy;
+            configuredShadowColor = color;
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (!innerBorderEnabled || innerBorderWidthPx <= 0f
+                    || getWidth() <= 0 || getHeight() <= 0) return;
+
+            Paint textPaint = getPaint();
+            Paint.Style oldStyle = textPaint.getStyle();
+            float oldStrokeWidth = textPaint.getStrokeWidth();
+            Paint.Join oldJoin = textPaint.getStrokeJoin();
+            Paint.Cap oldCap = textPaint.getStrokeCap();
+            android.graphics.Shader oldShader = textPaint.getShader();
+            android.graphics.Xfermode oldXfermode = textPaint.getXfermode();
+            int oldColor = textPaint.getColor();
+            int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
+            try {
+                // The first pass draws the outline. The second masks it to the glyph fill,
+                // removing the external half and leaving only the requested inner border.
+                textPaint.clearShadowLayer();
+                textPaint.setXfermode(null);
+                textPaint.setStyle(Paint.Style.STROKE);
+                textPaint.setStrokeWidth(innerBorderWidthPx * 2f);
+                textPaint.setStrokeJoin(Paint.Join.ROUND);
+                textPaint.setStrokeCap(Paint.Cap.ROUND);
+                textPaint.setShader(null);
+                textPaint.setColor(Color.WHITE);
+                super.onDraw(canvas);
+
+                textPaint.setStyle(Paint.Style.FILL);
+                textPaint.setStrokeWidth(0f);
+                textPaint.setShader(null);
+                textPaint.setColor(Color.WHITE);
+                textPaint.setXfermode(new android.graphics.PorterDuffXfermode(
+                        android.graphics.PorterDuff.Mode.DST_IN));
+                super.onDraw(canvas);
+            } finally {
+                canvas.restoreToCount(layer);
+                textPaint.setStyle(oldStyle);
+                textPaint.setStrokeWidth(oldStrokeWidth);
+                textPaint.setStrokeJoin(oldJoin);
+                textPaint.setStrokeCap(oldCap);
+                textPaint.setShader(oldShader);
+                textPaint.setXfermode(oldXfermode);
+                textPaint.setColor(oldColor);
+                if (configuredShadowRadius > 0f && Color.alpha(configuredShadowColor) != 0) {
+                    textPaint.setShadowLayer(configuredShadowRadius, configuredShadowDx,
+                            configuredShadowDy, configuredShadowColor);
+                } else {
+                    textPaint.clearShadowLayer();
+                }
+            }
+        }
+    }
+
     /** Draws a text run with a controlled fill colour and a thin external glyph outline. */
     private static final class ClockTextOutlineSpan extends android.text.style.ReplacementSpan {
         private final int fillColor;
@@ -381,6 +468,8 @@ public class MainActivity extends Activity {
     private final java.util.WeakHashMap<TextView, Boolean> dateGradientModeApplied =
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, String> dateTextAppearanceApplied =
+            new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
@@ -2473,7 +2562,7 @@ public class MainActivity extends Activity {
         clockRow.addView(clockGroup, groupParams);
         hero.addView(clockRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
         // Keep the existing 13sp date size; improve contrast instead of enlarging it.
-        dateText = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
+        dateText = createClockDateTextView();
         dateText.setTypeface(Typeface.create("cursive", Typeface.BOLD));
         dateText.setGravity(Gravity.CENTER);
         dateText.setLetterSpacing(0.04f);
@@ -2637,6 +2726,20 @@ public class MainActivity extends Activity {
         clockGroup = clockGroupsByPage[page];
     }
 
+    private ClockTextInnerBorderTextView createClockDateTextView() {
+        ClockTextInnerBorderTextView view = new ClockTextInnerBorderTextView(this);
+        // Match LauncherUiUtils.text() exactly; the caller applies the existing clock-specific
+        // typeface, gravity, spacing and shadow immediately afterwards.
+        view.setText("");
+        view.setTextSize(13f);
+        view.setTextColor(Color.WHITE);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setIncludeFontPadding(false);
+        view.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
+        return view;
+    }
+
     private void buildSecondPageClock() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -2677,7 +2780,7 @@ public class MainActivity extends Activity {
         panel.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
 
-        TextView date = LauncherUiUtils.text(this, "", 13, Color.WHITE, true);
+        TextView date = createClockDateTextView();
         date.setTypeface(Typeface.create("cursive", Typeface.BOLD));
         date.setGravity(Gravity.CENTER);
         date.setLetterSpacing(0.04f);
@@ -6540,6 +6643,14 @@ public class MainActivity extends Activity {
                 && !prefs.getBoolean(KEY_CLOCK_LIVE_GRADIENT, false);
     }
 
+    private boolean shouldApplyClockGradientInnerBorder() {
+        if (prefs == null || !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) return false;
+        int artworkTheme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+        // Nothing Monochrome has its own deliberate border treatment and must remain untouched.
+        return artworkTheme != LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+    }
+
     private void refreshClockArtworkAppearance() {
         int restorePage = Math.max(0, Math.min(1, currentPage));
         // Restore each style's own typography/shadow before applying the chosen
@@ -6703,6 +6814,16 @@ public class MainActivity extends Activity {
         float displayPhase = live ? phase : 0f;
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
+        boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
+        float borderDensity = getResources().getDisplayMetrics().density;
+        if (dateText instanceof ClockTextInnerBorderTextView) {
+            ((ClockTextInnerBorderTextView) dateText).setInnerBorderEnabled(
+                    useWhiteGradientInnerBorder, 0.5f * borderDensity);
+        }
+        if (amPmText instanceof ClockTextInnerBorderTextView) {
+            ((ClockTextInnerBorderTextView) amPmText).setInnerBorderEnabled(
+                    useWhiteGradientInnerBorder, 0.5f * borderDensity);
+        }
         boolean iconArtworkActive = isClockIconArtworkActive();
         int[] artworkTextColours = iconArtworkActive
                 ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
@@ -6778,12 +6899,17 @@ public class MainActivity extends Activity {
                     useDigitGradient && sevenSegment, digitPhase, digitColours);
 
             boolean useNothingInnerBorder = nothingArtworkMatch && !neonCircuit;
+            boolean useGradientInnerBorder = useWhiteGradientInnerBorder;
             float innerBorderWidth = useNothingInnerBorder
-                    ? 3f * getResources().getDisplayMetrics().density
-                    : Math.max(2.25f, getResources().getDisplayMetrics().density * 1.65f);
+                    ? 3f * borderDensity
+                    // The normal TextView path masks away the outer half of its stroke;
+                    // double its width so the visible inner contour remains exactly 1dp.
+                    : (sevenSegment ? 1f : 2f) * borderDensity;
+            clockRenderer.setDigitOnlyInnerBorder(useGradientInnerBorder);
+            boolean useAnyInnerBorder = useNothingInnerBorder || useGradientInnerBorder;
             clockRenderer.setContrastInnerBorderEnabled(
-                    useNothingInnerBorder, digitColours, innerBorderWidth,
-                    useNothingInnerBorder ? CLOCK_WHITE_BORDER_COLORS : null);
+                    useAnyInnerBorder, digitColours, innerBorderWidth,
+                    useAnyInnerBorder ? CLOCK_WHITE_BORDER_COLORS : null);
         }
 
         if (sevenSegment) {
@@ -6915,6 +7041,7 @@ public class MainActivity extends Activity {
             clockValue = clockValue.trim();
             boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
                     && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+            boolean useWhiteDigitInnerBorder = shouldApplyClockGradientInnerBorder();
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
             if (!sevenSegmentClock && !clockValue.isEmpty()) {
@@ -6962,11 +7089,16 @@ public class MainActivity extends Activity {
                                         * Math.max(0f, clockText.getLetterSpacing()) * 0.5f),
                                 hourStart, hourStart + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
-                    displayClock.setSpan(new CenteredColonSpan(LauncherUiUtils.dp(this, 114) / 2f),
+                    displayClock.setSpan(new CenteredColonSpan(
+                                    LauncherUiUtils.dp(this, 114) / 2f, useWhiteDigitInnerBorder),
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
-            if (!displayClock.toString().contentEquals(clockText.getText())) {
+            Boolean previousDigitBorderMode = clockDigitInnerBorderModeApplied.get(clockText);
+            boolean digitBorderModeChanged = previousDigitBorderMode == null
+                    || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
+            if (!displayClock.toString().contentEquals(clockText.getText())
+                    || digitBorderModeChanged) {
                 // The seven-segment renderer owns its glyph geometry; standard styles
                 // keep the normal TextView formatting and use a separate static shader.
                 if (sevenSegmentClock) {
@@ -6975,6 +7107,7 @@ public class MainActivity extends Activity {
                 } else {
                     clockText.setText(displayClock);
                 }
+                clockDigitInnerBorderModeApplied.put(clockText, useWhiteDigitInnerBorder);
             }
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
@@ -10959,9 +11092,11 @@ public class MainActivity extends Activity {
 
     private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
         private final float rowCenterY;
+        private final boolean skipGradientInnerBorder;
 
-        CenteredColonSpan(float rowCenterY) {
+        CenteredColonSpan(float rowCenterY, boolean skipGradientInnerBorder) {
             this.rowCenterY = rowCenterY;
+            this.skipGradientInnerBorder = skipGradientInnerBorder;
         }
 
         @Override
@@ -10975,6 +11110,9 @@ public class MainActivity extends Activity {
         @Override
         public void draw(Canvas canvas, CharSequence text, int start, int end,
                 float x, int top, int y, int bottom, Paint paint) {
+            // The ordinary gradient-border pass outlines digits only, not the colon.
+            // Leave the existing Nothing-theme rendering unchanged.
+            if (skipGradientInnerBorder && paint.getStyle() == Paint.Style.STROKE) return;
             Paint dots = new Paint(paint);
             dots.setStyle(Paint.Style.FILL);
             float naturalWidth = paint.measureText(":");
