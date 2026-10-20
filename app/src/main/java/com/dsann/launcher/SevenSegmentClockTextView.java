@@ -150,12 +150,11 @@ public final class SevenSegmentClockTextView extends TextView {
         float[] nextBorderStops = null;
         if (enabled && fillColors != null && fillColors.length >= 2) {
             if (isWhiteBlackWhitePalette(fillColors)) {
-                // White regions stay white and black regions stay black. The thresholds
-                // hold these tones near their endpoints; a smooth ramp joins them where
-                // the underlying monochrome gradient transitions from white to black.
+                // Reverse the current border polarity: white regions get black borders,
+                // black regions get white borders. Keep the same transition thresholds.
                 nextBorderColors = new int[] {
-                        Color.WHITE, Color.WHITE, Color.BLACK, Color.BLACK,
-                        Color.BLACK, Color.WHITE, Color.WHITE
+                        Color.BLACK, Color.BLACK, Color.WHITE, Color.WHITE,
+                        Color.WHITE, Color.BLACK, Color.BLACK
                 };
                 nextBorderStops = new float[] {
                         0f, 0.04f, 0.453f, 0.5f, 0.547f, 0.96f, 1f
