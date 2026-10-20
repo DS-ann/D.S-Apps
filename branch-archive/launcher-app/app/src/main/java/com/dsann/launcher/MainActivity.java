@@ -325,11 +325,7 @@ public class MainActivity extends Activity {
         final android.graphics.Matrix matrix = new android.graphics.Matrix();
     }
 
-    /**
-     * Keeps the normal TextView layout, shaping, spacing and per-run typography, then overlays
-     * a clipped white inner contour. The contour is only enabled for gradient-colour clocks.
-     */
-    private static final class ClockTextInnerBorderTextView extends TextView {
+    /** Draws a text run with a controlled fill colour and a thin external glyph outline. */
         private boolean innerBorderEnabled;
         private float innerBorderWidthPx;
         private float configuredShadowRadius;
@@ -2726,10 +2722,10 @@ public class MainActivity extends Activity {
         clockGroup = clockGroupsByPage[page];
     }
 
-    private ClockTextInnerBorderTextView createClockDateTextView() {
-        ClockTextInnerBorderTextView view = new ClockTextInnerBorderTextView(this);
-        // Match LauncherUiUtils.text() exactly; the caller applies the existing clock-specific
-        // typeface, gravity, spacing and shadow immediately afterwards.
+    private SevenSegmentClockTextView createClockDateTextView() {
+        SevenSegmentClockTextView view = new SevenSegmentClockTextView(this);
+        // Reuse the renderer's established inner-contour drawing path in ordinary TextView mode.
+        view.setSevenSegmentMode(false);
         view.setText("");
         view.setTextSize(13f);
         view.setTextColor(Color.WHITE);
@@ -6651,6 +6647,15 @@ public class MainActivity extends Activity {
         return artworkTheme != LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
     }
 
+    private void applyClockTextInnerBorder(TextView view, boolean enabled, float strokeWidthPx) {
+        if (!(view instanceof SevenSegmentClockTextView)) return;
+        SevenSegmentClockTextView renderer = (SevenSegmentClockTextView) view;
+        renderer.setDigitOnlyInnerBorder(false);
+        renderer.setContrastInnerBorderEnabled(enabled,
+                CLOCK_DATE_GRADIENT_COLORS, strokeWidthPx,
+                enabled ? CLOCK_WHITE_BORDER_COLORS : null);
+    }
+
     private void refreshClockArtworkAppearance() {
         int restorePage = Math.max(0, Math.min(1, currentPage));
         // Restore each style's own typography/shadow before applying the chosen
@@ -6816,14 +6821,10 @@ public class MainActivity extends Activity {
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
         float borderDensity = getResources().getDisplayMetrics().density;
-        if (dateText instanceof ClockTextInnerBorderTextView) {
-            ((ClockTextInnerBorderTextView) dateText).setInnerBorderEnabled(
-                    useWhiteGradientInnerBorder, 0.5f * borderDensity);
-        }
-        if (amPmText instanceof ClockTextInnerBorderTextView) {
-            ((ClockTextInnerBorderTextView) amPmText).setInnerBorderEnabled(
-                    useWhiteGradientInnerBorder, 0.5f * borderDensity);
-        }
+        // The existing text-mode renderer clips half of its centered stroke to the glyph;
+        // a 1dp stroke therefore leaves the requested 0.5dp white inner border.
+        applyClockTextInnerBorder(dateText, useWhiteGradientInnerBorder, 1f * borderDensity);
+        applyClockTextInnerBorder(amPmText, useWhiteGradientInnerBorder, 1f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
         int[] artworkTextColours = iconArtworkActive
                 ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
