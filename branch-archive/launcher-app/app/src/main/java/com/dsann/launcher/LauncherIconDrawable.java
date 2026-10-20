@@ -494,6 +494,13 @@ final class LauncherIconDrawable extends Drawable {
 
     private boolean matchesArtworkRequest(ArtworkCacheKey key, int theme) {
         if (artworkTheme != theme || originalSource == null) return false;
+        // Some Android icon drawables vend fresh ConstantState wrapper objects on bind.
+        // Stable app/activity + package-generation tokens identify the same logical source
+        // more reliably; package refreshes alter the token and reject obsolete worker results.
+        if (key.token != null && !key.token.isEmpty()
+                && sourceCacheToken != null && !sourceCacheToken.isEmpty()) {
+            return key.token.equals(sourceCacheToken);
+        }
         return key.equals(new ArtworkCacheKey(
                 originalSource.getConstantState(), sourceCacheToken, theme));
     }
