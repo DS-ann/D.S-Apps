@@ -201,10 +201,17 @@ final class LauncherIconDrawable extends Drawable {
             this.theme = theme;
         }
 
+        private boolean hasStableToken() {
+            return token != null && !token.isEmpty();
+        }
+
         @Override public int hashCode() {
+            // App/activity + package-generation tokens are stable across PackageManager
+            // icon reloads. Do not include ConstantState identity when such a token exists:
+            // Android may manufacture a fresh wrapper object for the same themed icon.
+            if (hasStableToken()) return token.hashCode() * 31 + theme;
             int identityHash = state == null ? 0 : System.identityHashCode(state);
-            int tokenHash = token == null ? 0 : token.hashCode();
-            return (identityHash * 31 + tokenHash) * 31 + theme;
+            return (identityHash * 31 + theme);
         }
 
         @Override public boolean equals(Object other) {
@@ -212,9 +219,13 @@ final class LauncherIconDrawable extends Drawable {
             if (!(other instanceof ArtworkCacheKey)) return false;
             ArtworkCacheKey key = (ArtworkCacheKey) other;
             if (theme != key.theme) return false;
-            if (state != key.state) return false;
-            if (token == null) return key.token == null;
-            return token.equals(key.token);
+            boolean stableToken = hasStableToken();
+            boolean otherStableToken = key.hasStableToken();
+            if (stableToken || otherStableToken) {
+                return stableToken && otherStableToken && token.equals(key.token);
+            }
+            // Token-less custom drawables use the prior ConstantState identity fallback.
+            return state == key.state;
         }
     }
 
