@@ -84,6 +84,15 @@ class BridgeServer(private val context: Context) {
                 command == "REJECT" -> PhoneCallController.reject()
                 command == "HANGUP" -> PhoneCallController.hangup()
                 command == "CALL_STATE?" -> "CALL_STATE:" + PhoneCallController.currentState
+                command.startsWith("AUDIO_DIAG:") -> {
+                    val value = command.substringAfter(':').replace('\n', ' ').replace('\r', ' ').take(1200)
+                    context.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putString("tablet_audio_diag", value)
+                        .putLong("tablet_audio_diag_at", System.currentTimeMillis())
+                        .apply()
+                    "OK:AUDIO_DIAG"
+                }
                 command.startsWith("AUDIO_START:") ->
                     startAudio(command.substringAfter(':').trim(), socket)
                 command == "AUDIO_STOP" -> {

@@ -1,11 +1,14 @@
 package com.dsann.phonebridge
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -24,6 +27,8 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -37,6 +42,13 @@ class MainActivity : Activity() {
     private var pendingDialNumber: String? = null
     private var localResult = ""
     private var showCallKeypad = false
+
+    private var bridgeSummaryView: TextView? = null
+    private var phoneAudioDiagnosticsView: TextView? = null
+    private var tabletAudioDiagnosticsView: TextView? = null
+    private var rootDiagnosticsView: TextView? = null
+    private var rootDiagnosticsReport = ""
+    @Volatile private var rootDiagnosticsRunning = false
 
     private var activeNumberView: TextView? = null
     private var activeStatusView: TextView? = null
@@ -54,6 +66,7 @@ class MainActivity : Activity() {
             }
             if (mode != renderedMode) renderScreen(mode)
             if (mode == MODE_ACTIVE_CALL || mode == MODE_INCOMING) updateCallScreen(state)
+            if (mode == MODE_HOME && selectedTab == TAB_BRIDGE) refreshBridgeStatus()
             handler.postDelayed(this, 500)
         }
     }
@@ -368,47 +381,177 @@ class MainActivity : Activity() {
     }
 
     private fun showBridgeTab() {
-        body.addView(makeText("Bridge status", 20f, COLOR_TEXT, true),
-            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
-        val prefs = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
-        val bridge = prefs.getString(BridgeService.KEY_STATUS, "Starting…") ?: "Starting…"
-        val call = prefs.getString(BridgeService.KEY_CALL_STATE, "IDLE") ?: "IDLE"
-        val audio = prefs.getString("audio_wifi", "STOPPED") ?: "STOPPED"
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, dp(12))
+        }
+
+        content.addView(makeText("Bridge diagnostics", 20f, COLOR_TEXT, true),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(COLOR_PANEL, 18)
-            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setPadding(dp(14), dp(14), dp(14), dp(14))
         }
-        card.addView(makeText("BRIDGE", 10f, COLOR_MUTED, true))
-        card.addView(makeText(bridge, 15f, COLOR_TEXT, true),
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
-        card.addView(makeText("Call: " + call + "    Wi-Fi audio: " + audio, 12f, COLOR_MUTED),
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        card.addView(makeText("LIVE BRIDGE / CALL STATE", 10f, COLOR_MUTED, true))
+        bridgeSummaryView = makeText("Reading status…", 12f, COLOR_TEXT, false)
+        bridgeSummaryView?.setTextIsSelectable(true)
+        card.addView(bridgeSummaryView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
 
-        body.addView(actionButton(
+        content.addView(makeText("PHONE AUDIO METRICS", 11f, COLOR_MUTED, true),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        phoneAudioDiagnosticsView = makeText("", 11f, COLOR_TEXT, false)
+        phoneAudioDiagnosticsView?.setTextIsSelectable(true)
+        content.addView(phoneAudioDiagnosticsView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+
+        content.addView(makeText("TABLET AUDIO METRICS (OVER WI-FI)", 11f, COLOR_MUTED, true),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        tabletAudioDiagnosticsView = makeText("Waiting for tablet telemetry. Connect both devices and start Wi-Fi audio.", 11f, COLOR_TEXT, false)
+        tabletAudioDiagnosticsView?.setTextIsSelectable(true)
+        content.addView(tabletAudioDiagnosticsView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+
+        content.addView(makeText(
+            "During calls, tablet microphone packets are measured but not played on the phone speaker. The phone attempts VOICE_DOWNLINK capture only; if Android blocks it, the error is shown rather than silently relaying the phone mic. STREAM_MUSIC is not the cellular uplink.",
+            11f, COLOR_MUTED, false
+        ), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+
+        content.addView(actionButton(
             if (isDefaultDialer()) "PhoneBridge is the default phone app" else "Set as default phone app",
             COLOR_SELECTED, COLOR_TEXT
-        ) { requestDefaultDialer() }, LinearLayout.LayoutParams(-1, dp(50)).apply {
-            bottomMargin = dp(8)
-        })
-        body.addView(actionButton("Start bridge", COLOR_PANEL, COLOR_TEXT, {
+        ) { requestDefaultDialer() }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(7) })
+
+        content.addView(actionButton("Start bridge", COLOR_PANEL, COLOR_TEXT, {
             startBridgeService()
             localResult = "Bridge start requested."
-            renderScreen(MODE_HOME)
-        }), LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
-        body.addView(actionButton("Stop bridge", COLOR_PANEL, COLOR_TEXT, {
+            refreshBridgeStatus()
+        }), LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+
+        content.addView(actionButton("Stop bridge", COLOR_PANEL, COLOR_TEXT, {
             startService(Intent(this, BridgeService::class.java).apply {
                 action = BridgeService.ACTION_STOP
             })
             localResult = "Bridge stop requested."
-            renderScreen(MODE_HOME)
-        }), LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+            refreshBridgeStatus()
+        }), LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+
+        content.addView(actionButton(
+            if (rootDiagnosticsRunning) "Root diagnostics running…" else "Run root audio diagnostics",
+            COLOR_SELECTED, COLOR_TEXT
+        ) { runRootAudioDiagnostics() }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(7) })
+
+        content.addView(actionButton("Copy diagnostic report", COLOR_PANEL, COLOR_TEXT, {
+            copyDiagnosticReport()
+        }), LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(10) })
+
+        content.addView(makeText("ROOT AUDIO REPORT", 11f, COLOR_MUTED, true),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        rootDiagnosticsView = makeText(
+            if (rootDiagnosticsReport.isBlank()) "Not run yet. Run this during a test call, then copy the report." else rootDiagnosticsReport,
+            10f, COLOR_TEXT, false
+        )
+        rootDiagnosticsView?.setTextIsSelectable(true)
+        content.addView(rootDiagnosticsView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
 
         if (localResult.isNotBlank()) {
-            body.addView(makeText(localResult, 12f, COLOR_MUTED),
-                LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            content.addView(makeText(localResult, 11f, COLOR_MUTED, false),
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
+
+        scroll.addView(content)
+        body.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        refreshBridgeStatus()
+    }
+
+    private fun refreshBridgeStatus() {
+        val prefs = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
+        val bridge = prefs.getString(BridgeService.KEY_STATUS, "Starting…") ?: "Starting…"
+        val call = prefs.getString(BridgeService.KEY_CALL_STATE, "IDLE") ?: "IDLE"
+        val audio = prefs.getString("audio_wifi", "STOPPED") ?: "STOPPED"
+        bridgeSummaryView?.text = "Bridge: " + bridge + "\nCall: " + call + "\nWi-Fi audio: " + audio
+        phoneAudioDiagnosticsView?.text = AudioBridge.diagnosticSummary()
+        tabletAudioDiagnosticsView?.text = prefs.getString(
+            "tablet_audio_diag",
+            "Waiting for tablet telemetry. Start Wi-Fi audio to receive TX/RX packet counts, mic levels, and capture errors."
+        ) ?: "Waiting for tablet telemetry."
+    }
+
+    private fun runRootAudioDiagnostics() {
+        if (rootDiagnosticsRunning) return
+        rootDiagnosticsRunning = true
+        rootDiagnosticsView?.text = "Collecting read-only root diagnostics. Keep the screen open and approve the Magisk su prompt if shown."
+        Thread({
+            val report = collectRootAudioDiagnostics()
+            runOnUiThread {
+                rootDiagnosticsRunning = false
+                rootDiagnosticsReport = report
+                rootDiagnosticsView?.text = report
+                localResult = "Root audio diagnostics collected."
+            }
+        }, "PhoneBridgeRootAudioDiagnostics").start()
+    }
+
+    private fun collectRootAudioDiagnostics(): String {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val prefs = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
+        val tablet = prefs.getString("tablet_audio_diag", "No tablet telemetry received.") ?: "No tablet telemetry received."
+        val header = "PhoneBridge root audio diagnostics" +
+            "\nDevice=" + Build.DEVICE +
+            "\nAndroid=" + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")" +
+            "\nFingerprint=" + Build.FINGERPRINT +
+            "\nCallState=" + PhoneCallController.currentState +
+            "\nAudioManagerMode=" + audioManager.mode +
+            "\nSpeakerphoneOn=" + audioManager.isSpeakerphoneOn +
+            "\nMicrophoneMuted=" + audioManager.isMicrophoneMute +
+            "\n\n=== PhoneBridge runtime metrics ===\n" + AudioBridge.diagnosticSummary() +
+            "\n\n=== Last tablet telemetry ===\n" + tablet +
+            "\n\n=== Root shell diagnostics ===\n"
+
+        val script = """
+            set +e
+            echo '=== ROOT ID ==='; id
+            echo '=== BUILD PROPERTIES ==='; getprop ro.build.version.release; getprop ro.build.version.sdk; getprop ro.product.device; getprop ro.product.board; getprop ro.board.platform; getprop ro.mediatek.platform
+            echo '=== AUDIO / MTK / MODEM PROPERTIES ==='; getprop | grep -Ei 'audio|mediatek|mtk|modem|ril|platform|alsa' | head -n 100
+            echo '=== ALSA DEVICE NODES ==='; ls -l /dev/snd 2>&1; cat /proc/asound/cards /proc/asound/pcm 2>&1
+            echo '=== AUDIO UTILITIES ==='; command -v tinymix; command -v tinycap; command -v tinyplay; command -v tinyhostless; ls -l /system/bin/tiny* /system/xbin/tiny* /vendor/bin/tiny* 2>&1
+            echo '=== AUDIO HAL LIBRARIES ==='; ls -l /system/lib/hw/audio* /system/lib64/hw/audio* /vendor/lib/hw/audio* /vendor/lib64/hw/audio* 2>&1
+            echo '=== DUMPSYS AUDIO ==='; dumpsys audio 2>&1 | head -n 180
+            echo '=== AUDIO FLINGER ==='; dumpsys media.audio_flinger 2>&1 | head -n 200
+            echo '=== TELECOM ==='; dumpsys telecom 2>&1 | head -n 100
+            echo '=== TELEPHONY REGISTRY ==='; dumpsys telephony.registry 2>&1 | head -n 90
+            echo '=== AUDIO / RADIO SERVICES ==='; service list 2>&1 | grep -Ei 'audio|media|phone|telecom|radio'
+        """.trimIndent()
+
+        var output = ""
+        var exitStatus = "unknown"
+        try {
+            val process = ProcessBuilder("su", "-c", script).redirectErrorStream(true).start()
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val buffer = StringBuilder()
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (buffer.length < 26000) buffer.append(line).append('\n')
+            }
+            reader.close()
+            exitStatus = process.waitFor().toString()
+            output = buffer.toString()
+        } catch (e: Throwable) {
+            output = "Root diagnostics failed: " + e.javaClass.simpleName + ": " + (e.message ?: "")
+        }
+        return header + "exit=" + exitStatus + "\n" + output.take(26000)
+    }
+
+    private fun copyDiagnosticReport() {
+        val prefs = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
+        val latest = rootDiagnosticsReport + "\n\n=== LIVE SNAPSHOT ===" +
+            "\nCallState=" + PhoneCallController.currentState +
+            "\nPhone=" + AudioBridge.diagnosticSummary() +
+            "\nTablet=" + (prefs.getString("tablet_audio_diag", "No tablet telemetry received.") ?: "No tablet telemetry received.")
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("PhoneBridge audio diagnostics", latest))
+        Toast.makeText(this, "Diagnostic report copied", Toast.LENGTH_SHORT).show()
     }
 
     private fun buildCallScreen(mode: String) {

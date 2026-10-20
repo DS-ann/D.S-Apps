@@ -64,6 +64,17 @@ class BridgeService : Service() {
 
     private val io = Executors.newCachedThreadPool()
     private val reconnectHandler = Handler(Looper.getMainLooper())
+    private val diagnosticsHandler = Handler(Looper.getMainLooper())
+    private val diagnosticReporter = object : Runnable {
+        override fun run() {
+            val activeSocket = socket
+            if (callAudioRequested && AudioClient.isRunning() &&
+                activeSocket != null && activeSocket.isConnected && !activeSocket.isClosed) {
+                sendCommand("AUDIO_DIAG:" + AudioClient.diagnosticSummary(this@BridgeService))
+            }
+            if (callAudioRequested) diagnosticsHandler.postDelayed(this, 1000L)
+        }
+    }
     @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
     @Volatile private var phabHost = "192.168.43.1"
@@ -122,7 +133,7 @@ class BridgeService : Service() {
         try {
             while (!s.isClosed) {
                 val line = reader.readLine() ?: break
-                broadcast("PHAB:" + line)
+                if (!line.startsWith("OK:AUDIO_DIAG")) broadcast("PHAB:" + line)
                 when {
                     line == "PONG" -> broadcast("CONNECTION:PONG")
 
@@ -150,6 +161,7 @@ class BridgeService : Service() {
                 socket = null
                 writer = null
                 callAudioRequested = false
+                diagnosticsHandler.removeCallbacks(diagnosticReporter)
                 AudioClient.stop(this)
                 broadcast("CONNECTION:DISCONNECTED")
                 scheduleReconnect()
@@ -161,16 +173,23 @@ class BridgeService : Service() {
 
     private fun ensureWifiAudio() {
         io.execute {
-            if (!callAudioRequested || audioRunning()) return@execute
+            if (!callAudioRequested) return@execute
+            if (audioRunning()) {
+                scheduleDiagnostics()
+                broadcast("AUDIO:ALREADY_RUNNING")
+                return@execute
+            }
             try {
                 val port = AudioClient.start(this, InetAddress.getByName(phabHost))
                 if (port < 0) {
+                    scheduleDiagnostics()
                     broadcast("AUDIO:ALREADY_RUNNING")
                     return@execute
                 }
                 broadcast("AUDIO:START_REQUEST:" + port)
                 sendCommand("AUDIO_START:" + port)
                 broadcast("AUDIO:STARTING:" + port)
+                scheduleDiagnostics()
             } catch (e: SecurityException) {
                 broadcast("ERROR:MIC_PERMISSION")
             } catch (e: Exception) {
@@ -180,6 +199,11 @@ class BridgeService : Service() {
                 }, 750)
             }
         }
+    }
+
+    private fun scheduleDiagnostics() {
+        diagnosticsHandler.removeCallbacks(diagnosticReporter)
+        diagnosticsHandler.postDelayed(diagnosticReporter, 1000L)
     }
 
     private fun sendCommand(command: String) {
@@ -207,6 +231,7 @@ class BridgeService : Service() {
 
     private fun stopWifiAudio() {
         callAudioRequested = false
+        diagnosticsHandler.removeCallbacks(diagnosticReporter)
         sendCommand("AUDIO_STOP")
         AudioClient.stop(this)
         broadcast("AUDIO:STOPPED")
@@ -265,6 +290,7 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         reconnectHandler.removeCallbacksAndMessages(null)
+        diagnosticsHandler.removeCallbacksAndMessages(null)
         callAudioRequested = false
         AudioClient.stop(this)
         closeSocket()
