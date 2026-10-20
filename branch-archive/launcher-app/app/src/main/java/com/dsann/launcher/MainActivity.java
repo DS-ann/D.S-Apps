@@ -138,12 +138,6 @@ public class MainActivity extends Activity {
             Color.rgb(169, 139, 255), Color.rgb(255, 120, 191),
             Color.rgb(217, 247, 255)
     };
-    // Neon Circuit's glyph fill stays strictly white-to-near-white, even when
-    // gradient or icon-artwork matching is enabled.
-    private static final int CLOCK_NEON_CIRCUIT_SOLID = Color.rgb(248, 248, 248);
-    private static final int[] CLOCK_NEON_CIRCUIT_GRADIENT_COLORS = new int[] {
-            Color.WHITE, Color.rgb(248, 248, 248), Color.WHITE
-    };
     private static final long ICON_EDGE_SWITCH_DELAY_MS = 200L;
     private static final int ICON_EDGE_SWITCH_ZONE_DP = 24;
     private interface IntAction { void onSelect(int value); }
@@ -6408,6 +6402,9 @@ public class MainActivity extends Activity {
         }
         activateClockForPage(restorePage);
         updateClock();
+        // Artwork-theme changes affect the panel itself as well as the digits.
+        // Refresh explicitly rather than waiting for resize or a colour-phase tick.
+        applyClockPanelColor(false);
     }
 
     private void refreshClockTypographyAndGeometry() {
@@ -6574,16 +6571,15 @@ public class MainActivity extends Activity {
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         boolean neonCircuit = prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
-        int solidDigitColour = neonCircuit && iconArtworkActive
-                ? CLOCK_NEON_CIRCUIT_SOLID : CLOCK_DIGIT_SILVER;
-
-        // Artwork matching keeps Neon Circuit achromatic; Colour Gradient alone
-        // restores its original multicolour palette.
-        boolean useDigitGradient = digitGradient || iconArtworkActive;
-        int[] digitColours = neonCircuit && iconArtworkActive
-                ? CLOCK_NEON_CIRCUIT_GRADIENT_COLORS
-                : iconArtworkActive ? getClockArtworkTransitionColours()
+        int[] digitColours = iconArtworkActive
+                ? getClockArtworkTransitionColours()
                 : CLOCK_DIGIT_GRADIENT_COLORS;
+        int solidDigitColour = neonCircuit && iconArtworkActive
+                ? digitColours[0] : CLOCK_DIGIT_SILVER;
+
+        // Icon-artwork matching uses the selected artwork's palette for every
+        // clock style, including Neon Circuit. Colour Gradient keeps its own palette.
+        boolean useDigitGradient = digitGradient || iconArtworkActive;
         float digitPhase = digitGradient ? displayPhase : 0f;
 
         if (clockText instanceof SevenSegmentClockTextView) {
