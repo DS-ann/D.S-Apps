@@ -26,6 +26,55 @@ jobs:
       - name: Restore deduplicated source files
         run: python3 .github/scripts/restore_archive_duplicates.py --branch 'main'
 
+      - name: Build bundled TinyALSA tinymix for Android 6+
+        env:
+          TINYALSA_COMMIT: bbdba1e208f402c5b7d5cb3d42307a3db9f6bb1c
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          NDK_VERSION="26.3.11579264"
+          NDK_ROOT="$SDK_ROOT/ndk/$NDK_VERSION"
+          if [ ! -f "$NDK_ROOT/build/cmake/android.toolchain.cmake" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print 2>/dev/null | sort -V | tail -n 1 || true)"
+            if [ -z "$SDKMANAGER" ]; then
+              echo "Android SDK manager not found; cannot install the NDK needed for tinymix." >&2
+              exit 1
+            fi
+            yes | "$SDKMANAGER" --licenses >/dev/null || true
+            "$SDKMANAGER" "ndk;$NDK_VERSION" "cmake;3.22.1"
+          fi
+          test -f "$NDK_ROOT/build/cmake/android.toolchain.cmake"
+          export PATH="$SDK_ROOT/cmake/3.22.1/bin:$PATH"
+          command -v cmake >/dev/null
+          TINYALSA_SOURCE="$RUNNER_TEMP/tinyalsa"
+          git clone --quiet https://github.com/tinyalsa/tinyalsa.git "$TINYALSA_SOURCE"
+          git -C "$TINYALSA_SOURCE" checkout --quiet --detach "$TINYALSA_COMMIT"
+          ASSET_ROOT="$GITHUB_WORKSPACE/branch-archive/main/phab-bridge/app/src/main/assets/tinymix"
+          mkdir -p "$ASSET_ROOT"
+          cp "$TINYALSA_SOURCE/LICENSE" "$ASSET_ROOT/LICENSE"
+          for ABI in arm64-v8a armeabi-v7a; do
+            BUILD_DIR="$RUNNER_TEMP/tinyalsa-build-$ABI"
+            cmake -S "$TINYALSA_SOURCE" -B "$BUILD_DIR" \
+              -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$ABI" \
+              -DANDROID_PLATFORM=android-23 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DTINYALSA_USES_PLUGINS=OFF \
+              -DTINYALSA_BUILD_EXAMPLES=OFF \
+              -DTINYALSA_BUILD_UTILS=ON
+            cmake --build "$BUILD_DIR" --target tinymix --parallel 2
+            TINYMIX_BIN="$BUILD_DIR/tinymix"
+            if [ ! -x "$TINYMIX_BIN" ]; then
+              TINYMIX_BIN="$(find "$BUILD_DIR" -type f -name tinymix -perm -u+x -print -quit)"
+            fi
+            test -n "$TINYMIX_BIN" && test -x "$TINYMIX_BIN"
+            mkdir -p "$ASSET_ROOT/$ABI"
+            install -m 0755 "$TINYMIX_BIN" "$ASSET_ROOT/$ABI/tinymix"
+            file "$ASSET_ROOT/$ABI/tinymix"
+          done
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -76,6 +125,9 @@ jobs:
           APK_SIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
           test -n "$APK_SIGNER" && test -x "$APK_SIGNER"
           test -s "$APK"
+          unzip -l "$APK" | grep -q 'assets/tinymix/arm64-v8a/tinymix'
+          unzip -l "$APK" | grep -q 'assets/tinymix/armeabi-v7a/tinymix'
+          unzip -l "$APK" | grep -q 'assets/tinymix/LICENSE'
           "$APK_SIGNER" verify --verbose "$APK"
           cp "$APK" "app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk"
 

@@ -28,6 +28,8 @@ import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -49,6 +51,9 @@ class MainActivity : Activity() {
     private var rootDiagnosticsView: TextView? = null
     private var rootDiagnosticsReport = ""
     @Volatile private var rootDiagnosticsRunning = false
+    private var tinymixDiagnosticsView: TextView? = null
+    private var tinymixDiagnosticsReport = ""
+    @Volatile private var tinymixDiagnosticsRunning = false
 
     private var activeNumberView: TextView? = null
     private var activeStatusView: TextView? = null
@@ -454,6 +459,23 @@ class MainActivity : Activity() {
             COLOR_SELECTED, COLOR_TEXT
         ) { runRootAudioDiagnostics() }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(7) })
 
+        content.addView(makeText("TINYMIX MIXER REPORT (READ-ONLY)", 11f, COLOR_MUTED, true),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        content.addView(makeText(
+            "Bundled TinyALSA tool. This report lists mixer controls and current values only; PhoneBridge does not change any mixer controls.",
+            11f, COLOR_MUTED, false
+        ), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        content.addView(actionButton(
+            if (tinymixDiagnosticsRunning) "Reading mixer controls…" else "Run tinymix mixer report",
+            COLOR_PANEL, COLOR_TEXT, { runTinymixDiagnostics() }
+        ), LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+        tinymixDiagnosticsView = makeText(
+            if (tinymixDiagnosticsReport.isBlank()) "Not run yet. Run during a call test to inspect the current mixer state." else tinymixDiagnosticsReport,
+            10f, COLOR_TEXT, false
+        )
+        tinymixDiagnosticsView?.setTextIsSelectable(true)
+        content.addView(tinymixDiagnosticsView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+
         content.addView(actionButton("Copy diagnostic report", COLOR_PANEL, COLOR_TEXT, {
             copyDiagnosticReport()
         }), LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(10) })
@@ -503,6 +525,76 @@ class MainActivity : Activity() {
                 localResult = "Root audio diagnostics collected."
             }
         }, "PhoneBridgeRootAudioDiagnostics").start()
+    }
+
+    private fun runTinymixDiagnostics() {
+        if (tinymixDiagnosticsRunning) return
+        tinymixDiagnosticsRunning = true
+        tinymixDiagnosticsView?.text = "Preparing bundled tinymix. Approve the Magisk su prompt if shown."
+        Thread({
+            val report = collectTinymixDiagnostics()
+            runOnUiThread {
+                tinymixDiagnosticsRunning = false
+                tinymixDiagnosticsReport = report
+                tinymixDiagnosticsView?.text = report
+                localResult = "Tinymix mixer report collected."
+            }
+        }, "PhoneBridgeTinymixDiagnostics").start()
+    }
+
+    private fun prepareBundledTinymix(): Pair<File, String>? {
+        val supportedAbis = if (Build.VERSION.SDK_INT >= 21) Build.SUPPORTED_ABIS else arrayOf(Build.CPU_ABI)
+        for (abi in supportedAbis) {
+            if (abi != "arm64-v8a" && abi != "armeabi-v7a") continue
+            val destination = File(filesDir, "tinymix-$abi")
+            try {
+                assets.open("tinymix/$abi/tinymix").use { input ->
+                    FileOutputStream(destination).use { output -> input.copyTo(output) }
+                }
+                destination.setReadable(true, true)
+                destination.setExecutable(true, false)
+                if (destination.canExecute()) return Pair(destination, abi)
+            } catch (_: Throwable) {
+                try { destination.delete() } catch (_: Throwable) { }
+            }
+        }
+        return null
+    }
+
+    private fun collectTinymixDiagnostics(): String {
+        val prepared = prepareBundledTinymix()
+            ?: return "Bundled tinymix binary is unavailable for this device ABI. Reinstall a PhoneBridge APK built with the TinyALSA asset step."
+        val binary = prepared.first.absolutePath
+        val abi = prepared.second
+        val script = """
+            set +e
+            echo '=== BUNDLED TINYALSA TINYMIX ==='
+            echo 'PhoneBridge only invokes read-only mixer queries.'
+            echo '--- Tool version ---'
+            "$binary" --version 2>&1
+            echo '--- Mixer controls ---'
+            "$binary" controls 2>&1
+            controls_exit=$?
+            echo "controls_exit=$controls_exit"
+            echo '--- Mixer current values ---'
+            "$binary" contents 2>&1
+            contents_exit=$?
+            echo "contents_exit=$contents_exit"
+        """.trimIndent()
+        return try {
+            val process = ProcessBuilder("su", "-c", script).redirectErrorStream(true).start()
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val buffer = StringBuilder()
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (buffer.length < 22000) buffer.append(line).append('\n')
+            }
+            reader.close()
+            val exitStatus = process.waitFor().toString()
+            "Tool=TinyALSA tinymix\nABI=$abi\nexit=$exitStatus\n" + buffer.toString()
+        } catch (e: Throwable) {
+            "Tinymix diagnostics failed: " + e.javaClass.simpleName + ": " + (e.message ?: "")
+        }
     }
 
     private fun collectRootAudioDiagnostics(): String {
@@ -574,7 +666,10 @@ class MainActivity : Activity() {
 
     private fun copyDiagnosticReport() {
         val prefs = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
-        val latest = rootDiagnosticsReport + "\n\n=== LIVE SNAPSHOT ===" +
+        val latest = rootDiagnosticsReport +
+            "\n\n=== BUNDLED TINYMIX REPORT ===\n" +
+            (if (tinymixDiagnosticsReport.isBlank()) "Not run yet." else tinymixDiagnosticsReport) +
+            "\n\n=== LIVE SNAPSHOT ===" +
             "\nCallState=" + PhoneCallController.currentState +
             "\nPhone=" + AudioBridge.diagnosticSummary() +
             "\nTablet=" + (prefs.getString("tablet_audio_diag", "No tablet telemetry received.") ?: "No tablet telemetry received.")
