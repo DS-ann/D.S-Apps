@@ -28,6 +28,7 @@ public final class SevenSegmentClockTextView extends TextView {
     private final Matrix segmentGradientMatrix = new Matrix();
     private boolean contrastInnerBorderEnabled;
     private float contrastInnerBorderWidth;
+    private boolean digitOnlyInnerBorder;
     private int[] contrastBorderColors;
     private float[] contrastBorderStops;
     private LinearGradient segmentBorderGradient;
@@ -195,6 +196,13 @@ public final class SevenSegmentClockTextView extends TextView {
         if (contrastInnerBorderEnabled && sevenSegmentMode && getWidth() > 0) {
             ensureSegmentBorderGradient();
         }
+        invalidate();
+    }
+
+    /** Keeps the new gradient border on the numeric segments, not the colon dots. */
+    void setDigitOnlyInnerBorder(boolean enabled) {
+        if (digitOnlyInnerBorder == enabled) return;
+        digitOnlyInnerBorder = enabled;
         invalidate();
     }
 
@@ -433,7 +441,8 @@ public final class SevenSegmentClockTextView extends TextView {
                 float lowerDotY = y + digitHeight * 0.68f;
                 canvas.drawCircle(dotX, upperDotY, radius, segmentPaint);
                 canvas.drawCircle(dotX, lowerDotY, radius, segmentPaint);
-                if (contrastInnerBorderEnabled && segmentBorderGradient != null) {
+                if (!digitOnlyInnerBorder && contrastInnerBorderEnabled
+                        && segmentBorderGradient != null) {
                     float insetRadius = Math.max(0f, radius - contrastInnerBorderWidth * 0.5f);
                     segmentPaint.setStyle(Paint.Style.STROKE);
                     segmentPaint.setStrokeWidth(contrastInnerBorderWidth);
