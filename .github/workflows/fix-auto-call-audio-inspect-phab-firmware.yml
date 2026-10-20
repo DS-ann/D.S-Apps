@@ -1,0 +1,132 @@
+name: Inspect Phab firmware audio configuration — fix/auto-call-audio
+
+on:
+  workflow_dispatch:
+    inputs:
+      firmware_url:
+        description: 'Direct URL to the firmware ZIP'
+        required: true
+        type: string
+        default: 'https://archive.org/download/PB2670MS000050171016ROW/PB2-670M_S000050_171016_ROW.zip'
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Download firmware
+        env:
+          FIRMWARE_URL: ${{ inputs.firmware_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p work extracted report
+          curl -L --fail --retry 3 --retry-all-errors -o work/firmware.zip "$FIRMWARE_URL"
+          ls -lh work/firmware.zip
+
+      - name: Extract firmware package
+        run: |
+          set -euo pipefail
+          7z x -y work/firmware.zip -owork/package >/dev/null
+          find work/package -maxdepth 4 -type f -printf '%p %s bytes\n' | sort | tee report/package-files.txt
+
+      - name: Locate signed system image
+        run: |
+          set -euo pipefail
+          SYSTEM_IMG="$(find work/package -type f \( -iname 'system-sign.img' -o -iname 'system.img' \) -print -quit)"
+          if [ -z "$SYSTEM_IMG" ]; then
+            echo 'No system-sign.img or system.img found' >&2
+            exit 1
+          fi
+          echo "Using system image: $SYSTEM_IMG" | tee report/system-image.txt
+          cp "$SYSTEM_IMG" work/system.img
+          ls -lh work/system.img
+
+      - name: Identify image format
+        run: |
+          set -euo pipefail
+          file work/system.img | tee report/image-file.txt
+          xxd -l 256 work/system.img | tee report/image-header.txt
+          echo '--- signatures ---' | tee -a report/image-file.txt
+          binwalk work/system.img 2>&1 | tee report/binwalk.txt || true
+
+      - name: Try sparse conversion and locate filesystem
+        run: |
+          set -euo pipefail
+          if simg2img work/system.img work/system-unsparse.img 2>report/simg2img.err; then
+            echo 'Android sparse image converted.' | tee report/unsparse.txt
+            IMG=work/system-unsparse.img
+          else
+            echo 'Not an Android sparse image; using original image.' | tee report/unsparse.txt
+            IMG=work/system.img
+          fi
+          python3 - "$IMG" <<'PY'
+          import sys
+          p=sys.argv[1]
+          with open(p,'rb') as f: data=f.read(128*1024*1024)
+          hits=[]
+          pos=0
+          while True:
+              i=data.find(b'\x53\xef',pos)
+              if i<0: break
+              sb=i-0x38
+              if sb>=0 and sb%1024==0: hits.append(sb)
+              pos=i+1
+          print('EXT4 candidate superblock offsets:', hits[:20])
+          open('report/ext4-offsets.txt','w').write('\n'.join(map(str,hits)))
+          if hits: open('work/ext4-offset','w').write(str(hits[0]))
+          PY
+          OFFSET=0
+          [ -s work/ext4-offset ] && OFFSET=$(cat work/ext4-offset)
+          echo "Filesystem offset: $OFFSET" | tee report/filesystem-offset.txt
+          if [ "$OFFSET" = 0 ]; then cp "$IMG" work/system-ext4.img; else dd if="$IMG" of=work/system-ext4.img bs=1 skip="$OFFSET" status=none; fi
+          file work/system-ext4.img | tee report/ext4-file.txt
+
+      - name: Inspect filesystem
+        run: |
+          set -euo pipefail
+          mkdir -p extracted
+          e2fsck -fn work/system-ext4.img 2>&1 | tee report/e2fsck.txt || true
+          dumpe2fs -h work/system-ext4.img 2>&1 | tee report/ext4-header.txt || true
+          debugfs -R 'ls -p /etc' work/system-ext4.img 2>&1 | tee report/etc-list.txt || true
+          debugfs -R 'ls -p /lib/hw' work/system-ext4.img 2>&1 | tee report/lib-hw-list.txt || true
+          debugfs -R 'ls -p /lib64/hw' work/system-ext4.img 2>&1 | tee report/lib64-hw-list.txt || true
+
+      - name: Extract audio configuration files
+        run: |
+          set -euo pipefail
+          mkdir -p extracted/etc extracted/lib/hw extracted/lib64/hw
+          extract_if_present() {
+            src="$1"; dst="$2"
+            if debugfs -R "stat $src" work/system-ext4.img 2>/dev/null | grep -q 'Inode:'; then
+              echo "Extracting $src"
+              debugfs -R "dump $src $dst" work/system-ext4.img >/dev/null 2>&1 || true
+            fi
+          }
+          for f in /etc/audio_policy.conf /etc/audio_policy_configuration.xml /etc/audio_policy_volumes.xml /etc/mixer_paths.xml /etc/mixer_paths_0.xml /etc/audio_effects.conf /etc/audio_effects.xml; do
+            base="$(basename "$f")"
+            extract_if_present "$f" "extracted/etc/$base"
+          done
+          debugfs -R 'ls -p /etc' work/system-ext4.img 2>/dev/null | grep -oE '/etc/[^:]+\.(xml|conf)$' | grep -Ei 'audio|mixer|policy|route|voice' | while IFS= read -r f; do
+            base="$(basename "$f")"
+            extract_if_present "$f" "extracted/etc/$base"
+          done || true
+          find extracted -type f -printf '%p %s bytes\n' | sort | tee report/extracted-files.txt
+
+      - name: Search audio routing and telephony definitions
+        run: |
+          set -euo pipefail
+          grep -RniE 'TELEPHONY_TX|TELEPHONY_RX|VOICE_CALL|VOICE_UPLINK|VOICE_DOWNLINK|VOICE_COMMUNICATION|EARPIECE|SPEAKER|AUDIO_DEVICE_IN|AUDIO_DEVICE_OUT|telephony|voice' extracted 2>/dev/null | tee report/audio-routing-matches.txt || true
+          find extracted -type f \( -name '*.so' -o -name '*.conf' -o -name '*.xml' \) -print0 | xargs -0 -r file | tee report/file-types.txt
+
+      - name: Package results
+        run: |
+          set -euo pipefail
+          tar -czf phab-audio-inspection.tar.gz report extracted
+          ls -lh phab-audio-inspection.tar.gz
+
+      - name: Upload inspection results
+        uses: actions/upload-artifact@v4
+        with:
+          name: phab-audio-inspection
+          path: phab-audio-inspection.tar.gz
+          retention-days: 7

@@ -1,0 +1,30 @@
+# Source branch: fix/auto-call-audio
+# Source commit: 0c9a11699d2a6984492d900e26f86bf4b37fc780
+# Source tree: 955851476efa98600ded2df740a7a057b4731baf
+# Source tracked source files (workflows excluded): 23
+# Unique blob contents stored: 13
+# Duplicate paths mapped to existing content: 10
+# Format: STATUS<TAB>BLOB_SHA<TAB>ORIGINAL_PATH<TAB>CANONICAL_PATH<TAB>MODE
+DUPLICATE	c2b3bc916538906cc93f0243016eccd3ce2948bb	pad-client/app/build.gradle	branch-archive/main/pad-client/app/build.gradle	100644
+DUPLICATE	9abb82ee25b5a3e8fd22e0fb73391229966df49d	pad-client/app/src/main/AndroidManifest.xml	branch-archive/main/pad-client/app/src/main/AndroidManifest.xml	100644
+ARCHIVED	4663177cd5a525cc08cf5f670c561fef84e69c9b	pad-client/app/src/main/java/com/dsann/phonebridge/pad/AudioClient.kt	branch-archive/fix/auto-call-audio/pad-client/app/src/main/java/com/dsann/phonebridge/pad/AudioClient.kt	100644
+ARCHIVED	39c6aa591495e543d87e01b494944570f48e4656	pad-client/app/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	branch-archive/fix/auto-call-audio/pad-client/app/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	100644
+DUPLICATE	37cd02945c61dc8bd564fc28f1292d8a29178de5	pad-client/app/src/main/java/com/dsann/phonebridge/pad/MainActivity.kt	branch-archive/main/pad-client/app/src/main/java/com/dsann/phonebridge/pad/MainActivity.kt	100644
+DUPLICATE	48ff41b5f6a7fb4547634d44e056592e633dc190	pad-client/app/src/main/res/values/styles.xml	branch-archive/main/pad-client/app/src/main/res/values/styles.xml	100644
+DUPLICATE	f7e60c6e074ec988891e68eeb7b8771b768e521d	pad-client/build.gradle	branch-archive/main/hfp-diagnostic/build.gradle	100644
+DUPLICATE	8f9c8a3a4c13c397a606ef0158476c12b0ade096	pad-client/settings.gradle	branch-archive/main/pad-client/settings.gradle	100644
+ARCHIVED	be394ace3354504043f51ce6055535d1c5339f37	phab-bridge/app/build.gradle	branch-archive/fix/auto-call-audio/phab-bridge/app/build.gradle	100644
+ARCHIVED	d6d1b24224899962e4ddddbad06d563abf1e490a	phab-bridge/app/src/main/AndroidManifest.xml	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/AndroidManifest.xml	100644
+ARCHIVED	8ba73bf2d6dd6e1d6250b5a2f699553701d3c0f7	phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	100644
+ARCHIVED	4344d135db7c3c0f93f945afa81479270db554e0	phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioProbe.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioProbe.kt	100644
+ARCHIVED	a77deb7f2c99b0d900bd25d2d00e7222b354a28f	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	100644
+ARCHIVED	825cfa9aefba4e3e55a64877e4306661d43b8d5a	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeServer.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeServer.kt	100644
+ARCHIVED	c808436f98679b173b2bc8edebc1f929dd2c2dca	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	100644
+ARCHIVED	6270baee94cb76d2dd36b2656b726ae5454918ed	phab-bridge/app/src/main/java/com/dsann/phonebridge/InCallActivity.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/InCallActivity.kt	100644
+ARCHIVED	889363b6e202f774f74f82ee3aa18020e217bdd4	phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	100644
+ARCHIVED	ecc06ce0c7a1293afae7f59a2ed2586e5d464851	phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneInCallService.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneInCallService.kt	100644
+ARCHIVED	245c8a2ba786548d138cad794c410a66363be223	phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneStateReceiver.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneStateReceiver.kt	100644
+DUPLICATE	85f78e11b3646817475bd69bae1ec94fd26d8488	phab-bridge/app/src/main/res/values/styles.xml	branch-archive/main/phab-bridge/app/src/main/res/values/styles.xml	100644
+DUPLICATE	f7e60c6e074ec988891e68eeb7b8771b768e521d	phab-bridge/build.gradle	branch-archive/main/hfp-diagnostic/build.gradle	100644
+DUPLICATE	07154b6b64565483fd4e73e69ad62ce4b3881574	phab-bridge/settings.gradle	branch-archive/main/phab-bridge/settings.gradle	100644
+DUPLICATE	464e66bb709309e46557cd36729ff4523f60fabe	README.md	branch-archive/main/README.md	100644

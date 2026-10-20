@@ -2,9 +2,6 @@ name: Repair AirBeats for Android 6
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/repair-airbeats-android6.yml'
 
 permissions:
   contents: read
@@ -16,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Restore deduplicated source files
+        run: python3 .github/scripts/restore_archive_duplicates.py --branch 'main'
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -74,7 +73,7 @@ jobs:
       - name: Download and validate source APK
         run: |
           set -euo pipefail
-          curl -fL --retry 3 "https://raw.githubusercontent.com/DS-ann/PhoneBridge/main/AirBeats_v6.2.0_android6_api23_fixed.apk" -o input/AirBeats-original.apk
+          cp branch-archive/main/AirBeats_v6.2.0_android6_api23_fixed.apk input/AirBeats-original.apk
           test -s input/AirBeats-original.apk
           sha256sum input/AirBeats-original.apk | tee output/source-sha256.txt
           unzip -t input/AirBeats-original.apk

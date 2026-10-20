@@ -1,0 +1,76 @@
+name: Build Audio Projects — test-call-bluetooth-audio-route
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'branch-archive/test-call-bluetooth-audio-route/**'
+      - '.github/workflows/test-call-bluetooth-audio-route-android-build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'branch-archive/test-call-bluetooth-audio-route/**'
+      - '.github/workflows/test-call-bluetooth-audio-route-android-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-branch-archive/test-call-bluetooth-audio-route/phab-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Restore deduplicated source files
+        run: python3 .github/scripts/restore_archive_duplicates.py --branch 'test-call-bluetooth-audio-route'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Install Gradle 8.7
+        working-directory: branch-archive/test-call-bluetooth-audio-route/phab-bridge
+        run: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/gradle
+          echo "/tmp/gradle/gradle-8.7/bin" >> "$GITHUB_PATH"
+      - name: Build Phab debug APK
+        working-directory: branch-archive/test-call-bluetooth-audio-route/phab-bridge
+        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Upload Phab APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: phonebridge-phab-debug
+          path: branch-archive/test-call-bluetooth-audio-route/phab-bridge/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  build-branch-archive/test-call-bluetooth-audio-route/pad-client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Restore deduplicated source files
+        run: python3 .github/scripts/restore_archive_duplicates.py --branch 'test-call-bluetooth-audio-route'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Install Gradle 8.7
+        working-directory: branch-archive/test-call-bluetooth-audio-route/pad-client
+        run: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/gradle
+          echo "/tmp/gradle/gradle-8.7/bin" >> "$GITHUB_PATH"
+      - name: Build Pad debug APK
+        working-directory: branch-archive/test-call-bluetooth-audio-route/pad-client
+        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Upload Pad APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: phonebridge-pad-debug
+          path: branch-archive/test-call-bluetooth-audio-route/pad-client/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

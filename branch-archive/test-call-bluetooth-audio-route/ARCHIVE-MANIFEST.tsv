@@ -1,0 +1,314 @@
+# Source branch: test-call-bluetooth-audio-route
+# Source commit: 0ef2f5634d102f8c82d0863957a9a1080617c15e
+# Source tree: dd6d632734e7d35c098ffd7a7e0d12706f3047a8
+# Source tracked source files (workflows excluded): 307
+# Unique blob contents stored: 2
+# Duplicate paths mapped to existing content: 305
+# Format: STATUS<TAB>BLOB_SHA<TAB>ORIGINAL_PATH<TAB>CANONICAL_PATH<TAB>MODE
+DUPLICATE	c2b3bc916538906cc93f0243016eccd3ce2948bb	pad-client/app/build.gradle	branch-archive/main/pad-client/app/build.gradle	100644
+DUPLICATE	9abb82ee25b5a3e8fd22e0fb73391229966df49d	pad-client/app/src/main/AndroidManifest.xml	branch-archive/main/pad-client/app/src/main/AndroidManifest.xml	100644
+DUPLICATE	4cf5795ff26d2dfce9d262064a92c2fa2478905c	pad-client/app/src/main/java/com/dsann/phonebridge/pad/AudioClient.kt	branch-archive/main/pad-client/app/src/main/java/com/dsann/phonebridge/pad/AudioClient.kt	100644
+DUPLICATE	19464e2b799a74cf2f5b255cfb2c6a2274f030c7	pad-client/app/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	branch-archive/main/pad-client/app/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	100644
+DUPLICATE	37cd02945c61dc8bd564fc28f1292d8a29178de5	pad-client/app/src/main/java/com/dsann/phonebridge/pad/MainActivity.kt	branch-archive/main/pad-client/app/src/main/java/com/dsann/phonebridge/pad/MainActivity.kt	100644
+DUPLICATE	48ff41b5f6a7fb4547634d44e056592e633dc190	pad-client/app/src/main/res/values/styles.xml	branch-archive/main/pad-client/app/src/main/res/values/styles.xml	100644
+DUPLICATE	f7e60c6e074ec988891e68eeb7b8771b768e521d	pad-client/build.gradle	branch-archive/main/hfp-diagnostic/build.gradle	100644
+DUPLICATE	8f9c8a3a4c13c397a606ef0158476c12b0ade096	pad-client/settings.gradle	branch-archive/main/pad-client/settings.gradle	100644
+DUPLICATE	c22c463e22d334676b547a9d1343a49fe2b75dd9	pad-client/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	branch-archive/main/pad-client/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	100644
+DUPLICATE	be394ace3354504043f51ce6055535d1c5339f37	phab-bridge/app/build.gradle	branch-archive/fix/auto-call-audio/phab-bridge/app/build.gradle	100644
+DUPLICATE	d6d1b24224899962e4ddddbad06d563abf1e490a	phab-bridge/app/src/main/AndroidManifest.xml	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/AndroidManifest.xml	100644
+ARCHIVED	68f468e2aa51f4b1db66e3962ae6fe8cfebc1ef1	phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	branch-archive/test-call-bluetooth-audio-route/phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	100644
+DUPLICATE	4344d135db7c3c0f93f945afa81479270db554e0	phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioProbe.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioProbe.kt	100644
+DUPLICATE	a77deb7f2c99b0d900bd25d2d00e7222b354a28f	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	100644
+DUPLICATE	825cfa9aefba4e3e55a64877e4306661d43b8d5a	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeServer.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeServer.kt	100644
+DUPLICATE	c808436f98679b173b2bc8edebc1f929dd2c2dca	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	100644
+DUPLICATE	6270baee94cb76d2dd36b2656b726ae5454918ed	phab-bridge/app/src/main/java/com/dsann/phonebridge/InCallActivity.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/InCallActivity.kt	100644
+DUPLICATE	889363b6e202f774f74f82ee3aa18020e217bdd4	phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	100644
+ARCHIVED	8320389aa7de9e87c7a17759295680b1bbd62747	phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneInCallService.kt	branch-archive/test-call-bluetooth-audio-route/phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneInCallService.kt	100644
+DUPLICATE	245c8a2ba786548d138cad794c410a66363be223	phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneStateReceiver.kt	branch-archive/fix/auto-call-audio/phab-bridge/app/src/main/java/com/dsann/phonebridge/PhoneStateReceiver.kt	100644
+DUPLICATE	85f78e11b3646817475bd69bae1ec94fd26d8488	phab-bridge/app/src/main/res/values/styles.xml	branch-archive/main/phab-bridge/app/src/main/res/values/styles.xml	100644
+DUPLICATE	f7e60c6e074ec988891e68eeb7b8771b768e521d	phab-bridge/build.gradle	branch-archive/main/hfp-diagnostic/build.gradle	100644
+DUPLICATE	07154b6b64565483fd4e73e69ad62ce4b3881574	phab-bridge/settings.gradle	branch-archive/main/phab-bridge/settings.gradle	100644
+DUPLICATE	464e66bb709309e46557cd36729ff4523f60fabe	README.md	branch-archive/main/README.md	100644
+DUPLICATE	e6104b15cd16eabae0e90142c9000af7491bcd1f	scripts/inspect_phab_system_image.py	branch-archive/main/scripts/inspect_phab_system_image.py	100644
+DUPLICATE	95b1b39a1ab262e4fbe89a7df83b69bfc4ac1cf2	Source code audio files/a2dpaudio_hw_hal.cpp	branch-archive/main/Source code audio files/a2dpaudio_hw_hal.cpp	100644
+DUPLICATE	9cfff6f514e15702f3d5bba790699bfd3642942d	Source code audio files/A2dpAudioInterface_FMoBT.cpp	branch-archive/main/Source code audio files/A2dpAudioInterface_FMoBT.cpp	100644
+DUPLICATE	c463cb40d1fae90251811774d14baa8de6123f44	Source code audio files/A2dpAudioInterface.cpp	branch-archive/main/Source code audio files/A2dpAudioInterface.cpp	100644
+DUPLICATE	48d5b17f5d8dcc649e4029c7494d57b9ae61832b	Source code audio files/Android.mk	branch-archive/main/Source code audio files/Android.mk	100644
+DUPLICATE	ea9cda736b4a86a2a95b4072307794863619b269	Source code audio files/audio_effect_mtk.h	branch-archive/main/Source code audio files/audio_effect_mtk.h	100644
+DUPLICATE	f86c8de79f9a5f2c36c9ba453f198d921c1729b8	Source code audio files/audio_hw_hal.txt	branch-archive/main/Source code audio files/audio_hw_hal.txt	100644
+DUPLICATE	a37d4dbb0c879f53e636136dba431b11e4b08976	Source code audio files/audio_mtk.txt	branch-archive/main/Source code audio files/audio_mtk.txt	100644
+DUPLICATE	33a12e6979fa16c2d5479d847e2f18756f4ab115	Source code audio files/audio_policy_hal.cpp	branch-archive/main/Source code audio files/audio_policy_hal.cpp	100644
+DUPLICATE	1ba131b88a07efcbca6b96baa3d12cc5fd26d3ed	Source code audio files/audio_policy_mtk.h	branch-archive/main/Source code audio files/audio_policy_mtk.h	100644
+DUPLICATE	f0564043c414d8c3b8fee0190f5be4d44afe0ee5	Source code audio files/AudioALSACaptureDataClient.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataClient.cpp	100644
+DUPLICATE	b8128762814ed71e8480c9bc67ddc1e217c78c5f	Source code audio files/AudioALSACaptureDataClient.h	branch-archive/main/Source code audio files/AudioALSACaptureDataClient.h	100644
+DUPLICATE	127bb24de5bce780530ed3baed7e3d95bf27af89	Source code audio files/AudioALSACaptureDataProviderANC.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderANC.cpp	100644
+DUPLICATE	02f2280302f4a7ddfc0043dc0a625e3bda24451b	Source code audio files/AudioALSACaptureDataProviderANC.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderANC.h	100644
+DUPLICATE	c07a24851d9d8d95ac00ccde6f515923e9c8501c	Source code audio files/AudioALSACaptureDataProviderBase.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderBase.cpp	100644
+DUPLICATE	a0a06087c1c2c22191dde1ebf3a2c360fa579499	Source code audio files/AudioALSACaptureDataProviderBase.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderBase.h	100644
+DUPLICATE	9d26356c05caf78c78f99c8fcdad067f59b9009b	Source code audio files/AudioALSACaptureDataProviderBTCVSD.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderBTCVSD.cpp	100644
+DUPLICATE	e733303f884ffb18f0b798f530dc422347ed090d	Source code audio files/AudioALSACaptureDataProviderBTCVSD.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderBTCVSD.h	100644
+DUPLICATE	81c7477661e814a49f79037203f1217420ece068	Source code audio files/AudioALSACaptureDataProviderBTSCO.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderBTSCO.cpp	100644
+DUPLICATE	f524326369c45b90c968a9ea97d7c00067108c86	Source code audio files/AudioALSACaptureDataProviderBTSCO.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderBTSCO.h	100644
+DUPLICATE	f31cb552cb1f83edf53fd48f7e18f95f4e0348ee	Source code audio files/AudioALSACaptureDataProviderEchoRef.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderEchoRef.cpp	100644
+DUPLICATE	a2997a9fb5996ae7bf39c604abdf5655c5e2603e	Source code audio files/AudioALSACaptureDataProviderEchoRef.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderEchoRef.h	100644
+DUPLICATE	115f045ea9762bb39621a04674792238b0aae770	Source code audio files/AudioALSACaptureDataProviderEchoRefBTSCO.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderEchoRefBTSCO.cpp	100644
+DUPLICATE	ad4c57be11a3c003ec28964d945c710945256b8b	Source code audio files/AudioALSACaptureDataProviderEchoRefBTSCO.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderEchoRefBTSCO.h	100644
+DUPLICATE	4de6571db46dedf49eef80527e36fb218e1c8b69	Source code audio files/AudioALSACaptureDataProviderEchoRefExt.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderEchoRefExt.cpp	100644
+DUPLICATE	2b1958bc3f95e4ef7e6c7609041232485aafd90c	Source code audio files/AudioALSACaptureDataProviderEchoRefExt.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderEchoRefExt.h	100644
+DUPLICATE	74d18b0fdd4fd329a8d6140d4bf440601e6fa28c	Source code audio files/AudioALSACaptureDataProviderFMRadio.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderFMRadio.cpp	100644
+DUPLICATE	3421918e1adfd718e8a76f77cde433fbd9156093	Source code audio files/AudioALSACaptureDataProviderFMRadio.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderFMRadio.h	100644
+DUPLICATE	86be6c7c2a8db1a887683778d3cfa1d78139f509	Source code audio files/AudioALSACaptureDataProviderModemDai.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderModemDai.cpp	100644
+DUPLICATE	3dbb3ceebacd090193ebcf528367c2482dbeaa82	Source code audio files/AudioALSACaptureDataProviderModemDai.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderModemDai.h	100644
+DUPLICATE	136edcb633f6c99eea0896ee117dfe0cbc739898	Source code audio files/AudioALSACaptureDataProviderNormal.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderNormal.cpp	100644
+DUPLICATE	dd7722d7f924a3c0b0a8420f57cdf1e89de82af6	Source code audio files/AudioALSACaptureDataProviderNormal.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderNormal.h	100644
+DUPLICATE	671337211aedc11c73f59b12aabb702533a41a46	Source code audio files/AudioALSACaptureDataProviderSpkFeed.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderSpkFeed.cpp	100644
+DUPLICATE	9d5f10c0281d821fefc0cec30648a104912e08c5	Source code audio files/AudioALSACaptureDataProviderSpkFeed.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderSpkFeed.h	100644
+DUPLICATE	2265c093840a7e5a19548e65eb28158a3faace9b	Source code audio files/AudioALSACaptureDataProviderTDM.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderTDM.cpp	100644
+DUPLICATE	0bd48e0d46ca93a43f5a48abc860b09cda7e99bd	Source code audio files/AudioALSACaptureDataProviderTDM.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderTDM.h	100644
+DUPLICATE	0a56266f4f436d7503af00668c21cb5b1a37837c	Source code audio files/AudioALSACaptureDataProviderVoice.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoice.cpp	100644
+DUPLICATE	eb688680f5b707a8d663e4aa7619b749abb8f1a4	Source code audio files/AudioALSACaptureDataProviderVoice.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoice.h	100644
+DUPLICATE	e84f3e6fca0a113c4e2c83ccbb59418f7f0c3c4e	Source code audio files/AudioALSACaptureDataProviderVoiceDL.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoiceDL.cpp	100644
+DUPLICATE	cf6d9bc4a61802d4443dff9282f3b04ffa63ac82	Source code audio files/AudioALSACaptureDataProviderVoiceDL.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoiceDL.h	100644
+DUPLICATE	b131d0a179233dc1151d70ecf453d3c0b5a7df8e	Source code audio files/AudioALSACaptureDataProviderVoiceMix.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoiceMix.cpp	100644
+DUPLICATE	826f1bee4c5c1e02ca2c56af07f5c5967b0038a3	Source code audio files/AudioALSACaptureDataProviderVoiceMix.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoiceMix.h	100644
+DUPLICATE	c553e50dfb9c7e552f0af4336231a8d6d21f7e16	Source code audio files/AudioALSACaptureDataProviderVoiceUL.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoiceUL.cpp	100644
+DUPLICATE	91ac7f5cfc5378cba9059d1b21061ee311df5945	Source code audio files/AudioALSACaptureDataProviderVoiceUL.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVoiceUL.h	100644
+DUPLICATE	7a925bda2fd81e12c4ca8ffa808efdbc37e4031f	Source code audio files/AudioALSACaptureDataProviderVOW.cpp	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVOW.cpp	100644
+DUPLICATE	99f97a664b1fbc34fa7bc51a14841b945daace71	Source code audio files/AudioALSACaptureDataProviderVOW.h	branch-archive/main/Source code audio files/AudioALSACaptureDataProviderVOW.h	100644
+DUPLICATE	aadf94858d1acc60a0e290acc4d337a08161bfce	Source code audio files/AudioALSACaptureHandlerAEC.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerAEC.cpp	100644
+DUPLICATE	38894d909a4380884108aa24f450500985a86ff4	Source code audio files/AudioALSACaptureHandlerAEC.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerAEC.h	100644
+DUPLICATE	da2cea00bec073353e798b730ad213c04aaec967	Source code audio files/AudioALSACaptureHandlerANC.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerANC.cpp	100644
+DUPLICATE	d832dd4f8ebe6a3c4f884012e6afc7ba05dc7648	Source code audio files/AudioALSACaptureHandlerANC.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerANC.h	100644
+DUPLICATE	55eab0622f11d613aacabc8b1c5f922d4e36a20a	Source code audio files/AudioALSACaptureHandlerBase.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerBase.cpp	100644
+DUPLICATE	3cbbbeb7c0be5d372ed82b102f52e57501a555d1	Source code audio files/AudioALSACaptureHandlerBase.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerBase.h	100644
+DUPLICATE	a1aaab1b8a9a07c600f3a57b043fe4a3712bd598	Source code audio files/AudioALSACaptureHandlerBT.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerBT.cpp	100644
+DUPLICATE	7cf995f68c935281764f42cab895f5eadc02eed6	Source code audio files/AudioALSACaptureHandlerBT.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerBT.h	100644
+DUPLICATE	73ca3483ad6190e5e29c4beefe6e688d4a521d3b	Source code audio files/AudioALSACaptureHandlerFMRadio.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerFMRadio.cpp	100644
+DUPLICATE	b96dce130f81586fe0402f6390b8d4e4a39021ba	Source code audio files/AudioALSACaptureHandlerFMRadio.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerFMRadio.h	100644
+DUPLICATE	9ba6b05d417949ffc416cb2d7a5195b71816617d	Source code audio files/AudioALSACaptureHandlerModemDai.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerModemDai.cpp	100644
+DUPLICATE	8ecdf413f20808c32f2ba1ecc88028e742aa4bf1	Source code audio files/AudioALSACaptureHandlerModemDai.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerModemDai.h	100644
+DUPLICATE	9006612c6db73742349124ba0b6be01d87c55af7	Source code audio files/AudioALSACaptureHandlerNormal.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerNormal.cpp	100644
+DUPLICATE	8b7cf5ebef98034c3d4247745703d2d86fb5b6b7	Source code audio files/AudioALSACaptureHandlerNormal.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerNormal.h	100644
+DUPLICATE	4243d7540d477226933566ca0e7dfd29d74b87ef	Source code audio files/AudioALSACaptureHandlerSpkFeed.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerSpkFeed.cpp	100644
+DUPLICATE	fa024fad24a9aaf4f88ae5d6e92631a11e9cccce	Source code audio files/AudioALSACaptureHandlerSpkFeed.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerSpkFeed.h	100644
+DUPLICATE	8f72b6316ce9e3a97e6dd50f06e16200b3ead89c	Source code audio files/AudioALSACaptureHandlerTDM.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerTDM.cpp	100644
+DUPLICATE	7da09a41b5a6455fc87db13a2c73b313b0e533d5	Source code audio files/AudioALSACaptureHandlerTDM.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerTDM.h	100644
+DUPLICATE	c61d8753af33f95251bc8418ac622c1ec39a339b	Source code audio files/AudioALSACaptureHandlerVoice.cpp	branch-archive/main/Source code audio files/AudioALSACaptureHandlerVoice.cpp	100644
+DUPLICATE	43692cdb75c3686eafa7518bf66802b4b8a66a1e	Source code audio files/AudioALSACaptureHandlerVoice.h	branch-archive/main/Source code audio files/AudioALSACaptureHandlerVoice.h	100644
+DUPLICATE	6f0c0864ea61f9c710166e06ec95605bf33760c5	Source code audio files/AudioALSACodecDeviceBase.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceBase.cpp	100644
+DUPLICATE	aaa37abb53837e9efadb6017cd013c8ab5cc2de0	Source code audio files/AudioALSACodecDeviceBase.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceBase.h	100644
+DUPLICATE	cfebda00f918de714812496ae9d9d8421124e224	Source code audio files/AudioALSACodecDeviceOutEarphonePMIC.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutEarphonePMIC.cpp	100644
+DUPLICATE	57837334b66411b58bc6252f5c5686ac9b7aca65	Source code audio files/AudioALSACodecDeviceOutEarphonePMIC.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutEarphonePMIC.h	100644
+DUPLICATE	8def119eec31022e6ccc1ed0cdaaec3970ce70e2	Source code audio files/AudioALSACodecDeviceOutExtSpeakerAmp.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutExtSpeakerAmp.cpp	100644
+DUPLICATE	d23c493e34a997f3e0452e50332b936553a01473	Source code audio files/AudioALSACodecDeviceOutExtSpeakerAmp.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutExtSpeakerAmp.h	100644
+DUPLICATE	3003bc2031db41367b421a9988760f21186107b8	Source code audio files/AudioALSACodecDeviceOutReceiverPMIC.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutReceiverPMIC.cpp	100644
+DUPLICATE	c1d21dbf6c09a30be8e7b6efce7826d079b3d811	Source code audio files/AudioALSACodecDeviceOutReceiverPMIC.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutReceiverPMIC.h	100644
+DUPLICATE	4b0341c1374a6ccf2a25ba4a1492127e070ca3e3	Source code audio files/AudioALSACodecDeviceOutReceiverSpeakerSwitch.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutReceiverSpeakerSwitch.cpp	100644
+DUPLICATE	55d9aa7919001dca9bcf496cd41a587a47ac98cd	Source code audio files/AudioALSACodecDeviceOutReceiverSpeakerSwitch.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutReceiverSpeakerSwitch.h	100644
+DUPLICATE	28429c3c546187f53c7d08f1ab337d11a700c86d	Source code audio files/AudioALSACodecDeviceOutSpeakerEarphonePMIC.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutSpeakerEarphonePMIC.cpp	100644
+DUPLICATE	bde485952d7350890f811644ec105e879d92421a	Source code audio files/AudioALSACodecDeviceOutSpeakerEarphonePMIC.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutSpeakerEarphonePMIC.h	100644
+DUPLICATE	7a435694f4763c5c1d0e15f70259bcb4f5a7487e	Source code audio files/AudioALSACodecDeviceOutSpeakerNXP.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutSpeakerNXP.cpp	100644
+DUPLICATE	a09fc8a77dda9f035883f4d9607117f4bca00f21	Source code audio files/AudioALSACodecDeviceOutSpeakerNXP.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutSpeakerNXP.h	100644
+DUPLICATE	a8be60f31dd4d2cd27d035bb8f18dacf8a843df9	Source code audio files/AudioALSACodecDeviceOutSpeakerPMIC.cpp	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutSpeakerPMIC.cpp	100644
+DUPLICATE	b992f766f007e49b3cd34f79036eb53a36d7b29d	Source code audio files/AudioALSACodecDeviceOutSpeakerPMIC.h	branch-archive/main/Source code audio files/AudioALSACodecDeviceOutSpeakerPMIC.h	100644
+DUPLICATE	241d6f6a62e2a69aeb1b465678c1faac4122ed00	Source code audio files/AudioALSADataProcessor.cpp	branch-archive/main/Source code audio files/AudioALSADataProcessor.cpp	100644
+DUPLICATE	fa39ee5330f412f0cad56372f70e6ae75b861688	Source code audio files/AudioALSADataProcessor.h	branch-archive/main/Source code audio files/AudioALSADataProcessor.h	100644
+DUPLICATE	c441d75c9c79c41a2d71799fb3a6298e758a3fb3	Source code audio files/AudioALSADeviceConfigManager.cpp	branch-archive/main/Source code audio files/AudioALSADeviceConfigManager.cpp	100644
+DUPLICATE	936dc2296d4c338de8a27ec58c6d1a4e973c8256	Source code audio files/AudioALSADeviceConfigManager.h	branch-archive/main/Source code audio files/AudioALSADeviceConfigManager.h	100644
+DUPLICATE	7289ccd78f478403f0db8944ec25cfd8b6977d1d	Source code audio files/AudioALSADeviceParser.cpp	branch-archive/main/Source code audio files/AudioALSADeviceParser.cpp	100644
+DUPLICATE	af7b7eef64da819bf9fae55751a832a2d4182859	Source code audio files/AudioALSADeviceParser.h	branch-archive/main/Source code audio files/AudioALSADeviceParser.h	100644
+DUPLICATE	cca638a3e5aa77c9cfd5d683e2469dd4d5d0ae67	Source code audio files/AudioALSADeviceString.h	branch-archive/main/Source code audio files/AudioALSADeviceString.h	100644
+DUPLICATE	e984a0bc3c7d68350452a9789d17583a6d0859c1	Source code audio files/AudioALSADriverUtility.cpp	branch-archive/main/Source code audio files/AudioALSADriverUtility.cpp	100644
+DUPLICATE	de686dcfe9291a432e6dd6fbaee0464951db8ec3	Source code audio files/AudioALSADriverUtility.h	branch-archive/main/Source code audio files/AudioALSADriverUtility.h	100644
+DUPLICATE	622e885c3dc3be75a4f883262ec1d03fa51ef170	Source code audio files/AudioALSAFMController.cpp	branch-archive/main/Source code audio files/AudioALSAFMController.cpp	100644
+DUPLICATE	d199a2f858be1b23cc4e3f5796aabb848ad57d71	Source code audio files/AudioALSAFMController.h	branch-archive/main/Source code audio files/AudioALSAFMController.h	100644
+DUPLICATE	6db38cfd28695e8db61fe230af7f4a591a76bd21	Source code audio files/AudioALSAGainController.cpp	branch-archive/main/Source code audio files/AudioALSAGainController.cpp	100644
+DUPLICATE	46e77fc8ebd696cb7282e4c7afbbc8305e174a76	Source code audio files/AudioALSAGainController.h	branch-archive/main/Source code audio files/AudioALSAGainController.h	100644
+DUPLICATE	562b630c99b9457018dd8902d505385162445050	Source code audio files/AudioALSAHardware.h.txt	branch-archive/main/Source code audio files/AudioALSAHardware.h.txt	100644
+DUPLICATE	73207dd8375f549ee6c3794ecddf8e4816f7699a	Source code audio files/AudioALSAHardware.txt	branch-archive/main/Source code audio files/AudioALSAHardware.txt	100644
+DUPLICATE	161b9dc06ecd72f33cbdb3490c5248657dc97642	Source code audio files/AudioALSAHardwareResourceManager.cpp	branch-archive/main/Source code audio files/AudioALSAHardwareResourceManager.cpp	100644
+DUPLICATE	1420e444d9bbdf8157c13abccb37d278d0249c55	Source code audio files/AudioALSAHardwareResourceManager.h	branch-archive/main/Source code audio files/AudioALSAHardwareResourceManager.h	100644
+DUPLICATE	1177005ca533693e4c44027ef194b0041a7407e6	Source code audio files/AudioALSALoopbackController.cpp	branch-archive/main/Source code audio files/AudioALSALoopbackController.cpp	100644
+DUPLICATE	3e8bc193faa64684edc1b07d8cb7ac775a0a9257	Source code audio files/AudioALSALoopbackController.h	branch-archive/main/Source code audio files/AudioALSALoopbackController.h	100644
+DUPLICATE	3e759010d499aa875d7644eee484a370a2dc32ec	Source code audio files/AudioALSAParamTuner.cpp	branch-archive/main/Source code audio files/AudioALSAParamTuner.cpp	100644
+DUPLICATE	77866e9d33069a7744739ba2f33c08bc4bf55405	Source code audio files/AudioALSAParamTuner.h	branch-archive/main/Source code audio files/AudioALSAParamTuner.h	100644
+DUPLICATE	d21b8b97bec65d6de4e03cca350cab5b0d6797e9	Source code audio files/AudioALSAPlaybackDataDispatcher.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackDataDispatcher.cpp	100644
+DUPLICATE	7855f011801004c335a54881ac0761aa9fcf7cda	Source code audio files/AudioALSAPlaybackDataDispatcher.h	branch-archive/main/Source code audio files/AudioALSAPlaybackDataDispatcher.h	100644
+DUPLICATE	f737343ce579f7f0ef2ed23ee29c67c52ab06a4f	Source code audio files/AudioALSAPlaybackHandlerBase.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerBase.cpp	100644
+DUPLICATE	6e8649a164dace8eed44e340c6271c637e74e27d	Source code audio files/AudioALSAPlaybackHandlerBase.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerBase.h	100644
+DUPLICATE	99ac3bbf004c26caeba4e14d7780a5eb8def574a	Source code audio files/AudioALSAPlaybackHandlerBTCVSD.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerBTCVSD.cpp	100644
+DUPLICATE	3d59c3f0776d5912850e11a5bd1af47413581cb3	Source code audio files/AudioALSAPlaybackHandlerBTCVSD.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerBTCVSD.h	100644
+DUPLICATE	7f1a90e033227c58698484b6b514a1b3127c221e	Source code audio files/AudioALSAPlaybackHandlerBTSCO.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerBTSCO.cpp	100644
+DUPLICATE	c882286364afb3e62f7fa0db0018f212632e552d	Source code audio files/AudioALSAPlaybackHandlerBTSCO.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerBTSCO.h	100644
+DUPLICATE	453f604125925edc05fb1437f04641a9d6ee436d	Source code audio files/AudioALSAPlaybackHandlerFast.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerFast.cpp	100644
+DUPLICATE	9f2e7c09612c2900dbd2376715defc4f43fb7002	Source code audio files/AudioALSAPlaybackHandlerFast.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerFast.h	100644
+DUPLICATE	aea9cf3d42f9a1de22658450a1fb52b8972a1b20	Source code audio files/AudioALSAPlaybackHandlerFMTransmitter.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerFMTransmitter.cpp	100644
+DUPLICATE	c6c21197d93edfbceb1737eb736dfe9bb8161874	Source code audio files/AudioALSAPlaybackHandlerFMTransmitter.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerFMTransmitter.h	100644
+DUPLICATE	b94893175ef8d95806d50318dccb2559a6c5ede2	Source code audio files/AudioALSAPlaybackHandlerHDMI.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerHDMI.cpp	100644
+DUPLICATE	05a33568f9fb0dc1d0b19379ab7b5de1a952c7d8	Source code audio files/AudioALSAPlaybackHandlerHDMI.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerHDMI.h	100644
+DUPLICATE	2bc9046f4a456292700ce9c4dccad5a8e9d49e11	Source code audio files/AudioALSAPlaybackHandlerI2SHDMI.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerI2SHDMI.cpp	100644
+DUPLICATE	49dd897c9d8a3f7c82aa79fda5046fe03bb9920f	Source code audio files/AudioALSAPlaybackHandlerI2SHDMI.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerI2SHDMI.h	100644
+DUPLICATE	72fb898dc05b71db5af13b80c1ec4a5c095de813	Source code audio files/AudioALSAPlaybackHandlerNormal.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerNormal.cpp	100644
+DUPLICATE	e409bf49de5b137882475a21c0628ba8dd54ffd4	Source code audio files/AudioALSAPlaybackHandlerNormal.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerNormal.h	100644
+DUPLICATE	9e9f34a19360dd359a97cd30c2ec4e98145fe8dc	Source code audio files/AudioALSAPlaybackHandlerOffload.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerOffload.cpp	100644
+DUPLICATE	2962414996b96e0ef2cc52e184365fa9a159d546	Source code audio files/AudioALSAPlaybackHandlerOffload.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerOffload.h	100644
+DUPLICATE	a59783309ab0c75a2a6d0ff127e264ecd142111e	Source code audio files/AudioALSAPlaybackHandlerSphDL.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerSphDL.cpp	100644
+DUPLICATE	01edd9ae5734cd3869188b48954e3bbaef87dac1	Source code audio files/AudioALSAPlaybackHandlerSphDL.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerSphDL.h	100644
+DUPLICATE	2e7c7726a00b7b20cd1e4e84e4d7203f9ec0405f	Source code audio files/AudioALSAPlaybackHandlerVoice.cpp	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerVoice.cpp	100644
+DUPLICATE	464fc91313fa1f87d417abf62794800847d7c3a9	Source code audio files/AudioALSAPlaybackHandlerVoice.h	branch-archive/main/Source code audio files/AudioALSAPlaybackHandlerVoice.h	100644
+DUPLICATE	4fe90dad015af36a4a5de955baef7f3bc29e6c8a	Source code audio files/AudioALSASampleRateController.cpp	branch-archive/main/Source code audio files/AudioALSASampleRateController.cpp	100644
+DUPLICATE	60a40def9c1e48ef76ca596ae5d6c3286b3d128f	Source code audio files/AudioALSASampleRateController.h	branch-archive/main/Source code audio files/AudioALSASampleRateController.h	100644
+DUPLICATE	996db62b1f317efa459637e4e4b772c9e3c5afef	Source code audio files/AudioALSASpeakerMonitor.cpp	branch-archive/main/Source code audio files/AudioALSASpeakerMonitor.cpp	100644
+DUPLICATE	85fb7dbafffa17daf5e18c1c6fe07c2b85f5170f	Source code audio files/AudioALSASpeakerMonitor.h	branch-archive/main/Source code audio files/AudioALSASpeakerMonitor.h	100644
+DUPLICATE	3776bcbfca9032bf14e16b7bb784205ec8eb917b	Source code audio files/AudioALSASpeechLoopbackController.cpp	branch-archive/main/Source code audio files/AudioALSASpeechLoopbackController.cpp	100644
+DUPLICATE	f015ffdba95f9fec749e79d685602963fc3946cb	Source code audio files/AudioALSASpeechLoopbackController.h	branch-archive/main/Source code audio files/AudioALSASpeechLoopbackController.h	100644
+DUPLICATE	81190214fac1582e7d773e0cf71e60df311f653f	Source code audio files/AudioALSASpeechPhoneCallController.cpp.txt	branch-archive/main/Source code audio files/AudioALSASpeechPhoneCallController.cpp.txt	100644
+DUPLICATE	31bbe3ccc7cedb11ac902b6b3c3c39558bc5d6b4	Source code audio files/AudioALSASpeechPhoneCallController.h	branch-archive/main/Source code audio files/AudioALSASpeechPhoneCallController.h	100644
+DUPLICATE	eb5bd9f65f176267ad507881b6b7f689295302f6	Source code audio files/AudioALSASpeechStreamController.cpp	branch-archive/main/Source code audio files/AudioALSASpeechStreamController.cpp	100644
+DUPLICATE	8cfb96a27cbc4da777b0b545c8b6551a330445eb	Source code audio files/AudioALSASpeechStreamController.h	branch-archive/main/Source code audio files/AudioALSASpeechStreamController.h	100644
+DUPLICATE	0b425aa1ffc765dac1b84c39de5c139da392d2eb	Source code audio files/AudioALSAStreamIn.cpp	branch-archive/main/Source code audio files/AudioALSAStreamIn.cpp	100644
+DUPLICATE	ce7c30ce375fbfecf53f991230b1105d655d650a	Source code audio files/AudioALSAStreamIn.h	branch-archive/main/Source code audio files/AudioALSAStreamIn.h	100644
+DUPLICATE	4ddb9d6211e84d05e6c411e3b486ba10dc93c149	Source code audio files/AudioALSAStreamManager.cpp	branch-archive/main/Source code audio files/AudioALSAStreamManager.cpp	100644
+DUPLICATE	4bb4c9fd380b077bf93743debf966eb03052d3bd	Source code audio files/AudioALSAStreamManager.h	branch-archive/main/Source code audio files/AudioALSAStreamManager.h	100644
+DUPLICATE	66cf6e6148ec5f99edda605a6b1b7ec9333f51a6	Source code audio files/AudioALSAStreamOut.cpp.txt	branch-archive/main/Source code audio files/AudioALSAStreamOut.cpp.txt	100644
+DUPLICATE	8184cf73be48d378e489977f267a48816d7fdf9d	Source code audio files/AudioALSAStreamOut.h	branch-archive/main/Source code audio files/AudioALSAStreamOut.h	100644
+DUPLICATE	99077eb08f27a38b25101f8aee1ff10f39f88ac0	Source code audio files/AudioALSAVoiceWakeUpController.cpp	branch-archive/main/Source code audio files/AudioALSAVoiceWakeUpController.cpp	100644
+DUPLICATE	c5e87ee47ea44e52dc6d90ae0d4479f43b8ec998	Source code audio files/AudioALSAVoiceWakeUpController.h	branch-archive/main/Source code audio files/AudioALSAVoiceWakeUpController.h	100644
+DUPLICATE	a909e171d051b80f4791bc62f5c3143f86e05632	Source code audio files/AudioALSAVolumeController.cpp	branch-archive/main/Source code audio files/AudioALSAVolumeController.cpp	100644
+DUPLICATE	0cbe8015e9eaad11ccb0c12b58c0ef95b2d759c5	Source code audio files/AudioALSAVolumeController.h	branch-archive/main/Source code audio files/AudioALSAVolumeController.h	100644
+DUPLICATE	17cba865af89910f626ccd0cc0546e722bd67d77	Source code audio files/AudioAMPControlInterface.cpp	branch-archive/main/Source code audio files/AudioAMPControlInterface.cpp	100644
+DUPLICATE	654b454a390367d5117a4cc967549b108aad371c	Source code audio files/AudioAMPControlInterface.h	branch-archive/main/Source code audio files/AudioAMPControlInterface.h	100644
+DUPLICATE	f43e1d2128b50b2ca6935aa98691e9e54714de3f	Source code audio files/AudioAnalogControlFactory.cpp	branch-archive/main/Source code audio files/AudioAnalogControlFactory.cpp	100644
+DUPLICATE	71b864f4bf099033ff688b383ae40827186559b4	Source code audio files/AudioAnalogControlFactory.h	branch-archive/main/Source code audio files/AudioAnalogControlFactory.h	100644
+DUPLICATE	6f62bafcce7fa51d243446c94a16d5e34f20ccf5	Source code audio files/AudioAnalogControlInterface.h	branch-archive/main/Source code audio files/AudioAnalogControlInterface.h	100644
+DUPLICATE	058f249df2c5c336fd956d0ebe1dd4863d5d6602	Source code audio files/AudioAssert.h	branch-archive/main/Source code audio files/AudioAssert.h	100644
+DUPLICATE	62d718cb5be968875bcbcc947433440d3e6354da	Source code audio files/AudioBTCVSDControl.cpp	branch-archive/main/Source code audio files/AudioBTCVSDControl.cpp	100644
+DUPLICATE	0d9a782ca202238b55b90d099e15f5b80f99eeea	Source code audio files/AudioBTCVSDControl.h	branch-archive/main/Source code audio files/AudioBTCVSDControl.h	100644
+DUPLICATE	93b3087b27b89a3f3916be60e3364aa4b355b04b	Source code audio files/AudioBTCVSDDef.h	branch-archive/main/Source code audio files/AudioBTCVSDDef.h	100644
+DUPLICATE	8c0a12b21c99c10975164bc862de55926fe343c8	Source code audio files/AudioCustomVolume.h	branch-archive/main/Source code audio files/AudioCustomVolume.h	100644
+DUPLICATE	1a4f668369839e95f5003df5feadd558265bcefb	Source code audio files/AudioDef.h	branch-archive/main/Source code audio files/AudioDef.h	100644
+DUPLICATE	ed87d93984047151d7b9fdb145369e5ec580bde8	Source code audio files/AudioDigitalControlFactory.cpp	branch-archive/main/Source code audio files/AudioDigitalControlFactory.cpp	100644
+DUPLICATE	62373b438ff76955d2df1f90f51b3ac60dd7fe6e	Source code audio files/AudioDigitalControlFactory.h	branch-archive/main/Source code audio files/AudioDigitalControlFactory.h	100644
+DUPLICATE	338f8bd98e3c92f7111d77ccb0ca498221e22b72	Source code audio files/AudioDigitalControlInterface.h	branch-archive/main/Source code audio files/AudioDigitalControlInterface.h	100644
+DUPLICATE	a6e10a99197e90634676e66f0296103ffbdca597	Source code audio files/AudioExtDisp.h	branch-archive/main/Source code audio files/AudioExtDisp.h	100644
+DUPLICATE	7e701949b460dbc0eae6d2ce8a8cf3e3bafd4384	Source code audio files/AudioFMController.cpp	branch-archive/main/Source code audio files/AudioFMController.cpp	100644
+DUPLICATE	43f4e125e22745d7547d289453d06c6b803a22a9	Source code audio files/AudioFMController.h	branch-archive/main/Source code audio files/AudioFMController.h	100644
+DUPLICATE	ea82acb419afe5b4c13b27d9dfd0d9dfc96d916b	Source code audio files/AudioFMResourceManager.h	branch-archive/main/Source code audio files/AudioFMResourceManager.h	100644
+DUPLICATE	bd2615e724aa3cf802e05bb77fc15ffe9c19e453	Source code audio files/AudioFtm.cpp	branch-archive/main/Source code audio files/AudioFtm.cpp	100644
+DUPLICATE	19d35d4ee4415d6689bfd3f01608378922884273	Source code audio files/AudioFtm.h	branch-archive/main/Source code audio files/AudioFtm.h	100644
+DUPLICATE	4778b9983cd7370a09be3aabb82c57f6b7795d6a	Source code audio files/AudioFtmBase.cpp	branch-archive/main/Source code audio files/AudioFtmBase.cpp	100644
+DUPLICATE	9156dd7a7229128e62c8f721cb87a7be02d5d254	Source code audio files/AudioFtmBase.h	branch-archive/main/Source code audio files/AudioFtmBase.h	100644
+DUPLICATE	9abe73a7d741c5bf276cc1868898cf7f9115fce8	Source code audio files/AudioGainTableParam.h	branch-archive/main/Source code audio files/AudioGainTableParam.h	100644
+DUPLICATE	ef1cda05bd3e3fe85373d9b6e3e3a26cd558d4b2	Source code audio files/AudioGainTableParamParser.cpp	branch-archive/main/Source code audio files/AudioGainTableParamParser.cpp	100644
+DUPLICATE	fedf2260415c7e6c5a49bc907bbf0145c0e907db	Source code audio files/AudioGainTableParamParser.h	branch-archive/main/Source code audio files/AudioGainTableParamParser.h	100644
+DUPLICATE	4c2511f88fc375730fe2f48e5e9400a40bebea6d	Source code audio files/AudioHfpProcessingInterface.h	branch-archive/main/Source code audio files/AudioHfpProcessingInterface.h	100644
+DUPLICATE	cba2600c7dc5a32691c3aaf8ad7cdbdec8bdda34	Source code audio files/AudioInterConnection.h	branch-archive/main/Source code audio files/AudioInterConnection.h	100644
+DUPLICATE	c8dbcb3cfffd111c07083f9a5c47199b0702e2eb	Source code audio files/AudioIoctl.h	branch-archive/main/Source code audio files/AudioIoctl.h	100644
+DUPLICATE	f322ba30c743003a46fa41e6cc590b9f483d447b	Source code audio files/AudioLock.h	branch-archive/main/Source code audio files/AudioLock.h	100644
+DUPLICATE	24bf49c92ee58d40be8f626a928d532277db9b7a	Source code audio files/AudioMATVController.cpp	branch-archive/main/Source code audio files/AudioMATVController.cpp	100644
+DUPLICATE	8f98fd99ccdd833cc2d043737176ee2c1ae5ed8a	Source code audio files/AudioMATVController.h	branch-archive/main/Source code audio files/AudioMATVController.h	100644
+DUPLICATE	2cad7c12cd6b42da127d7eb2d1404fb2018211e1	Source code audio files/AudioMATVResourceManager.h	branch-archive/main/Source code audio files/AudioMATVResourceManager.h	100644
+DUPLICATE	478a41051163f40d993be919f58669303da6faba	Source code audio files/AudioMTKDec.cpp	branch-archive/main/Source code audio files/AudioMTKDec.cpp	100644
+DUPLICATE	fa2dc21014685c1a52a298e7626771d778a5d22e	Source code audio files/AudioMTKDec.h	branch-archive/main/Source code audio files/AudioMTKDec.h	100644
+DUPLICATE	ddf15333990eab48d03c473be288d620f4d2fdbf	Source code audio files/AudioMTKFilter.cpp	branch-archive/main/Source code audio files/AudioMTKFilter.cpp	100644
+DUPLICATE	3bd68614eba0e3949fbd1170575ba35e2b972785	Source code audio files/AudioMTKFilter.h	branch-archive/main/Source code audio files/AudioMTKFilter.h	100644
+DUPLICATE	9105702e088fe2d2fbd39a2c2d6bf04d8037ee20	Source code audio files/AudioMTKGainController.cpp	branch-archive/main/Source code audio files/AudioMTKGainController.cpp	100644
+DUPLICATE	5be44a9a5d4d4f0dbee46a479da4269bfe2c99d6	Source code audio files/AudioMTKGainController.h	branch-archive/main/Source code audio files/AudioMTKGainController.h	100644
+DUPLICATE	a2f4349d093d16f188ec75c65d7bf1f5c578f708	Source code audio files/AudioMTKHardwareCommand.h	branch-archive/main/Source code audio files/AudioMTKHardwareCommand.h	100644
+DUPLICATE	bfeb79c87af1ca515cd29eb73994a2c111d9f08c	Source code audio files/AudioMTKHardwareCommonCommand.cpp	branch-archive/main/Source code audio files/AudioMTKHardwareCommonCommand.cpp	100644
+DUPLICATE	378c7aaf19a2384ede9fb141dae10af5aa7956d5	Source code audio files/AudioMTKHardwareInterface.h	branch-archive/main/Source code audio files/AudioMTKHardwareInterface.h	100644
+DUPLICATE	01e99669a262e2720e37e636d38565988e28514d	Source code audio files/AudioMTKHeadsetMessager.cpp	branch-archive/main/Source code audio files/AudioMTKHeadsetMessager.cpp	100644
+DUPLICATE	c7f06cc181121e54a9f16abbd97680b7d635e6d7	Source code audio files/AudioMTKHeadsetMessager.h	branch-archive/main/Source code audio files/AudioMTKHeadsetMessager.h	100644
+DUPLICATE	b1f8d07f1a25d07002470dbbafadbca80fb4f8ef	Source code audio files/AudioMTKPolicyInterface.h	branch-archive/main/Source code audio files/AudioMTKPolicyInterface.h	100644
+DUPLICATE	ae87b1f621c3d2d2fef9ef22dc730bfff755bf4e	Source code audio files/AudioMTKPolicyManager.cpp	branch-archive/main/Source code audio files/AudioMTKPolicyManager.cpp	100644
+DUPLICATE	7ec3e885978d0fc0229f7d50d1aef83ba98f3be8	Source code audio files/AudioMTKPolicyManager.h	branch-archive/main/Source code audio files/AudioMTKPolicyManager.h	100644
+DUPLICATE	4b27054cc34da5d24c2243baaa55876df2cd37ec	Source code audio files/AudioMTKStreamInClient.cpp	branch-archive/main/Source code audio files/AudioMTKStreamInClient.cpp	100644
+DUPLICATE	3cf78a5ac2ac27e3e4178e0d4e2b85120b90d35a	Source code audio files/AudioMTKStreamInClient.h	branch-archive/main/Source code audio files/AudioMTKStreamInClient.h	100644
+DUPLICATE	dfddf15105425349110e4864463120551e720569	Source code audio files/AudioMTKStreamInManagerInterface.h	branch-archive/main/Source code audio files/AudioMTKStreamInManagerInterface.h	100644
+DUPLICATE	08aad04350cec1210070ef0e03737e2d68dfbdfd	Source code audio files/AudioMTKStreamManager.cpp	branch-archive/main/Source code audio files/AudioMTKStreamManager.cpp	100644
+DUPLICATE	a056cd5046ef36eab18330794a0e77b1d0e3ce97	Source code audio files/AudioMTKStreamManager.h	branch-archive/main/Source code audio files/AudioMTKStreamManager.h	100644
+DUPLICATE	bd44307a7ee0e1ba25095c7996de4084d8efad45	Source code audio files/AudioMTKStreamManagerBase.cpp	branch-archive/main/Source code audio files/AudioMTKStreamManagerBase.cpp	100644
+DUPLICATE	69f0681abec9a7f3df58e9d56767ca94810c093f	Source code audio files/AudioMTKStreamManagerBase.h	branch-archive/main/Source code audio files/AudioMTKStreamManagerBase.h	100644
+DUPLICATE	ee93fba7b329d911cd1bb06d398c643773c16aae	Source code audio files/AudioMTKStreamManagerInterface.h	branch-archive/main/Source code audio files/AudioMTKStreamManagerInterface.h	100644
+DUPLICATE	f7a31dbc9f9cf17e5f046ab7f5e0a69c358c0ca1	Source code audio files/AudioMTKVolumeCapability.cpp	branch-archive/main/Source code audio files/AudioMTKVolumeCapability.cpp	100644
+DUPLICATE	5c4c6ca328e97841d92d2e1ed537aef0f549d746	Source code audio files/AudioMTKVolumeCapability.h	branch-archive/main/Source code audio files/AudioMTKVolumeCapability.h	100644
+DUPLICATE	4eb9cbe1b612587b3c2623f9a0f2c4074279e621	Source code audio files/AudioMTKVolumeInterface.h	branch-archive/main/Source code audio files/AudioMTKVolumeInterface.h	100644
+DUPLICATE	5276861b629b8393fedc0ee4075096efe47c06bc	Source code audio files/AudioPolicyCompatClient.cpp	branch-archive/main/Source code audio files/AudioPolicyCompatClient.cpp	100644
+DUPLICATE	56d00125b3bad2f0346fabae6d0a38076a4fc20c	Source code audio files/AudioPolicyCompatClient.h	branch-archive/main/Source code audio files/AudioPolicyCompatClient.h	100644
+DUPLICATE	e926036088b6ea13ba2f8fc0cc600ea27770aa89	Source code audio files/AudioPolicyFactory.cpp	branch-archive/main/Source code audio files/AudioPolicyFactory.cpp	100644
+DUPLICATE	4a98644b4a4b854e2b838d88f54c9041b1b4bfca	Source code audio files/AudioPolicyManagerCustom.cpp	branch-archive/main/Source code audio files/AudioPolicyManagerCustom.cpp	100644
+DUPLICATE	ad0a2a0809b8e3d0ec4bcbe1537ecf236a91ea7a	Source code audio files/AudioPolicyManagerCustom.h	branch-archive/main/Source code audio files/AudioPolicyManagerCustom.h	100644
+DUPLICATE	70f00474f05587866b6746f7766997a25c2ec93f	Source code audio files/AudioPolicyManagerDefault.cpp	branch-archive/main/Source code audio files/AudioPolicyManagerDefault.cpp	100644
+DUPLICATE	fed82bf2f3cefd05140619fd87b3d32174237979	Source code audio files/AudioPolicyManagerDefault.h	branch-archive/main/Source code audio files/AudioPolicyManagerDefault.h	100644
+DUPLICATE	98b76503aa3a6a4ba5b866125995adb63321d548	Source code audio files/AudioPolicyParameters.h	branch-archive/main/Source code audio files/AudioPolicyParameters.h	100644
+DUPLICATE	5efce1b9560912b3d8d428de5f1e41aa7c1ac2ad	Source code audio files/AudioPreProcess.cpp	branch-archive/main/Source code audio files/AudioPreProcess.cpp	100644
+DUPLICATE	478698256187bc035f7aed354a20c77afb60aca7	Source code audio files/AudioPreProcess.h	branch-archive/main/Source code audio files/AudioPreProcess.h	100644
+DUPLICATE	56d8c49afab635e1d08d488c88b58c146673efdb	Source code audio files/AudioResourceFactory.cpp	branch-archive/main/Source code audio files/AudioResourceFactory.cpp	100644
+DUPLICATE	be10621f8108f3d1cffd80ea046477b8a04ab22b	Source code audio files/AudioResourceFactory.h	branch-archive/main/Source code audio files/AudioResourceFactory.h	100644
+DUPLICATE	f1f7388293d75863fd6e842f0c851d08d49fa062	Source code audio files/AudioSampleRateController.cpp	branch-archive/main/Source code audio files/AudioSampleRateController.cpp	100644
+DUPLICATE	2e2dd0f476bfd6ede03e1d3b27b2f372363a82f4	Source code audio files/AudioSampleRateController.h	branch-archive/main/Source code audio files/AudioSampleRateController.h	100644
+DUPLICATE	b1d0d156a67639f379cbc7811a3a9374604eb678	Source code audio files/AudioSpeechEnhanceInfo.cpp	branch-archive/main/Source code audio files/AudioSpeechEnhanceInfo.cpp	100644
+DUPLICATE	96a2d10ea7f16bcd27481ead40db2c02a2a14c4e	Source code audio files/AudioSpeechEnhanceInfo.h	branch-archive/main/Source code audio files/AudioSpeechEnhanceInfo.h	100644
+DUPLICATE	e0588e0c2e049dfb9f052ace0b9ac15422265b8a	Source code audio files/AudioSpeechEnhLayer.cpp	branch-archive/main/Source code audio files/AudioSpeechEnhLayer.cpp	100644
+DUPLICATE	5d2889eeec221dc9e1444939c6a9a4d2fb714e18	Source code audio files/AudioSpeechEnhLayer.h	branch-archive/main/Source code audio files/AudioSpeechEnhLayer.h	100644
+DUPLICATE	47930b24c96a7a426e60ce59cc01a7613f0eccb0	Source code audio files/AudioStreamAttribute.cpp	branch-archive/main/Source code audio files/AudioStreamAttribute.cpp	100644
+DUPLICATE	5b178e00d764f204685c8e94d24c4356ce67b651	Source code audio files/AudioStreamAttribute.h	branch-archive/main/Source code audio files/AudioStreamAttribute.h	100644
+DUPLICATE	42a48791906bd3acd9cf99b126f8306355b01fec	Source code audio files/AudioType.h	branch-archive/main/Source code audio files/AudioType.h	100644
+DUPLICATE	f4bdf85cc501e90f368487a8a660af11440578c5	Source code audio files/AudioTypeExt.h	branch-archive/main/Source code audio files/AudioTypeExt.h	100644
+DUPLICATE	0bfd62c62b1312a567c5d1cb1ff388c304400e34	Source code audio files/AudioUtility.cpp	branch-archive/main/Source code audio files/AudioUtility.cpp	100644
+DUPLICATE	873e03b1d403aa46be77c86b9bf9a347ea85ed04	Source code audio files/AudioUtility.h	branch-archive/main/Source code audio files/AudioUtility.h	100644
+DUPLICATE	833ec39d1c395d320fc3dbbed7cf554e7cf2669d	Source code audio files/AudioVIBSPKCoeff.h	branch-archive/main/Source code audio files/AudioVIBSPKCoeff.h	100644
+DUPLICATE	c049f91865dab95f8f0602e59223defe5d012927	Source code audio files/AudioVIBSPKControl.cpp	branch-archive/main/Source code audio files/AudioVIBSPKControl.cpp	100644
+DUPLICATE	dd1fc465a548cb012daf1398c40187d445738e6c	Source code audio files/AudioVIBSPKControl.h	branch-archive/main/Source code audio files/AudioVIBSPKControl.h	100644
+DUPLICATE	885065c08394366368f5910f374b711e7b7c11f0	Source code audio files/AudioVolumeFactory.cpp	branch-archive/main/Source code audio files/AudioVolumeFactory.cpp	100644
+DUPLICATE	20d272303a7fc5788a8377e6fd757452ae5c35a8	Source code audio files/AudioVolumeFactory.h	branch-archive/main/Source code audio files/AudioVolumeFactory.h	100644
+DUPLICATE	7a853a0275b6bd074f5b351eea6cd2f45d5c5fc8	Source code audio files/AudioVolumeInterface.h	branch-archive/main/Source code audio files/AudioVolumeInterface.h	100644
+DUPLICATE	3f3f2535e525198d103ed810fc2db4711887d27a	Source code audio files/AudioVUnlockDL.cpp	branch-archive/main/Source code audio files/AudioVUnlockDL.cpp	100644
+DUPLICATE	31465fa7e374b988f680a974f052e0f1095b618d	Source code audio files/AudioVUnlockDL.h	branch-archive/main/Source code audio files/AudioVUnlockDL.h	100644
+DUPLICATE	e6823f390c575127965cd9d55a58fb57a4ca0f7a	Source code audio files/CVQStream.c	branch-archive/main/Source code audio files/CVQStream.c	100644
+DUPLICATE	a5fc9106a7bf7b0d85123bbf0d04e660f7dec9e7	Source code audio files/CVQStream.h	branch-archive/main/Source code audio files/CVQStream.h	100644
+DUPLICATE	461bae4429e5ec9791d6e6148858dc13a602027d	Source code audio files/LoopbackManager.cpp	branch-archive/main/Source code audio files/LoopbackManager.cpp	100644
+DUPLICATE	f1d0da89b07fc85d2bfcbc26b269f74541af3253	Source code audio files/LoopbackManager.h	branch-archive/main/Source code audio files/LoopbackManager.h	100644
+DUPLICATE	8b137891791fe96927ad78e64b0aad7bded08bdc	Source code audio files/S	branch-archive/main/Source code audio files/S	100644
+DUPLICATE	9f2c1e94e1d18d848be171a5998b25de7bed91db	Source code audio files/SpeechANCController.cpp	branch-archive/main/Source code audio files/SpeechANCController.cpp	100644
+DUPLICATE	9ae26c4451ece8e0a05addd7f1b8cf2ad6ff7a78	Source code audio files/SpeechANCController.h	branch-archive/main/Source code audio files/SpeechANCController.h	100644
+DUPLICATE	0779370bd34b4e8562173b2003901a112fd540e7	Source code audio files/SpeechBGSPlayer.cpp	branch-archive/main/Source code audio files/SpeechBGSPlayer.cpp	100644
+DUPLICATE	1200aa96aaad86d7b35cf5de6164ac1d30070b60	Source code audio files/SpeechBGSPlayer.h	branch-archive/main/Source code audio files/SpeechBGSPlayer.h	100644
+DUPLICATE	379808e5dc59fdfa768da8d0debb8dc8e7509b41	Source code audio files/SpeechDataProcessingHandler.cpp	branch-archive/main/Source code audio files/SpeechDataProcessingHandler.cpp	100644
+DUPLICATE	9692db936ccf57692437b7f1ec7ea2f6fc4ffc30	Source code audio files/SpeechDataProcessingHandler.h	branch-archive/main/Source code audio files/SpeechDataProcessingHandler.h	100644
+DUPLICATE	f8c0b8148beccf2ed3097a52fe05772f3e520529	Source code audio files/SpeechDriverDSDA.cpp	branch-archive/main/Source code audio files/SpeechDriverDSDA.cpp	100644
+DUPLICATE	1f494651305ed654906bd8670d35ad4f114d90b0	Source code audio files/SpeechDriverDSDA.h	branch-archive/main/Source code audio files/SpeechDriverDSDA.h	100644
+DUPLICATE	15331787de0cf2186ab2405f486f81dce1a7de78	Source code audio files/SpeechDriverDummy.cpp	branch-archive/main/Source code audio files/SpeechDriverDummy.cpp	100644
+DUPLICATE	72e87afbb56736d1c3e68332633390ca8ef9e3ae	Source code audio files/SpeechDriverDummy.h	branch-archive/main/Source code audio files/SpeechDriverDummy.h	100644
+DUPLICATE	f466b71e60791e5479138f1ce499bf3d4f145cee	Source code audio files/SpeechDriverFactory.cpp	branch-archive/main/Source code audio files/SpeechDriverFactory.cpp	100644
+DUPLICATE	f91bba6fed574cded0c81753c6617e488c27e550	Source code audio files/SpeechDriverFactory.h	branch-archive/main/Source code audio files/SpeechDriverFactory.h	100644
+DUPLICATE	43b923a53fa2b34b736d1debfeaa18389a70416e	Source code audio files/SpeechDriverInterface.h	branch-archive/main/Source code audio files/SpeechDriverInterface.h	100644
+DUPLICATE	5a7a3bceca5935a7397145f0aaf1b39874f32d81	Source code audio files/SpeechDriverLAD.cpp	branch-archive/main/Source code audio files/SpeechDriverLAD.cpp	100644
+DUPLICATE	75a653cd3c09c27f9d3fc436c4fbb0804871444d	Source code audio files/SpeechDriverLAD.h	branch-archive/main/Source code audio files/SpeechDriverLAD.h	100644
+DUPLICATE	bf975d60082e5043914d11c82fb085e99710d48b	Source code audio files/SpeechDriverVendEVDO.cpp	branch-archive/main/Source code audio files/SpeechDriverVendEVDO.cpp	100644
+DUPLICATE	ccb9bd5cec66abb3a51276573a2e0d6ed3a7b908	Source code audio files/SpeechDriverVendEVDO.h	branch-archive/main/Source code audio files/SpeechDriverVendEVDO.h	100644
+DUPLICATE	f0755540263f7ef73aff946c5fc6784aa823067f	Source code audio files/SpeechEnhancementController.cpp	branch-archive/main/Source code audio files/SpeechEnhancementController.cpp	100644
+DUPLICATE	789898cd3cee6c05137b59747ddfab39639b73c6	Source code audio files/SpeechEnhancementController.h	branch-archive/main/Source code audio files/SpeechEnhancementController.h	100644
+DUPLICATE	425c3097ed49e6ce0b8b4ed8c6886f271d960463	Source code audio files/SpeechLoopbackController.h	branch-archive/main/Source code audio files/SpeechLoopbackController.h	100644
+DUPLICATE	ff65bf462fd86821c277f5f2cd912973c9da53f3	Source code audio files/SpeechMessengerCCCI.cpp	branch-archive/main/Source code audio files/SpeechMessengerCCCI.cpp	100644
+DUPLICATE	ff135760b4ce50311cb97ec7a81a0f743c955124	Source code audio files/SpeechMessengerCCCI.h	branch-archive/main/Source code audio files/SpeechMessengerCCCI.h	100644
+DUPLICATE	1e190bc5228eac77b97b6aba84515e10c9417ab0	Source code audio files/SpeechMessengerDSDA.cpp	branch-archive/main/Source code audio files/SpeechMessengerDSDA.cpp	100644
+DUPLICATE	5efc3cb653abeb4d0d96cb8850c3f6d0eb308a52	Source code audio files/SpeechMessengerDSDA.h	branch-archive/main/Source code audio files/SpeechMessengerDSDA.h	100644
+DUPLICATE	a4c62924ef051c9339a0badde3f42fc8b6455c6d	Source code audio files/SpeechMessengerECCCI.cpp	branch-archive/main/Source code audio files/SpeechMessengerECCCI.cpp	100644
+DUPLICATE	b1e514e366a7466e20ecc8360efdc002e68c1c78	Source code audio files/SpeechMessengerECCCI.h	branch-archive/main/Source code audio files/SpeechMessengerECCCI.h	100644
+DUPLICATE	a7e2f63ff4bbd538fc2ab50a202fb48e1000ce4c	Source code audio files/SpeechMessengerEEMCS.cpp	branch-archive/main/Source code audio files/SpeechMessengerEEMCS.cpp	100644
+DUPLICATE	4029c470dbec1fac242987a4b2d358913f892abb	Source code audio files/SpeechMessengerEEMCS.h	branch-archive/main/Source code audio files/SpeechMessengerEEMCS.h	100644
+DUPLICATE	61a7922e7c01e6207ead625ae870ed3c583661a3	Source code audio files/SpeechMessengerEVDO.cpp	branch-archive/main/Source code audio files/SpeechMessengerEVDO.cpp	100644
+DUPLICATE	ee9a81c77843e2d376a354e8224597e3d4273565	Source code audio files/SpeechMessengerEVDO.h	branch-archive/main/Source code audio files/SpeechMessengerEVDO.h	100644
+DUPLICATE	522d80f3d19b0b2644d7ea20ee28eb8f998fecc3	Source code audio files/SpeechMessengerInterface.h	branch-archive/main/Source code audio files/SpeechMessengerInterface.h	100644
+DUPLICATE	4cee338b6cd39bcaee2df56bd98e59003a4a64de	Source code audio files/SpeechMessengerVendEVDO.cpp	branch-archive/main/Source code audio files/SpeechMessengerVendEVDO.cpp	100644
+DUPLICATE	69df76cb1d269c17e4f1c151191e32ac835b9b47	Source code audio files/SpeechMessengerVendEVDO.h	branch-archive/main/Source code audio files/SpeechMessengerVendEVDO.h	100644
+DUPLICATE	cba0257bf1bf85a86b792faf50600e0b3392db78	Source code audio files/SpeechParamParser.cpp	branch-archive/main/Source code audio files/SpeechParamParser.cpp	100644
+DUPLICATE	77971ae55ad6197a8b26b14b764dc7a2c9b7f724	Source code audio files/SpeechParamParser.h	branch-archive/main/Source code audio files/SpeechParamParser.h	100644
+DUPLICATE	49523339b59ed3b501746bd688973fae84ddd75a	Source code audio files/SpeechPcm2way.cpp	branch-archive/main/Source code audio files/SpeechPcm2way.cpp	100644
+DUPLICATE	beb21d93e7f96f1ea6afd2c99b62592d411f9608	Source code audio files/SpeechPcm2way.h	branch-archive/main/Source code audio files/SpeechPcm2way.h	100644
+DUPLICATE	bb48114000ce2d34e5f74102a6086e0e6f414049	Source code audio files/SpeechType.h	branch-archive/main/Source code audio files/SpeechType.h	100644
+DUPLICATE	ce7cc20abe6b2af5ea35de35063c4ee6dbb231d0	Source code audio files/SpeechVMRecorder.cpp	branch-archive/main/Source code audio files/SpeechVMRecorder.cpp	100644
+DUPLICATE	9f7e7e07c5f4eadc22ee6540a906b53ef381fd36	Source code audio files/SpeechVMRecorder.h	branch-archive/main/Source code audio files/SpeechVMRecorder.h	100644
+DUPLICATE	7a3817957d112078e0f9b3bd4679ff89eaa24e5d	Source code audio files/WCNChipController.cpp	branch-archive/main/Source code audio files/WCNChipController.cpp	100644
+DUPLICATE	5857ed7e96bba9f898bb21a068f033921db5921f	Source code audio files/WCNChipController.h	branch-archive/main/Source code audio files/WCNChipController.h	100644

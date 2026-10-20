@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.dsann.batterymonitor'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.dsann.batterymonitor.tab'
+        minSdk 23
+        targetSdk 36
+        versionCode 180701
+        versionName '18.7.1'
+    }
+
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("BATTERYPULSE_KEYSTORE_PATH")
+            if (keystorePath != null && !keystorePath.isEmpty()) {
+                storeFile file(keystorePath)
+                storeType "PKCS12"
+                storePassword System.getenv("BATTERYPULSE_STORE_PASSWORD")
+                keyAlias System.getenv("BATTERYPULSE_KEY_ALIAS")
+                keyPassword System.getenv("BATTERYPULSE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+    }
+}

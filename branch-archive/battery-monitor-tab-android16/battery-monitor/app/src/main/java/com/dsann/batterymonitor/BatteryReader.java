@@ -1,0 +1,117 @@
+package com.dsann.batterymonitor;
+
+import android.content.Context;
+import android.content.Intent;
+import android.os.BatteryManager;
+import android.os.Build;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+
+final class BatteryReader {
+    private static final String FG_CURRENT =
+            "/sys/devices/platform/battery_meter/FG_Current";
+    private static final String INSTAT_VOLT =
+            "/sys/class/power_supply/battery/InstatVolt";
+
+    private BatteryReader() {}
+
+    static Reading read(Context context) {
+        Long currentRaw = readSysfs(FG_CURRENT);
+
+        // Resolve voltage independently of the current source. The previous
+        // implementation returned early when FG_Current was available, which
+        // prevented the voltage fallbacks from ever running.
+        Long voltageMv = readSysfs(INSTAT_VOLT);
+
+        if (voltageMv == null) {
+            Intent battery = context.registerReceiver(
+                    null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (battery != null) {
+                int mv = battery.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
+                if (mv > 0) voltageMv = (long) mv;
+            }
+        }
+
+        if (voltageMv == null) {
+            Long voltageUv = readSysfs("/sys/class/power_supply/battery/voltage_now");
+            if (voltageUv != null && voltageUv > 0) {
+                voltageMv = Math.round(voltageUv / 1000.0);
+            }
+        }
+
+        if (currentRaw != null) {
+            // On this MTK phone FG_Current is reported in 0.1 mA units.
+            // Example: 2437 means 243.7 mA, not 2437 mA.
+            long currentUa = currentRaw * 100L;
+            return new Reading(
+                    voltageMv != null ? voltageMv * 1000L : Long.MIN_VALUE,
+                    currentUa
+            );
+        }
+
+        // Generic Android/sysfs fallback: these current values are in microamps.
+        BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
+        if (bm != null && Build.VERSION.SDK_INT >= 21) {
+            long currentUa = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+            if (currentUa != 0) {
+                return new Reading(
+                        voltageMv != null ? voltageMv * 1000L : Long.MIN_VALUE,
+                        currentUa
+                );
+            }
+        }
+
+        Long fallbackUa = readSysfs("/sys/class/power_supply/battery/current_now");
+        if (fallbackUa != null) {
+            return new Reading(
+                    voltageMv != null ? voltageMv * 1000L : Long.MIN_VALUE,
+                    fallbackUa
+            );
+        }
+
+        return new Reading(
+                voltageMv != null ? voltageMv * 1000L : Long.MIN_VALUE,
+                Long.MIN_VALUE
+        );
+    }
+
+    private static Long readSysfs(String path) {
+        File f = new File(path);
+        if (!f.canRead()) return null;
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String s = br.readLine();
+            if (s == null) return null;
+            return Long.parseLong(s.trim());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    static final class Reading {
+        final long voltageUv;
+        final long currentUa;
+
+        Reading(long voltageUv, long currentUa) {
+            this.voltageUv = voltageUv;
+            this.currentUa = currentUa;
+        }
+
+        String voltageText() {
+            return voltageUv > 0
+                    ? String.format(java.util.Locale.US, "%.3f V", voltageUv / 1_000_000.0)
+                    : "N/A";
+        }
+
+        String currentText() {
+            if (currentUa == Long.MIN_VALUE) return "N/A";
+            return String.format(java.util.Locale.US, "%+.1f mA",
+                    currentUa / 1000.0);
+        }
+
+        String compact() {
+            return voltageText() + "  •  " + currentText();
+        }
+    }
+}

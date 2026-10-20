@@ -1,0 +1,139 @@
+name: Build Launcher APK — launcher-app archive
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'branch-archive/launcher-app/**'
+      - '.github/workflows/launcher-app-build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'branch-archive/launcher-app/**'
+      - '.github/workflows/launcher-app-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher-app-build-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and sign Launcher APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Restore deduplicated source files
+        run: python3 .github/scripts/restore_archive_duplicates.py --branch 'launcher-app'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Restore the original workflow setup, with all Gradle and SDK caches disabled.
+      - name: Set up Gradle without cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+          cache-disabled: true
+
+      - name: Set up Android SDK build tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android 17 SDK and Build Tools
+        run: sdkmanager --channel=3 "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Prepare and validate BatteryPulse signing key
+        env:
+          BATTERYPULSE_KEYSTORE_BASE64: ${{ secrets.BATTERYPULSE_KEYSTORE_BASE64 }}
+          BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+          BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BATTERYPULSE_KEYSTORE_BASE64" ] || [ -z "$BATTERYPULSE_STORE_PASSWORD" ] || [ -z "$BATTERYPULSE_KEY_ALIAS" ]; then
+            echo "BatteryPulse signing secrets are incomplete. Configure the existing repository Actions secrets." >&2
+            exit 1
+          fi
+          printf '%s' "$BATTERYPULSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/batterypulse-release.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/batterypulse-release.p12" -storepass "$BATTERYPULSE_STORE_PASSWORD" -alias "$BATTERYPULSE_KEY_ALIAS" >/dev/null
+          chmod 600 "$RUNNER_TEMP/batterypulse-release.p12"
+          echo "BatteryPulse PKCS12 keystore validated."
+
+      - name: Clean and build signed release APK without caches
+        working-directory: branch-archive/launcher-app
+        env:
+          BATTERYPULSE_KEYSTORE_PATH: ${{ runner.temp }}/batterypulse-release.p12
+          BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+          BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+          BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gradle --no-daemon --no-build-cache --no-configuration-cache --stacktrace clean assembleRelease; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Gradle build attempt $attempt failed; retrying after a possible transient dependency-repository error."
+              sleep $((attempt * 15))
+            fi
+          done
+          exit 1
+
+      - name: Verify release APK signature
+        working-directory: branch-archive/launcher-app
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/D.S Launcher-18.7.0.apk"
+          APK_SIGNER="$ANDROID_HOME/build-tools/37.0.0/apksigner"
+          test -s "app/build/outputs/apk/release/app-release.apk"
+          cp "app/build/outputs/apk/release/app-release.apk" "$APK"
+          test -s "$APK"
+          test -x "$APK_SIGNER"
+          "$APK_SIGNER" verify --verbose "$APK"
+          echo "Signed D.S Launcher 18.7.0 APK verified."
+
+      - name: Upload signed release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: D.S-Launcher-18.7.0-signed-APK
+          path: branch-archive/launcher-app/app/build/outputs/apk/release/D.S Launcher-18.7.0.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Release D.S Launcher v18.7.0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          # D.S Launcher 18.7.0
+
+          A lightweight, customizable Android launcher with an updated modern app icon.
+
+          ## Highlights
+          - New D.S Launcher app icon with a dark, neon-accented design.
+          - App display name updated to **D.S Launcher**.
+          - Retains the launcher’s home screen, app drawer, widget, clock customization, and page transition features.
+          - Version name: **18.7.0** (version code **180700**).
+
+          ## Compatibility
+          - Minimum Android version: **Android 6.0 (API 23)**.
+          - Target SDK: **API 37 (Android 17)**.
+          - The APK is signed, and CI verifies its signature before publishing.
+
+          **Testing note:** The release build and signature are verified by CI. Full physical-device testing across every Android version from 6 through 17 has not been completed.
+          EOF
+          gh release create "v18.7.0" "branch-archive/launcher-app/app/build/outputs/apk/release/D.S Launcher-18.7.0.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "D.S Launcher 18.7.0" \
+            --notes-file release-notes.md \
+            --target "$GITHUB_SHA"

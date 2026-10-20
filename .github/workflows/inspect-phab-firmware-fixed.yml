@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Restore deduplicated source files
+        run: python3 .github/scripts/restore_archive_duplicates.py --branch 'main'
 
       - name: Restore cached system image
         id: system-cache
@@ -63,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/inspect_phab_system_image.py work/system-sign.img work/system-payload.img extracted/diagnostics/bfbf-header.txt extracted/diagnostics/ext4-scan.txt
+          python3 branch-archive/main/scripts/inspect_phab_system_image.py work/system-sign.img work/system-payload.img extracted/diagnostics/bfbf-header.txt extracted/diagnostics/ext4-scan.txt
           file work/system-sign.img > extracted/diagnostics/file.txt || true
           stat -c 'size=%s bytes' work/system-sign.img > extracted/diagnostics/size.txt
           xxd -l 512 work/system-sign.img > extracted/diagnostics/header.txt || true
