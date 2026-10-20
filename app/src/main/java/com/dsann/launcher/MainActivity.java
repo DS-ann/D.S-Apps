@@ -329,6 +329,7 @@ public class MainActivity extends Activity {
     private boolean clockWidgetEditing = false;
     private boolean clockWidgetDragging = false;
     private boolean clockWidgetMoving = false;
+    private boolean clockGeometryRejectedAtLastMove = false;
     private float clockWidgetDownRawX, clockWidgetDownRawY;
     private float clockWidgetStartX, clockWidgetStartY;
     private int clockWidgetStartLength, clockWidgetStartBreadth;
@@ -658,6 +659,10 @@ public class MainActivity extends Activity {
                     @Override public LinearLayout getPagesStrip() { return pagesStrip; }
                     @Override public void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer) {
                         MainActivity.this.resolveWidgetIconCollisions(page, widgetContainer);
+                    }
+                    @Override public boolean canPlaceWorkspaceItem(FrameLayout page, View item,
+                            int left, int top, int width, int height) {
+                        return MainActivity.this.canPlaceWorkspaceItem(page, item, left, top, width, height);
                     }
                     @Override public void updateLiveDisplacements(FrameLayout page, View movingView) {
                         MainActivity.this.updateLiveDisplacements(page, movingView);
@@ -1000,6 +1005,7 @@ public class MainActivity extends Activity {
                     ? hitClockResizeEdge(event.getRawX(), event.getRawY()) : 0;
             gestureStartedOnClock = touchStartedOnClock(event.getRawX(), event.getRawY())
                     || clockResizeEdge != 0;
+            if (gestureStartedOnClock) clockGeometryRejectedAtLastMove = false;
             // A tap anywhere outside the clock cancels its 1-second move-ready
             // dance immediately, even before the 2-second edit mode has begun.
             if (!gestureStartedOnClock && clockWidgetMoving && !clockWidgetEditing) {
@@ -1127,8 +1133,22 @@ public class MainActivity extends Activity {
                     // Keep gesture coordinates transient while the finger is moving.
                     // ACTION_UP already commits the final position; cancellation restores
                     // the start position. Writing preferences for every MOVE was wasteful.
-                    setClampedClockTranslation(clockWidgetStartX + moveX,
-                            clockWidgetStartY + moveY, false);
+                    float[] targetTranslation = clampClockTranslation(clockPanel,
+                            clockWidgetStartX + moveX, clockWidgetStartY + moveY);
+                    boolean acceptableClockPosition = true;
+                    if (clockPanel.getParent() instanceof FrameLayout) {
+                        FrameLayout activePage = (FrameLayout) clockPanel.getParent();
+                        int[] visible = itemGeometry(clockPanel);
+                        int candidateLeft = visible[0] + Math.round(
+                                targetTranslation[0] - clockPanel.getTranslationX());
+                        int candidateTop = visible[1] + Math.round(
+                                targetTranslation[1] - clockPanel.getTranslationY());
+                        acceptableClockPosition = canPlaceWorkspaceItem(activePage, clockPanel,
+                                candidateLeft, candidateTop, visible[2], visible[3]);
+                    }
+                    clockGeometryRejectedAtLastMove = !acceptableClockPosition;
+                    if (!acceptableClockPosition) return true;
+                    setClampedClockTranslation(targetTranslation[0], targetTranslation[1], false);
                     updateClockResizeHandles();
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
@@ -1216,6 +1236,13 @@ public class MainActivity extends Activity {
                 int maxBreadthPercent = Math.max(80, Math.min(600, (int) Math.ceil(
                         pageHeight * 100f / Math.max(1, naturalRowHeight))));
                 breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
+                if (!(clockPanel.getParent() instanceof FrameLayout)
+                        || !canPlaceWorkspaceItem((FrameLayout) clockPanel.getParent(), clockPanel,
+                                new android.graphics.Rect(left, top, right, bottom))) {
+                    clockGeometryRejectedAtLastMove = true;
+                    return true;
+                }
+                clockGeometryRejectedAtLastMove = false;
                 prefs.edit()
                         .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), lengthPercent)
                         .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), breadthPercent)
@@ -1490,6 +1517,8 @@ public class MainActivity extends Activity {
                             .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
                             .apply();
                 }
+                if (clockGeometryRejectedAtLastMove) showWorkspaceOverlapRejected();
+                clockGeometryRejectedAtLastMove = false;
                 setWorkspaceGridVisible(false, null);
                 updateClockResizeHandles();
                 return true;
@@ -1680,6 +1709,8 @@ public class MainActivity extends Activity {
         if (clockPanel.getParent() instanceof FrameLayout) {
             finishLiveDisplacements(!cancelled, clockPanel);
         }
+        if (!cancelled && clockGeometryRejectedAtLastMove) showWorkspaceOverlapRejected();
+        clockGeometryRejectedAtLastMove = false;
         setWorkspaceGridVisible(false, null);
         updateClockResizeHandles();
     }
@@ -3064,6 +3095,26 @@ public class MainActivity extends Activity {
                                     targetPage.getHeight(), shortcutCellHeight)
                                     + LauncherUiUtils.dp(this, 14);
                         }
+                        if (commit && !canPlaceWorkspaceItem(targetPage, tile, left, top,
+                                Math.max(1, lp.width > 0 ? lp.width : tile.getWidth()),
+                                Math.max(1, lp.height > 0 ? lp.height : tile.getHeight()))) {
+                            lp.leftMargin = shortcutOrigin[0];
+                            lp.topMargin = shortcutOrigin[1];
+                            tile.setTranslationX(0f);
+                            tile.setTranslationY(0f);
+                            tile.setLayoutParams(lp);
+                            finishWorkspaceTransferDrag(tile, false);
+                            finishLiveDisplacements(false, tile);
+                            shortcutDragging[0] = false;
+                            shortcutMoveArmed[0] = false;
+                            if (tile.getParent() != null) {
+                                tile.getParent().requestDisallowInterceptTouchEvent(false);
+                            }
+                            setWorkspaceGridVisible(false, null);
+                            refreshWorkspaceGrid();
+                            showWorkspaceOverlapRejected();
+                            return true;
+                        }
                         lp.leftMargin = left;
                         lp.topMargin = top;
                         tile.setTranslationX(0f);
@@ -3789,18 +3840,9 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView) {
-        if (page == null || movingView == null || movingView.getParent() != page
-                || page.getWidth() <= 0 || page.getHeight() <= 0) return;
-        if (pendingLiveDisplacementPage == page && pendingLiveDisplacementMover == movingView) {
-            return;
-        }
-        // A launcher workspace has one active drag owner. If ownership changes before
-        // the next frame, keep only the newest owner instead of running stale collision
-        // work against the old item's geometry.
+        // Candidate geometry is checked before a gesture applies it; do not schedule
+        // an automatic push-aside animation to make space for another item.
         cancelPendingLiveDisplacementUpdate();
-        pendingLiveDisplacementPage = page;
-        pendingLiveDisplacementMover = movingView;
-        page.postOnAnimation(liveDisplacementFrame);
     }
 
     private void updateWorkspaceTransferDisplacements(View item, float rawX, float rawY,
@@ -4395,6 +4437,34 @@ public class MainActivity extends Activity {
                             - viewportLocation[1] - iconDragFingerOffsetY;
                     int targetRow = homeGridRowFromTop(
                             desiredTop, rows, targetHeight, cellHeight);
+                    int proposedIconLeft = targetCol * cellWidth;
+                    int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
+                    if (!canPlaceWorkspaceItem(targetPage, view, proposedIconLeft,
+                            proposedIconTop, cellWidth, cellHeight)) {
+                        FrameLayout.LayoutParams rollbackParams =
+                                (FrameLayout.LayoutParams) view.getLayoutParams();
+                        rollbackParams.leftMargin = iconOriginalLeft;
+                        rollbackParams.topMargin = iconOriginalTop;
+                        view.setTranslationX(0f);
+                        view.setTranslationY(0f);
+                        view.setScaleX(1f);
+                        view.setScaleY(1f);
+                        view.setAlpha(1f);
+                        view.setLayoutParams(rollbackParams);
+                        finishWorkspaceTransferDrag(view, false);
+                        finishLiveDisplacements(false, view);
+                        restoreIconDragPageVisuals();
+                        setWorkspaceGridVisible(false, null);
+                        iconDragging = false;
+                        iconDragArmed = false;
+                        activeDragView = null;
+                        activeDragPackage = null;
+                        iconDragPageIndex = -1;
+                        iconOriginalPageIndex = -1;
+                        iconEdgeLatch = 0;
+                        showWorkspaceOverlapRejected();
+                        return true;
+                    }
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = slotHeight;
                     int sourceRows = Math.max(1, sourceView.getHeight() / sourceCellHeight);
@@ -4547,9 +4617,7 @@ public class MainActivity extends Activity {
                             // A committed live displacement plan already reserved and
                             // persisted every affected rectangle. Do not shuffle that layout
                             // a second time after the newly rendered app cells appear.
-                            if (!hadLiveDisplacementPlan) {
-                                resolveAllWorkspaceOverlaps(collisionPage, null);
-                            }
+                            // Collision checks happened before commit; do not reflow peers.
                         });
                     });
                     return true;
@@ -5826,51 +5894,25 @@ public class MainActivity extends Activity {
      * with a destination proxy, so resolve that proxy synchronously and verify that
      * the destination can hold the widget after the planned neighbour movements.
      */
+    /**
+     * Validate the exact size and target position of a cross-page widget drop.
+     * Never move neighbours or silently shrink the widget to force a fit.
+     */
     private int[] prepareWorkspaceWidgetDrop(FrameLayout targetPage, View widget,
             float rawX, float rawY, float fingerOffsetX, float fingerOffsetY) {
         if (targetPage == null || widget == null || targetPage.getWidth() <= 0
                 || targetPage.getHeight() <= 0 || workspaceTransferItem != widget
                 || workspaceTransferTargetPage < 0 || pagesStrip == null
                 || workspaceTransferTargetPage >= pagesStrip.getChildCount()) return null;
-
-        boolean crossScreen = workspaceTransferTargetPage != workspaceTransferOriginPage;
-        if (crossScreen) {
-            updateWorkspaceTransferDisplacements(widget, rawX, rawY,
-                    fingerOffsetX, fingerOffsetY);
-            View proxy = workspaceTransferProxy;
-            if (proxy == null || proxy.getParent() != targetPage) return null;
-            // A next-frame update is too late for the release decision; flush the
-            // latest pointer position before checking the destination's end-state.
-            updateLiveDisplacements(targetPage, proxy);
-        } else {
-            if (widget.getParent() != targetPage) return null;
-            updateLiveDisplacements(targetPage, widget);
-        }
-
         ViewGroup.LayoutParams raw = widget.getLayoutParams();
-        int width = raw instanceof FrameLayout.LayoutParams
-                && ((FrameLayout.LayoutParams) raw).width > 0
-                ? ((FrameLayout.LayoutParams) raw).width : widget.getWidth();
-        int height = raw instanceof FrameLayout.LayoutParams
-                && ((FrameLayout.LayoutParams) raw).height > 0
-                ? ((FrameLayout.LayoutParams) raw).height : widget.getHeight();
-        if (width <= 0 || height <= 0
-                || !(raw instanceof FrameLayout.LayoutParams)) return null;
-        FrameLayout.LayoutParams widgetParams = (FrameLayout.LayoutParams) raw;
-        int preferredX = widgetParams.leftMargin;
-        int preferredY = widgetParams.topMargin;
-        for (int scalePercent = 100; scalePercent >= 20; scalePercent -= 20) {
-            int candidateWidth = Math.max(1, Math.round(width * scalePercent / 100f));
-            int candidateHeight = Math.max(1, Math.round(height * scalePercent / 100f));
-            int[] position = findFreeWidgetPosition(targetPage, candidateWidth, candidateHeight,
-                    widget, true, preferredX, preferredY);
-            if (position != null) {
-                // {left, top, width, height}; percentages are applied uniformly so
-                // the widget's aspect ratio is preserved up to pixel rounding.
-                return new int[]{position[0], position[1], candidateWidth, candidateHeight};
-            }
-        }
-        return null;
+        if (!(raw instanceof FrameLayout.LayoutParams)) return null;
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
+        int width = params.width > 0 ? params.width : widget.getWidth();
+        int height = params.height > 0 ? params.height : widget.getHeight();
+        int left = params.leftMargin;
+        int top = params.topMargin;
+        if (!canPlaceWorkspaceItem(targetPage, widget, left, top, width, height)) return null;
+        return new int[]{left, top, width, height};
     }
 
     private int[] findFreeWidgetPosition(FrameLayout page, int widgetWidth, int widgetHeight) {
@@ -7731,6 +7773,56 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * Returns true only when the proposed visible footprint fits in its page and
+     * does not intersect another workspace item. Neighbours are never shifted or resized.
+     */
+    private boolean canPlaceWorkspaceItem(FrameLayout page, View movingView,
+            int left, int top, int width, int height) {
+        if (page == null || movingView == null || width <= 0 || height <= 0
+                || page.getWidth() <= 0 || page.getHeight() <= 0
+                || left < 0 || top < 0
+                || left + width > page.getWidth() || top + height > page.getHeight()) return false;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingView || other == workspaceTransferProxy
+                    || !isWorkspaceItem(other)) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            android.graphics.Rect candidate = collisionRectAtForInteraction(
+                    movingView, left, top, width, height, other);
+            android.graphics.Rect obstacle = collisionRectForInteraction(
+                    other, otherGeometry, movingView);
+            if (android.graphics.Rect.intersects(candidate, obstacle)) return false;
+        }
+        return true;
+    }
+
+    /** Collision test for a clock resize's already-measured visible rectangle. */
+    private boolean canPlaceWorkspaceItem(FrameLayout page, View movingView,
+            android.graphics.Rect candidateBounds) {
+        if (page == null || movingView == null || candidateBounds == null
+                || page.getWidth() <= 0 || page.getHeight() <= 0
+                || candidateBounds.left < 0 || candidateBounds.top < 0
+                || candidateBounds.right > page.getWidth()
+                || candidateBounds.bottom > page.getHeight()) return false;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingView || other == workspaceTransferProxy
+                    || !isWorkspaceItem(other)) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            android.graphics.Rect obstacle = collisionRectForInteraction(
+                    other, otherGeometry, movingView);
+            if (android.graphics.Rect.intersects(candidateBounds, obstacle)) return false;
+        }
+        return true;
+    }
+
+    private void showWorkspaceOverlapRejected() {
+        Toast.makeText(this, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
      * Keep the clock's scaled visual bounds inside its own home-page viewport.
      * Translation is clamped in parent coordinates, accounting for the scale pivot
      * so left/center/right-aligned clocks all respect the same screen edges.
@@ -7918,311 +8010,15 @@ public class MainActivity extends Activity {
     }
 
     private void updateLiveDisplacements(FrameLayout page, View movingView) {
-        // This entry point is used at transaction boundaries as well as by animation
-        // callbacks. Any older queued pass is now stale; synchronous validation wins.
+        // Automatic displacement is disabled. Gesture controllers reject candidate
+        // rectangles that collide, keeping every other workspace item's geometry fixed.
         cancelPendingLiveDisplacementUpdate();
         pendingAppDisplacementTargets.clear();
         liveDragGeometryCache.clear();
-        if (page == null || movingView == null || movingView.getParent() != page
-                || page.getWidth() <= 0 || page.getHeight() <= 0) return;
-
-        int[] moving = itemGeometry(movingView);
-        if (moving[2] <= 0 || moving[3] <= 0) return;
-        android.graphics.Rect movingRect = collisionRect(movingView, moving);
         liveDragAppVisualBoundsCache.clear();
-        liveDragPlanningCacheActive = true;
-        // Start moving neighbours while the dragged item approaches from any side,
-        // not only after their visible bounds already touch.
-        // Push a neighbour only once the dragged item actually reaches its bounds.
-        // A large approach gap makes nearby items jump before the drop is real.
-        int gap = 0;
-
-        // Displacement is a live preview, not a permanent one-way shuffle. When the
-        // mover leaves a neighbour's original footprint, animate that neighbour back
-        // if its original rectangle is free. If the finger reverses again, the same
-        // reserved target is eligible to be pushed away once more.
-        restoreDisplacedItemsWhenDragReverses(page, movingView, movingRect);
-        // Reverse-restoration can retarget animations; take one consistent snapshot
-        // after it, then reuse geometry for repeated obstacle tests in this pass.
-        liveDragGeometryCache.clear();
-        for (int i = 0; i < page.getChildCount(); i++) {
-            View other = page.getChildAt(i);
-            if (other == movingView || !isWorkspaceItem(other)) continue;
-
-            boolean alreadyDisplaced = liveDisplacedItems.containsKey(other);
-            int[] existingTarget = liveDisplacementTargets.get(other);
-            int[] g = cachedLiveDragGeometry(other);
-            if (g[2] <= 0 || g[3] <= 0) continue;
-            android.graphics.Rect movingBoundsForOther =
-                    collisionRectForInteraction(movingView, moving, other);
-            android.graphics.Rect otherRect = collisionRectForInteraction(other, g, movingView);
-            boolean currentCollides = overlapsWithGap(movingBoundsForOther, otherRect, gap);
-            boolean targetCollides = alreadyDisplaced && existingTarget != null
-                    && overlapsWithGap(movingBoundsForOther, collisionRectAtForInteraction(other,
-                            existingTarget[0], existingTarget[1], g[2], g[3], movingView), gap);
-            // An item whose assigned destination is clear must be allowed to finish
-            // moving out of its original collision zone. Replanning from its current
-            // animation frame on every MOVE cancelled its animation repeatedly.
-            if (alreadyDisplaced && !targetCollides) continue;
-            if (!alreadyDisplaced && !currentCollides) continue;
-
-            android.graphics.Rect directionBounds = otherRect;
-            if (!currentCollides && targetCollides && existingTarget != null) {
-                directionBounds = collisionRectAtForInteraction(other,
-                        existingTarget[0], existingTarget[1], g[2], g[3], movingView);
-            }
-            int[] pushDirection = resolveLiveDisplacementDirection(
-                    movingBoundsForOther, directionBounds);
-            int pushDx = pushDirection[0];
-            int pushDy = pushDirection[1];
-            int preferredDisplacementX = existingTarget == null ? g[0] : existingTarget[0];
-            int preferredDisplacementY = existingTarget == null ? g[1] : existingTarget[1];
-
-            // If the dragged item reaches a neighbour's planned destination, the complete
-            // affected chain is replanned in one direction instead of reacting item by item.
-
-            int maxX = page.getWidth() - g[2] - gap;
-            int maxY = page.getHeight() - g[3] - gap;
-            int min = gap;
-            if (maxX < min || maxY < min) continue;
-
-            // Build candidate coordinates from the edges of real obstacles rather
-            // than scanning every 4dp across the entire screen on every MOVE frame.
-            // This works for mixed-size widgets and shortcuts and avoids missing a
-            // narrow valid gap because the step does not divide the page dimensions.
-            java.util.ArrayList<android.graphics.Rect> obstacles =
-                    new java.util.ArrayList<android.graphics.Rect>();
-            java.util.ArrayList<View> obstacleOwners = new java.util.ArrayList<View>();
-            for (int j = 0; j < page.getChildCount(); j++) {
-                View blocker = page.getChildAt(j);
-                // The cross-screen drag proxy is intentionally not a workspace item
-                // itself, but its footprint must still be reserved as an obstacle.
-                // Otherwise a displaced neighbour can select the dragged item's
-                // destination as its own "free" slot and appear not to move at all.
-                if (blocker == other
-                        || (blocker != movingView && !isWorkspaceItem(blocker))) continue;
-                int[] bg = cachedLiveDragGeometry(blocker);
-                if (bg[2] <= 0 || bg[3] <= 0) continue;
-                // Reserve both the current visual footprint and any destination already
-                // assigned to an in-flight neighbour. Without target reservations, two
-                // items processed in the same MOVE event can choose the same empty pocket
-                // because the first animation has not moved its view there yet.
-                obstacles.add(collisionRectForInteraction(blocker, bg, other));
-                obstacleOwners.add(blocker);
-                int[] plannedTarget = liveDisplacementTargets.get(blocker);
-                if (plannedTarget != null) {
-                    obstacles.add(collisionRectAtForInteraction(blocker,
-                            plannedTarget[0], plannedTarget[1],
-                            Math.max(1, bg[2]), Math.max(1, bg[3]), other));
-                    obstacleOwners.add(blocker);
-                }
-            }
-            for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
-                View reserved = entry.getKey();
-                if (reserved == other || reserved.getParent() != page) continue;
-                int[] original = entry.getValue();
-                int[] rg = cachedLiveDragGeometry(reserved);
-                obstacles.add(collisionRectAtForInteraction(
-                        reserved, original[0], original[1], rg[2], rg[3], other));
-                obstacleOwners.add(reserved);
-            }
-
-            java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
-            java.util.TreeSet<Integer> yCandidates = new java.util.TreeSet<Integer>();
-            xCandidates.add(Math.max(min, Math.min(maxX, g[0])));
-            yCandidates.add(Math.max(min, Math.min(maxY, g[1])));
-            xCandidates.add(min);
-            xCandidates.add(maxX);
-            yCandidates.add(min);
-            yCandidates.add(maxY);
-            for (android.graphics.Rect obstacle : obstacles) {
-                xCandidates.add(Math.max(min, Math.min(maxX, obstacle.left - g[2] - gap)));
-                xCandidates.add(Math.max(min, Math.min(maxX, obstacle.right + gap)));
-                yCandidates.add(Math.max(min, Math.min(maxY, obstacle.top - g[3] - gap)));
-                yCandidates.add(Math.max(min, Math.min(maxY, obstacle.bottom + gap)));
-            }
-
-            int bestX = -1, bestY = -1;
-            long bestScore = Long.MAX_VALUE;
-            if (isHomeGridIcon(other)) {
-                // App cells must remain snapped to the home grid during displacement.
-                int columns = homeGridColumnsForItem(other);
-                int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
-                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
-                int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-                int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
-                xCandidates.clear();
-                yCandidates.clear();
-                for (int col = 0; col < columns; col++) {
-                    int x = homeGridIconLeftAt(other, col, cellWidth, g[2]);
-                    if (x + g[2] <= page.getWidth()) xCandidates.add(x);
-                }
-                for (int row = 0; row < rows; row++) {
-                    int y = homeGridIconTopAt(page, other, row, rows, cellHeight);
-                    if (y + g[3] <= page.getHeight()) yCandidates.add(y);
-                }
-            }
-            for (Integer candidateY : yCandidates) {
-                for (Integer candidateX : xCandidates) {
-                    int x = candidateX.intValue();
-                    int y = candidateY.intValue();
-                    // Compare primitive bounds directly: allocating a Rect for every
-                    // candidate creates substantial short-lived garbage during live drag.
-                    int candidateRight = x + g[2];
-                    int candidateBottom = y + g[3];
-                    android.graphics.Rect candidateVisible = isHomeGridIcon(other)
-                            ? appIconVisualRectAt(other, x, y, g[2], g[3]) : null;
-                    boolean blocked = false;
-                    for (int obstacleIndex = 0; obstacleIndex < obstacles.size(); obstacleIndex++) {
-                        android.graphics.Rect obstacle = obstacles.get(obstacleIndex);
-                        View obstacleOwner = obstacleOwners.get(obstacleIndex);
-                        if (candidateVisible != null
-                                && isAppIconCollisionParticipant(obstacleOwner)) {
-                            if (android.graphics.Rect.intersects(candidateVisible, obstacle)) {
-                                blocked = true;
-                                break;
-                            }
-                        } else if (x < obstacle.right && candidateRight > obstacle.left
-                                && y < obstacle.bottom && candidateBottom > obstacle.top) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    if (blocked) continue;
-                    long score = liveDisplacementCandidateScore(x, y,
-                            preferredDisplacementX, preferredDisplacementY, pushDx, pushDy);
-                    if (score < bestScore || (score == bestScore
-                            && (bestY < 0 || y < bestY || (y == bestY && x < bestX)))) {
-                        bestScore = score;
-                        bestX = x;
-                        bestY = y;
-                    }
-                }
-            }
-
-            // Edge-derived candidates are fast, but can miss a valid pocket when
-            // obstacles form irregular shapes. Only when that search fails, scan the
-            // page at a modest interval and choose the nearest collision-free position.
-            // This makes displacement work consistently near the top as well as below.
-            if (bestX < 0 && !isHomeGridIcon(other)) {
-                int step = Math.max(1, LauncherUiUtils.dp(this, 6));
-                for (int y = 0; y <= maxY + step; y += step) {
-                    int candidateY = Math.min(maxY, y);
-                    for (int x = 0; x <= maxX + step; x += step) {
-                        int candidateX = Math.min(maxX, x);
-                        // The 6dp fallback is only entered if the edge search found no
-                        // usable target. Rank every free candidate by the same directional
-                        // score as the fast path so it cannot reintroduce opposite-side jumps.
-                        boolean blocked = false;
-                        int candidateRight = candidateX + g[2];
-                        int candidateBottom = candidateY + g[3];
-                        for (android.graphics.Rect obstacle : obstacles) {
-                            if (candidateX < obstacle.right && candidateRight > obstacle.left
-                                    && candidateY < obstacle.bottom && candidateBottom > obstacle.top) {
-                                blocked = true;
-                                break;
-                            }
-                        }
-                        if (blocked) continue;
-                        long score = liveDisplacementCandidateScore(candidateX, candidateY,
-                                preferredDisplacementX, preferredDisplacementY, pushDx, pushDy);
-                        if (score < bestScore || (score == bestScore
-                                && (bestY < 0 || candidateY < bestY
-                                || (candidateY == bestY && candidateX < bestX)))) {
-                            bestScore = score;
-                            bestX = candidateX;
-                            bestY = candidateY;
-                        }
-                    }
-                    if (candidateY == maxY) break;
-                }
-            }
-
-            if (!alreadyDisplaced && isHomeGridIcon(movingView)
-                    && isHomeGridIcon(other)
-                    && tryShiftHomeIconCohort(page, movingView, other, bestX, bestY)) {
-                continue;
-            }
-
-            {
-                // Plan a direction-aware push chain before accepting a nearby empty slot.
-                // This prevents a shortcut/app/widget from escaping one way first and then
-                // being pushed again when the dragged item advances another few pixels.
-                java.util.IdentityHashMap<View, int[]> cascadePlan =
-                        new java.util.IdentityHashMap<View, int[]>();
-                java.util.IdentityHashMap<View, Boolean> recursionStack =
-                        new java.util.IdentityHashMap<View, Boolean>();
-                int[] searchBudget = new int[]{240};
-                if (findCascadeDisplacementPlan(page, other, movingView, movingRect,
-                        preferredDisplacementX, preferredDisplacementY, pushDx, pushDy,
-                        cascadePlan, recursionStack, 0, searchBudget)) {
-                    // Reserve every target before starting any animation. This prevents
-                    // asynchronous animation callbacks from seeing a partly committed chain.
-                    java.util.ArrayList<View> cascadeParticipantsToAnimate =
-                            new java.util.ArrayList<View>();
-                    for (java.util.Map.Entry<View, int[]> planned : cascadePlan.entrySet()) {
-                        View participant = planned.getKey();
-                        int[] destination = planned.getValue();
-                        int[] oldTarget = liveDisplacementTargets.get(participant);
-                        if (oldTarget != null && oldTarget[0] == destination[0]
-                                && oldTarget[1] == destination[1]) continue;
-                        participant.animate().cancel();
-                        liveDragGeometryCache.remove(participant);
-                        int[] currentGeometry = itemGeometry(participant);
-                        liveDragGeometryCache.put(participant, currentGeometry);
-                        if (!liveDisplacedItems.containsKey(participant)) {
-                            liveDisplacedItems.put(participant,
-                                    new int[]{currentGeometry[0], currentGeometry[1]});
-                        }
-                        liveDisplacementTargets.put(participant,
-                                new int[]{destination[0], destination[1]});
-                        cascadeParticipantsToAnimate.add(participant);
-                    }
-                    for (View participant : cascadeParticipantsToAnimate) {
-                        int[] destination = liveDisplacementTargets.get(participant);
-                        if (destination != null) {
-                            animateDisplacedItemTo(participant, destination[0], destination[1]);
-                        }
-                    }
-                    continue;
-                }
-            }
-
-            if (bestX >= 0) {
-                if (alreadyDisplaced && existingTarget != null
-                        && existingTarget[0] == bestX && existingTarget[1] == bestY) continue;
-                // Recompute the visual origin after cancelling any old motion so the
-                // next translation starts from the exact frame that was on screen.
-                other.animate().cancel();
-                liveDragGeometryCache.remove(other);
-                g = itemGeometry(other);
-                liveDragGeometryCache.put(other, g);
-                if (!liveDisplacedItems.containsKey(other)) {
-                    liveDisplacedItems.put(other, new int[]{g[0], g[1]});
-                }
-                liveDisplacementTargets.put(other, new int[]{bestX, bestY});
-
-                // Move the neighbour to its reserved free rectangle with a short
-                // synchronized animation; the reservation is recorded before motion starts.
-                animateDisplacedItemTo(other, bestX, bestY);
-            }
-        }
-    
-        flushPendingAppDisplacementAnimations();
-        liveDragGeometryCache.clear();
-        enforceLiveDragCollisionSafety(page, movingView);
         liveDragPlanningCacheActive = false;
-        liveDragAppVisualBoundsCache.clear();
     }
 
-
-    /**
-     * Hold an actively dragged item at its last collision-free position if a visible
-     * collision remains after live displacement is scheduled. Neighbours can have a
-     * free destination while still occupying old bounds during their short animation.
-     * Invisible destination proxies are excluded; real cross-page drops are checked at
-     * their exact snapped destination before the gesture commits.
-     */
     private void enforceLiveDragCollisionSafety(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
                 || "workspace_transfer_proxy".equals(movingView.getTag())) return;
@@ -9000,15 +8796,8 @@ public class MainActivity extends Activity {
         if (commit || isClockWorkspaceItem(movingView)) {
             liveDragLastSafeGeometry.remove(movingView);
         }
-        if (commit && !committedLivePlan && movingView != null
-                && movingView.getParent() instanceof FrameLayout
-                && isWorkspaceItem(movingView)) {
-            FrameLayout page = (FrameLayout) movingView.getParent();
-            boolean preserveSize = isClockWorkspaceItem(movingView)
-                    || (movingView.getTag() instanceof String
-                    && ((String) movingView.getTag()).startsWith("launcher_widget:"));
-            resolveAllWorkspaceOverlaps(page, movingView, preserveSize);
-        }
+        // Never run a second resolver after release: the initiating gesture either
+        // accepted a collision-free rectangle or restored its last safe geometry.
         refreshWorkspaceGrid();
     }
 
@@ -9019,8 +8808,9 @@ public class MainActivity extends Activity {
      * immediately after another resolver had moved them.
      */
     private void resolveWidgetIconCollisions(FrameLayout page, FrameLayout widgetContainer) {
+        // Widget insertion/restoration owns its placement decision. Provider updates must
+        // never relocate surrounding icons, shortcuts, clocks, or other widgets.
         if (page == null || widgetContainer == null || widgetContainer.getParent() != page) return;
-        resolveAllWorkspaceOverlaps(page, widgetContainer, true);
     }
 
     private void normalizeClockVisualModePreferences() {

@@ -32,6 +32,8 @@ final class WidgetInteractionController {
         void showPage(int page, boolean animate);
         LinearLayout getPagesStrip();
         void resolveWidgetCollisions(FrameLayout page, FrameLayout widgetContainer);
+        boolean canPlaceWorkspaceItem(FrameLayout page, View item,
+                int left, int top, int width, int height);
         void updateLiveDisplacements(FrameLayout page, View movingView);
         void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView);
         void finishLiveDisplacements(boolean commit, View movingView);
@@ -429,6 +431,8 @@ final class WidgetInteractionController {
         final float[] down = {0f, 0f};
         final float[] fingerOffset = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
+        final boolean[] moveRejectedAtLastPosition = {false};
+        final boolean[] resizeRejectedAtLastPosition = {false};
         final int[] widgetPage = {pageIndex};
         final int[] originalPageAtDown = {pageIndex};
         final int[] edgeLatch = {0};
@@ -544,6 +548,8 @@ final class WidgetInteractionController {
                 widgetPage[0] = originalPageAtDown[0];
                 editMode[0] = 0;
                 dragging[0] = false;
+                moveRejectedAtLastPosition[0] = false;
+                resizeRejectedAtLastPosition[0] = false;
                 childCanceled[0] = false;
                 menuShown[0] = false;
                 handler.removeCallbacks(movePress[0]);
@@ -619,17 +625,21 @@ final class WidgetInteractionController {
                 int top = Math.round(event.getRawY() - sourcePageLocation[1]
                         - fingerOffset[1] - container.getTranslationY()
                         - container.getPivotY() * (1f - Math.max(0.01f, container.getScaleY())));
-                current.leftMargin = Math.max(0, Math.min(maxX, left));
-                current.topMargin = Math.max(0, Math.min(maxY, top));
+                int candidateLeft = Math.max(0, Math.min(maxX, left));
+                int candidateTop = Math.max(0, Math.min(maxY, top));
+                boolean crossPagePreview = destinationPage != originalPageAtDown[0];
+                if (!crossPagePreview && !listener.canPlaceWorkspaceItem(sourcePage, container,
+                        candidateLeft, candidateTop, dropWidth, dropHeight)) {
+                    moveRejectedAtLastPosition[0] = true;
+                    return true;
+                }
+                current.leftMargin = candidateLeft;
+                current.topMargin = candidateTop;
                 container.setLayoutParams(current);
-                if (destinationPage != originalPageAtDown[0]) {
+                moveRejectedAtLastPosition[0] = false;
+                if (crossPagePreview) {
                     listener.updateWorkspaceTransferDisplacements(container, event.getRawX(),
                             event.getRawY(), fingerOffset[0], fingerOffset[1]);
-                } else {
-                    // Same-page placement can displace items directly around the real widget.
-                    // Coalesce collision planning to the next display frame while keeping
-                    // the container itself directly responsive to the finger.
-                    listener.scheduleLiveDisplacementUpdate(sourcePage, container);
                 }
                 widgetPage[0] = destinationPage;
                 return true;
@@ -659,6 +669,24 @@ final class WidgetInteractionController {
                         targetPage = (FrameLayout) strip.getChildAt(targetIndex);
                     }
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
+                    if (commit && targetPage == sourcePage) {
+                        int finalWidth = current.width > 0 ? current.width : container.getWidth();
+                        int finalHeight = current.height > 0 ? current.height : container.getHeight();
+                        if (!listener.canPlaceWorkspaceItem(targetPage, container,
+                                current.leftMargin, current.topMargin, finalWidth, finalHeight)) {
+                            current.leftMargin = origin[0];
+                            current.topMargin = origin[1];
+                            current.width = origin[2];
+                            current.height = origin[3];
+                            container.setTranslationX(0f);
+                            container.setTranslationY(0f);
+                            container.setLayoutParams(current);
+                            commit = false;
+                            Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
+                        } else if (moveRejectedAtLastPosition[0]) {
+                            Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
+                        }
+                    }
                     if (commit && targetPage != sourcePage) {
                         // Cross-page drops are recalculated in the target page's coordinate
                         // space and then passed through prepareWidgetDrop() for collision-safe
@@ -749,6 +777,7 @@ final class WidgetInteractionController {
                 int action = event.getActionMasked();
                 if (action == MotionEvent.ACTION_DOWN) {
                     listener.setWorkspaceGridVisible(false, null);
+                    resizeRejectedAtLastPosition[0] = false;
                     down[0] = event.getRawX(); down[1] = event.getRawY();
                     FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
                     origin[0] = current.leftMargin; origin[1] = current.topMargin;
@@ -783,6 +812,14 @@ final class WidgetInteractionController {
                     top = Math.max(0, Math.min(top, activePage.getHeight() - minH));
                     resizeWidth = Math.max(minW, Math.min(resizeWidth, activePage.getWidth() - left));
                     resizeHeight = Math.max(minH, Math.min(resizeHeight, activePage.getHeight() - top));
+                    FrameLayout activePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    if (!listener.canPlaceWorkspaceItem(activePage, container,
+                            left, top, resizeWidth, resizeHeight)) {
+                        resizeRejectedAtLastPosition[0] = true;
+                        return true;
+                    }
+                    resizeRejectedAtLastPosition[0] = false;
                     current.leftMargin = left;
                     current.topMargin = top;
                     current.width = resizeWidth;
@@ -797,8 +834,8 @@ final class WidgetInteractionController {
                         finalParams.leftMargin = origin[0]; finalParams.topMargin = origin[1];
                         finalParams.width = origin[2]; finalParams.height = origin[3]; container.setLayoutParams(finalParams);
                     }
-                    if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout) {
-                        listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
+                    if (action == MotionEvent.ACTION_UP && resizeRejectedAtLastPosition[0]) {
+                        Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
                     }
                     if (container.getChildAt(0) instanceof AppWidgetHostView) {
                         WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
