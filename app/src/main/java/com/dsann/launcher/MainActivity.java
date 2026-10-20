@@ -153,7 +153,7 @@ public class MainActivity extends Activity {
     // Avoid reopening the system Home-role prompt repeatedly during a single Activity lifetime.
     private boolean homeRoleRequestAttempted = false;
     // Registered on Android 13+ because targetSdk 37 no longer relies on legacy Back dispatch.
-    private android.window.OnBackInvokedCallback backInvokedCallback;
+    private Object backInvokedCallback;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
@@ -628,10 +628,7 @@ public class MainActivity extends Activity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         if (Build.VERSION.SDK_INT >= 33) {
-            backInvokedCallback = () -> handleBackNavigation();
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-                    backInvokedCallback);
+            backInvokedCallback = Api33BackDispatcher.register(this);
         }
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -1870,6 +1867,23 @@ public class MainActivity extends Activity {
         // navigation bar/gesture, not the Back button.
     }
 
+    // Isolate API-33-only types from MainActivity's fields and ordinary API-23 code paths.
+    private static final class Api33BackDispatcher {
+        @android.annotation.TargetApi(33)
+        static Object register(MainActivity activity) {
+            android.window.OnBackInvokedCallback callback = activity::handleBackNavigation;
+            activity.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
+            return callback;
+        }
+
+        @android.annotation.TargetApi(33)
+        static void unregister(MainActivity activity, Object callback) {
+            activity.getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(
+                    (android.window.OnBackInvokedCallback) callback);
+        }
+    }
+
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -1967,7 +1981,7 @@ public class MainActivity extends Activity {
         }
         try { unregisterReceiver(timeChangesReceiver); } catch (IllegalArgumentException ignored) {}
         if (Build.VERSION.SDK_INT >= 33 && backInvokedCallback != null) {
-            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backInvokedCallback);
+            Api33BackDispatcher.unregister(this, backInvokedCallback);
             backInvokedCallback = null;
         }
         super.onDestroy();
@@ -2097,8 +2111,10 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets systemBars = insets.getInsets(
                         android.view.WindowInsets.Type.systemBars());
+                android.graphics.Insets ime = insets.getInsets(
+                        android.view.WindowInsets.Type.ime());
                 topInset = systemBars.top;
-                bottomInset = systemBars.bottom;
+                bottomInset = Math.max(systemBars.bottom, ime.bottom);
             } else {
                 topInset = insets.getSystemWindowInsetTop();
                 bottomInset = insets.getSystemWindowInsetBottom();

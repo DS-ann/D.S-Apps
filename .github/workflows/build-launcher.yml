@@ -34,12 +34,12 @@ jobs:
           cache-disabled: true
 
       - name: Set up Android SDK build tools
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          packages: 'platforms;android-37'
+          packages: ''
 
-      - name: Install Android 17 Build Tools
-        run: sdkmanager "build-tools;37.0.0"
+      - name: Install Android 17 SDK and Build Tools
+        run: sdkmanager --channel=3 "platforms;android-37" "build-tools;37.0.0"
 
       - name: Prepare and validate BatteryPulse signing key
         env:
