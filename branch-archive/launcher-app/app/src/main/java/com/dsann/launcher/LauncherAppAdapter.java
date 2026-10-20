@@ -193,8 +193,14 @@ public final class LauncherAppAdapter extends BaseAdapter {
                     + (application == null ? -1 : application.uid)
                     + ";modified=" + modified + ";length=" + length;
         }
-        String prior = packageArtworkIdentityCache.putIfAbsent(packageName, identity);
-        return prior == null ? identity : prior;
+        // Map.putIfAbsent() on java.util.Map is unavailable on Android 6 (API 23).
+        // Synchronize this small cache section instead of invoking the API-24 interface method.
+        synchronized (packageArtworkIdentityCache) {
+            String prior = packageArtworkIdentityCache.get(packageName);
+            if (prior != null) return prior;
+            packageArtworkIdentityCache.put(packageName, identity);
+            return identity;
+        }
     }
 
     /** Forget one package's metadata after install/removal/update, without touching other apps. */
