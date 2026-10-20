@@ -2117,7 +2117,9 @@ public class MainActivity extends Activity {
                 bottomInset = Math.max(systemBars.bottom, ime.bottom);
             } else {
                 topInset = insets.getSystemWindowInsetTop();
-                bottomInset = insets.getSystemWindowInsetBottom();
+                // Before API 30, the navigation bar remains outside the content
+                // frame. Only compensate for the status bar on these versions.
+                bottomInset = 0;
             }
             homeScreen.setPadding(
                     LauncherUiUtils.dp(this, 20),
