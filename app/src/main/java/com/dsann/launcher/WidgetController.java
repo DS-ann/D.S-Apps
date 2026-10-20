@@ -3,9 +3,13 @@ package com.dsann.launcher;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.SizeF;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+
+import java.util.Collections;
 
 /** Shared widget persistence operations, kept out of the activity's view code. */
 final class WidgetController {
@@ -13,19 +17,27 @@ final class WidgetController {
 
     static void updateWidgetSize(AppWidgetManager manager, int widgetId, AppWidgetHostView hostView,
                                  float density, int widthPx, int heightPx) {
+        if (hostView == null) return;
         int widthDp = Math.max(1, Math.round(widthPx / Math.max(0.1f, density)));
         int heightDp = Math.max(1, Math.round(heightPx / Math.max(0.1f, density)));
-        Bundle options = new Bundle();
-        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, widthDp);
-        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, widthDp);
-        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, heightDp);
-        options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
-        try { manager.updateAppWidgetOptions(widgetId, options); } catch (Exception ignored) {}
+        // The host-view size API already updates the widget options. Sending equivalent
+        // data through both AppWidgetManager and AppWidgetHostView duplicated provider
+        // callbacks at release, which could briefly select a stale/smaller layout.
         try {
-            // AppWidgetHostView exposes the five-parameter overload; the three-parameter
-            // overload does not exist in the Android SDK. This overload is available on API 16+.
-            hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp);
-        } catch (Exception ignored) {}
+            if (Build.VERSION.SDK_INT >= 31) {
+                hostView.updateAppWidgetSize(new Bundle(),
+                        Collections.singletonList(new SizeF(widthDp, heightDp)));
+            } else {
+                Bundle options = new Bundle();
+                options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, widthDp);
+                options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, widthDp);
+                options.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, heightDp);
+                options.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp);
+                hostView.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp);
+            }
+        } catch (RuntimeException ignored) {
+            // A provider may reject an unusual size; keep the launcher's selected frame intact.
+        }
     }
 
     static boolean containsWidgetId(String stored, int widgetId) {

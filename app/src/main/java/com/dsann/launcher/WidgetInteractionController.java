@@ -237,19 +237,24 @@ final class WidgetInteractionController {
             final int resizeEdge = edge;
             View handle = new View(activity);
             handle.setTag("launcher_widget_resize_handle");
-            final int touchLength = LauncherUiUtils.dp(activity, 56);
-            final int touchThickness = LauncherUiUtils.dp(activity, 32);
-            final int visualLength = LauncherUiUtils.dp(activity, 32);
+            final int touchLength = LauncherUiUtils.dp(activity, 44);
+            final int touchThickness = LauncherUiUtils.dp(activity, 24);
+            final int visualLength = LauncherUiUtils.dp(activity, 30);
             final int visualThickness = LauncherUiUtils.dp(activity, 4);
+            final int edgeGap = LauncherUiUtils.dp(activity, 1);
             GradientDrawable handleBg = new GradientDrawable();
             handleBg.setColor(Color.rgb(115, 159, 255));
             handleBg.setCornerRadius(visualThickness / 2f);
             int centeredInset = Math.max(0, (touchLength - visualLength) / 2);
-            int thinInset = Math.max(0, touchThickness - visualThickness);
-            int insetLeft = resizeEdge == 0 ? 0 : resizeEdge == 1 ? thinInset : centeredInset;
-            int insetTop = resizeEdge == 2 ? 0 : resizeEdge == 3 ? thinInset : centeredInset;
-            int insetRight = resizeEdge == 1 ? 0 : resizeEdge == 0 ? thinInset : centeredInset;
-            int insetBottom = resizeEdge == 3 ? 0 : resizeEdge == 2 ? thinInset : centeredInset;
+            int innerEdgeInset = Math.max(0, touchThickness - visualThickness - edgeGap);
+            int insetLeft = resizeEdge == 0 ? edgeGap
+                    : resizeEdge == 1 ? innerEdgeInset : centeredInset;
+            int insetTop = resizeEdge == 2 ? edgeGap
+                    : resizeEdge == 3 ? innerEdgeInset : centeredInset;
+            int insetRight = resizeEdge == 1 ? edgeGap
+                    : resizeEdge == 0 ? innerEdgeInset : centeredInset;
+            int insetBottom = resizeEdge == 3 ? edgeGap
+                    : resizeEdge == 2 ? innerEdgeInset : centeredInset;
             handle.setBackground(new android.graphics.drawable.InsetDrawable(
                     handleBg, insetLeft, insetTop, insetRight, insetBottom));
             handle.setVisibility(View.GONE);
@@ -577,6 +582,7 @@ final class WidgetInteractionController {
                 // starts a drag; after that, keep moving mode alive through every MOVE event.
                 if (!dragging[0]) {
                     if (!pastSlop) return true;
+                    LauncherUiUtils.stopMoveHint(container);
                     dragging[0] = true;
                     handler.removeCallbacks(menuPress[0]);
                     listener.beginWorkspaceTransferDrag(container, originalPageAtDown[0],
@@ -777,21 +783,11 @@ final class WidgetInteractionController {
                     top = Math.max(0, Math.min(top, activePage.getHeight() - minH));
                     resizeWidth = Math.max(minW, Math.min(resizeWidth, activePage.getWidth() - left));
                     resizeHeight = Math.max(minH, Math.min(resizeHeight, activePage.getHeight() - top));
-                    android.graphics.Rect candidate = new android.graphics.Rect(left, top, left + resizeWidth, top + resizeHeight);
-                    boolean overlap = false;
-                    for (int i = 0; i < activePage.getChildCount(); i++) {
-                        View other = activePage.getChildAt(i);
-                        if (other == container || !(other.getTag() instanceof String)) continue;
-                        String tag = (String) other.getTag();
-                        if (!(tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
-                                || "launcher_contact_shortcut".equals(tag) || "launcher_clock_widget".equals(tag))) continue;
-                        if (android.graphics.Rect.intersects(candidate, workspaceBounds(other))) { overlap = true; break; }
-                    }
-                    if (!overlap) {
-                        current.leftMargin = left; current.topMargin = top; current.width = resizeWidth; current.height = resizeHeight;
-                        container.setLayoutParams(current);
-                    }
-                    listener.setWorkspaceGridVisible(false, null);
+                    current.leftMargin = left;
+                    current.topMargin = top;
+                    current.width = resizeWidth;
+                    current.height = resizeHeight;
+                    container.setLayoutParams(current);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -801,14 +797,15 @@ final class WidgetInteractionController {
                         finalParams.leftMargin = origin[0]; finalParams.topMargin = origin[1];
                         finalParams.width = origin[2]; finalParams.height = origin[3]; container.setLayoutParams(finalParams);
                     }
+                    if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout) {
+                        listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
+                    }
                     if (container.getChildAt(0) instanceof AppWidgetHostView) {
                         WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
                                 widgetId, (AppWidgetHostView) container.getChildAt(0),
                                 activity.getResources().getDisplayMetrics().density, finalParams.width, finalParams.height);
                     }
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
-                    if (action == MotionEvent.ACTION_UP && container.getParent() instanceof FrameLayout)
-                        listener.resolveWidgetCollisions((FrameLayout) container.getParent(), container);
                     return true;
                 }
                 return true;

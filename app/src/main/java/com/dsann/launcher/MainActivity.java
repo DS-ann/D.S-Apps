@@ -1181,27 +1181,9 @@ public class MainActivity extends Activity {
                     top = Math.max(0, Math.min(top, pageHeight - minH));
                     bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
                 }
-                android.graphics.Rect candidate = new android.graphics.Rect(left, top, right, bottom);
-
-                // Match the ordinary widget resizer: reject a resize frame if its
-                // proposed rectangle intersects another workspace item. Do not apply
-                // preferences for a rectangle that the widget system would reject.
-                boolean overlapsWorkspaceItem = false;
-                for (int i = 0; i < activePage.getChildCount(); i++) {
-                    View other = activePage.getChildAt(i);
-                    if (other == clockPanel || !(other.getTag() instanceof String)) continue;
-                    String tag = (String) other.getTag();
-                    if (!(tag.startsWith("launcher_widget:") || tag.startsWith("launcher_app:")
-                            || "launcher_contact_shortcut".equals(tag)
-                            || "launcher_clock_widget".equals(tag))) continue;
-                    int[] otherGeometry = itemGeometry(other);
-                    if (android.graphics.Rect.intersects(candidate,
-                            collisionRect(other, otherGeometry))) {
-                        overlapsWorkspaceItem = true;
-                        break;
-                    }
-                }
-                if (overlapsWorkspaceItem) return true;
+                // Allow the live resize preview to cross neighbouring bounds. The existing
+                // displacement transaction rearranges surrounding items instead of freezing
+                // the handle at the first collision.
 
                 // The panel's measured width is its unscaled natural width; scaleX
                 // is the saved length percentage. Convert the requested visible width
@@ -1724,11 +1706,12 @@ public class MainActivity extends Activity {
         // Match the widget resizer: 18dp-thick grips, 40dp long.
         int side = LauncherUiUtils.dp(this, 40);
         int thin = LauncherUiUtils.dp(this, 18);
+        int edgeGap = LauncherUiUtils.dp(this, 1);
         int[][] positions = new int[][] {
-                {visualLeft, visualTop + h / 2 - side / 2},
-                {visualLeft + w - thin, visualTop + h / 2 - side / 2},
-                {visualLeft + w / 2 - side / 2, visualTop},
-                {visualLeft + w / 2 - side / 2, visualTop + h - thin}
+                {visualLeft + edgeGap, visualTop + h / 2 - side / 2},
+                {visualLeft + w - thin - edgeGap, visualTop + h / 2 - side / 2},
+                {visualLeft + w / 2 - side / 2, visualTop + edgeGap},
+                {visualLeft + w / 2 - side / 2, visualTop + h - thin - edgeGap}
         };
         for (int i = 0; i < clockEdgeHandles.length; i++) {
             View grip = clockEdgeHandles[i];
@@ -8598,25 +8581,29 @@ public class MainActivity extends Activity {
     }
 
     private void resolveAllWorkspaceOverlaps(FrameLayout page, View priorityView) {
+        resolveAllWorkspaceOverlaps(page, priorityView, false);
+    }
+
+    private void resolveAllWorkspaceOverlaps(FrameLayout page, View priorityView,
+                                             boolean preservePrioritySize) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
         // The legacy resolver always rebuilt a nearest-free plan for every item,
         // even when the page was already visually collision-free. That caused needless
         // position changes and a costly post-drop pause. Make it a true no-op in that case.
         if (!hasWorkspaceVisualOverlaps(page)) return;
         java.util.ArrayList<View> items = new java.util.ArrayList<View>();
-        // Preserve already-placed workspace items first. The moving item is placed
-        // last, after the resolver knows which visible regions are actually free.
-        // updateLiveDisplacements() already previews the intended push-aside layout;
-        // this final pass must not accept a mover and leave its neighbors overlapping.
+        // For explicit widget resizing, reserve the selected widget's exact dimensions first;
+        // surrounding workspace items are then moved around that rectangle.
+        boolean priorityIsWorkspaceItem = priorityView != null
+                && priorityView.getParent() == page && isWorkspaceItem(priorityView);
+        if (preservePrioritySize && priorityIsWorkspaceItem) items.add(priorityView);
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
             if (child == priorityView || !isWorkspaceItem(child)) continue;
-            if (isClockWorkspaceItem(child)) items.add(0, child);
+            if (!preservePrioritySize && isClockWorkspaceItem(child)) items.add(0, child);
             else items.add(child);
         }
-        if (priorityView != null && priorityView.getParent() == page && isWorkspaceItem(priorityView)) {
-            items.add(priorityView);
-        }
+        if (!preservePrioritySize && priorityIsWorkspaceItem) items.add(priorityView);
         java.util.ArrayList<android.graphics.Rect> accepted = new java.util.ArrayList<android.graphics.Rect>();
         java.util.ArrayList<View> acceptedViews = new java.util.ArrayList<View>();
         for (View item : items) {
@@ -8780,9 +8767,12 @@ public class MainActivity extends Activity {
                 continue;
             }
 
-            // Last-resort protection for non-icon workspace items: if this page is crowded,
-            // reduce visual scale in small steps to find a legal position.
-            if (bestX < 0) {
+            // Never silently resize an app widget or the custom clock as a collision fallback.
+            // If the page is full, retain their chosen dimensions instead of scaling them down.
+            boolean keepWidgetSize = isClockWorkspaceItem(item)
+                    || (item.getTag() instanceof String
+                    && ((String) item.getTag()).startsWith("launcher_widget:"));
+            if (bestX < 0 && !keepWidgetSize) {
                 float originalScaleX = item.getScaleX();
                 float originalScaleY = item.getScaleY();
                 if (item.getTag() instanceof String && prefs != null) {
@@ -9014,7 +9004,10 @@ public class MainActivity extends Activity {
                 && movingView.getParent() instanceof FrameLayout
                 && isWorkspaceItem(movingView)) {
             FrameLayout page = (FrameLayout) movingView.getParent();
-            resolveAllWorkspaceOverlaps(page, movingView);
+            boolean preserveSize = isClockWorkspaceItem(movingView)
+                    || (movingView.getTag() instanceof String
+                    && ((String) movingView.getTag()).startsWith("launcher_widget:"));
+            resolveAllWorkspaceOverlaps(page, movingView, preserveSize);
         }
         refreshWorkspaceGrid();
     }
@@ -9027,7 +9020,7 @@ public class MainActivity extends Activity {
      */
     private void resolveWidgetIconCollisions(FrameLayout page, FrameLayout widgetContainer) {
         if (page == null || widgetContainer == null || widgetContainer.getParent() != page) return;
-        resolveAllWorkspaceOverlaps(page, widgetContainer);
+        resolveAllWorkspaceOverlaps(page, widgetContainer, true);
     }
 
     private void normalizeClockVisualModePreferences() {
