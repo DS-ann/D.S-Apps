@@ -6538,6 +6538,11 @@ public class MainActivity extends Activity {
                         KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
         int[] artworkColours =
                 LauncherIconDrawable.clockTransitionPaletteForArtwork(artworkTheme);
+        // Nothing Monochrome uses a restrained white-to-near-white gradient for
+        // artwork-matched clock text, rather than inheriting the icon's dark regions.
+        if (artworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME) {
+            return new int[] { Color.WHITE, Color.rgb(245, 246, 249), Color.rgb(220, 224, 231) };
+        }
         // "Original Colours" has no universal icon palette, so use the existing Home Studio
         // spectrum as its neutral fallback. The other themes use their own real icon palettes.
         return artworkColours != null && artworkColours.length >= 2
@@ -6550,12 +6555,16 @@ public class MainActivity extends Activity {
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean iconArtworkActive = isClockIconArtworkActive();
+        int[] artworkTextColours = iconArtworkActive
+                ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
 
-        // Date and AM/PM use the existing animated palette only in gradient mode.
+        // When Match Artwork is enabled, date and AM/PM share the same palette as
+        // the digits for every artwork theme. Nothing Monochrome is white-to-near-white.
         if (dateText != null) {
-            if (digitGradient) {
-                applyAnimatedTextGradient(dateText, CLOCK_DATE_GRADIENT_COLORS,
-                        displayPhase, clockDateGradients);
+            if (digitGradient || iconArtworkActive) {
+                applyAnimatedTextGradient(dateText,
+                        iconArtworkActive ? artworkTextColours : CLOCK_DATE_GRADIENT_COLORS,
+                        digitGradient ? displayPhase : 0f, clockDateGradients);
             } else {
                 clockDateGradients.remove(dateText);
                 if (dateText.getPaint().getShader() != null) {
@@ -6565,6 +6574,20 @@ public class MainActivity extends Activity {
                 if (dateText.getCurrentTextColor() != CLOCK_DIGIT_SILVER) {
                     dateText.setTextColor(CLOCK_DIGIT_SILVER);
                 }
+            }
+        }
+        if (amPmText != null) {
+            if (digitGradient || iconArtworkActive) {
+                applyAnimatedTextGradient(amPmText,
+                        iconArtworkActive ? artworkTextColours : CLOCK_DATE_GRADIENT_COLORS,
+                        digitGradient ? displayPhase : 0f, clockDateGradients);
+            } else {
+                clockDateGradients.remove(amPmText);
+                if (amPmText.getPaint().getShader() != null) {
+                    amPmText.getPaint().setShader(null);
+                }
+                amPmText.setTextColor(CLOCK_DIGIT_SILVER);
+                amPmText.invalidate();
             }
         }
         if (clockText == null) return;
