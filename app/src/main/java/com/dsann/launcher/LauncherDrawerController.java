@@ -21,6 +21,7 @@ import java.util.List;
 /** Builds the app-drawer view and keeps its adapter wiring in one place. */
 final class LauncherDrawerController {
     interface Actions {
+        boolean canLaunchApp(View sourceView);
         void launchApp(ResolveInfo app, View sourceView);
         void showAppOptions(ResolveInfo app, boolean onHome);
         int getColumns();
@@ -48,6 +49,7 @@ final class LauncherDrawerController {
                              String iconSizeKey, String fontSizeKey, String showLabelsKey,
                              Actions actions) {
         LinearLayout screen = new LinearLayout(activity);
+        screen.setVisibility(View.GONE);
         screen.setOrientation(LinearLayout.VERTICAL);
         int side = LauncherUiUtils.dp(activity, 18);
         screen.setPadding(side, side, side, LauncherUiUtils.dp(activity, 8));
@@ -89,7 +91,11 @@ final class LauncherDrawerController {
         final Runnable[] closeSearchRef = new Runnable[1];
         LauncherAppAdapter adapter = new LauncherAppAdapter(activity, prefs, packageManager, allApps, drawerApps, null,
                 true, iconSizeKey, fontSizeKey, showLabelsKey, new LauncherAppAdapter.Actions() {
-                    @Override public void onAppClick(ResolveInfo app, View sourceView) { if (closeSearchRef[0] != null) closeSearchRef[0].run(); actions.launchApp(app, sourceView); }
+                    @Override public void onAppClick(ResolveInfo app, View sourceView) {
+                        if (!actions.canLaunchApp(sourceView)) return;
+                        if (closeSearchRef[0] != null) closeSearchRef[0].run();
+                        actions.launchApp(app, sourceView);
+                    }
                     @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
                         actions.showAppOptions(app, onHome);
                     }

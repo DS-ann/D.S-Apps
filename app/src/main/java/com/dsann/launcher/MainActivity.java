@@ -745,6 +745,14 @@ public class MainActivity extends Activity {
                 return true;
             }
         }
+        if (action == MotionEvent.ACTION_DOWN && !drawerOpen && drawerScreen != null
+                && drawerScreen.getVisibility() == View.VISIBLE
+                && !LauncherScreenTransitions.isDrawerTransitionRunning(
+                        homeScreen, drawerScreen, getDrawerTransition())) {
+            // The drawer is not the selected surface and no transition owns it. Hide
+            // any stale visible copy before the topmost view can steal a home-icon tap.
+            showHomeImmediately();
+        }
         // During the last 20% of a drawer transition, detect an intentional reverse
         // swipe before handing the event to the grid. Ordinary taps and list scrolling
         // continue through to the child; a qualifying reverse cancels that child stream
@@ -2092,7 +2100,7 @@ public class MainActivity extends Activity {
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome) { MainActivity.this.showAppOptions(app, onHome); }
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
-        showHome();
+        showHomeImmediately();
         // The first clock text/layout pass must happen after the page viewport has
         // real dimensions. Otherwise a fresh install/update can leave the first
         // page's clock empty or measured at zero until Home Studio rebuilds it.
@@ -2593,7 +2601,12 @@ public class MainActivity extends Activity {
                 this, root, prefs, packageManager, allApps, drawerApps, drawerBackground(),
                 prefs.getInt(KEY_DRAWER_SPACING, 8), KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE,
                 KEY_SHOW_DRAWER_LABELS, new LauncherDrawerController.Actions() {
-                    @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
+                    @Override public boolean canLaunchApp(View sourceView) {
+                        return MainActivity.this.canLaunchAppFromSource(sourceView);
+                    }
+                    @Override public void launchApp(ResolveInfo app, View sourceView) {
+                        MainActivity.this.launchApp(app, sourceView);
+                    }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome) {
                         MainActivity.this.showAppOptions(app, onHome);
                     }
@@ -6220,7 +6233,32 @@ public class MainActivity extends Activity {
         launchApp(app, null);
     }
 
+    private boolean isViewDescendantOf(View candidate, View ancestor) {
+        View current = candidate;
+        while (current != null) {
+            if (current == ancestor) return true;
+            android.view.ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+        }
+        return false;
+    }
+
+    /**
+     * Drawer cells may receive a hit while a 3D drawer transition still exposes the
+     * home surface. Only launch from the drawer once its open state and hit surface agree.
+     * Home cells and standalone shortcut launches are unaffected.
+     */
+    private boolean canLaunchAppFromSource(View sourceView) {
+        if (sourceView == null || drawerGrid == null
+                || !isViewDescendantOf(sourceView, drawerGrid)) return true;
+        return drawerOpen && drawerScreen != null
+                && drawerScreen.getVisibility() == View.VISIBLE
+                && !LauncherScreenTransitions.isDrawerTransitionRunning(
+                        homeScreen, drawerScreen, getDrawerTransition());
+    }
+
     private void launchApp(ResolveInfo app, View sourceView) {
+        if (app == null || app.activityInfo == null || !canLaunchAppFromSource(sourceView)) return;
         Intent intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
         if (intent != null) {
             try {
