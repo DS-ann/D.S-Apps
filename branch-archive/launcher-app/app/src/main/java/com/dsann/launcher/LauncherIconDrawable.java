@@ -1,8 +1,10 @@
 package com.dsann.launcher;
 
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -15,7 +17,13 @@ import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.LruCache;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /** Draws app icons with optional backing and selectable silhouettes. */
 final class LauncherIconDrawable extends Drawable {
@@ -77,6 +85,14 @@ final class LauncherIconDrawable extends Drawable {
     private static final Paint COMPOSITION_BITMAP_PAINT =
             new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
 
+    // Persist only the currently selected artwork theme. The disk cache is private to this
+    // application and bounded independently from the RAM LRU caches.
+    private static final long MAX_DISK_ARTWORK_CACHE_BYTES = 64L * 1024L * 1024L;
+    private static final Object DISK_ARTWORK_CACHE_LOCK = new Object();
+    private static volatile File DISK_ARTWORK_CACHE_ROOT;
+    private static volatile File ACTIVE_DISK_ARTWORK_CACHE_DIR;
+    private static volatile int selectedPersistentArtworkTheme = -1;
+
     private static int calculateArtworkCacheCapacity() {
         long maxHeap = Runtime.getRuntime().maxMemory();
         long target = maxHeap / 8L;
@@ -125,6 +141,193 @@ final class LauncherIconDrawable extends Drawable {
                     return thread;
                 }
             });
+
+    private static final java.util.concurrent.ExecutorService DISK_ARTWORK_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
+                @Override public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(() -> {
+                        try {
+                            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST);
+                        } catch (RuntimeException ignored) {}
+                        runnable.run();
+                    }, "LauncherArtworkDiskCache");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+
+    /**
+     * Configure the internal-storage cache when the launcher starts or the artwork selection
+     * changes. Old theme directories and unselected-theme RAM entries are discarded.
+     */
+    static void configurePersistentArtworkCache(Context context, int selectedTheme) {
+        if (context == null) return;
+        final int theme = clampArtworkTheme(selectedTheme);
+        final File root = new File(context.getCacheDir(), "launcher-icon-artwork-v1");
+        final File active = theme == ARTWORK_ORIGINAL
+                ? null : new File(root, "theme-" + theme);
+        File priorRoot = DISK_ARTWORK_CACHE_ROOT;
+        boolean rootChanged = priorRoot == null || !priorRoot.equals(root);
+        if (!rootChanged && selectedPersistentArtworkTheme == theme) return;
+
+        DISK_ARTWORK_CACHE_ROOT = root;
+        ACTIVE_DISK_ARTWORK_CACHE_DIR = active;
+        selectedPersistentArtworkTheme = theme;
+        removeUnselectedArtworkFromRam(theme);
+
+        // Keep file deletion off the UI thread. A queued cleanup skips itself if a newer
+        // selection supersedes it before it starts.
+        DISK_ARTWORK_EXECUTOR.execute(() -> {
+            synchronized (DISK_ARTWORK_CACHE_LOCK) {
+                if (selectedPersistentArtworkTheme != theme
+                        || !root.equals(DISK_ARTWORK_CACHE_ROOT)) return;
+                if (!root.exists()) root.mkdirs();
+                File[] children = root.listFiles();
+                if (children != null) {
+                    for (File child : children) {
+                        if (active == null || !child.equals(active)) {
+                            deleteRecursively(child);
+                        }
+                    }
+                }
+                if (active != null) {
+                    if (active.exists() && !active.isDirectory()) deleteRecursively(active);
+                    if (!active.exists()) active.mkdirs();
+                    pruneDiskArtworkCache(active);
+                }
+            }
+        });
+    }
+
+    private static void removeUnselectedArtworkFromRam(int selectedTheme) {
+        for (ArtworkCacheKey key : ARTWORK_CACHE.snapshot().keySet()) {
+            if (key.theme != selectedTheme) ARTWORK_CACHE.remove(key);
+        }
+        for (CompositionCacheKey key : COMPOSITION_CACHE.snapshot().keySet()) {
+            if (key.artwork.theme != selectedTheme) COMPOSITION_CACHE.remove(key);
+        }
+    }
+
+    private static File persistentArtworkFile(ArtworkCacheKey key, int theme) {
+        if (key == null || !key.hasStableToken() || theme == ARTWORK_ORIGINAL
+                || key.theme != theme || selectedPersistentArtworkTheme != theme) return null;
+        File directory = ACTIVE_DISK_ARTWORK_CACHE_DIR;
+        if (directory == null) return null;
+        String digest;
+        try {
+            byte[] bytes = MessageDigest.getInstance("SHA-256")
+                    .digest(key.token.getBytes(StandardCharsets.UTF_8));
+            char[] digits = "0123456789abcdef".toCharArray();
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte item : bytes) {
+                int value = item & 0xff;
+                hex.append(digits[value >>> 4]).append(digits[value & 0x0f]);
+            }
+            digest = hex.toString();
+        } catch (NoSuchAlgorithmException ignored) {
+            return null;
+        }
+        return new File(directory, digest + ".png");
+    }
+
+    /** Read and touch an already-themed bitmap without doing disk I/O on the UI thread. */
+    private static Bitmap readPersistentArtwork(ArtworkCacheKey key, int theme) {
+        File file = persistentArtworkFile(key, theme);
+        if (file == null) return null;
+        synchronized (DISK_ARTWORK_CACHE_LOCK) {
+            if (selectedPersistentArtworkTheme != theme || !file.isFile()) return null;
+            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+            if (bitmap == null) {
+                file.delete();
+                return null;
+            }
+            file.setLastModified(System.currentTimeMillis());
+            return bitmap;
+        }
+    }
+
+    /** Write a finished bitmap in the background; failures fall back to normal RAM caching. */
+    private static void writePersistentArtwork(ArtworkCacheKey key, int theme, Bitmap bitmap) {
+        if (bitmap == null || bitmap.getByteCount() > MAX_ARTWORK_CACHE_BYTES) return;
+        final File file = persistentArtworkFile(key, theme);
+        if (file == null) return;
+        DISK_ARTWORK_EXECUTOR.execute(() -> {
+            synchronized (DISK_ARTWORK_CACHE_LOCK) {
+                File active = ACTIVE_DISK_ARTWORK_CACHE_DIR;
+                if (selectedPersistentArtworkTheme != theme || active == null
+                        || !active.equals(file.getParentFile())) return;
+                if (file.isFile()) {
+                    file.setLastModified(System.currentTimeMillis());
+                    return;
+                }
+                if (!active.exists() && !active.mkdirs()) return;
+                File temporary = new File(file.getAbsolutePath() + ".tmp");
+                try (FileOutputStream output = new FileOutputStream(temporary)) {
+                    if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                        temporary.delete();
+                        return;
+                    }
+                    output.flush();
+                } catch (IOException | RuntimeException ignored) {
+                    temporary.delete();
+                    return;
+                }
+                // A theme may have been switched while the image was being encoded.
+                if (selectedPersistentArtworkTheme != theme
+                        || !active.equals(ACTIVE_DISK_ARTWORK_CACHE_DIR)) {
+                    temporary.delete();
+                    return;
+                }
+                if (file.exists()) file.delete();
+                if (!temporary.renameTo(file)) {
+                    temporary.delete();
+                    return;
+                }
+                pruneDiskArtworkCache(active);
+            }
+        });
+    }
+
+    private static void pruneDiskArtworkCache(File directory) {
+        if (directory == null || !directory.isDirectory()) return;
+        File[] files = directory.listFiles();
+        if (files == null) return;
+        long totalBytes = 0L;
+        for (File file : files) {
+            if (!file.isFile()) continue;
+            if (file.getName().endsWith(".tmp")) {
+                file.delete();
+            } else if (file.getName().endsWith(".png")) {
+                totalBytes += file.length();
+            }
+        }
+        while (totalBytes > MAX_DISK_ARTWORK_CACHE_BYTES) {
+            File oldest = null;
+            File[] candidates = directory.listFiles();
+            if (candidates == null) break;
+            for (File candidate : candidates) {
+                if (!candidate.isFile() || !candidate.getName().endsWith(".png")) continue;
+                if (oldest == null || candidate.lastModified() < oldest.lastModified()) {
+                    oldest = candidate;
+                }
+            }
+            if (oldest == null) break;
+            long length = oldest.length();
+            if (!oldest.delete()) break;
+            totalBytes -= length;
+        }
+    }
+
+    private static void deleteRecursively(File file) {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) deleteRecursively(child);
+            }
+        }
+        file.delete();
+    }
 
     private Drawable source;
     // Read from the worker before starting an expensive icon conversion; make these fields
@@ -536,17 +739,22 @@ final class LauncherIconDrawable extends Drawable {
             // drawable still represents this app/style; otherwise old icons compete with the
             // current fling for CPU and can make the scroll feel sticky.
             if (!hasCurrentArtworkWaiter(key, theme)) return;
-            Bitmap themed = null;
-            try {
-                Drawable workerDrawable = state.newDrawable();
-                if (workerDrawable != null) workerDrawable = workerDrawable.mutate();
-                themed = createThemedArtworkBitmap(workerDrawable, theme);
-            } catch (RuntimeException ignored) {
-                // A vendor Drawable may not support worker-thread rasterisation; retain its
-                // original icon rather than crash the drawer.
+            Bitmap themed = readPersistentArtwork(key, theme);
+            boolean generated = themed == null;
+            if (generated) {
+                try {
+                    Drawable workerDrawable = state.newDrawable();
+                    if (workerDrawable != null) workerDrawable = workerDrawable.mutate();
+                    themed = createThemedArtworkBitmap(workerDrawable, theme);
+                } catch (RuntimeException ignored) {
+                    // A vendor Drawable may not support worker-thread rasterisation; retain its
+                    // original icon rather than crash the drawer.
+                }
             }
             final Bitmap result = themed;
             ARTWORK_HANDLER.post(() -> finishArtworkRequest(key, theme, result));
+            // Persist after posting the result so PNG encoding cannot delay the visible icon.
+            if (generated && result != null) writePersistentArtwork(key, theme, result);
         });
     }
 
@@ -583,7 +791,8 @@ final class LauncherIconDrawable extends Drawable {
             ARTWORK_PENDING.remove(key);
             waiters = ARTWORK_WAITERS.remove(key);
         }
-        if (bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES) {
+        if (bitmap != null && bitmap.getByteCount() <= MAX_ARTWORK_CACHE_BYTES
+                && selectedPersistentArtworkTheme == theme) {
             ARTWORK_CACHE.put(key, bitmap);
         }
         if (waiters == null || bitmap == null) return;

@@ -686,6 +686,8 @@ public class MainActivity extends Activity {
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         normalizeAppIconSettings();
+        LauncherIconDrawable.configurePersistentArtworkCache(this,
+                prefs.getInt(KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
         normalizeClockVisualModePreferences();
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -9939,6 +9941,7 @@ public class MainActivity extends Activity {
                         .putInt(KEY_ICON_BACKGROUND_COLOR, LauncherIconDrawable.BACKGROUND_WHITE);
             }
             themeEdit.apply();
+            LauncherIconDrawable.configurePersistentArtworkCache(this, selectedTheme);
             refreshWorkspaceIconAppearance();
             refreshClockArtworkAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
