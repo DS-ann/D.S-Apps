@@ -417,7 +417,7 @@ public class MainActivity extends Activity {
     private final Runnable drawerSnapshotReadyCheck = new Runnable() {
         @Override public void run() {
             if (drawerSnapshotBody == null || drawerGrid == null || drawerAdapter == null
-                    || drawerScreen == null || drawerScreen.getVisibility() != View.VISIBLE
+                    || drawerScreen == null || drawerScreen.getVisibility() == View.GONE
                     || isFinishing()) return;
             if (drawerAdapter.areVisibleIconsReady(drawerGrid)) {
                 if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
@@ -2779,6 +2779,9 @@ public class MainActivity extends Activity {
         refreshDrawerAppList = built.refreshAppList;
         drawerSnapshotBody = built.snapshotBody;
         drawerAdapter.seedLabelCache(preloadedAppLabels);
+        // Pre-render the initial viewport while the drawer is invisible, so the very first
+        // opening can use a complete cached frame instead of showing icons as they load.
+        scheduleDrawerSnapshotRefresh();
     }
 
     private void renderHomePages(boolean animate) {
