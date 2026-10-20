@@ -79,13 +79,11 @@ jobs:
           "$APK_SIGNER" verify --verbose "$APK"
           cp "$APK" "app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk"
 
-      - name: Upload phone APKs
+      - name: Upload signed phone release APK
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneBridge-Phone-APKs
-          path: |
-            branch-archive/main/phab-bridge/app/build/outputs/apk/debug/app-debug.apk
-            branch-archive/main/phab-bridge/app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk
+          name: PhoneBridge-Phone-Release
+          path: branch-archive/main/phab-bridge/app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -151,12 +149,10 @@ jobs:
           "$APK_SIGNER" verify --verbose "$APK"
           cp "$APK" "app/build/outputs/apk/release/PhoneBridge-Tablet-signed.apk"
 
-      - name: Upload tablet APKs
+      - name: Upload signed tablet release APK
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneBridge-Tablet-APKs
-          path: |
-            branch-archive/main/pad-client/app/build/outputs/apk/debug/app-debug.apk
-            branch-archive/main/pad-client/app/build/outputs/apk/release/PhoneBridge-Tablet-signed.apk
+          name: PhoneBridge-Tablet-Release
+          path: branch-archive/main/pad-client/app/build/outputs/apk/release/PhoneBridge-Tablet-signed.apk
           if-no-files-found: error
           retention-days: 14
