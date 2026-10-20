@@ -1,16 +1,16 @@
 name: Build Battery Monitor — battery-monitor-tab-android16
 
-on: 
+on:
   push:
-    branches: [ battery-monitor-tab-android16 ]
+    branches: [ main ]
     paths:
-      - 'battery-monitor/**'
-      - '.github/workflows/build-battery-monitor.yml'
+      - 'branch-archive/battery-monitor-tab-android16/**'
+      - '.github/workflows/battery-monitor-tab-android16-build.yml'
   pull_request:
-    branches: [ battery-monitor-tab-android16 ]
+    branches: [ main ]
     paths:
-      - 'battery-monitor/**'
-      - '.github/workflows/build-battery-monitor.yml'
+      - 'branch-archive/battery-monitor-tab-android16/**'
+      - '.github/workflows/battery-monitor-tab-android16-build.yml'
   workflow_dispatch:
 
 permissions:
