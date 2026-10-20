@@ -29,6 +29,12 @@ android {
         }
     }
 
+    lint {
+        // Keep targetSdk 28 for the legacy Android 6 call-routing behavior.
+        // This app is distributed directly, not through Google Play.
+        disable 'ExpiredTargetSdkVersion'
+    }
+
     buildTypes {
         release {
             if (releaseKeystorePath != null && !releaseKeystorePath.isEmpty()) {

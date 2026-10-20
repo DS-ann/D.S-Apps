@@ -25,7 +25,7 @@ ARCHIVED	48ff41b5f6a7fb4547634d44e056592e633dc190	pad-client/app/src/main/res/va
 DUPLICATE	f7e60c6e074ec988891e68eeb7b8771b768e521d	pad-client/build.gradle	branch-archive/main/hfp-diagnostic/build.gradle	100644
 ARCHIVED	8f9c8a3a4c13c397a606ef0158476c12b0ade096	pad-client/settings.gradle	branch-archive/main/pad-client/settings.gradle	100644
 ARCHIVED	c22c463e22d334676b547a9d1343a49fe2b75dd9	pad-client/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	branch-archive/main/pad-client/src/main/java/com/dsann/phonebridge/pad/BridgeService.kt	100644
-ARCHIVED	6b82f2aecfa1f5920728133fd671de57c5892871	phab-bridge/app/build.gradle	branch-archive/main/phab-bridge/app/build.gradle	100644
+ARCHIVED	803eb3c5545d104faa1a3d0c15760ecf46a625eb	phab-bridge/app/build.gradle	branch-archive/main/phab-bridge/app/build.gradle	100644
 ARCHIVED	6e3292e5dc3cb07e269d277cf3cca1f5dbd6f78b	phab-bridge/app/src/main/AndroidManifest.xml	branch-archive/main/phab-bridge/app/src/main/AndroidManifest.xml	100644
 ARCHIVED	93e0326c64b3c3e16291d7a2c00de0cb6506da38	phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	100644
 ARCHIVED	a5dea3f85845fcd891189d6a8d1abb829bc8f3b9	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	100644
