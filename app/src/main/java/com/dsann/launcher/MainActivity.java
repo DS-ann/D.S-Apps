@@ -10042,6 +10042,14 @@ public class MainActivity extends Activity {
                     horizontalOffset += singleDigitAdjustment;
                 }
                 targetX = -horizontalOffset / panelScaleX;
+                // Neon Circuit single-digit hours should sit 20dp farther right than
+                // the normal figure-space-compensated position. Apply this in the
+                // geometry path, independently of the active colour mode, so colour
+                // changes cannot alter the alignment. Divide by the panel scale so the
+                // visible shift remains exactly 20dp while the clock is resized.
+                if (style == 2 && singleDigitHour) {
+                    targetX += LauncherUiUtils.dp(this, 20) / panelScaleX;
+                }
             }
         }
         // Avoid invalidating the view when the computed offset hasn't actually changed.
