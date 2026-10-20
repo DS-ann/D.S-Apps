@@ -134,6 +134,9 @@ final class LauncherIconDrawable extends Drawable {
     private volatile String sourceCacheToken;
     private volatile int artworkTheme = -1;
     private boolean sourceIsProcessedArtwork;
+    // The stable logical source for the bitmap currently being shown. This lets us keep the
+    // already-themed art visible if Android returns a fresh ConstantState for the same app icon.
+    private String processedArtworkSourceToken;
     private int drawableAlpha = 255;
     private ColorFilter drawableColorFilter;
     // Force the first appearance bind through the cache so Original icons get the outline too.
@@ -397,10 +400,16 @@ final class LauncherIconDrawable extends Drawable {
         // implementation reset every drawable to Original and rebuilt its themed wrapper
         // on every bind, causing avoidable allocation and repeated work on slow devices.
         Drawable.ConstantState nextState = source == null ? null : source.getConstantState();
-        boolean sameSource = nextState != null
+        // A few packages (including adaptive/vendor-managed icons) manufacture a different
+        // ConstantState wrapper from newDrawable() on each bind. The app/activity token is the
+        // stable identity for that icon within one package-cache generation, so prefer it over
+        // object identity. clearPackageCaches() advances that generation after package updates.
+        boolean sameStableSource = stableCacheToken != null && !stableCacheToken.isEmpty()
+                && stableCacheToken.equals(sourceCacheToken);
+        boolean sameSource = sameStableSource || (nextState != null
                 ? nextState == originalSourceState
                 : nextState == null && sourceCacheToken != null
-                    && sourceCacheToken.equals(stableCacheToken);
+                    && sourceCacheToken.equals(stableCacheToken));
         boolean sameAppearance = this.showBackground == showBackground
                 && this.shape == clampShape(shape)
                 && this.backgroundColor == backgroundColor
@@ -419,9 +428,16 @@ final class LauncherIconDrawable extends Drawable {
     private void applyArtworkTheme() {
         Drawable original = originalSource;
         int theme = clampArtworkTheme(artworkTheme);
+        // If this is a theme switch/rebind for the same logical app, do not briefly reveal
+        // its original-colour icon while the worker prepares the replacement palette.
+        boolean keepProcessedArtwork = sourceIsProcessedArtwork
+                && source instanceof BitmapDrawable
+                && processedArtworkSourceToken != null
+                && processedArtworkSourceToken.equals(sourceCacheToken);
         sourceIsProcessedArtwork = false;
         if (original == null) {
             source = null;
+            processedArtworkSourceToken = null;
             return;
         }
 
@@ -429,8 +445,16 @@ final class LauncherIconDrawable extends Drawable {
         // Drawables without ConstantState cannot safely be cloned for a worker. Keep this
         // uncommon fallback correct; normal installed-app icons take the asynchronous path.
         if (state == null) {
-            source = artworkForTheme(original, theme, sourceCacheToken);
-            if (source != null) source.setBounds(getBounds());
+            Drawable themed = artworkForTheme(original, theme, sourceCacheToken);
+            if (themed != null) {
+                source = themed;
+                sourceIsProcessedArtwork = themed != original;
+                processedArtworkSourceToken = sourceIsProcessedArtwork ? sourceCacheToken : null;
+                source.setBounds(getBounds());
+            } else if (!keepProcessedArtwork) {
+                source = original;
+                source.setBounds(getBounds());
+            }
             return;
         }
 
@@ -441,10 +465,15 @@ final class LauncherIconDrawable extends Drawable {
             return;
         }
 
-        // Show the original logo temporarily instead of blocking the transition/scroll
-        // while its themed bitmap is prepared. Completion invalidates this drawable.
-        source = original;
-        source.setBounds(getBounds());
+        // Keep a previously processed version of this same app icon on screen while a new
+        // artwork bitmap is prepared. Falling back to the source here made dynamic
+        // ConstantState icons visibly flash to their real colours during launcher-to-app
+        // scale-up transitions, then switch back after the worker finished.
+        if (!keepProcessedArtwork) {
+            source = original;
+            source.setBounds(getBounds());
+            processedArtworkSourceToken = null;
+        }
         requestArtworkBitmap(key, state, theme, sourceCacheToken, this);
     }
 
@@ -455,6 +484,7 @@ final class LauncherIconDrawable extends Drawable {
         result.setBounds(getBounds());
         source = result;
         sourceIsProcessedArtwork = true;
+        processedArtworkSourceToken = sourceCacheToken;
         invalidateSelf();
     }
 
