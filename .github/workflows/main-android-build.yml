@@ -39,16 +39,55 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp/gradle
           echo "/tmp/gradle/gradle-8.7/bin" >> "$GITHUB_PATH"
 
-      - name: Build Phab audio bridge
-        working-directory: branch-archive/main/phab-bridge
-        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Prepare and validate BatteryPulse signing key
+        env:
+          BATTERYPULSE_KEYSTORE_BASE64: ${{ secrets.BATTERYPULSE_KEYSTORE_BASE64 }}
+          BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+          BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+          BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BATTERYPULSE_KEYSTORE_BASE64" ] || [ -z "$BATTERYPULSE_STORE_PASSWORD" ] || [ -z "$BATTERYPULSE_KEY_ALIAS" ] || [ -z "$BATTERYPULSE_KEY_PASSWORD" ]; then
+            echo "BatteryPulse signing secrets are incomplete. Configure the same existing repository Actions secrets used by D.S Launcher." >&2
+            exit 1
+          fi
+          printf '%s' "$BATTERYPULSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/batterypulse-release.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/batterypulse-release.p12" -storepass "$BATTERYPULSE_STORE_PASSWORD" -alias "$BATTERYPULSE_KEY_ALIAS" >/dev/null
+          chmod 600 "$RUNNER_TEMP/batterypulse-release.p12"
+          echo "Existing BatteryPulse signing key validated."
 
-      - name: Upload Phab APK
+
+      - name: Build debug and signed release APKs
+        working-directory: branch-archive/main/phab-bridge
+        env:
+          BATTERYPULSE_KEYSTORE_PATH: ${{ runner.temp }}/batterypulse-release.p12
+          BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+          BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+          BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace assembleDebug assembleRelease
+
+      - name: Verify signed phone APK
+        working-directory: branch-archive/main/phab-bridge
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          APK_SIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -n "$APK_SIGNER" && test -x "$APK_SIGNER"
+          test -s "$APK"
+          "$APK_SIGNER" verify --verbose "$APK"
+          cp "$APK" "app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk"
+
+      - name: Upload phone APKs
         uses: actions/upload-artifact@v4
         with:
-          name: phonebridge-phab-audio-debug
-          path: branch-archive/main/phab-bridge/app/build/outputs/apk/debug/app-debug.apk
+          name: PhoneBridge-Phone-APKs
+          path: |
+            branch-archive/main/phab-bridge/app/build/outputs/apk/debug/app-debug.apk
+            branch-archive/main/phab-bridge/app/build/outputs/apk/release/PhoneBridge-Phone-signed.apk
           if-no-files-found: error
+          retention-days: 14
 
   build-pad:
     name: Build Pad Audio Bridge
@@ -72,13 +111,52 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp/gradle
           echo "/tmp/gradle/gradle-8.7/bin" >> "$GITHUB_PATH"
 
-      - name: Build Pad audio bridge
-        working-directory: branch-archive/main/pad-client
-        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Prepare and validate BatteryPulse signing key
+        env:
+          BATTERYPULSE_KEYSTORE_BASE64: ${{ secrets.BATTERYPULSE_KEYSTORE_BASE64 }}
+          BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+          BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+          BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BATTERYPULSE_KEYSTORE_BASE64" ] || [ -z "$BATTERYPULSE_STORE_PASSWORD" ] || [ -z "$BATTERYPULSE_KEY_ALIAS" ] || [ -z "$BATTERYPULSE_KEY_PASSWORD" ]; then
+            echo "BatteryPulse signing secrets are incomplete. Configure the same existing repository Actions secrets used by D.S Launcher." >&2
+            exit 1
+          fi
+          printf '%s' "$BATTERYPULSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/batterypulse-release.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/batterypulse-release.p12" -storepass "$BATTERYPULSE_STORE_PASSWORD" -alias "$BATTERYPULSE_KEY_ALIAS" >/dev/null
+          chmod 600 "$RUNNER_TEMP/batterypulse-release.p12"
+          echo "Existing BatteryPulse signing key validated."
 
-      - name: Upload Pad APK
+
+      - name: Build debug and signed release APKs
+        working-directory: branch-archive/main/pad-client
+        env:
+          BATTERYPULSE_KEYSTORE_PATH: ${{ runner.temp }}/batterypulse-release.p12
+          BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+          BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+          BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace assembleDebug assembleRelease
+
+      - name: Verify signed tablet APK
+        working-directory: branch-archive/main/pad-client
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          APK_SIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -n "$APK_SIGNER" && test -x "$APK_SIGNER"
+          test -s "$APK"
+          "$APK_SIGNER" verify --verbose "$APK"
+          cp "$APK" "app/build/outputs/apk/release/PhoneBridge-Tablet-signed.apk"
+
+      - name: Upload tablet APKs
         uses: actions/upload-artifact@v4
         with:
-          name: phonebridge-pad-audio-debug
-          path: branch-archive/main/pad-client/app/build/outputs/apk/debug/app-debug.apk
+          name: PhoneBridge-Tablet-APKs
+          path: |
+            branch-archive/main/pad-client/app/build/outputs/apk/debug/app-debug.apk
+            branch-archive/main/pad-client/app/build/outputs/apk/release/PhoneBridge-Tablet-signed.apk
           if-no-files-found: error
+          retention-days: 14

@@ -3,6 +3,8 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def releaseKeystorePath = System.getenv('BATTERYPULSE_KEYSTORE_PATH')
+
 android {
     namespace 'com.dsann.phonebridge.pad'
     compileSdk 35
@@ -13,6 +15,27 @@ android {
         targetSdk 35
         versionCode 1
         versionName '0.1.0'
+    }
+
+    signingConfigs {
+        if (releaseKeystorePath != null && !releaseKeystorePath.isEmpty()) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword System.getenv('BATTERYPULSE_STORE_PASSWORD')
+                keyAlias System.getenv('BATTERYPULSE_KEY_ALIAS')
+                keyPassword System.getenv('BATTERYPULSE_KEY_PASSWORD')
+                storeType 'PKCS12'
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (releaseKeystorePath != null && !releaseKeystorePath.isEmpty()) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
     }
 }
 
