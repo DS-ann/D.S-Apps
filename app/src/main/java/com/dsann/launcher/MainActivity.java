@@ -6241,9 +6241,8 @@ public class MainActivity extends Activity {
                 || clockText instanceof SevenSegmentClockTextView) {
             LauncherClockStyler.apply(this, clockText, style);
         }
-        // Neon Circuit's fill remains near-white; other presets retain the shared silver tone.
-        clockText.setTextColor(style == 2
-                ? CLOCK_NEON_CIRCUIT_SOLID : CLOCK_DIGIT_SILVER);
+        // Keep the original solid silver tone unless a clock effect overrides it.
+        clockText.setTextColor(CLOCK_DIGIT_SILVER);
         if (clockText instanceof SevenSegmentClockTextView) {
             SevenSegmentClockTextView ledClock = (SevenSegmentClockTextView) clockText;
             // Reassert the selected mode after every style refresh (including the
@@ -6384,13 +6383,13 @@ public class MainActivity extends Activity {
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
         boolean neonCircuit = prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
-        int solidDigitColour = neonCircuit
+        int solidDigitColour = neonCircuit && iconArtworkActive
                 ? CLOCK_NEON_CIRCUIT_SOLID : CLOCK_DIGIT_SILVER;
 
-        // Artwork matching uses the selected icon artwork's actual theme palette,
-        // held stationary at phase zero. Neon Circuit intentionally stays achromatic.
+        // Artwork matching keeps Neon Circuit achromatic; Colour Gradient alone
+        // restores its original multicolour palette.
         boolean useDigitGradient = digitGradient || iconArtworkActive;
-        int[] digitColours = neonCircuit
+        int[] digitColours = neonCircuit && iconArtworkActive
                 ? CLOCK_NEON_CIRCUIT_GRADIENT_COLORS
                 : iconArtworkActive ? getClockArtworkTransitionColours()
                 : CLOCK_DIGIT_GRADIENT_COLORS;
