@@ -1966,6 +1966,10 @@ public class MainActivity extends Activity {
             packageReceiverRegistered = false;
         }
         try { unregisterReceiver(timeChangesReceiver); } catch (IllegalArgumentException ignored) {}
+        if (Build.VERSION.SDK_INT >= 33 && backInvokedCallback != null) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backInvokedCallback);
+            backInvokedCallback = null;
+        }
         super.onDestroy();
     }
 
@@ -2104,6 +2108,11 @@ public class MainActivity extends Activity {
                     LauncherUiUtils.dp(this, 14) + topInset,
                     LauncherUiUtils.dp(this, 20),
                     LauncherUiUtils.dp(this, 8) + bottomInset);
+            if (drawerScreen != null) {
+                int drawerSide = LauncherUiUtils.dp(this, 18);
+                drawerScreen.setPadding(drawerSide, drawerSide + topInset, drawerSide,
+                        LauncherUiUtils.dp(this, 8) + bottomInset);
+            }
             return insets;
         });
         buildHomeChrome();
