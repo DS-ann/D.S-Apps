@@ -49,6 +49,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
             new HashMap<>();
     private final java.util.Set<String> pendingIconLoads = new java.util.HashSet<>();
     private int iconCacheGeneration;
+    private Runnable dataChangedListener;
 
     // PackageManager icon resolution is I/O/resource-heavy on Android 6. Never do it on the
     // UI thread during the drawer's opening animation or while GridView is scrolling.
@@ -358,6 +359,34 @@ public final class LauncherAppAdapter extends BaseAdapter {
     }
 
     /**
+     * Check cells currently visible in the drawer viewport. The cached opening layer stays
+     * visible until their artwork has reached the final selected palette.
+     */
+    boolean areVisibleIconsReady(android.widget.GridView grid) {
+        if (!drawer || grid == null || drawerApps.isEmpty()) return true;
+        if (grid.getWidth() <= 0 || grid.getHeight() <= 0) return false;
+        int childCount = grid.getChildCount();
+        if (childCount <= 0) return false;
+        boolean inspected = false;
+        for (int childIndex = 0; childIndex < childCount; childIndex++) {
+            View cell = grid.getChildAt(childIndex);
+            int position = grid.getPositionForView(cell);
+            if (position < 0 || position >= drawerApps.size()) continue;
+            inspected = true;
+            if (!(cell instanceof ViewGroup) || ((ViewGroup) cell).getChildCount() == 0) {
+                return false;
+            }
+            View candidate = ((ViewGroup) cell).getChildAt(0);
+            if (!(candidate instanceof ImageView)) return false;
+            android.graphics.drawable.Drawable icon = ((ImageView) candidate).getDrawable();
+            if (icon == null) return false;
+            if (icon instanceof LauncherIconDrawable
+                    && !((LauncherIconDrawable) icon).isArtworkReady()) return false;
+        }
+        return inspected;
+    }
+
+    /**
      * Apply the latest icon settings to the currently attached drawer cells without rebuilding
      * the grid or reloading package icons. The drawer view remains alive while hidden, so this
      * also restores settings changed in Home Studio before the next opening.
@@ -416,6 +445,15 @@ public final class LauncherAppAdapter extends BaseAdapter {
                     artworkTheme, fitInsideBackground);
             wrapped.setExternalShapeClip(outlineClip);
         }
+    }
+
+    void setOnDataChangedListener(Runnable listener) {
+        dataChangedListener = listener;
+    }
+
+    @Override public void notifyDataSetChanged() {
+        if (dataChangedListener != null) dataChangedListener.run();
+        super.notifyDataSetChanged();
     }
 
     /** Called only when PackageManager reports an installed-app change. */

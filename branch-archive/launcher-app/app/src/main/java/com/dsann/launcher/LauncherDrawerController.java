@@ -5,11 +5,16 @@ import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.View;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.widget.AbsListView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridView;
@@ -32,12 +37,122 @@ final class LauncherDrawerController {
         final GridView grid;
         final LauncherAppAdapter adapter;
         final Runnable refreshAppList;
+        final CachedDrawerBody snapshotBody;
         BuiltDrawer(LinearLayout screen, GridView grid, LauncherAppAdapter adapter,
-                    Runnable refreshAppList) {
+                    Runnable refreshAppList, CachedDrawerBody snapshotBody) {
             this.screen = screen;
             this.grid = grid;
             this.adapter = adapter;
             this.refreshAppList = refreshAppList;
+            this.snapshotBody = snapshotBody;
+        }
+    }
+
+    /**
+     * Paints the last complete drawer viewport while visible icons are warming up.
+     * The bitmap is drawn by dispatchDraw, not as a touch-blocking child, so the real GridView
+     * continues to receive taps and long presses while the static view is shown.
+     */
+    static final class CachedDrawerBody extends FrameLayout {
+        private static final long MAX_SNAPSHOT_PIXELS = 1200000L;
+        private final Paint snapshotPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        private final Rect snapshotBounds = new Rect();
+        private Bitmap cachedSnapshot;
+        private boolean displayCachedSnapshot;
+        private boolean capturingSnapshot;
+        private long cachedSignature = Long.MIN_VALUE;
+        private int cachedFirstVisible = -1;
+
+        CachedDrawerBody(Activity activity) {
+            super(activity);
+            setWillNotDraw(false);
+        }
+
+        boolean isShowingCachedSnapshot() {
+            return displayCachedSnapshot && cachedSnapshot != null && !cachedSnapshot.isRecycled();
+        }
+
+        void hideCachedSnapshot() {
+            if (!displayCachedSnapshot) return;
+            displayCachedSnapshot = false;
+            invalidate();
+        }
+
+        void invalidateSnapshot() {
+            displayCachedSnapshot = false;
+            Bitmap previous = cachedSnapshot;
+            cachedSnapshot = null;
+            cachedSignature = Long.MIN_VALUE;
+            cachedFirstVisible = -1;
+            if (previous != null && !previous.isRecycled()) previous.recycle();
+            invalidate();
+        }
+
+        boolean showCachedSnapshot(long signature, int firstVisiblePosition) {
+            if (cachedSnapshot == null || cachedSnapshot.isRecycled()) return false;
+            if (cachedSignature != signature || cachedFirstVisible != firstVisiblePosition) {
+                invalidateSnapshot();
+                return false;
+            }
+            if (!displayCachedSnapshot) {
+                displayCachedSnapshot = true;
+                invalidate();
+            }
+            return true;
+        }
+
+        void captureSnapshot(long signature, int firstVisiblePosition) {
+            int width = getWidth();
+            int height = getHeight();
+            if (width <= 0 || height <= 0) return;
+
+            long area = (long) width * (long) height;
+            float scale = area > MAX_SNAPSHOT_PIXELS
+                    ? (float) Math.sqrt((double) MAX_SNAPSHOT_PIXELS / (double) area) : 1f;
+            int bitmapWidth = Math.max(1, Math.round(width * scale));
+            int bitmapHeight = Math.max(1, Math.round(height * scale));
+            Bitmap next = null;
+            try {
+                next = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(next);
+                canvas.scale(bitmapWidth / (float) width, bitmapHeight / (float) height);
+                capturingSnapshot = true;
+                // Force live child rendering even when a previous cached frame is showing.
+                super.draw(canvas);
+            } catch (OutOfMemoryError | RuntimeException ignored) {
+                if (next != null && !next.isRecycled()) next.recycle();
+                return;
+            } finally {
+                capturingSnapshot = false;
+            }
+
+            Bitmap previous = cachedSnapshot;
+            cachedSnapshot = next;
+            cachedSignature = signature;
+            cachedFirstVisible = firstVisiblePosition;
+            displayCachedSnapshot = false;
+            snapshotBounds.set(0, 0, width, height);
+            if (previous != null && previous != next && !previous.isRecycled()) previous.recycle();
+            invalidate();
+        }
+
+        @Override protected void dispatchDraw(Canvas canvas) {
+            Bitmap current = cachedSnapshot;
+            if (!capturingSnapshot && displayCachedSnapshot
+                    && current != null && !current.isRecycled()) {
+                snapshotBounds.set(0, 0, getWidth(), getHeight());
+                canvas.drawBitmap(current, null, snapshotBounds, snapshotPaint);
+                return;
+            }
+            super.dispatchDraw(canvas);
+        }
+
+        @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight);
+            if (cachedSnapshot != null && (width != oldWidth || height != oldHeight)) {
+                invalidateSnapshot();
+            }
+            snapshotBounds.set(0, 0, width, height);
         }
     }
 
@@ -49,7 +164,9 @@ final class LauncherDrawerController {
                              String iconSizeKey, String fontSizeKey, String showLabelsKey,
                              Actions actions) {
         LinearLayout screen = new LinearLayout(activity);
-        screen.setVisibility(View.GONE);
+        // INVISIBLE still participates in layout, allowing GridView cells to warm up in the
+        // background before the first drawer opening; transition helpers later use GONE.
+        screen.setVisibility(View.INVISIBLE);
         screen.setOrientation(LinearLayout.VERTICAL);
         int side = LauncherUiUtils.dp(activity, 18);
         screen.setPadding(side, side, side, LauncherUiUtils.dp(activity, 8));
@@ -75,7 +192,7 @@ final class LauncherDrawerController {
                 Gravity.RIGHT | Gravity.CENTER_VERTICAL));
         screen.addView(headerRow, headerParams);
 
-        FrameLayout drawerBody = new FrameLayout(activity);
+        CachedDrawerBody drawerBody = new CachedDrawerBody(activity);
         GridView grid = new GridView(activity);
         grid.setNumColumns(actions.getColumns());
         grid.setVerticalSpacing(LauncherUiUtils.dp(activity, spacing));
@@ -100,7 +217,18 @@ final class LauncherDrawerController {
                         actions.showAppOptions(app, onHome);
                     }
                 });
+        adapter.setOnDataChangedListener(drawerBody::invalidateSnapshot);
         grid.setAdapter(adapter);
+        grid.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView view, int scrollState) {
+                if (scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE) {
+                    // A scroll changes the cached viewport even if it is not currently displayed.
+                    drawerBody.invalidateSnapshot();
+                }
+            }
+            @Override public void onScroll(AbsListView view, int firstVisibleItem,
+                    int visibleItemCount, int totalItemCount) {}
+        });
         drawerBody.addView(grid, new FrameLayout.LayoutParams(-1, -1));
         screen.addView(drawerBody, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -209,6 +337,6 @@ final class LauncherDrawerController {
             });
         });
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
-        return new BuiltDrawer(screen, grid, adapter, refreshAppList);
+        return new BuiltDrawer(screen, grid, adapter, refreshAppList, drawerBody);
     }
 }

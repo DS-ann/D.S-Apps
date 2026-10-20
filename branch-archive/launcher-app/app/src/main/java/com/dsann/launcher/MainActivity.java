@@ -410,6 +410,31 @@ public class MainActivity extends Activity {
     private TextView pageIndicator;
     private LauncherAppAdapter drawerAdapter;
     private Runnable refreshDrawerAppList;
+    private LauncherDrawerController.CachedDrawerBody drawerSnapshotBody;
+    private long drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+    private boolean drawerSnapshotSwipeOpeningPrepared = false;
+    private int drawerSnapshotReadyChecks = 0;
+    private final Runnable drawerSnapshotReadyCheck = new Runnable() {
+        @Override public void run() {
+            if (drawerSnapshotBody == null || drawerGrid == null || drawerAdapter == null
+                    || drawerScreen == null || drawerScreen.getVisibility() == View.GONE
+                    || isFinishing()) return;
+            if (drawerAdapter.areVisibleIconsReady(drawerGrid)) {
+                if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
+                    drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+                }
+                drawerSnapshotBody.captureSnapshot(drawerSnapshotCurrentSignature,
+                        drawerGrid.getFirstVisiblePosition());
+                drawerSnapshotReadyChecks = 0;
+            } else if (++drawerSnapshotReadyChecks <= 30) {
+                handler.postDelayed(this, 100L);
+            } else {
+                // An app with a broken icon must not keep a frozen picture over the real grid.
+                drawerSnapshotBody.hideCachedSnapshot();
+                drawerSnapshotReadyChecks = 0;
+            }
+        }
+    };
     private List<ResolveInfo> allApps = new ArrayList<>();
     private List<ResolveInfo> drawerApps = new ArrayList<>();
     // The same labels used to sort allApps are reused by drawer cells and search.
@@ -871,7 +896,7 @@ public class MainActivity extends Activity {
                 } else {
                     refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = true, getDrawerTransition(), progress);
+                            this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(), progress);
                 }
                 return true;
             }
@@ -1535,7 +1560,7 @@ public class MainActivity extends Activity {
                 if (drawerSwipeProgress > 0.90f) {
                                         refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                            this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(), drawerSwipeProgress);
                 } else {
                     LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
                             () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
@@ -1548,7 +1573,7 @@ public class MainActivity extends Activity {
                 if (drawerSwipeProgress >= 0.10f) {
                                         refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                            this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(), drawerSwipeProgress);
                 } else {
                     LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
                             getDrawerTransition());
@@ -1608,7 +1633,7 @@ public class MainActivity extends Activity {
                 if (drawerSwipeProgress > 0.90f) {
                                         refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                            this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(), drawerSwipeProgress);
                 } else {
                     LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
                             () -> drawerOpen = false, getDrawerTransition(), drawerSwipeProgress);
@@ -1621,7 +1646,7 @@ public class MainActivity extends Activity {
                 if (drawerSwipeProgress >= 0.10f) {
                                         refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                            this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(), drawerSwipeProgress);
                 } else {
                     LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
                             getDrawerTransition());
@@ -1645,7 +1670,7 @@ public class MainActivity extends Activity {
                     if (drawerSwipeProgress >= 0.10f) {
                                             refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
-                                () -> drawerOpen = true, getDrawerTransition(), drawerSwipeProgress);
+                                this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(), drawerSwipeProgress);
                     } else {
                         LauncherScreenTransitions.cancelDrawerSwipe(this, homeScreen, drawerScreen,
                                 getDrawerTransition());
@@ -2752,7 +2777,11 @@ public class MainActivity extends Activity {
         drawerGrid = built.grid;
         drawerAdapter = built.adapter;
         refreshDrawerAppList = built.refreshAppList;
+        drawerSnapshotBody = built.snapshotBody;
         drawerAdapter.seedLabelCache(preloadedAppLabels);
+        // Pre-render the initial viewport while the drawer is invisible, so even the first
+        // opening can use a complete cached frame instead of showing icons as they load.
+        scheduleDrawerSnapshotRefresh();
     }
 
     private void renderHomePages(boolean animate) {
@@ -5267,6 +5296,40 @@ public class MainActivity extends Activity {
         dismissShortcutEditMode();
     }
 
+    private long calculateDrawerSnapshotSignature() {
+        long signature = prefs == null ? 0L : prefs.getAll().hashCode();
+        signature = signature * 31L + (drawerAdapter == null ? 0 : drawerAdapter.getCount());
+        signature = signature * 31L + (drawerGrid == null ? 0 : drawerGrid.getNumColumns());
+        signature = signature * 31L + (drawerSnapshotBody == null ? 0 : drawerSnapshotBody.getWidth());
+        signature = signature * 31L + (drawerSnapshotBody == null ? 0 : drawerSnapshotBody.getHeight());
+        return signature;
+    }
+
+    private void scheduleDrawerSnapshotRefresh() {
+        if (drawerSnapshotBody == null) return;
+        handler.removeCallbacks(drawerSnapshotReadyCheck);
+        drawerSnapshotReadyChecks = 0;
+        handler.postDelayed(drawerSnapshotReadyCheck, 80L);
+    }
+
+    private void prepareDrawerSnapshotForOpening() {
+        if (drawerSnapshotBody == null) return;
+        drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+        drawerSnapshotSwipeOpeningPrepared = true;
+        int firstVisible = drawerGrid == null ? 0 : drawerGrid.getFirstVisiblePosition();
+        drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible);
+        scheduleDrawerSnapshotRefresh();
+    }
+
+    private void markDrawerOpenAndRefreshSnapshot() {
+        drawerOpen = true;
+        drawerSnapshotSwipeOpeningPrepared = false;
+        if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
+            drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+        }
+        scheduleDrawerSnapshotRefresh();
+    }
+
     private void showDrawer() { showDrawer(0f); }
 
     private void refreshDrawerIconAppearances() {
@@ -5276,10 +5339,11 @@ public class MainActivity extends Activity {
     }
 
     private void showDrawer(float swipeProgress) {
+        prepareDrawerSnapshotForOpening();
         refreshDrawerIconAppearances();
-        LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen, () -> {
-            drawerOpen = true;
-        }, getDrawerTransition(), Math.max(0f, Math.min(1f, swipeProgress)));
+        LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen,
+                this::markDrawerOpenAndRefreshSnapshot, getDrawerTransition(),
+                Math.max(0f, Math.min(1f, swipeProgress)));
     }
 
     private void scheduleDrawerSwipeFrame(float progress) {
@@ -5297,6 +5361,16 @@ public class MainActivity extends Activity {
 
     private void applyDrawerSwipeFrame() {
         if (homeScreen == null || drawerScreen == null) return;
+        if (!drawerOpen && drawerSwipePendingProgress > 0.001f && drawerSnapshotBody != null) {
+            if (!drawerSnapshotSwipeOpeningPrepared) {
+                drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+                drawerSnapshotSwipeOpeningPrepared = true;
+            }
+            int firstVisible = drawerGrid == null ? 0 : drawerGrid.getFirstVisiblePosition();
+            drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible);
+        } else {
+            drawerSnapshotSwipeOpeningPrepared = false;
+        }
         LauncherScreenTransitions.updateDrawerSwipe(this, homeScreen, drawerScreen,
                 drawerSwipePendingEffect, drawerSwipePendingProgress);
     }

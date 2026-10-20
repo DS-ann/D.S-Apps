@@ -795,6 +795,11 @@ final class LauncherIconDrawable extends Drawable {
         requestArtworkBitmap(key, state, theme, sourceCacheToken, this);
     }
 
+    /** True once this icon can be drawn in its selected final artwork theme. */
+    boolean isArtworkReady() {
+        return !awaitingThemedArtwork;
+    }
+
     private void applyArtworkBitmap(Bitmap bitmap) {
         BitmapDrawable result = new BitmapDrawable(Resources.getSystem(), bitmap);
         result.setFilterBitmap(true);
