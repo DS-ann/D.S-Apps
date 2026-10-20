@@ -12,9 +12,12 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.telecom.Call
+import android.telecom.CallAudioState
 import android.telecom.InCallService
 import android.telecom.TelecomManager
 import android.telecom.VideoProfile
+import org.json.JSONArray
+import org.json.JSONObject
 
 class BridgeService : Service() {
     private var server: BridgeServer? = null
@@ -47,6 +50,12 @@ class BridgeService : Service() {
         const val PREFS = "bridge"
         const val KEY_STATUS = "status"
         const val KEY_CALL_STATE = "call_state"
+        const val KEY_CALL_NUMBER = "call_number"
+        const val KEY_CALL_DIRECTION = "call_direction"
+        const val KEY_CALL_STARTED_AT = "call_started_at"
+        const val KEY_RECENTS = "recent_calls"
+        const val KEY_CALL_MUTED = "call_muted"
+        const val KEY_CALL_SPEAKER = "call_speaker"
     }
 }
 
@@ -69,17 +78,22 @@ class PhoneInCallService : InCallService() {
             override fun onStateChanged(changedCall: Call, state: Int) {
                 PhoneCallController.onCallStateChanged(changedCall, state)
             }
+
+            override fun onDetailsChanged(changedCall: Call, details: Call.Details) {
+                PhoneCallController.onCallDetailsChanged(changedCall, details)
+            }
         }
         callbacks[call] = callback
         call.registerCallback(callback, mainHandler)
         PhoneCallController.onCallAdded(call)
 
-        // Keep a minimal in-call screen available on the phone.
+        // Open the app's own call screen. Telecom still owns the call lifecycle.
         try {
             startActivity(
-                Intent(this, MainActivity::class.java).addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                )
+                Intent(this, MainActivity::class.java).apply {
+                    action = MainActivity.ACTION_SHOW_CALL
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
             )
         } catch (_: Exception) { }
     }
@@ -108,6 +122,10 @@ object PhoneCallController {
     @Volatile private var inCallService: PhoneInCallService? = null
     @Volatile private var server: BridgeServer? = null
     @Volatile private var appContext: Context? = null
+    @Volatile private var currentNumber = ""
+    @Volatile private var currentDirection = "OUTGOING"
+    @Volatile private var callStartedAt = 0L
+    @Volatile private var previousNonSpeakerRoute = CallAudioState.ROUTE_EARPIECE
 
     @Volatile var currentState: String = "IDLE"
         private set
@@ -115,8 +133,8 @@ object PhoneCallController {
     fun attachServer(instance: BridgeServer, context: Context) {
         server = instance
         appContext = context.applicationContext
-        appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
-            ?.edit()?.putString(BridgeService.KEY_CALL_STATE, currentState)?.apply()
+        val prefs = appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+        prefs?.edit()?.putString(BridgeService.KEY_CALL_STATE, currentState)?.apply()
     }
 
     fun detachServer(instance: BridgeServer) {
@@ -131,24 +149,55 @@ object PhoneCallController {
         if (inCallService === instance) {
             inCallService = null
             activeCall = null
+            currentNumber = ""
+            callStartedAt = 0L
+            saveCallMetadata()
             publishState("IDLE")
         }
     }
 
     fun onCallAdded(call: Call) {
         activeCall = call
+        val callNumber = try { call.details?.handle?.schemeSpecificPart ?: "" } catch (_: Throwable) { "" }
+        if (callNumber.isNotBlank()) currentNumber = callNumber
+        currentDirection = if (call.state == Call.STATE_RINGING) "INCOMING" else "OUTGOING"
+        callStartedAt = if (call.state == Call.STATE_ACTIVE || call.state == Call.STATE_HOLDING) {
+            System.currentTimeMillis()
+        } else {
+            0L
+        }
+        saveCallMetadata()
         publishState(labelFor(call.state))
+    }
+
+    fun onCallDetailsChanged(call: Call, details: Call.Details) {
+        if (activeCall !== call) return
+        val callNumber = try { details.handle?.schemeSpecificPart ?: "" } catch (_: Throwable) { "" }
+        if (callNumber.isNotBlank() && callNumber != currentNumber) {
+            currentNumber = callNumber
+            saveCallMetadata()
+        }
     }
 
     fun onCallRemoved(call: Call) {
         if (activeCall === call) {
+            recordRecentCall()
             activeCall = null
+            currentNumber = ""
+            currentDirection = "OUTGOING"
+            callStartedAt = 0L
+            saveCallMetadata()
             publishState("IDLE")
         }
     }
 
     fun onCallStateChanged(call: Call, state: Int) {
-        if (activeCall === call) publishState(labelFor(state))
+        if (activeCall !== call) return
+        if ((state == Call.STATE_ACTIVE || state == Call.STATE_HOLDING) && callStartedAt == 0L) {
+            callStartedAt = System.currentTimeMillis()
+            saveCallMetadata()
+        }
+        publishState(labelFor(state))
     }
 
     fun dial(context: Context, rawNumber: String): String {
@@ -163,9 +212,15 @@ object PhoneCallController {
         }
 
         return try {
+            appContext = context.applicationContext
             val telecom = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
             val uri = Uri.fromParts("tel", number, null)
+            currentNumber = number
+            currentDirection = "OUTGOING"
+            callStartedAt = 0L
+            saveCallMetadata()
             if (context.packageName == telecom.defaultDialerPackage) {
+                publishState("DIALING")
                 telecom.placeCall(uri, Bundle())
             } else {
                 context.startActivity(
@@ -174,8 +229,10 @@ object PhoneCallController {
             }
             "OK:DIAL"
         } catch (e: SecurityException) {
+            publishState("IDLE")
             "ERROR:CALL_PERMISSION:" + (e.message ?: "permission denied")
         } catch (e: Throwable) {
+            publishState("IDLE")
             "ERROR:DIAL:" + e.javaClass.simpleName + ":" + (e.message ?: "call failed")
         }
     }
@@ -208,6 +265,123 @@ object PhoneCallController {
         } catch (e: Throwable) {
             "ERROR:HANGUP:" + e.javaClass.simpleName + ":" + (e.message ?: "hangup failed")
         }
+    }
+
+    fun isMuted(): Boolean {
+        return appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+            ?.getBoolean(BridgeService.KEY_CALL_MUTED, false) ?: false
+    }
+
+    fun setMuted(muted: Boolean): String {
+        val service = inCallService ?: return "ERROR:NO_IN_CALL_SERVICE"
+        return try {
+            service.setMuted(muted)
+            appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+                ?.edit()?.putBoolean(BridgeService.KEY_CALL_MUTED, muted)?.apply()
+            "OK:MUTE:" + muted
+        } catch (e: Throwable) {
+            "ERROR:MUTE:" + e.javaClass.simpleName
+        }
+    }
+
+    fun isSpeakerEnabled(): Boolean {
+        val route = try { inCallService?.callAudioState?.route } catch (_: Throwable) { null }
+        if (route != null) return route == CallAudioState.ROUTE_SPEAKER
+        return appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+            ?.getBoolean(BridgeService.KEY_CALL_SPEAKER, false) ?: false
+    }
+
+    fun setSpeakerEnabled(enabled: Boolean): String {
+        val service = inCallService ?: return "ERROR:NO_IN_CALL_SERVICE"
+        return try {
+            val audioState = service.callAudioState ?: return "ERROR:CALL_AUDIO_UNAVAILABLE"
+            val supported = audioState.supportedRouteMask
+            val targetRoute: Int
+            if (enabled) {
+                if (audioState.route != CallAudioState.ROUTE_SPEAKER) {
+                    previousNonSpeakerRoute = audioState.route
+                }
+                targetRoute = CallAudioState.ROUTE_SPEAKER
+            } else {
+                targetRoute = if ((supported and previousNonSpeakerRoute) != 0) {
+                    previousNonSpeakerRoute
+                } else if ((supported and CallAudioState.ROUTE_EARPIECE) != 0) {
+                    CallAudioState.ROUTE_EARPIECE
+                } else if ((supported and CallAudioState.ROUTE_BLUETOOTH) != 0) {
+                    CallAudioState.ROUTE_BLUETOOTH
+                } else if ((supported and CallAudioState.ROUTE_WIRED_HEADSET) != 0) {
+                    CallAudioState.ROUTE_WIRED_HEADSET
+                } else {
+                    return "ERROR:NO_SUPPORTED_AUDIO_ROUTE"
+                }
+            }
+            if ((supported and targetRoute) == 0) return "ERROR:UNSUPPORTED_AUDIO_ROUTE"
+            service.setAudioRoute(targetRoute)
+            appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+                ?.edit()?.putBoolean(BridgeService.KEY_CALL_SPEAKER, enabled)?.apply()
+            "OK:SPEAKER:" + enabled
+        } catch (e: Throwable) {
+            "ERROR:SPEAKER:" + e.javaClass.simpleName
+        }
+    }
+
+    fun sendDtmf(digit: Char): String {
+        if (!(digit in '0'..'9' || digit == '*' || digit == '#')) return "ERROR:INVALID_DTMF"
+        val call = activeCall ?: return "ERROR:NO_ACTIVE_CALL"
+        return try {
+            call.playDtmfTone(digit)
+            Handler(Looper.getMainLooper()).postDelayed({
+                try { call.stopDtmfTone() } catch (_: Throwable) { }
+            }, 160L)
+            "OK:DTMF"
+        } catch (e: Throwable) {
+            "ERROR:DTMF:" + e.javaClass.simpleName
+        }
+    }
+
+    private fun recordRecentCall() {
+        val context = appContext ?: return
+        val number = currentNumber
+        if (number.isBlank()) return
+        val endedAt = System.currentTimeMillis()
+        val duration = if (callStartedAt > 0L) {
+            ((endedAt - callStartedAt) / 1000L).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val direction = if (currentDirection == "INCOMING" && callStartedAt == 0L) {
+            "MISSED"
+        } else {
+            currentDirection
+        }
+        val prefs = context.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE)
+        val old = try {
+            JSONArray(prefs.getString(BridgeService.KEY_RECENTS, "[]") ?: "[]")
+        } catch (_: Throwable) {
+            JSONArray()
+        }
+        val updated = JSONArray()
+        updated.put(
+            JSONObject()
+                .put("number", number)
+                .put("direction", direction)
+                .put("timestamp", endedAt)
+                .put("duration", duration)
+        )
+        for (i in 0 until old.length().coerceAtMost(39)) {
+            val item = old.optJSONObject(i) ?: continue
+            updated.put(item)
+        }
+        prefs.edit().putString(BridgeService.KEY_RECENTS, updated.toString()).apply()
+    }
+
+    private fun saveCallMetadata() {
+        val prefs = appContext?.getSharedPreferences(BridgeService.PREFS, Context.MODE_PRIVATE) ?: return
+        prefs.edit()
+            .putString(BridgeService.KEY_CALL_NUMBER, currentNumber)
+            .putString(BridgeService.KEY_CALL_DIRECTION, currentDirection)
+            .putLong(BridgeService.KEY_CALL_STARTED_AT, callStartedAt)
+            .apply()
     }
 
     private fun publishState(state: String) {

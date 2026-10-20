@@ -30,8 +30,8 @@ ARCHIVED	6e3292e5dc3cb07e269d277cf3cca1f5dbd6f78b	phab-bridge/app/src/main/Andro
 ARCHIVED	93e0326c64b3c3e16291d7a2c00de0cb6506da38	phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/AudioBridge.kt	100644
 ARCHIVED	a5dea3f85845fcd891189d6a8d1abb829bc8f3b9	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeProtocol.kt	100644
 ARCHIVED	b379d7980cfa5999e6e814fc3626378ebe28c9dc	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeServer.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeServer.kt	100644
-ARCHIVED	e2be5bc63262203e8f04309d91eb9b16bc9811c2	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	100644
-ARCHIVED	f5f67478bd8c4bc126d7614acf64728122c850b4	phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	100644
+ARCHIVED	fb7f027808b46036a5abd5bdabca6736cbc96c66	phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/BridgeService.kt	100644
+ARCHIVED	26914dff9bae8621425f14f6bb33c635b33811b3	phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	branch-archive/main/phab-bridge/app/src/main/java/com/dsann/phonebridge/MainActivity.kt	100644
 ARCHIVED	85f78e11b3646817475bd69bae1ec94fd26d8488	phab-bridge/app/src/main/res/values/styles.xml	branch-archive/main/phab-bridge/app/src/main/res/values/styles.xml	100644
 DUPLICATE	f7e60c6e074ec988891e68eeb7b8771b768e521d	phab-bridge/build.gradle	branch-archive/main/hfp-diagnostic/build.gradle	100644
 ARCHIVED	07154b6b64565483fd4e73e69ad62ce4b3881574	phab-bridge/settings.gradle	branch-archive/main/phab-bridge/settings.gradle	100644
