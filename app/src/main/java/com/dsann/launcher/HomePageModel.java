@@ -69,9 +69,9 @@ final class HomePageModel {
                 String name = items.get(index);
                 int defaultCol = index % columns;
                 int defaultRow = index / columns;
-                float sx = prefs.getFloat(iconXPrefix + name,
+                float sx = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXPrefix + name,
                         defaultCol / (float) Math.max(1, columns - 1));
-                float sy = prefs.getFloat(iconYPrefix + name,
+                float sy = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYPrefix + name,
                         defaultRow / (float) Math.max(1, effectiveRows - 1));
                 int wantedCol = Math.max(0, Math.min(columns - 1,
                         Math.round(sx * Math.max(1, columns - 1))));
