@@ -152,6 +152,8 @@ public class MainActivity extends Activity {
     private boolean clockUpdatesActive = false;
     // Avoid reopening the system Home-role prompt repeatedly during a single Activity lifetime.
     private boolean homeRoleRequestAttempted = false;
+    // Registered on Android 13+ because targetSdk 37 no longer relies on legacy Back dispatch.
+    private android.window.OnBackInvokedCallback backInvokedCallback;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
@@ -625,6 +627,12 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        if (Build.VERSION.SDK_INT >= 33) {
+            backInvokedCallback = () -> handleBackNavigation();
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    backInvokedCallback);
+        }
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         normalizeAppIconSettings();
@@ -714,6 +722,9 @@ public class MainActivity extends Activity {
         // while retaining the system icons and reserving their inset for launcher content.
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(BG);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
@@ -1842,6 +1853,12 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        // Android 6–12 use the legacy callback; Android 13+ use the registered
+        // OnBackInvokedCallback above so targetSdk 37 keeps the same launcher behavior.
+        handleBackNavigation();
+    }
+
+    private void handleBackNavigation() {
         // Back closes the app drawer first. On the launcher home screen, consume
         // Back instead of letting the task fall through to system overview.
         if (drawerOpen) {
@@ -2071,7 +2088,22 @@ public class MainActivity extends Activity {
         homeScreen.setPadding(LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 8));
         root.addView(homeScreen, new FrameLayout.LayoutParams(-1, -1));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            homeScreen.setPadding(LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 14) + insets.getSystemWindowInsetTop(), LauncherUiUtils.dp(this, 20), LauncherUiUtils.dp(this, 8));
+            int topInset;
+            int bottomInset;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets systemBars = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars());
+                topInset = systemBars.top;
+                bottomInset = systemBars.bottom;
+            } else {
+                topInset = insets.getSystemWindowInsetTop();
+                bottomInset = insets.getSystemWindowInsetBottom();
+            }
+            homeScreen.setPadding(
+                    LauncherUiUtils.dp(this, 20),
+                    LauncherUiUtils.dp(this, 14) + topInset,
+                    LauncherUiUtils.dp(this, 20),
+                    LauncherUiUtils.dp(this, 8) + bottomInset);
             return insets;
         });
         buildHomeChrome();

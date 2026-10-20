@@ -6,18 +6,13 @@ def releaseKeystorePath = System.getenv('BATTERYPULSE_KEYSTORE_PATH')
 
 android {
     namespace 'com.dsann.launcher'
-    compileSdk 35
+    compileSdk 37
     defaultConfig {
         applicationId 'com.dsann.launcher'
         minSdk 23
-        targetSdk 28
+        targetSdk 37
         versionCode 1
         versionName '1.0.0'
-    }
-
-    lint {
-        // Keep the deliberately low target SDK for legacy launcher behavior and Android 6 compatibility.
-        disable 'ExpiredTargetSdkVersion'
     }
 
     signingConfigs {
