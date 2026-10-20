@@ -64,7 +64,11 @@ class MainActivity : Activity() {
                 "DIALING", "CONNECTING", "OFFHOOK" -> MODE_ACTIVE_CALL
                 else -> MODE_HOME
             }
-            if (mode != renderedMode) renderScreen(mode)
+            // Keep Bridge diagnostics visible during an active call when requested.
+            // Do not rebuild the call screen every 500 ms over the report.
+            val keepBridgeVisible = mode == MODE_ACTIVE_CALL &&
+                selectedTab == TAB_BRIDGE && renderedMode == MODE_HOME
+            if (mode != renderedMode && !keepBridgeVisible) renderScreen(mode)
             if (mode == MODE_ACTIVE_CALL || mode == MODE_INCOMING) updateCallScreen(state)
             if (mode == MODE_HOME && selectedTab == TAB_BRIDGE) refreshBridgeStatus()
             handler.postDelayed(this, 500)
@@ -390,6 +394,14 @@ class MainActivity : Activity() {
         content.addView(makeText("Bridge diagnostics", 20f, COLOR_TEXT, true),
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
 
+        val currentCallState = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
+            .getString(BridgeService.KEY_CALL_STATE, "IDLE") ?: "IDLE"
+        if (currentCallState in arrayOf("DIALING", "CONNECTING", "OFFHOOK", "ACTIVE", "HOLDING")) {
+            content.addView(actionButton("Return to call screen", COLOR_SELECTED, COLOR_TEXT, {
+                renderScreen(MODE_ACTIVE_CALL)
+            }), LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(10) })
+        }
+
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(COLOR_PANEL, 18)
@@ -570,6 +582,15 @@ class MainActivity : Activity() {
             Gravity.CENTER
         ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         root.addView(top, LinearLayout.LayoutParams(-1, -2))
+        if (!incoming) {
+            root.addView(actionButton("Bridge diagnostics", COLOR_PANEL, COLOR_TEXT, {
+                selectedTab = TAB_BRIDGE
+                renderScreen(MODE_HOME)
+            }), LinearLayout.LayoutParams(-1, dp(44)).apply {
+                topMargin = dp(8)
+                bottomMargin = dp(4)
+            })
+        }
         root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.6f))
 
         val avatar = makeText("☎", 44f, COLOR_TEXT, false, Gravity.CENTER)
