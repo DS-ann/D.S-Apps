@@ -2779,7 +2779,7 @@ public class MainActivity extends Activity {
         refreshDrawerAppList = built.refreshAppList;
         drawerSnapshotBody = built.snapshotBody;
         drawerAdapter.seedLabelCache(preloadedAppLabels);
-        // Pre-render the initial viewport while the drawer is invisible, so the very first
+        // Pre-render the initial viewport while the drawer is invisible, so even the first
         // opening can use a complete cached frame instead of showing icons as they load.
         scheduleDrawerSnapshotRefresh();
     }
