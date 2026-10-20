@@ -509,70 +509,48 @@ class MainActivity : Activity() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val prefs = getSharedPreferences(BridgeService.PREFS, MODE_PRIVATE)
         val tablet = prefs.getString("tablet_audio_diag", "No tablet telemetry received.") ?: "No tablet telemetry received."
-        val header = "PhoneBridge root audio diagnostics" +
-            "\nDevice=" + Build.DEVICE +
-            "\nAndroid=" + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")" +
-            "\nFingerprint=" + Build.FINGERPRINT +
+        val captureAudioOutputPermission =
+            if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission("android.permission.CAPTURE_AUDIO_OUTPUT") == PackageManager.PERMISSION_GRANTED
+            ) "GRANTED" else "NOT_GRANTED"
+        val capturedAt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())
+        val header = "PhoneBridge live call-audio snapshot" +
+            "\nCapturedAt=" + capturedAt +
             "\nCallState=" + PhoneCallController.currentState +
             "\nAudioManagerMode=" + audioManager.mode +
             "\nSpeakerphoneOn=" + audioManager.isSpeakerphoneOn +
             "\nMicrophoneMuted=" + audioManager.isMicrophoneMute +
+            "\nCaptureAudioOutputPermission=" + captureAudioOutputPermission +
             "\n\n=== PhoneBridge runtime metrics ===\n" + AudioBridge.diagnosticSummary() +
             "\n\n=== Last tablet telemetry ===\n" + tablet +
-            "\n\n=== Root shell diagnostics ===\n"
+            "\n\n=== Live root audio state ===\n"
 
         val script = """
             set +e
-            echo '=== ROOT ID ==='; id
-            echo '=== BUILD PROPERTIES ==='; getprop ro.build.version.release; getprop ro.build.version.sdk; getprop ro.product.device; getprop ro.product.board; getprop ro.board.platform; getprop ro.mediatek.platform
-            echo '=== AUDIO / MTK / MODEM PROPERTIES ==='; getprop | grep -Ei 'audio|mediatek|mtk|modem|ril|platform|alsa' | head -n 100
-            echo '=== ALSA DEVICE NODES ==='; ls -l /dev/snd 2>&1; cat /proc/asound/cards /proc/asound/pcm 2>&1
-            echo '=== AUDIO UTILITIES ==='; command -v tinymix; command -v tinycap; command -v tinyplay; command -v tinyhostless; ls -l /system/bin/tiny* /system/xbin/tiny* /vendor/bin/tiny* 2>&1
-            echo '=== AUDIO HAL LIBRARIES ==='; ls -l /system/lib/hw/audio* /system/lib64/hw/audio* /vendor/lib/hw/audio* /vendor/lib64/hw/audio* 2>&1
-            echo '=== AUDIO POLICY CONFIG HINTS ==='
-            for f in /system/etc/audio_policy.conf /system/etc/audio_policy*.conf /system/etc/audio_policy*.xml /system/etc/*audio*policy*.xml /vendor/etc/audio_policy.conf /vendor/etc/audio_policy*.conf /vendor/etc/audio_policy*.xml /vendor/etc/*audio*policy*.xml; do
-                if [ -f "${'$'}f" ]; then
-                    echo "--- ${'$'}f"; ls -l "${'$'}f"
-                    grep -inE 'voice|call|modem|downlink|uplink|pcm|hfp|bluetooth|capture|input|output' "${'$'}f" 2>&1 | head -n 100
-                fi
-            done
-            echo '=== TARGET VOICE PCM NODES ==='
-            ls -l /dev/snd/pcmC0D2p /dev/snd/pcmC0D2c /dev/snd/pcmC0D17p /dev/snd/pcmC0D17c /dev/snd/pcmC0D10p /dev/snd/pcmC0D11p /dev/snd/pcmC0D12c /dev/snd/pcmC0D19p 2>&1
-            echo '=== TARGET VOICE PCM PROC STATUS ==='
-            for d in /proc/asound/card0/pcm2p /proc/asound/card0/pcm2c /proc/asound/card0/pcm17p /proc/asound/card0/pcm17c /proc/asound/card0/pcm10p /proc/asound/card0/pcm11p /proc/asound/card0/pcm12c /proc/asound/card0/pcm19p; do
+            echo '=== LIVE VOICE PCM SUBSTREAM STATE ==='
+            for d in /proc/asound/card0/pcm2c /proc/asound/card0/pcm17c /proc/asound/card0/pcm12c /proc/asound/card0/pcm9c /proc/asound/card0/pcm13c; do
                 if [ -d "${'$'}d" ]; then
-                    echo "--- ${'$'}d"; cat "${'$'}d/info" 2>&1
                     for f in "${'$'}d"/sub*/status "${'$'}d"/sub*/hw_params; do
                         if [ -f "${'$'}f" ]; then echo "--- ${'$'}f"; cat "${'$'}f" 2>&1; fi
                     done
                 fi
             done
-            echo '=== PROCESSES HOLDING TARGET VOICE PCM NODES ==='
+            echo '=== LIVE PCM OWNERS ==='
             for fd in /proc/[0-9]*/fd/*; do
                 target=${'$'}(readlink "${'$'}fd" 2>/dev/null)
                 case "${'$'}target" in
-                    *pcmC0D2p*|*pcmC0D2c*|*pcmC0D17p*|*pcmC0D17c*|*pcmC0D10p*|*pcmC0D11p*|*pcmC0D12c*|*pcmC0D19p*)
+                    *pcmC0D2c*|*pcmC0D17c*|*pcmC0D12c*|*pcmC0D9c*|*pcmC0D13c*|*pcmC0D2p*|*pcmC0D17p*|*pcmC0D10p*|*pcmC0D11p*)
                         rest=${'$'}{fd#/proc/}; pid=${'$'}{rest%%/*}
                         printf 'pid=%s comm=' "${'$'}pid"; cat "/proc/${'$'}pid/comm" 2>/dev/null
-                        echo "fd=${'$'}fd target=${'$'}target"
+                        echo "pcmFd=${'$'}fd device=${'$'}target"
                         ;;
                 esac
             done
-            echo '=== AVAILABLE AUDIO INSPECTION TOOLS ==='; command -v strings; command -v nm; command -v readelf; command -v tinymix; command -v amixer
-            echo '=== HAL VOICE STRING HINTS (READ-ONLY) ==='
-            if command -v strings >/dev/null 2>&1; then
-                for f in /system/lib/hw/audio.primary.mt6753.so /system/lib/hw/audio.primary.default.so /vendor/lib/hw/audio.primary.mt6753.so /vendor/lib/hw/audio.primary.default.so /system/lib64/hw/audio.primary.mt6753.so /vendor/lib64/hw/audio.primary.mt6753.so; do
-                    if [ -f "${'$'}f" ]; then
-                        echo "--- ${'$'}f"
-                        strings "${'$'}f" 2>/dev/null | grep -iE 'voice|call|modem|downlink|uplink|pcm|audio source|voip|bluetooth|hfp|record' | head -n 100
-                    fi
-                done
-            fi
-            echo '=== DUMPSYS AUDIO ==='; dumpsys audio 2>&1 | head -n 180
-            echo '=== AUDIO FLINGER ==='; dumpsys media.audio_flinger 2>&1 | head -n 200
-            echo '=== TELECOM ==='; dumpsys telecom 2>&1 | head -n 100
-            echo '=== TELEPHONY REGISTRY ==='; dumpsys telephony.registry 2>&1 | head -n 90
-            echo '=== AUDIO / RADIO SERVICES ==='; service list 2>&1 | grep -Ei 'audio|media|phone|telecom|radio'
+            echo '=== CURRENT AUDIO ROUTE / RECORDING LINES ==='
+            dumpsys audio 2>&1 | grep -iE 'mode:|phone state|speakerphone|sco|communication|stream.*volume|recording|input device|audio focus' | head -n 55
+            dumpsys telecom 2>&1 | grep -iE 'CallAudioState|audioRoute|supportedRouteMask|activeBluetoothDevice' | head -n 15
+            echo '=== ACTIVE AUDIO FLINGER RECORDING LINES ==='
+            dumpsys media.audio_flinger 2>&1 | grep -iE 'RecordThread|Record Track|record thread|Input device|active client|standby|VOICE_CALL|VOICE_DOWNLINK' | head -n 55
         """.trimIndent()
 
         var output = ""
@@ -583,7 +561,7 @@ class MainActivity : Activity() {
             val buffer = StringBuilder()
             while (true) {
                 val line = reader.readLine() ?: break
-                if (buffer.length < 36000) buffer.append(line).append('\n')
+                if (buffer.length < 14000) buffer.append(line).append('\n')
             }
             reader.close()
             exitStatus = process.waitFor().toString()
@@ -591,7 +569,7 @@ class MainActivity : Activity() {
         } catch (e: Throwable) {
             output = "Root diagnostics failed: " + e.javaClass.simpleName + ": " + (e.message ?: "")
         }
-        return header + "exit=" + exitStatus + "\n" + output.take(36000)
+        return header + "exit=" + exitStatus + "\n" + output.take(14000)
     }
 
     private fun copyDiagnosticReport() {
