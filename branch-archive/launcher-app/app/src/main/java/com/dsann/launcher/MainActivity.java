@@ -419,15 +419,6 @@ public class MainActivity extends Activity {
             if (drawerSnapshotBody == null || drawerGrid == null || drawerAdapter == null
                     || drawerScreen == null || drawerScreen.getVisibility() != View.VISIBLE
                     || isFinishing()) return;
-            if (drawerGrid.getScrollState()
-                    != android.widget.AbsListView.OnScrollListener.SCROLL_STATE_IDLE) {
-                if (++drawerSnapshotReadyChecks <= 30) handler.postDelayed(this, 120L);
-                else {
-                    drawerSnapshotBody.hideCachedSnapshot();
-                    drawerSnapshotReadyChecks = 0;
-                }
-                return;
-            }
             if (drawerAdapter.areVisibleIconsReady(drawerGrid)) {
                 if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
                     drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
