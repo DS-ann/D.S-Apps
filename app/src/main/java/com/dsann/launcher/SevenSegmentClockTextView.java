@@ -29,14 +29,33 @@ public final class SevenSegmentClockTextView extends TextView {
     private boolean contrastInnerBorderEnabled;
     private float contrastInnerBorderWidth;
     private int[] contrastBorderColors;
+    private float[] contrastBorderStops;
     private LinearGradient segmentBorderGradient;
     private int segmentBorderGradientWidth = -1;
     private final Matrix segmentBorderGradientMatrix = new Matrix();
+
+    // Shared horizontal coordinate space for gradients on every clock style.
+    static int stableClockGradientSpanPx(Context context) {
+        return Math.max(1, Math.round(320f
+                * context.getResources().getDisplayMetrics().density));
+    }
+
+    // Preserve the preset's normal glow, but suppress it during the inner-border mask pass.
+    private float configuredTextShadowRadius;
+    private float configuredTextShadowDx;
+    private float configuredTextShadowDy;
+    private int configuredTextShadowColor = Color.TRANSPARENT;
     private LinearGradient textBorderGradient;
     private int textBorderGradientWidth = -1;
-    private float textBorderSpanWidth = -1f;
-    private String textBorderValue = "";
     private final float[][] segmentRects = new float[7][4];
+
+    @Override public void setShadowLayer(float radius, float dx, float dy, int color) {
+        configuredTextShadowRadius = radius;
+        configuredTextShadowDx = dx;
+        configuredTextShadowDy = dy;
+        configuredTextShadowColor = color;
+        super.setShadowLayer(radius, dx, dy, color);
+    }
 
     public SevenSegmentClockTextView(Context context) {
         super(context);
@@ -104,7 +123,7 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     private void ensureSegmentGradient() {
-        int width = Math.max(1, getWidth());
+        int width = stableClockGradientSpanPx(getContext());
         if (segmentGradient == null || segmentGradientWidth != width) {
             int[] colors = segmentGradientColors == null
                     ? new int[]{Color.rgb(77, 163, 255), Color.rgb(71, 240, 232),
@@ -128,28 +147,38 @@ public final class SevenSegmentClockTextView extends TextView {
     public void setContrastInnerBorderEnabled(boolean enabled, int[] fillColors,
             float strokeWidthPx) {
         int[] nextBorderColors = null;
+        float[] nextBorderStops = null;
         if (enabled && fillColors != null && fillColors.length >= 2) {
-            nextBorderColors = new int[fillColors.length];
-            for (int i = 0; i < fillColors.length; i++) {
-                int color = fillColors[i];
-                nextBorderColors[i] = Color.argb(Color.alpha(color),
-                        255 - Color.red(color), 255 - Color.green(color),
-                        255 - Color.blue(color));
+            if (isWhiteBlackWhitePalette(fillColors)) {
+                // White regions stay white and black regions stay black. The thresholds
+                // hold these tones near their endpoints; a smooth ramp joins them where
+                // the underlying monochrome gradient transitions from white to black.
+                nextBorderColors = new int[] {
+                        Color.WHITE, Color.WHITE, Color.BLACK, Color.BLACK,
+                        Color.BLACK, Color.WHITE, Color.WHITE
+                };
+                nextBorderStops = new float[] {
+                        0f, 0.04f, 0.453f, 0.5f, 0.547f, 0.96f, 1f
+                };
+            } else {
+                // Preserve the incoming colour order for other palettes rather than
+                // automatically inverting each border colour.
+                nextBorderColors = fillColors.clone();
             }
         }
 
         boolean paletteChanged = !java.util.Arrays.equals(contrastBorderColors, nextBorderColors);
+        boolean stopsChanged = !java.util.Arrays.equals(contrastBorderStops, nextBorderStops);
         float nextWidth = enabled ? Math.max(0.5f, strokeWidthPx) : 0f;
         boolean widthChanged = Math.abs(contrastInnerBorderWidth - nextWidth) > 0.01f;
         boolean nextEnabled = enabled && nextBorderColors != null;
-        if (paletteChanged || widthChanged) {
+        if (paletteChanged || stopsChanged || widthChanged) {
             contrastBorderColors = nextBorderColors;
+            contrastBorderStops = nextBorderStops;
             segmentBorderGradient = null;
             segmentBorderGradientWidth = -1;
             textBorderGradient = null;
             textBorderGradientWidth = -1;
-            textBorderSpanWidth = -1f;
-            textBorderValue = "";
         }
         contrastInnerBorderEnabled = nextEnabled;
         contrastInnerBorderWidth = nextWidth;
@@ -159,12 +188,29 @@ public final class SevenSegmentClockTextView extends TextView {
         invalidate();
     }
 
+    private static boolean isWhiteBlackWhitePalette(int[] colors) {
+        if (colors == null || colors.length < 3) return false;
+        return isNearWhite(colors[0])
+                && isNearBlack(colors[colors.length / 2])
+                && isNearWhite(colors[colors.length - 1]);
+    }
+
+    private static boolean isNearWhite(int color) {
+        return Color.red(color) >= 230 && Color.green(color) >= 230
+                && Color.blue(color) >= 230;
+    }
+
+    private static boolean isNearBlack(int color) {
+        return Color.red(color) <= 25 && Color.green(color) <= 25
+                && Color.blue(color) <= 25;
+    }
+
     private void ensureSegmentBorderGradient() {
         if (!contrastInnerBorderEnabled || contrastBorderColors == null) return;
         int width = Math.max(1, getWidth());
         if (segmentBorderGradient == null || segmentBorderGradientWidth != width) {
             segmentBorderGradient = new LinearGradient(0f, 0f, width, 0f,
-                    contrastBorderColors, null, Shader.TileMode.MIRROR);
+                    contrastBorderColors, contrastBorderStops, Shader.TileMode.MIRROR);
             segmentBorderGradientWidth = width;
         }
         segmentBorderGradientMatrix.setTranslate(-segmentGradientPhase * width * 2f, 0f);
@@ -179,27 +225,18 @@ public final class SevenSegmentClockTextView extends TextView {
     void invalidateContrastTextBorderCache() {
         textBorderGradient = null;
         textBorderGradientWidth = -1;
-        textBorderSpanWidth = -1f;
-        textBorderValue = "";
         invalidate();
     }
 
     private LinearGradient ensureTextBorderGradient() {
         if (!contrastInnerBorderEnabled || contrastBorderColors == null) return null;
-        int width = Math.max(1, getWidth());
-        String value = getText() == null ? "" : getText().toString();
-        float measured = getPaint().measureText(value);
-        float span = Math.max(1f, Math.min((float) width,
-                measured > 0f ? measured : (float) width));
-        if (textBorderGradient == null || textBorderGradientWidth != width
-                || Math.abs(textBorderSpanWidth - span) > 1f
-                || !textBorderValue.equals(value)) {
-            float startX = (width - span) * 0.5f;
-            textBorderGradient = new LinearGradient(startX, 0f,
-                    startX + span, 0f, contrastBorderColors, null, Shader.TileMode.MIRROR);
+        int width = stableClockGradientSpanPx(getContext());
+        if (textBorderGradient == null || textBorderGradientWidth != width) {
+            // This shader shares the fixed coordinate span and origin with the fill shader.
+            textBorderGradient = new LinearGradient(0f, 0f,
+                    width, 0f, contrastBorderColors, contrastBorderStops,
+                    Shader.TileMode.MIRROR);
             textBorderGradientWidth = width;
-            textBorderSpanWidth = span;
-            textBorderValue = value;
         }
         return textBorderGradient;
     }
@@ -253,8 +290,15 @@ public final class SevenSegmentClockTextView extends TextView {
             Shader previousShader = textPaint.getShader();
             android.graphics.Xfermode previousXfermode = textPaint.getXfermode();
             int previousColor = textPaint.getColor();
+            float previousShadowRadius = configuredTextShadowRadius;
+            float previousShadowDx = configuredTextShadowDx;
+            float previousShadowDy = configuredTextShadowDy;
+            int previousShadowColor = configuredTextShadowColor;
             int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
             try {
+                // Blur expands the alpha mask and can swallow the thin Neon Circuit outline.
+                // Keep both stroke and mask passes sharp; the regular text still keeps its glow.
+                textPaint.clearShadowLayer();
                 textPaint.setXfermode(null);
                 textPaint.setStyle(Paint.Style.STROKE);
                 textPaint.setStrokeWidth(contrastInnerBorderWidth);
@@ -280,6 +324,12 @@ public final class SevenSegmentClockTextView extends TextView {
                 textPaint.setShader(previousShader);
                 textPaint.setXfermode(previousXfermode);
                 textPaint.setColor(previousColor);
+                if (previousShadowRadius > 0f && Color.alpha(previousShadowColor) != 0) {
+                    textPaint.setShadowLayer(previousShadowRadius, previousShadowDx,
+                            previousShadowDy, previousShadowColor);
+                } else {
+                    textPaint.clearShadowLayer();
+                }
             }
             return;
         }

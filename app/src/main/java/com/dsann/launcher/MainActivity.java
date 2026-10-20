@@ -303,9 +303,7 @@ public class MainActivity extends Activity {
         }
     };
     private static final class ClockTextGradientState {
-        int viewWidth;
-        float spanWidth;
-        String textValue = "";
+        int gradientSpanPx;
         int[] colors;
         android.graphics.LinearGradient shader;
         final android.graphics.Matrix matrix = new android.graphics.Matrix();
@@ -6446,29 +6444,22 @@ public class MainActivity extends Activity {
     private void applyAnimatedTextGradient(TextView view, int[] colors, float phase,
             java.util.Map<TextView, ClockTextGradientState> cache) {
         if (view == null || colors == null || colors.length < 2) return;
-        int viewWidth = Math.max(1, view.getWidth());
-        String value = view.getText() == null ? "" : view.getText().toString();
-        float measured = view.getPaint().measureText(value);
-        float span = Math.max(1f, Math.min((float) viewWidth,
-                measured > 0f ? measured : (float) viewWidth));
+        // All clock styles share one fixed gradient coordinate system. The live time,
+        // font metrics and view width must not change where colour stops appear.
+        int gradientSpanPx = SevenSegmentClockTextView.stableClockGradientSpanPx(view.getContext());
         ClockTextGradientState state = cache.get(view);
-        if (state == null || state.viewWidth != viewWidth
-                || Math.abs(state.spanWidth - span) > 1f
-                || !state.textValue.equals(value)
+        if (state == null || state.gradientSpanPx != gradientSpanPx
                 || !java.util.Arrays.equals(state.colors, colors)) {
             state = new ClockTextGradientState();
-            state.viewWidth = viewWidth;
-            state.spanWidth = span;
-            state.textValue = value;
+            state.gradientSpanPx = gradientSpanPx;
             state.colors = colors.clone();
-            float startX = (viewWidth - span) * 0.5f;
-            state.shader = new android.graphics.LinearGradient(startX, 0f,
-                    startX + span, 0f, colors, null,
+            state.shader = new android.graphics.LinearGradient(0f, 0f,
+                    gradientSpanPx, 0f, colors, null,
                     android.graphics.Shader.TileMode.MIRROR);
             cache.put(view, state);
         }
         float normalized = phase - (float) Math.floor(phase);
-        state.matrix.setTranslate(-normalized * state.spanWidth * 2f, 0f);
+        state.matrix.setTranslate(-normalized * state.gradientSpanPx * 2f, 0f);
         state.shader.setLocalMatrix(state.matrix);
         if (view.getPaint().getShader() != state.shader) {
             view.getPaint().setShader(state.shader);
