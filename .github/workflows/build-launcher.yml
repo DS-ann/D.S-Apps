@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: launcher-app-build-${{ github.sha }}
@@ -95,3 +95,33 @@ jobs:
           path: app/build/outputs/apk/release/D.S Launcher-18.7.0.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/launcher-app' && github.event.head_commit.message == 'Release D.S Launcher v18.7.0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          # D.S Launcher 18.7.0
+
+          A lightweight, customizable Android launcher with an updated modern app icon.
+
+          ## Highlights
+          - New D.S Launcher app icon with a dark, neon-accented design.
+          - App display name updated to **D.S Launcher**.
+          - Retains the launcher’s home screen, app drawer, widget, clock customization, and page transition features.
+          - Version name: **18.7.0** (version code **180700**).
+
+          ## Compatibility
+          - Minimum Android version: **Android 6.0 (API 23)**.
+          - Target SDK: **API 37 (Android 17)**.
+          - The APK is signed, and CI verifies its signature before publishing.
+
+          **Testing note:** The release build and signature are verified by CI. Full physical-device testing across every Android version from 6 through 17 has not been completed.
+          EOF
+          gh release create "v18.7.0" "app/build/outputs/apk/release/D.S Launcher-18.7.0.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "D.S Launcher 18.7.0" \
+            --notes-file release-notes.md \
+            --target "$GITHUB_SHA"
