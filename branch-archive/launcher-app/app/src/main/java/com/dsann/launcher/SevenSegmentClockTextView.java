@@ -146,9 +146,20 @@ public final class SevenSegmentClockTextView extends TextView {
      */
     public void setContrastInnerBorderEnabled(boolean enabled, int[] fillColors,
             float strokeWidthPx) {
+        setContrastInnerBorderEnabled(enabled, fillColors, strokeWidthPx, null);
+    }
+
+    /**
+     * Enables an inner glyph/segment border. An explicit border palette allows artwork
+     * matching to keep the digit fill gradient independent from the white outline.
+     */
+    public void setContrastInnerBorderEnabled(boolean enabled, int[] fillColors,
+            float strokeWidthPx, int[] explicitBorderColors) {
         int[] nextBorderColors = null;
         float[] nextBorderStops = null;
-        if (enabled && fillColors != null && fillColors.length >= 2) {
+        if (enabled && explicitBorderColors != null && explicitBorderColors.length >= 2) {
+            nextBorderColors = explicitBorderColors.clone();
+        } else if (enabled && fillColors != null && fillColors.length >= 2) {
             if (isWhiteBlackWhitePalette(fillColors)) {
                 // Reverse the current border polarity: white regions get black borders,
                 // black regions get white borders. Keep the same transition thresholds.
