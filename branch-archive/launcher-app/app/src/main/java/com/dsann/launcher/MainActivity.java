@@ -6737,10 +6737,10 @@ public class MainActivity extends Activity {
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
         float borderDensity = getResources().getDisplayMetrics().density;
-        // The existing text-mode renderer clips half of its centered stroke to the glyph;
-        // a 1dp stroke therefore leaves the requested 0.5dp white inner border.
-        applyClockTextInnerBorder(dateText, useWhiteGradientInnerBorder, 1f * borderDensity);
-        applyClockTextInnerBorder(amPmText, useWhiteGradientInnerBorder, 1f * borderDensity);
+        // The renderer clips the outer half of its centered stroke. A 4dp stroke therefore
+        // leaves a 2dp white inner contour on the date line (including its AM/PM prefix).
+        applyClockTextInnerBorder(dateText, useWhiteGradientInnerBorder, 4f * borderDensity);
+        applyClockTextInnerBorder(amPmText, useWhiteGradientInnerBorder, 4f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
         int[] artworkTextColours = iconArtworkActive
                 ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
@@ -6819,9 +6819,10 @@ public class MainActivity extends Activity {
             boolean useGradientInnerBorder = useWhiteGradientInnerBorder;
             float innerBorderWidth = useNothingInnerBorder
                     ? 3f * borderDensity
-                    // The normal TextView path masks away the outer half of its stroke;
-                    // double its width so the visible inner contour remains exactly 1dp.
-                    : (sevenSegment ? 1f : 2f) * borderDensity;
+                    // The normal TextView path masks away the outer half of its stroke.
+                    // Keep its visible inner contour at 2dp; LED segment strokes are inset
+                    // directly and therefore use the requested 2dp width as-is.
+                    : (sevenSegment ? 2f : 4f) * borderDensity;
             clockRenderer.setDigitOnlyInnerBorder(useGradientInnerBorder);
             boolean useAnyInnerBorder = useNothingInnerBorder || useGradientInnerBorder;
             clockRenderer.setContrastInnerBorderEnabled(
