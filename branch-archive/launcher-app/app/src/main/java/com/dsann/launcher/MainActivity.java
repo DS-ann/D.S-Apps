@@ -10927,11 +10927,11 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
-        // Preserve the established physical offset when the widget is at normal or
-        // enlarged size, but scale the offset with the background as the widget shrinks.
-        // Inverse scaling held this shift fixed while the background narrowed, cutting
-        // digits against the left edge at small clock lengths.
-        float offsetScaleDenominator = Math.max(1f, panelScaleX);
+        // Seven-segment positioning is already tuned. For typography clocks, undo
+        // the panel scale exactly so their visual offset remains fixed when the panel
+        // width changes to accommodate a different date size.
+        float offsetScaleDenominator = sevenSegment
+                ? Math.max(1f, panelScaleX) : panelScaleX;
         float targetX;
         if (sevenSegment) {
             targetX = -LauncherUiUtils.dp(this, 15) / offsetScaleDenominator;
@@ -11168,10 +11168,13 @@ public class MainActivity extends Activity {
         // across the full page, but never beyond the page's horizontal bounds.
         // The cap is based on the actual page width (not half-width/grid columns),
         // so normal typography clocks can expand all the way to either screen edge.
-        // Keep the scale cap tied to the digit group, not the date line. Enlarging or
-        // changing the date font may widen the background, but never moves/compresses digits.
+        // Keep the seven-segment cap unchanged because its renderer's width is already
+        // tuned. Typography clocks must also fit their full background width: if the
+        // date makes the panel wider than the digit group, capping against only the
+        // digits lets the panel overflow the page and the boundary clamp snaps it sideways.
+        float widthForScaleCap = sevenSegment ? clockWithMarkerWidth : naturalPanelWidth;
         final float lengthScale = Math.min(requestedLengthScale,
-                Math.max(0.01f, availablePanelWidth / (float) clockWithMarkerWidth));
+                Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
