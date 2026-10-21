@@ -251,9 +251,9 @@ public class MainActivity extends Activity {
                 requestBatteryOptimizationExemption();
             }else{
                 SessionStore.finish(this);
-                android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
-                if(prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
-                        ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                android.content.SharedPreferences recordingPrefs=getSharedPreferences(PREFS,0);
+                if(recordingPrefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                        ||recordingPrefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
                         ||BatteryPercentCalculator.isRunning(this)){
                     startNotificationService();
                 }else{
