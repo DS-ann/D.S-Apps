@@ -502,6 +502,8 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
+    // Forces a fresh text/span buffer after renderer and package refreshes.
+    private boolean forceClockTextRefresh = false;
     private View clockWidgetResizeHandle;
     private final View[] clockEdgeHandles = new View[4];
     private boolean clockWidgetEditing = false;
@@ -797,11 +799,19 @@ public class MainActivity extends Activity {
         @Override public void run() {
             if (clockPanelsByPage[0] != null && clockPanelsByPage[1] != null) {
                 int restorePage = Math.max(0, Math.min(1, currentPage));
-                updateClock();
+                // Re-apply the renderer before refreshing text. If styles are reapplied
+                // after updateClock(), identical two-digit time text can bypass rebuilding
+                // and leave a stale/missing replacement-span buffer on the clock view.
                 for (int page = 0; page < clockPanelsByPage.length; page++) {
                     if (clockPanelsByPage[page] == null) continue;
                     activateClockForPage(page);
                     applyClockStyle();
+                }
+                forceClockTextRefresh = true;
+                updateClock();
+                for (int page = 0; page < clockPanelsByPage.length; page++) {
+                    if (clockPanelsByPage[page] == null) continue;
+                    activateClockForPage(page);
                     applyClockPositionAndSize();
                     applyClockPanelColor(false);
                 }
@@ -9230,6 +9240,8 @@ public class MainActivity extends Activity {
 
     private void updateClock() {
         if (clockPanelsByPage[0] == null || clockPanelsByPage[1] == null) return;
+        final boolean forceTextRefresh = forceClockTextRefresh;
+        forceClockTextRefresh = false;
         Date now = new Date();
         int currentColourPhase = (now.getMinutes() / 5) % 4;
         if (currentColourPhase != lastClockPanelColorPhase) applyClockPanelColor(false);
@@ -9386,7 +9398,29 @@ public class MainActivity extends Activity {
             Boolean previousDigitBorderMode = clockDigitInnerBorderModeApplied.get(clockText);
             boolean digitBorderModeChanged = previousDigitBorderMode == null
                     || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
-            if (!displayClock.toString().contentEquals(clockText.getText())
+            boolean missingDisplaySpans = false;
+            int expectedColon = displayClock.toString().indexOf(':');
+            if (!sevenSegmentClock && !clockValue.isEmpty() && expectedColon >= 0) {
+                CharSequence existingText = clockText.getText();
+                if (!(existingText instanceof android.text.Spanned)) {
+                    missingDisplaySpans = true;
+                } else {
+                    android.text.Spanned existingSpanned = (android.text.Spanned) existingText;
+                    int expectedDigitSpans = 0;
+                    for (int i = 0; i < displayClock.length(); i++) {
+                        if (Character.digit(displayClock.charAt(i), 10) >= 0) expectedDigitSpans++;
+                    }
+                    TightDigitSpan[] installedDigitSpans = existingSpanned.getSpans(
+                            0, existingSpanned.length(), TightDigitSpan.class);
+                    missingDisplaySpans = installedDigitSpans.length < expectedDigitSpans;
+                    if (existingSpanned.getSpans(expectedColon, expectedColon + 1,
+                            CenteredColonSpan.class).length == 0) {
+                        missingDisplaySpans = true;
+                    }
+                }
+            }
+            if (forceTextRefresh || missingDisplaySpans
+                    || !displayClock.toString().contentEquals(clockText.getText())
                     || digitBorderModeChanged) {
                 // The seven-segment renderer owns its glyph geometry; standard styles
                 // keep the normal TextView formatting and use a separate static shader.
@@ -10140,7 +10174,7 @@ public class MainActivity extends Activity {
                 int targetX = homeGridIconLeftAt(
                         member, originSlot[0] + dxCells, cellWidth, geometry[2]);
                 int targetY = homeGridIconTopAt(
-                        page, originSlot[1] + dyCells, rows, cellHeight);
+                        page, member, originSlot[1] + dyCells, rows, cellHeight);
                 targets.put(member, new int[]{targetX, targetY});
                 geometries.put(member, geometry);
             }
