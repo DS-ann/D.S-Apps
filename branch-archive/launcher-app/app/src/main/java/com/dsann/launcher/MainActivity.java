@@ -3952,12 +3952,14 @@ public class MainActivity extends Activity {
 
         final boolean[] closing = new boolean[]{false};
         final float[] iconScale = new float[]{0.12f, 0.12f};
+        final android.animation.ValueAnimator[] shapeAnimator =
+                new android.animation.ValueAnimator[1];
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
-                dialog, panel, dimLayer, openingMemberViews, closing, iconScale));
+                dialog, panel, dimLayer, openingMemberViews, closing, iconScale, shapeAnimator));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                closeAppGroupWithAnimation(dialog, panel, dimLayer, openingMemberViews, closing, iconScale);
+                closeAppGroupWithAnimation(dialog, panel, dimLayer, openingMemberViews, closing, iconScale, shapeAnimator);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -4038,6 +4040,8 @@ public class MainActivity extends Activity {
                 panelBackground.setCornerRadius((Float) a.getAnimatedValue());
                 panel.invalidate();
             });
+            if (shapeAnimator[0] != null) shapeAnimator[0].cancel();
+            shapeAnimator[0] = radiusAnimator;
             radiusAnimator.start();
 
             panel.animate().cancel();
@@ -4067,7 +4071,8 @@ public class MainActivity extends Activity {
     }
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
-            ArrayList<View> memberViews, boolean[] closing, float[] iconScale) {
+            ArrayList<View> memberViews, boolean[] closing, float[] iconScale,
+            android.animation.ValueAnimator[] shapeAnimator) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -4094,6 +4099,9 @@ public class MainActivity extends Activity {
             dimLayer.animate().alpha(0f).setDuration(duration).start();
         }
         if (panel.getBackground() instanceof GradientDrawable) {
+            if (shapeAnimator != null && shapeAnimator.length > 0 && shapeAnimator[0] != null) {
+                shapeAnimator[0].cancel();
+            }
             GradientDrawable background = (GradientDrawable) panel.getBackground();
             android.animation.ValueAnimator radiusAnimator = android.animation.ValueAnimator.ofFloat(
                     Math.max(panel.getWidth(), panel.getHeight()) / 2f,
@@ -4103,6 +4111,7 @@ public class MainActivity extends Activity {
                     Math.max(panel.getWidth(), panel.getHeight()) / 2f);
             radiusAnimator.setDuration(duration);
             radiusAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator());
+            if (shapeAnimator != null && shapeAnimator.length > 0) shapeAnimator[0] = radiusAnimator;
             radiusAnimator.addUpdateListener(a -> {
                 background.setCornerRadius((Float) a.getAnimatedValue());
                 panel.invalidate();
