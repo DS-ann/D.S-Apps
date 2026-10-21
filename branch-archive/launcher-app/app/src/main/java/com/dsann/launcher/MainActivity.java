@@ -1422,6 +1422,8 @@ public class MainActivity extends Activity {
                 android.graphics.Rect constrainedBounds = constrainClockResizeBounds(
                         activePage, clockPanel, left, top, right, bottom, clockResizeEdge,
                         minW, minH);
+                constrainedBounds = settleClockResizeBounds(activePage, clockPanel,
+                        constrainedBounds, clockResizeEdge, minW, minH);
                 left = constrainedBounds.left;
                 top = constrainedBounds.top;
                 right = constrainedBounds.right;
@@ -3795,6 +3797,7 @@ public class MainActivity extends Activity {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
         ArrayList<String> members = getAppGroupMembers(groupId);
         final View openingGroupIcon = findAppGroupLogoView(groupId);
+        final View openingGroupCell = findAppGroupView(groupId);
         final Dialog dialog = new Dialog(this);
         dialog.setOnDismissListener(ignored -> {
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
@@ -3973,6 +3976,11 @@ public class MainActivity extends Activity {
             android.view.Window window = dialog.getWindow();
             window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            window.setStatusBarColor(Color.TRANSPARENT);
+            View decor = window.getDecorView();
+            decor.setSystemUiVisibility(decor.getSystemUiVisibility()
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             window.setGravity(Gravity.TOP | Gravity.LEFT);
             window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
@@ -4004,17 +4012,118 @@ public class MainActivity extends Activity {
             }
 
             int safe = LauncherUiUtils.dp(this, 8);
-            int panelLeft = Math.max(safe, Math.min(availableW - lp.width - safe,
-                    iconX - lp.width / 2));
-            // Bias the panel down from the icon; open upwards when there is not
-            // enough vertical space below. This keeps it visibly attached to its icon.
-            int preferredTop = iconY - LauncherUiUtils.dp(this, 54);
-            if (preferredTop + lp.height > availableH - safe) {
-                preferredTop = iconY - lp.height + LauncherUiUtils.dp(this, 54);
+            int statusBarHeight = 0;
+            int statusBarId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (statusBarId > 0) {
+                statusBarHeight = getResources().getDimensionPixelSize(statusBarId);
             }
-            int panelTop = Math.max(safe, Math.min(availableH - lp.height - safe, preferredTop));
-            lp.leftMargin = panelLeft;
-            lp.topMargin = panelTop;
+            int navigationBarHeight = 0;
+            int navigationBarId = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+            if (navigationBarId > 0) {
+                navigationBarHeight = getResources().getDimensionPixelSize(navigationBarId);
+            }
+            int safeTop = Math.min(availableH - 1, statusBarHeight + safe);
+            int safeBottom = Math.max(safeTop + 1, availableH - navigationBarHeight - safe);
+            int safeRight = Math.max(safe + 1, availableW - safe);
+            lp.width = Math.max(1, Math.min(lp.width, safeRight - safe));
+            lp.height = Math.max(1, Math.min(lp.height, safeBottom - safeTop));
+
+            int iconLeft = iconX - Math.max(1, iconW) / 2;
+            int iconTop = iconY - Math.max(1, iconH) / 2;
+            android.graphics.Rect iconBounds = new android.graphics.Rect(
+                    iconLeft, iconTop, iconLeft + Math.max(1, iconW), iconTop + Math.max(1, iconH));
+            int gap = LauncherUiUtils.dp(this, 10);
+            int[] freeSpace = new int[]{
+                    Math.max(0, iconBounds.top - safeTop - gap),
+                    Math.max(0, safeBottom - iconBounds.bottom - gap),
+                    Math.max(0, iconBounds.left - safe - gap),
+                    Math.max(0, safeRight - iconBounds.right - gap)
+            };
+            // Prefer the side with the most room, but only use a full-size position if
+            // the panel can fit there without touching an edge or covering its own icon.
+            int[] directionOrder = new int[]{0, 1, 2, 3}; // above, below, left, right
+            for (int i = 0; i < directionOrder.length; i++) {
+                for (int j = i + 1; j < directionOrder.length; j++) {
+                    if (freeSpace[directionOrder[j]] > freeSpace[directionOrder[i]]) {
+                        int swap = directionOrder[i];
+                        directionOrder[i] = directionOrder[j];
+                        directionOrder[j] = swap;
+                    }
+                }
+            }
+            android.graphics.Rect panelBounds = null;
+            int chosenDirection = -1;
+            for (int direction : directionOrder) {
+                int neededSpace = direction < 2 ? lp.height : lp.width;
+                if (freeSpace[direction] < neededSpace) continue;
+                int candidateLeft;
+                int candidateTop;
+                if (direction == 0) {
+                    candidateLeft = Math.max(safe, Math.min(safeRight - lp.width,
+                            iconX - lp.width / 2));
+                    candidateTop = iconBounds.top - gap - lp.height;
+                } else if (direction == 1) {
+                    candidateLeft = Math.max(safe, Math.min(safeRight - lp.width,
+                            iconX - lp.width / 2));
+                    candidateTop = iconBounds.bottom + gap;
+                } else if (direction == 2) {
+                    candidateLeft = iconBounds.left - gap - lp.width;
+                    candidateTop = Math.max(safeTop, Math.min(safeBottom - lp.height,
+                            iconY - lp.height / 2));
+                } else {
+                    candidateLeft = iconBounds.right + gap;
+                    candidateTop = Math.max(safeTop, Math.min(safeBottom - lp.height,
+                            iconY - lp.height / 2));
+                }
+                android.graphics.Rect candidate = new android.graphics.Rect(candidateLeft,
+                        candidateTop, candidateLeft + lp.width, candidateTop + lp.height);
+                if (candidate.left < safe || candidate.top < safeTop
+                        || candidate.right > safeRight || candidate.bottom > safeBottom
+                        || android.graphics.Rect.intersects(candidate, iconBounds)) continue;
+                panelBounds = candidate;
+                chosenDirection = direction;
+                break;
+            }
+
+            if (panelBounds == null) {
+                // A tall group may not fit in any direction at its preferred size. Shrink
+                // the panel along its placement axis and shorten its scroll area too, so
+                // it remains entirely on-screen while leaving the launcher icon exposed.
+                chosenDirection = directionOrder[0];
+                if (chosenDirection < 2) {
+                    lp.height = Math.max(1, Math.min(lp.height, freeSpace[chosenDirection]));
+                    ViewGroup.LayoutParams scrollParams = scroll.getLayoutParams();
+                    int fixedHeight = LauncherUiUtils.dp(this, 112);
+                    scrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
+                            Math.min(scrollHeight, lp.height - fixedHeight));
+                    scroll.setLayoutParams(scrollParams);
+                } else {
+                    lp.width = Math.max(1, Math.min(lp.width, freeSpace[chosenDirection]));
+                }
+                int candidateLeft;
+                int candidateTop;
+                if (chosenDirection == 0) {
+                    candidateLeft = Math.max(safe, Math.min(safeRight - lp.width,
+                            iconX - lp.width / 2));
+                    candidateTop = iconBounds.top - gap - lp.height;
+                } else if (chosenDirection == 1) {
+                    candidateLeft = Math.max(safe, Math.min(safeRight - lp.width,
+                            iconX - lp.width / 2));
+                    candidateTop = iconBounds.bottom + gap;
+                } else if (chosenDirection == 2) {
+                    candidateLeft = iconBounds.left - gap - lp.width;
+                    candidateTop = Math.max(safeTop, Math.min(safeBottom - lp.height,
+                            iconY - lp.height / 2));
+                } else {
+                    candidateLeft = iconBounds.right + gap;
+                    candidateTop = Math.max(safeTop, Math.min(safeBottom - lp.height,
+                            iconY - lp.height / 2));
+                }
+                panelBounds = new android.graphics.Rect(candidateLeft, candidateTop,
+                        candidateLeft + lp.width, candidateTop + lp.height);
+            }
+            lp.leftMargin = panelBounds.left;
+            lp.topMargin = panelBounds.top;
             panel.setLayoutParams(lp);
 
             float pivotX = Math.max(0f, Math.min(lp.width, iconX - panelLeft));
@@ -4050,7 +4159,7 @@ public class MainActivity extends Activity {
                     .setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f))
                     .start();
             dimLayer.animate().cancel();
-            dimLayer.animate().alpha(0.28f).setDuration(duration).start();
+            dimLayer.setAlpha(0f);
             title.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
                     .setStartDelay(duration / 6).start();
             manage.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
@@ -9878,40 +9987,41 @@ public class MainActivity extends Activity {
         cohortSet.put(seed, Boolean.TRUE);
         slots.put(seed, seedSlot);
 
-        int col = seedSlot[0];
-        int row = seedSlot[1];
-        // Extend only through immediately adjacent home-grid items in the same
-        // grid family. Every member advances by the identical cell vector, keeping
-        // the row/column together and moving its last member into the open slot.
-        while (true) {
-            int nextCol = col + deltaCol;
-            int nextRow = row + deltaRow;
-            if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) {
-                return false;
-            }
-            View next = null;
-            for (int i = 0; i < page.getChildCount(); i++) {
-                View candidate = page.getChildAt(i);
-                if (candidate == movingView || candidate == seed
-                        || !isHomeGridIcon(candidate)
-                        || isWorkspaceContactShortcut(candidate)
-                                != isWorkspaceContactShortcut(seed)) continue;
-                int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
-                if (candidateSlot != null
-                        && candidateSlot[0] == nextCol && candidateSlot[1] == nextRow) {
-                    next = candidate;
-                    slots.put(candidate, candidateSlot);
-                    break;
+        // Collect the complete contiguous row/column on both sides of the seed.
+        // The old forward-only scan split the row whenever the collision approached
+        // from the opposite side, so only a suffix moved instead of the connected run.
+        for (int directionSign : new int[]{-1, 1}) {
+            int col = seedSlot[0];
+            int row = seedSlot[1];
+            while (true) {
+                int nextCol = col + deltaCol * directionSign;
+                int nextRow = row + deltaRow * directionSign;
+                if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) break;
+                View next = null;
+                int[] nextSlot = null;
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    View candidate = page.getChildAt(i);
+                    if (candidate == movingView || candidate == seed
+                            || !isHomeGridIcon(candidate)
+                            || isWorkspaceContactShortcut(candidate)
+                                    != isWorkspaceContactShortcut(seed)) continue;
+                    int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
+                    if (candidateSlot != null
+                            && candidateSlot[0] == nextCol && candidateSlot[1] == nextRow) {
+                        next = candidate;
+                        nextSlot = candidateSlot;
+                        break;
+                    }
                 }
+                if (next == null) break;
+                if (cohortSet.containsKey(next)) return false;
+                cohort.add(next);
+                cohortSet.put(next, Boolean.TRUE);
+                slots.put(next, nextSlot);
+                col = nextSlot[0];
+                row = nextSlot[1];
+                if (cohort.size() > page.getChildCount()) return false;
             }
-            if (next == null) break;
-            if (next == movingView || cohortSet.containsKey(next)) return false;
-            cohort.add(next);
-            cohortSet.put(next, Boolean.TRUE);
-            int[] nextSlot = slots.get(next);
-            col = nextSlot[0];
-            row = nextSlot[1];
-            if (cohort.size() > page.getChildCount()) return false;
         }
         // A one-item shift is handled by the ordinary placement planner. This fast
         // path is specifically the together-row/column behaviour.
@@ -10416,15 +10526,20 @@ public class MainActivity extends Activity {
                 || candidateBounds.left < 0 || candidateBounds.top < 0
                 || candidateBounds.right > page.getWidth()
                 || candidateBounds.bottom > page.getHeight()) return false;
+        int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
+        android.graphics.Rect protectedCandidate = new android.graphics.Rect(candidateBounds);
+        protectedCandidate.inset(-gap, -gap);
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
             if (other == movingView || other == workspaceTransferProxy
                     || !isWorkspaceItem(other)) continue;
             int[] otherGeometry = itemGeometry(other);
             if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
-            android.graphics.Rect obstacle = collisionRectForInteraction(
-                    other, otherGeometry, movingView);
-            if (android.graphics.Rect.intersects(candidateBounds, obstacle)) return false;
+            // The clock must respect the whole item layout rectangle, not a reduced
+            // icon-artwork rectangle, and keep a real 5dp clearance around it.
+            android.graphics.Rect obstacle = workspaceLayoutCollisionRect(other,
+                    otherGeometry[0], otherGeometry[1], otherGeometry[2], otherGeometry[3]);
+            if (android.graphics.Rect.intersects(protectedCandidate, obstacle)) return false;
         }
         return true;
     }
@@ -10438,7 +10553,7 @@ public class MainActivity extends Activity {
             int left, int top, int right, int bottom, int edge, int minWidth, int minHeight) {
         android.graphics.Rect bounds = new android.graphics.Rect(left, top, right, bottom);
         if (page == null || clock == null || edge < 1 || edge > 4) return bounds;
-        int gap = Math.max(1, LauncherUiUtils.dp(this, 1));
+        int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
 
         // More than one obstacle can constrain the same edge. Revisit the list until
         // the moving edge is stable; only that edge is changed, preserving the anchor.
@@ -10452,7 +10567,8 @@ public class MainActivity extends Activity {
                 int[] geometry = itemGeometry(other);
                 if (geometry[2] <= 0 || geometry[3] <= 0) continue;
 
-                android.graphics.Rect obstacle = collisionRectForInteraction(other, geometry, clock);
+                android.graphics.Rect obstacle = workspaceLayoutCollisionRect(other,
+                        geometry[0], geometry[1], geometry[2], geometry[3]);
                 changed |= constrainClockResizeAgainstObstacle(
                         bounds, obstacle, edge, minWidth, minHeight, gap);
                 int[] reserved = liveDisplacementTargets.get(other);
@@ -10580,6 +10696,29 @@ public class MainActivity extends Activity {
                     .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, page), clamped[1])
                     .apply();
         }
+    }
+
+    /**
+     * If any transformed/layout edge case still leaves the constrained candidate too
+     * close to an invisible workspace bound, shrink only the actively moving edge until
+     * the nearest legal rectangle is found. This avoids freezing one resize frame.
+     */
+    private android.graphics.Rect settleClockResizeBounds(FrameLayout page, View clock,
+            android.graphics.Rect requested, int edge, int minWidth, int minHeight) {
+        android.graphics.Rect candidate = new android.graphics.Rect(requested);
+        if (canPlaceWorkspaceItem(page, clock, candidate)) return candidate;
+        int maxSteps = edge == 1 || edge == 2
+                ? Math.max(0, candidate.width() - minWidth)
+                : Math.max(0, candidate.height() - minHeight);
+        for (int step = 1; step <= maxSteps; step++) {
+            android.graphics.Rect trial = new android.graphics.Rect(requested);
+            if (edge == 1) trial.left = Math.min(trial.right - minWidth, requested.left + step);
+            else if (edge == 2) trial.right = Math.max(trial.left + minWidth, requested.right - step);
+            else if (edge == 3) trial.top = Math.min(trial.bottom - minHeight, requested.top + step);
+            else if (edge == 4) trial.bottom = Math.max(trial.top + minHeight, requested.bottom - step);
+            if (canPlaceWorkspaceItem(page, clock, trial)) return trial;
+        }
+        return candidate;
     }
 
     private void setClampedClockTranslation(float translationX, float translationY, boolean persist) {
