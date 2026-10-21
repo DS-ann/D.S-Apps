@@ -486,6 +486,8 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, String> dateTextAppearanceApplied =
             new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, String> clockDateGeometrySignatures =
+            new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
@@ -10927,11 +10929,11 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
-        // Preserve the established physical offset when the widget is at normal or
-        // enlarged size, but scale the offset with the background as the widget shrinks.
-        // Inverse scaling held this shift fixed while the background narrowed, cutting
-        // digits against the left edge at small clock lengths.
-        float offsetScaleDenominator = Math.max(1f, panelScaleX);
+        // Seven-segment positioning is already tuned. For typography clocks, undo
+        // the panel scale exactly so their visual offset remains fixed when the panel
+        // width changes to accommodate a different date size.
+        float offsetScaleDenominator = sevenSegment
+                ? Math.max(1f, panelScaleX) : panelScaleX;
         float targetX;
         if (sevenSegment) {
             targetX = -LauncherUiUtils.dp(this, 15) / offsetScaleDenominator;
@@ -11039,6 +11041,26 @@ public class MainActivity extends Activity {
                 prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, targetPage), 15)));
         final int configuredPmSize = Math.max(8, Math.min(24,
                 prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, targetPage), 14)));
+        final String dateGeometrySignature = configuredDateSize + ":" + configuredPmSize + ":"
+                + clockDateFontFamily() + ":" + clockPmFontFamily() + ":"
+                + prefs.getInt(KEY_CLOCK_STYLE, 0);
+        final String previousDateGeometrySignature = dateText == null ? null
+                : clockDateGeometrySignatures.get(dateText);
+        final FrameLayout groupAtGeometryStart = clockGroupsByPage[targetPage] != null
+                ? clockGroupsByPage[targetPage] : clockGroup;
+        final int[] previousClockGroupLocation = new int[2];
+        final boolean preserveTypographyGroupScreenX =
+                !(clockText instanceof SevenSegmentClockTextView
+                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5)
+                && previousDateGeometrySignature != null
+                && !previousDateGeometrySignature.equals(dateGeometrySignature)
+                && groupAtGeometryStart != null && groupAtGeometryStart.getWidth() > 0;
+        if (preserveTypographyGroupScreenX) {
+            groupAtGeometryStart.getLocationOnScreen(previousClockGroupLocation);
+        }
+        if (dateText != null) {
+            clockDateGeometrySignatures.put(dateText, dateGeometrySignature);
+        }
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
@@ -11168,10 +11190,13 @@ public class MainActivity extends Activity {
         // across the full page, but never beyond the page's horizontal bounds.
         // The cap is based on the actual page width (not half-width/grid columns),
         // so normal typography clocks can expand all the way to either screen edge.
-        // Keep the scale cap tied to the digit group, not the date line. Enlarging or
-        // changing the date font may widen the background, but never moves/compresses digits.
+        // Keep the seven-segment cap unchanged because its renderer's width is already
+        // tuned. Typography clocks must also fit their full background width: if the
+        // date makes the panel wider than the digit group, capping against only the
+        // digits lets the panel overflow the page and the boundary clamp snaps it sideways.
+        float widthForScaleCap = sevenSegment ? clockWithMarkerWidth : naturalPanelWidth;
         final float lengthScale = Math.min(requestedLengthScale,
-                Math.max(0.01f, availablePanelWidth / (float) clockWithMarkerWidth));
+                Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
@@ -11218,9 +11243,21 @@ public class MainActivity extends Activity {
             setClampedClockTranslationForPanel(
                     targetPanel, targetPage, bounded[0], bounded[1], true);
 
-            // Do not apply a screen-coordinate correction to the digit group here.
-            // Its gravity anchors it to the clock panel; a compensating translation
-            // makes the digits drift against the background when date typography changes.
+            // Typography clock rows can remeasure when date size/font or clock preset
+            // changes. Preserve their prior screen anchor after the parent's scale and
+            // bounds settle; keep the tuned seven-segment path free of this correction.
+            if (preserveTypographyGroupScreenX && groupAtGeometryStart != null
+                    && groupAtGeometryStart.getParent() != null) {
+                int[] currentGroupLocation = new int[2];
+                groupAtGeometryStart.getLocationOnScreen(currentGroupLocation);
+                float parentScale = Math.max(0.01f, Math.abs(targetPanel.getScaleX()));
+                float correction = (previousClockGroupLocation[0]
+                        - currentGroupLocation[0]) / parentScale;
+                if (Math.abs(correction) > 0.25f) {
+                    groupAtGeometryStart.setTranslationX(
+                            groupAtGeometryStart.getTranslationX() + correction);
+                }
+            }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
                 updateClockResizeHandles();
             }
@@ -11256,9 +11293,10 @@ public class MainActivity extends Activity {
             groupParams.width = clockGroupWidth;
             groupParams.height = rowHeight;
             clockGroup.setLayoutParams(groupParams);
-            // Keep the digit group anchored to the panel's alignment, never to a
-            // previous screen coordinate captured before the date line was remeasured.
-            clockGroup.setTranslationX(0f);
+            // Seven-segment positioning remains exactly as tuned. Typography-clock
+            // translation may contain a date-geometry compensation and must be retained
+            // across unrelated layout refreshes.
+            if (sevenSegment) clockGroup.setTranslationX(0f);
             clockGroup.setClipChildren(false);
             clockGroup.setClipToPadding(false);
         }
