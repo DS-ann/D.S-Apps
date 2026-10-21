@@ -2832,8 +2832,9 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Finds the home-grid slot with the greatest intersection with the drag boundary.
-     * A slot is returned only when at least half of that grid cell is covered by the boundary.
+     * Finds the legal grid slot with the greatest overlap of the dragged cell.
+     * At least half of the dragged-cell area must enter the slot. Exact 50% ties
+     * follow the drag direction, so drops behave consistently from every edge.
      */
     private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
             int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
@@ -6566,7 +6567,6 @@ public class MainActivity extends Activity {
                     // Commit against the exact snapped release slot, not the last
                     // intermediate pointer frame. This prevents a final grid snap from
                     // creating a collision that only the slow post-render resolver would see.
-                    boolean hadLiveDisplacementPlan;
                     FrameLayout.LayoutParams finalIconParams =
                             new FrameLayout.LayoutParams(cellWidth, cellHeight,
                                     Gravity.TOP | Gravity.LEFT);
@@ -6626,7 +6626,6 @@ public class MainActivity extends Activity {
                         // solely its temporary destination-page proxy.
                         updateLiveDisplacements(targetPage, view);
                     }
-                    hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
                     finishWorkspaceTransferDrag(view, true);
                     int committedPage = destinationPage;
                     boolean displacementAccepted = finishLiveDisplacements(true, view);
