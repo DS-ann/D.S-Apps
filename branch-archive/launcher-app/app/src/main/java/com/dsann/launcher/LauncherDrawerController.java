@@ -31,6 +31,7 @@ final class LauncherDrawerController {
         void launchApp(ResolveInfo app, View sourceView);
         void showAppOptions(ResolveInfo app, boolean onHome);
         int getColumns();
+        void onDrawerDataChanged();
     }
 
     static final class BuiltDrawer {
@@ -342,7 +343,10 @@ final class LauncherDrawerController {
                         actions.showAppOptions(app, onHome);
                     }
                 });
-        adapter.setOnDataChangedListener(drawerBody::invalidateSnapshot);
+        adapter.setOnDataChangedListener(() -> {
+            drawerBody.invalidateSnapshot();
+            actions.onDrawerDataChanged();
+        });
         grid.setAdapter(adapter);
         grid.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override public void onScrollStateChanged(AbsListView view, int scrollState) {
