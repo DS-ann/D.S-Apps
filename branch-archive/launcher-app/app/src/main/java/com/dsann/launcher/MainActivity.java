@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_ICON_ARTWORK = "clock_icon_artwork";
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
+    private static final String KEY_CLOCK_DATE_FILL_COLOR_POSITION = "clock_date_fill_color_position";
     private static final String KEY_CLOCK_DATE_FONT = "clock_date_font_family";
     private static final String KEY_CLOCK_PM_FONT = "clock_ampm_font_family";
     private static final String KEY_HOME_LABEL_FONT = "home_label_font_family";
@@ -2692,6 +2693,16 @@ public class MainActivity extends Activity {
         return LauncherIconDrawable.spectrumColorForPosition(position);
     }
 
+    private int clockDateFillColor() {
+        if (prefs == null || !prefs.contains(KEY_CLOCK_DATE_FILL_COLOR_POSITION)) {
+            // Keep the existing default date fill until the user selects a new colour.
+            return Color.rgb(238, 240, 244);
+        }
+        int position = Math.max(0, Math.min(1000,
+                prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, 0)));
+        return LauncherIconDrawable.spectrumColorForPosition(position);
+    }
+
     private String clockDateFontFamily() {
         int family = prefs == null ? 0 : Math.max(0, Math.min(3,
                 prefs.getInt(KEY_CLOCK_DATE_FONT, 0)));
@@ -2736,6 +2747,54 @@ public class MainActivity extends Activity {
         int textHeightPx = (int) Math.ceil(metrics.descent - metrics.ascent);
         return Math.max(LauncherUiUtils.dp(this, 12),
                 textHeightPx + LauncherUiUtils.dp(this, 2));
+    }
+
+    /**
+     * Fit shortcut labels to their actual label width. Keep the original title in the
+     * content description so font or layout changes can safely recalculate the visible text.
+     * The explicit two-dot suffix is used only when truncation is necessary.
+     */
+    private void fitShortcutLabelWithDots(TextView label) {
+        if (label == null) return;
+        CharSequence source = label.getContentDescription();
+        if (source == null) source = label.getText();
+        String fullText = source == null ? "" : source.toString();
+        if (fullText.isEmpty()) return;
+
+        ViewGroup.LayoutParams params = label.getLayoutParams();
+        int availableWidth = label.getWidth();
+        if (availableWidth <= 0 && params != null && params.width > 0) {
+            availableWidth = params.width;
+        }
+        availableWidth -= label.getPaddingLeft() + label.getPaddingRight();
+        if (availableWidth <= 0) return;
+
+        Paint labelPaint = label.getPaint();
+        String fittedText = fullText;
+        if (labelPaint.measureText(fullText) > availableWidth) {
+            final String suffix = "..";
+            fittedText = "";
+            int end = fullText.length();
+            while (end > 0) {
+                int candidateEnd = end;
+                if (candidateEnd < fullText.length() && candidateEnd > 0
+                        && Character.isHighSurrogate(fullText.charAt(candidateEnd - 1))
+                        && Character.isLowSurrogate(fullText.charAt(candidateEnd))) {
+                    candidateEnd--;
+                }
+                String prefix = fullText.substring(0, candidateEnd).trim();
+                String candidate = prefix + suffix;
+                if (labelPaint.measureText(candidate) <= availableWidth) {
+                    fittedText = candidate;
+                    break;
+                }
+                end = candidateEnd - 1;
+            }
+            if (fittedText.isEmpty() && labelPaint.measureText(suffix) <= availableWidth) {
+                fittedText = suffix;
+            }
+        }
+        if (!fittedText.contentEquals(label.getText())) label.setText(fittedText);
     }
 
     /**
@@ -3276,13 +3335,14 @@ public class MainActivity extends Activity {
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
                 homeFontSizeSp(), homeLabelColor(), false);
+        label.setContentDescription(label.getText());
         label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.NORMAL));
         label.setShadowLayer(LauncherUiUtils.dp(this, 1), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(180, 0, 0, 0));
         label.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
         label.setSingleLine(true);
         label.setMaxLines(1);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setEllipsize(null);
         label.setIncludeFontPadding(false);
         int shortcutLabelHeight = workspaceLabelHeightPx(label);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
@@ -3301,6 +3361,7 @@ public class MainActivity extends Activity {
         tileParams.leftMargin = tileLeft;
         tileParams.topMargin = tileTop;
         chosenPage.addView(tile, tileParams);
+        label.post(() -> fitShortcutLabelWithDots(label));
         tile.setOnClickListener(v -> {
             try {
                 Intent target = Intent.parseUri(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_INTENT, shortcutId), ""),
@@ -3765,6 +3826,7 @@ public class MainActivity extends Activity {
                     labelParams.leftMargin = slot[0] * cellWidth - targetTileLeft;
                     labelParams.topMargin = target + LauncherUiUtils.dp(this, 1);
                     label.setLayoutParams(labelParams);
+                    fitShortcutLabelWithDots(label);
                 }
             }
             resolveAllWorkspaceOverlaps(page, null);
@@ -3913,7 +3975,7 @@ public class MainActivity extends Activity {
                 Color.argb(180, 0, 0, 0));
         label.setSingleLine(true);
         label.setMaxLines(1);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setEllipsize(shortcut ? null : android.text.TextUtils.TruncateAt.END);
         label.setIncludeFontPadding(false);
         if (shortcut && label.getParent() instanceof ViewGroup) {
             ViewGroup shortcutTile = (ViewGroup) label.getParent();
@@ -3943,6 +4005,7 @@ public class MainActivity extends Activity {
                 shortcutTile.setLayoutParams(tileParams);
             }
         }
+        if (shortcut) fitShortcutLabelWithDots(label);
         label.invalidate();
     }
 
@@ -7143,7 +7206,6 @@ public class MainActivity extends Activity {
         float displayPhase = live ? phase : 0f;
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
-        boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
         float borderDensity = getResources().getDisplayMetrics().density;
         // Date/AM-PM outlines are drawn by ClockTextOutlineSpan so the black inner contour
         // stays above the fill in every mode without a second renderer contour over it.
@@ -7152,7 +7214,7 @@ public class MainActivity extends Activity {
         applyClockDateBlackInnerBorder(dateText, false, 0.5f * borderDensity);
         applyClockDateBlackInnerBorder(amPmText, false, 0.5f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
-        boolean useClockWhiteInnerBorder = useWhiteGradientInnerBorder || iconArtworkActive;
+        boolean useClockWhiteInnerBorder = digitGradient || iconArtworkActive;
         int artworkThemeForText = prefs == null
                 ? LauncherIconDrawable.ARTWORK_ORIGINAL
                 : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
@@ -7231,10 +7293,12 @@ public class MainActivity extends Activity {
             // Artwork matching also gets the thin white inner contour: LED segments use
             // 0.5dp directly; normal glyph text doubles the centered stroke before masking.
             float innerBorderWidth = useClockWhiteInnerBorder
-                    ? (sevenSegment ? 0.5f : 1f) * borderDensity
+                    ? (sevenSegment ? 1f : 2f) * borderDensity
                     : (useNothingInnerBorder ? 3f * borderDensity
-                            : (sevenSegment ? 0.5f : 1f) * borderDensity);
-            clockRenderer.setDigitOnlyInnerBorder(useGradientInnerBorder);
+                            : (sevenSegment ? 1f : 2f) * borderDensity);
+            // The border renderer is shared by all clock styles. Let it also border
+            // the colon rather than restricting the contour to numeric segments only.
+            clockRenderer.setDigitOnlyInnerBorder(false);
             boolean useAnyInnerBorder = useNothingInnerBorder || useGradientInnerBorder;
             clockRenderer.setContrastInnerBorderEnabled(
                     useAnyInnerBorder, digitColours, innerBorderWidth,
@@ -7348,9 +7412,11 @@ public class MainActivity extends Activity {
                     android.util.TypedValue.COMPLEX_UNIT_SP, 0.5f,
                     getResources().getDisplayMetrics());
             float dateBorderWidthPx = density * (configuredDateSize / 20f);
+            int dateFillColor = (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                    && !iconArtworkActive) ? clockDateFillColor() : Color.rgb(238, 240, 244);
             if (dateStart < dateLine.length()) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.rgb(238, 240, 244), Color.BLACK,
+                                dateFillColor, Color.BLACK,
                                 dateBorderWidthPx, 0f),
                         dateStart, dateLine.length(),
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -7380,7 +7446,7 @@ public class MainActivity extends Activity {
             clockValue = clockValue.trim();
             boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
                     && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-            boolean useWhiteDigitInnerBorder = shouldApplyClockGradientInnerBorder()
+            boolean useWhiteDigitInnerBorder = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
                     || isClockIconArtworkActive();
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
@@ -7459,6 +7525,7 @@ public class MainActivity extends Activity {
                     || previousDateGradient.booleanValue() != useDateGradient;
             String dateAppearanceKey = configuredDateSize + ":" + configuredPmSize + ":"
                     + useDateGradient + ":" + isClockIconArtworkActive() + ":"
+                    + prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, -1) + ":"
                     + clockDateFontFamily() + ":" + clockPmFontFamily();
             String previousDateAppearance = dateTextAppearanceApplied.get(dateText);
             if (!dateLine.toString().contentEquals(dateText.getText())
@@ -10758,6 +10825,15 @@ public class MainActivity extends Activity {
                     refreshClockTypographyAndGeometry();
                     showCustomizationMenu(dialog, scroll.getScrollY(), false);
                 });
+        boolean dateColourSliderEnabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                && !isClockIconArtworkActive();
+        addColorSliderRow(content, "Clock date inner colour",
+                Math.max(0, Math.min(1000,
+                        prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, 0))),
+                dateColourSliderEnabled, value -> {
+                    prefs.edit().putInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, value).apply();
+                    updateClock();
+                });
 
         addSection(content, "Page animations");
         addChoiceRow(content, "Page transition effect", getPageTransition(),
@@ -11007,7 +11083,10 @@ public class MainActivity extends Activity {
                 float leadingCellWidth = clockText.getPaint().measureText("\u2007");
                 float trackingWidth = clockText.getTextSize() * clockText.getLetterSpacing();
                 float leadingCellAdvance = Math.max(0f, leadingCellWidth + trackingWidth);
-                targetX = -(leadingCellAdvance * 0.5f) * textScaleX;
+                // Convert the desired on-screen offset back through both local glyph
+                // scaling and the parent panel scale. Date sizing can resize that panel,
+                // but must never change this position relative to the background.
+                targetX = -(leadingCellAdvance * 0.5f) * textScaleX / panelScaleX;
             } else if (colon >= 0) {
                 // Center the colon itself, not merely the entire string. This accounts for
                 // the custom colon/digit spans and the actual advances of the displayed
@@ -11034,7 +11113,7 @@ public class MainActivity extends Activity {
                     }
                     float colonCenter = (groupWidth - fullTextWidth) * 0.5f
                             + prefixWidth + colonAdvance * 0.5f;
-                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
+                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX / panelScaleX;
                 } else {
                     targetX = 0f;
                 }
@@ -11266,6 +11345,17 @@ public class MainActivity extends Activity {
         float widthForScaleCap = sevenSegment ? clockWithMarkerWidth : naturalPanelWidth;
         final float lengthScale = Math.min(requestedLengthScale,
                 Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
+        // Neon Circuit's glyphs must keep the scale they would have without the date
+        // controlling the panel's width cap. The full panel still stays inside the page;
+        // only this style compensates the extra horizontal reduction caused by the date.
+        final boolean neonCircuitStyle = !sevenSegment && selectedClockStyle == 2;
+        final float neonCircuitScaleWithoutDateCap = neonCircuitStyle
+                ? Math.min(requestedLengthScale, Math.max(0.01f,
+                        availablePanelWidth / (float) Math.max(1, clockWithMarkerWidth)))
+                : lengthScale;
+        final float neonCircuitDateScaleCompensation = neonCircuitStyle
+                ? Math.max(1f, neonCircuitScaleWithoutDateCap / Math.max(0.01f, lengthScale))
+                : 1f;
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
@@ -11449,7 +11539,7 @@ public class MainActivity extends Activity {
                     (currentGlyphWidth - LauncherUiUtils.dp(this, 20)) / currentGlyphWidth);
         }
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale
-                : nonLedDigitScale * neonCircuitWidthScale);
+                : nonLedDigitScale * neonCircuitWidthScale * neonCircuitDateScaleCompensation);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(clockGroupWidth / 2f);
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
@@ -11621,11 +11711,11 @@ public class MainActivity extends Activity {
 
     private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
         private final float rowCenterY;
-        private final boolean skipGradientInnerBorder;
+        private final boolean drawWhiteInnerBorder;
 
-        CenteredColonSpan(float rowCenterY, boolean skipGradientInnerBorder) {
+        CenteredColonSpan(float rowCenterY, boolean drawWhiteInnerBorder) {
             this.rowCenterY = rowCenterY;
-            this.skipGradientInnerBorder = skipGradientInnerBorder;
+            this.drawWhiteInnerBorder = drawWhiteInnerBorder;
         }
 
         @Override
@@ -11639,11 +11729,22 @@ public class MainActivity extends Activity {
         @Override
         public void draw(Canvas canvas, CharSequence text, int start, int end,
                 float x, int top, int y, int bottom, Paint paint) {
-            // The ordinary gradient-border pass outlines digits only, not the colon.
-            // Leave the existing Nothing-theme rendering unchanged.
-            if (skipGradientInnerBorder && paint.getStyle() == Paint.Style.STROKE) return;
+            boolean borderPass = paint.getStyle() == Paint.Style.STROKE;
+            if (borderPass && !drawWhiteInnerBorder) return;
             Paint dots = new Paint(paint);
-            dots.setStyle(Paint.Style.FILL);
+            if (borderPass) {
+                // The renderer masks this stroke to the filled dots below, leaving a
+                // 1dp white contour inside their edges without changing the dot fill.
+                dots.setShader(null);
+                dots.setColor(Color.WHITE);
+                dots.setStyle(Paint.Style.STROKE);
+                dots.setStrokeWidth(paint.getStrokeWidth());
+                dots.setStrokeJoin(Paint.Join.ROUND);
+                dots.setStrokeCap(Paint.Cap.ROUND);
+            } else {
+                dots.setStyle(Paint.Style.FILL);
+                dots.setStrokeWidth(0f);
+            }
             float naturalWidth = paint.measureText(":");
             float radius = Math.max(1f, paint.getTextSize() * 0.045f);
             // Match the horizontal center of the colon's compact reserved advance.
