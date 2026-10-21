@@ -332,19 +332,48 @@ public class MainActivity extends Activity {
         private final int outlineColor;
         private final float borderPx;
         private final float innerBlackBorderPx;
+        private final float outerBlackBorderPx;
+        private final boolean preserveFill;
+        private final boolean extraBold;
 
         ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
                 float innerBlackBorderPx) {
+            this(fillColor, outlineColor, borderPx, innerBlackBorderPx, 0f, false, true);
+        }
+
+        ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
+                float innerBlackBorderPx, float outerBlackBorderPx) {
+            this(fillColor, outlineColor, borderPx, innerBlackBorderPx,
+                    outerBlackBorderPx, false, true);
+        }
+
+        // Keep the current TextView color/shader for ordinary and gradient modes.
+        ClockTextOutlineSpan(int outlineColor, float borderPx) {
+            this(0, outlineColor, borderPx, 0f, 0f, true, true);
+        }
+
+        private ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
+                float innerBlackBorderPx, float outerBlackBorderPx,
+                boolean preserveFill, boolean extraBold) {
             this.fillColor = fillColor;
             this.outlineColor = outlineColor;
             this.borderPx = Math.max(0.1f, borderPx);
             this.innerBlackBorderPx = Math.max(0f, innerBlackBorderPx);
+            this.outerBlackBorderPx = Math.max(0f, outerBlackBorderPx);
+            this.preserveFill = preserveFill;
+            this.extraBold = extraBold;
         }
 
         @Override public int getSize(Paint paint, CharSequence text, int start, int end,
                 android.graphics.Paint.FontMetricsInt fontMetrics) {
-            if (fontMetrics != null) paint.getFontMetricsInt(fontMetrics);
-            return Math.round(paint.measureText(text, start, end));
+            boolean oldFakeBold = paint.isFakeBoldText();
+            try {
+                if (extraBold) paint.setFakeBoldText(true);
+                if (fontMetrics != null) paint.getFontMetricsInt(fontMetrics);
+                return Math.round(paint.measureText(text, start, end));
+            } finally {
+                paint.setFakeBoldText(oldFakeBold);
+            }
         }
 
         @Override public void draw(Canvas canvas, CharSequence text, int start, int end,
@@ -354,11 +383,25 @@ public class MainActivity extends Activity {
             float oldStrokeWidth = paint.getStrokeWidth();
             Paint.Join oldJoin = paint.getStrokeJoin();
             Paint.Cap oldCap = paint.getStrokeCap();
+            boolean oldFakeBold = paint.isFakeBoldText();
             android.graphics.Shader oldShader = paint.getShader();
             android.graphics.Xfermode oldXfermode = paint.getXfermode();
             try {
                 paint.setShader(null);
                 paint.setXfermode(null);
+                paint.setFakeBoldText(extraBold || oldFakeBold);
+
+                // Artwork-matched mode already has a theme-specific outline. Draw a
+                // black underlay another 0.3dp beyond it to add the requested outer rim.
+                if (outerBlackBorderPx > 0f) {
+                    paint.setColor(Color.BLACK);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth((borderPx + outerBlackBorderPx) * 2f);
+                    paint.setStrokeJoin(Paint.Join.ROUND);
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    canvas.drawText(text, start, end, x, y, paint);
+                }
+
                 paint.setColor(outlineColor);
                 paint.setStyle(Paint.Style.STROKE);
                 paint.setStrokeWidth(borderPx * 2f);
@@ -366,9 +409,24 @@ public class MainActivity extends Activity {
                 paint.setStrokeCap(Paint.Cap.ROUND);
                 canvas.drawText(text, start, end, x, y, paint);
 
-                paint.setStyle(Paint.Style.FILL);
-                paint.setStrokeWidth(0f);
-                paint.setColor(fillColor);
+                if (preserveFill) {
+                    // Restore the active solid/gradient fill rather than overriding it.
+                    paint.setColor(oldColor);
+                    paint.setStyle(oldStyle);
+                    paint.setStrokeWidth(oldStrokeWidth);
+                    paint.setStrokeJoin(oldJoin);
+                    paint.setStrokeCap(oldCap);
+                    paint.setShader(oldShader);
+                    paint.setXfermode(oldXfermode);
+                    paint.setFakeBoldText(extraBold || oldFakeBold);
+                } else {
+                    paint.setShader(null);
+                    paint.setXfermode(null);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setStrokeWidth(0f);
+                    paint.setColor(fillColor);
+                    paint.setFakeBoldText(extraBold || oldFakeBold);
+                }
                 canvas.drawText(text, start, end, x, y, paint);
 
                 if (innerBlackBorderPx > 0f) {
@@ -376,10 +434,11 @@ public class MainActivity extends Activity {
                     // existing matched-artwork outline while adding a true inner contour.
                     float textWidth = Math.max(1f, paint.measureText(text, start, end));
                     int innerLayer = canvas.saveLayer(x, top,
-                            x + textWidth + borderPx * 2f, bottom, null);
+                            x + textWidth + (borderPx + outerBlackBorderPx) * 2f, bottom, null);
                     try {
                         paint.setShader(null);
                         paint.setXfermode(null);
+                        paint.setFakeBoldText(extraBold || oldFakeBold);
                         paint.setColor(Color.BLACK);
                         paint.setStyle(Paint.Style.STROKE);
                         paint.setStrokeWidth(innerBlackBorderPx * 2f);
@@ -403,6 +462,7 @@ public class MainActivity extends Activity {
                 paint.setStrokeWidth(oldStrokeWidth);
                 paint.setStrokeJoin(oldJoin);
                 paint.setStrokeCap(oldCap);
+                paint.setFakeBoldText(oldFakeBold);
                 paint.setShader(oldShader);
                 paint.setXfermode(oldXfermode);
             }
@@ -7018,24 +7078,30 @@ public class MainActivity extends Activity {
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            if (isClockIconArtworkActive()) {
-                // Match Artwork gives the date a white fill / 0.5dp black outline,
-                // with a grey AM/PM prefix / 1dp black outline.
-                int dateStart = use24Hour ? 0 : periodLength + 2;
-                float density = getResources().getDisplayMetrics().density;
-                float blackInnerWidth = shouldApplyClockDateBlackInnerBorder()
-                        ? 0.2f * density : 0f;
-                if (dateStart < dateLine.length()) {
-                    dateLine.setSpan(new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
-                                    0.5f * density, blackInnerWidth),
-                            dateStart, dateLine.length(),
-                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                }
-                if (!use24Hour && periodLength > 0) {
-                    dateLine.setSpan(new ClockTextOutlineSpan(Color.rgb(160, 163, 170),
-                                    Color.BLACK, 1f * density, blackInnerWidth),
-                            0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                }
+            // Always outline both text runs. Artwork mode retains its established fills
+            // and inner contour, with an additional 0.3dp black rim outside that outline.
+            // Other modes preserve their live solid/gradient paint and get the same outer rim.
+            boolean iconArtworkActive = isClockIconArtworkActive();
+            int dateStart = use24Hour ? 0 : periodLength + 2;
+            float density = getResources().getDisplayMetrics().density;
+            float blackOuterWidth = 0.3f * density;
+            float blackInnerWidth = iconArtworkActive && shouldApplyClockDateBlackInnerBorder()
+                    ? 0.2f * density : 0f;
+            if (dateStart < dateLine.length()) {
+                ClockTextOutlineSpan dateOutline = iconArtworkActive
+                        ? new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
+                                0.5f * density, blackInnerWidth, blackOuterWidth)
+                        : new ClockTextOutlineSpan(Color.BLACK, blackOuterWidth);
+                dateLine.setSpan(dateOutline, dateStart, dateLine.length(),
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (!use24Hour && periodLength > 0) {
+                ClockTextOutlineSpan periodOutline = iconArtworkActive
+                        ? new ClockTextOutlineSpan(Color.rgb(160, 163, 170), Color.BLACK,
+                                1f * density, blackInnerWidth, blackOuterWidth)
+                        : new ClockTextOutlineSpan(Color.BLACK, blackOuterWidth);
+                dateLine.setSpan(periodOutline, 0, periodLength,
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             String clockValue = formatClockDigits(now, use24Hour);
             if (amPmText != null) {
