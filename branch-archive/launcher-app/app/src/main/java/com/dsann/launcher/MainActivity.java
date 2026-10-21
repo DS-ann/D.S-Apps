@@ -8525,6 +8525,12 @@ public class MainActivity extends Activity {
             // Keep the separator aligned with the active clock's vertical transform
             // after every text refresh, independently of the date/AM-PM typography.
             syncClockColonVerticalCenter();
+            // TextView may not have rebuilt its Layout yet during initial creation.
+            // Re-sync once the posted layout work has had a chance to complete.
+            final TextView pendingColonSyncTarget = clockText;
+            pendingColonSyncTarget.post(() -> {
+                if (clockText == pendingColonSyncTarget) syncClockColonVerticalCenter();
+            });
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
@@ -12871,10 +12877,15 @@ public class MainActivity extends Activity {
             // This keeps a balanced two-digit time centered in its background.
             float colonAdvance = Math.max(1f, Math.round(naturalWidth * 0.45f));
             float centerX = x + colonAdvance * 0.5f;
-            // Anchor the dots to the actual 114 dp clock-row center, not the font
-            // line bounds (which vary by typeface and can sit above the background center).
-            // Parent resizing scales the row and this coordinate together.
+            // Use the clock-row pivot after converting it into Layout coordinates.
+            // If the Layout was not available when the span was created, keep the dots
+            // inside this rendered line instead of drawing them beyond its visible bounds.
             float centerY = rowCenterY;
+            float lineTop = Math.min(top, bottom);
+            float lineBottom = Math.max(top, bottom);
+            if (centerY < lineTop || centerY > lineBottom) {
+                centerY = (lineTop + lineBottom) * 0.5f;
+            }
             float gap = paint.getTextSize() * 0.18f;
 
             Paint dots = new Paint(paint);
