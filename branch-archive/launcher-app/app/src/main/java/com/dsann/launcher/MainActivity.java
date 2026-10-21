@@ -9410,6 +9410,13 @@ public class MainActivity extends Activity {
             clockValue = clockValue.trim();
             boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
                     && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+            int fallbackColonAt = clockValue.indexOf(':');
+            int fallbackHourDigits = 0;
+            for (int i = 0; fallbackColonAt >= 0 && i < fallbackColonAt; i++) {
+                if (Character.digit(clockValue.charAt(i), 10) >= 0) fallbackHourDigits++;
+            }
+            boolean api23TwoDigitTextFallback = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                    && !sevenSegmentClock && fallbackHourDigits >= 2;
             if (clockText instanceof SevenSegmentClockTextView) {
                 ((SevenSegmentClockTextView) clockText).setSevenSegmentMode(sevenSegmentClock);
             }
@@ -9421,7 +9428,8 @@ public class MainActivity extends Activity {
                     || isClockIconArtworkActive();
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
-            if (!sevenSegmentClock && !clockValue.isEmpty()) {
+            if (!sevenSegmentClock && !clockValue.isEmpty()
+                    && !api23TwoDigitTextFallback) {
                 // Reserve a leading invisible '1' when the hour has one digit.
                 int firstDigit = -1;
                 for (int i = 0; i < clockValue.length(); i++) {
@@ -9484,7 +9492,8 @@ public class MainActivity extends Activity {
                     || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
             boolean missingDisplaySpans = false;
             int expectedColon = displayClock.toString().indexOf(':');
-            if (!sevenSegmentClock && !clockValue.isEmpty() && expectedColon >= 0) {
+            if (!sevenSegmentClock && !api23TwoDigitTextFallback
+                    && !clockValue.isEmpty() && expectedColon >= 0) {
                 CharSequence existingText = clockText.getText();
                 if (!(existingText instanceof android.text.Spanned)) {
                     missingDisplaySpans = true;
@@ -10135,7 +10144,6 @@ public class MainActivity extends Activity {
         addAppShiftDirection(directions, seenDirections, 0, 1);
         addAppShiftDirection(directions, seenDirections, 0, -1);
 
-        int[] moverGeometry = itemGeometry(movingView);
         for (int[] direction : directions) {
             int dxCells = direction[0];
             int dyCells = direction[1];
