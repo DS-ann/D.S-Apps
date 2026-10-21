@@ -465,6 +465,10 @@ public class MainActivity extends Activity {
             if (drawerSnapshotBody == null || drawerGrid == null || drawerAdapter == null
                     || drawerScreen == null || drawerScreen.getVisibility() == View.GONE
                     || isFinishing()) return;
+            if (drawerSnapshotBody.getWidth() <= 0 || drawerSnapshotBody.getHeight() <= 0) {
+                if (++drawerSnapshotReadyChecks <= 100) handler.postDelayed(this, 100L);
+                return;
+            }
 
             // Load the durable viewport image while the drawer is still hidden at Home.
             // If the settings or app list changed, loadPersistentSnapshot rejects it safely.
@@ -476,9 +480,16 @@ public class MainActivity extends Activity {
             }
             long signature = drawerSnapshotCurrentSignature;
             int firstVisible = drawerGrid.getFirstVisiblePosition();
+            boolean cachedFrameValid = false;
             if (drawerSnapshotDiskLoadSignature != signature) {
-                drawerSnapshotBody.loadPersistentSnapshot(signature, firstVisible);
+                cachedFrameValid = drawerSnapshotBody.loadPersistentSnapshot(signature, firstVisible);
                 drawerSnapshotDiskLoadSignature = signature;
+            }
+            if (cachedFrameValid) {
+                // A matching stored image is already the finished drawer. Leave it intact and
+                // skip both grid recapture and PNG rewrite on every ordinary opening.
+                drawerSnapshotReadyChecks = 0;
+                return;
             }
 
             if (drawerAdapter.areVisibleIconsReady(drawerGrid)) {
