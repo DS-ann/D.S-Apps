@@ -633,18 +633,19 @@ public final class LauncherAppAdapter extends BaseAdapter {
             label.setText(fullLabel);
         }
         // Font-size preferences are stored as the exact SP value selected by the slider.
-        float targetTextSize = Math.max(8f, Math.min(20f,
+        float targetTextSize = Math.max(8f, Math.min(15f,
                 preferences == null ? 9f : preferences.getInt(fontSizeKey, 9)));
         if (Math.abs(label.getTextSize() - targetTextSize * activity.getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
             label.setTextSize(targetTextSize);
         }
         // Apply shared system-font and colour choices before measuring each recycled Home/drawer label.
-        int labelFontSelection = Math.max(0, Math.min(2,
+        int labelFontSelection = Math.max(0, Math.min(3,
                 preferences == null ? 0 : preferences.getInt("home_label_font_family", 0)));
         String labelTypefaceFamily;
         switch (labelFontSelection) {
             case 1: labelTypefaceFamily = "serif"; break;
             case 2: labelTypefaceFamily = "monospace"; break;
+            case 3: labelTypefaceFamily = "cursive"; break;
             default: labelTypefaceFamily = "sans-serif";
         }
         Typeface wantedTypeface = Typeface.create(labelTypefaceFamily, Typeface.NORMAL);

@@ -449,7 +449,7 @@ public class MainActivity extends Activity {
                         paint.setShader(null);
                         paint.setXfermode(null);
                         paint.setFakeBoldText(extraBold || oldFakeBold);
-                        paint.setColor(outlineColor);
+                        paint.setColor(Color.BLACK);
                         paint.setStyle(Paint.Style.STROKE);
                         paint.setStrokeWidth(innerBorderPx * 2f);
                         paint.setStrokeJoin(Paint.Join.ROUND);
@@ -2467,7 +2467,8 @@ public class MainActivity extends Activity {
             this.page = page;
             // Use a quiet filled placement marker, not a full grid of heavy lines.
             gridPaint.setStyle(Paint.Style.FILL);
-            gridPaint.setColor(Color.argb(34, 120, 165, 255));
+            // More visible while moving, while remaining translucent over wallpaper.
+            gridPaint.setColor(Color.argb(72, 120, 165, 255));
         }
         void configure(int cw, int ch) {
             int nextW = Math.max(1, cw);
@@ -2664,7 +2665,7 @@ public class MainActivity extends Activity {
      * accessibility font scaling is respected on Android 6 as well.
      */
     private int homeFontSizeSp() {
-        return Math.max(8, Math.min(20,
+        return Math.max(8, Math.min(15,
                 prefs == null ? 9 : prefs.getInt(KEY_HOME_FONT_SIZE, 9)));
     }
 
@@ -2769,6 +2770,44 @@ public class MainActivity extends Activity {
                 ? Math.max(0, pageHeightPx - rows * cellHeight - homeGridBottomGapPx()) : 0;
         return Math.max(0, Math.min(rows - 1,
                 Math.round((topPx - topInset) / (float) cellHeight)));
+    }
+
+    /**
+     * Finds the home-grid slot with the greatest intersection with the drag boundary.
+     * A slot is returned only when it contains at least 50% of that boundary's area.
+     */
+    private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
+            int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
+            int columns, int rows, int cellWidth, int cellHeight) {
+        long boundaryArea = (long) Math.max(1, boundaryWidth) * Math.max(1, boundaryHeight);
+        long bestOverlapArea = 0L;
+        int bestColumn = -1;
+        int bestRow = -1;
+        int boundaryRight = boundaryLeft + Math.max(1, boundaryWidth);
+        int boundaryBottom = boundaryTop + Math.max(1, boundaryHeight);
+
+        for (int row = 0; row < Math.max(1, rows); row++) {
+            int cellTop = homeGridRowTop(row, rows, pageHeight, cellHeight);
+            int cellBottom = Math.min(pageHeight, cellTop + cellHeight);
+            int overlapHeight = Math.max(0,
+                    Math.min(boundaryBottom, cellBottom) - Math.max(boundaryTop, cellTop));
+            if (overlapHeight <= 0) continue;
+            for (int column = 0; column < Math.max(1, columns); column++) {
+                int cellLeft = column * cellWidth;
+                int cellRight = Math.min(pageWidth, cellLeft + cellWidth);
+                int overlapWidth = Math.max(0,
+                        Math.min(boundaryRight, cellRight) - Math.max(boundaryLeft, cellLeft));
+                if (overlapWidth <= 0) continue;
+                long overlapArea = (long) overlapWidth * overlapHeight;
+                if (overlapArea > bestOverlapArea) {
+                    bestOverlapArea = overlapArea;
+                    bestColumn = column;
+                    bestRow = row;
+                }
+            }
+        }
+        return bestColumn >= 0 && bestOverlapArea * 2L >= boundaryArea
+                ? new int[]{bestColumn, bestRow} : null;
     }
 
     private String clockPrefKey(String key, int page) {
@@ -2959,6 +2998,7 @@ public class MainActivity extends Activity {
         rebuildPages();
         if (homePageController != null) homePageController.renderHomePages(animate);
         renderSavedContactShortcut();
+        ensureShortcutLabelsNotClipped();
         renderDock();
         attachClockPanelsToPages();
         // Validate after the controller's posted layout corrections and clock remeasurements.
@@ -3217,18 +3257,18 @@ public class MainActivity extends Activity {
 
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
-                homeFontSizeSp(), homeLabelColor(), true);
-        label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.BOLD));
+                homeFontSizeSp(), homeLabelColor(), false);
+        label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.NORMAL));
         label.setShadowLayer(LauncherUiUtils.dp(this, 1), 0f, LauncherUiUtils.dp(this, 1),
-                Color.argb(210, 0, 0, 0));
-        label.setGravity(Gravity.CENTER);
+                Color.argb(180, 0, 0, 0));
+        label.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
         label.setSingleLine(true);
         label.setMaxLines(1);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setIncludeFontPadding(false);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
                 cellW, LauncherUiUtils.dp(this, homeLabelHeightDp()), Gravity.TOP | Gravity.LEFT);
-        labelParams.leftMargin = -Math.max(0, (cellW - initialIconSize) / 2);
+        labelParams.leftMargin = chosenCol * cellW - tileLeft;
         labelParams.topMargin = initialIconSize + LauncherUiUtils.dp(this, 1);
         tile.addView(label, labelParams);
         label.setVisibility(prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
@@ -3683,7 +3723,8 @@ public class MainActivity extends Activity {
                 int labelExtraHeight = prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
                         ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
                 tileParams.height = target + labelExtraHeight;
-                tileParams.leftMargin = homeGridIconLeftAt(null, slot[0], cellWidth, target);
+                int targetTileLeft = homeGridIconLeftAt(null, slot[0], cellWidth, target);
+                tileParams.leftMargin = targetTileLeft;
                 tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight)
                         + LauncherUiUtils.dp(this, 14);
                 shortcut.setLayoutParams(tileParams);
@@ -3698,13 +3739,14 @@ public class MainActivity extends Activity {
                     FrameLayout.LayoutParams labelParams =
                             (FrameLayout.LayoutParams) label.getLayoutParams();
                     labelParams.width = cellWidth;
-                    labelParams.leftMargin = -Math.max(0, (cellWidth - target) / 2);
+                    labelParams.leftMargin = slot[0] * cellWidth - targetTileLeft;
                     labelParams.topMargin = target + LauncherUiUtils.dp(this, 1);
                     label.setLayoutParams(labelParams);
                 }
             }
             resolveAllWorkspaceOverlaps(page, null);
         }
+        ensureShortcutLabelsNotClipped();
         refreshWorkspaceGrid();
     }
 
@@ -3811,13 +3853,40 @@ public class MainActivity extends Activity {
                 "shortcut:" + token, false));
     }
 
+    private void ensureShortcutLabelsNotClipped() {
+        if (pagesStrip == null) return;
+        for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            boolean hasContactShortcut = false;
+            for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                Object tag = page.getChildAt(childIndex).getTag();
+                if ("launcher_contact_shortcut".equals(tag)) {
+                    hasContactShortcut = true;
+                    break;
+                }
+            }
+            if (hasContactShortcut) {
+                // The icon tile stays icon-sized; only its separate label view spans the
+                // logical cell. The page viewport remains the clipping boundary for the screen.
+                page.setClipChildren(false);
+                page.setClipToPadding(false);
+            }
+        }
+    }
+
     private void applyWorkspaceLabelAppearance(TextView label, boolean shortcut) {
         if (label == null) return;
-        label.setTypeface(Typeface.create(homeLabelTypefaceFamily(),
-                shortcut ? Typeface.BOLD : Typeface.NORMAL));
+        // Home and shortcut labels share the same font family and regular weight.
+        label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.NORMAL));
         label.setTextColor(homeLabelColor());
         label.setShadowLayer(LauncherUiUtils.dp(this, 1), 0f, LauncherUiUtils.dp(this, 1),
-                Color.argb(190, 0, 0, 0));
+                Color.argb(180, 0, 0, 0));
+        label.setSingleLine(true);
+        label.setMaxLines(1);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setIncludeFontPadding(false);
         label.invalidate();
     }
 
@@ -3853,6 +3922,7 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        ensureShortcutLabelsNotClipped();
     }
 
     private void refreshWorkspaceIconAppearance() {
@@ -4819,13 +4889,35 @@ public class MainActivity extends Activity {
                     int cellWidth = Math.max(1, targetWidth / columns);
                     int cellHeight = slotHeight;
                     rows = Math.max(1, Math.min(rows, targetHeight / cellHeight));
-                    float desiredLeft = event.getRawX() - viewportLocation[0] - cellWidth / 2f;
-                    int targetCol = Math.max(0, Math.min(columns - 1,
-                            Math.round(desiredLeft / cellWidth)));
-                    float desiredTop = event.getRawY()
+
+                    // Use the actual dragged cell boundary, matching the rectangle that follows
+                    // the finger during MOVE. Do not use the artwork glyph's smaller visual bounds.
+                    int dragBoundaryWidth = Math.max(1,
+                            view.getWidth() > 0 ? view.getWidth() : cellWidth);
+                    int dragBoundaryHeight = Math.max(1,
+                            view.getHeight() > 0 ? view.getHeight() : cellHeight);
+                    float desiredBoundaryLeft = event.getRawX() - viewportLocation[0]
+                            - dragBoundaryWidth / 2f;
+                    float desiredBoundaryTop = event.getRawY()
                             - viewportLocation[1] - iconDragFingerOffsetY;
-                    int targetRow = homeGridRowFromTop(
-                            desiredTop, rows, targetHeight, cellHeight);
+                    int boundaryLeft = Math.max(0, Math.min(
+                            Math.max(0, targetWidth - dragBoundaryWidth),
+                            Math.round(desiredBoundaryLeft)));
+                    int boundaryTop = Math.max(0, Math.min(
+                            Math.max(0, targetHeight - dragBoundaryHeight),
+                            Math.round(desiredBoundaryTop)));
+
+                    // A slot qualifies only when at least half of the drag-boundary area overlaps
+                    // it. This makes release placement follow the same visible movement boundary.
+                    int[] majorityOverlapSlot = findHomeGridSlotForDragBoundary(
+                            boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
+                            targetWidth, targetHeight, columns, rows, cellWidth, cellHeight);
+                    boolean boundaryHasMajorityCell = majorityOverlapSlot != null;
+                    int targetCol = boundaryHasMajorityCell ? majorityOverlapSlot[0]
+                            : Math.max(0, Math.min(columns - 1,
+                                    Math.round(boundaryLeft / (float) cellWidth)));
+                    int targetRow = boundaryHasMajorityCell ? majorityOverlapSlot[1]
+                            : homeGridRowFromTop(boundaryTop, rows, targetHeight, cellHeight);
                     int proposedIconLeft = targetCol * cellWidth;
                     int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
                     FrameLayout.LayoutParams snappedCandidate =
@@ -4835,9 +4927,9 @@ public class MainActivity extends Activity {
                     view.setTranslationX(0f);
                     view.setTranslationY(0f);
                     view.setLayoutParams(snappedCandidate);
-                    updateLiveDisplacements(targetPage, view);
-                    if (!canPlaceWorkspaceItem(targetPage, view, proposedIconLeft,
-                            proposedIconTop, cellWidth, cellHeight)) {
+                    if (boundaryHasMajorityCell) updateLiveDisplacements(targetPage, view);
+                    if (!boundaryHasMajorityCell || !canPlaceWorkspaceItem(targetPage, view,
+                            proposedIconLeft, proposedIconTop, cellWidth, cellHeight)) {
                         FrameLayout.LayoutParams rollbackParams =
                                 (FrameLayout.LayoutParams) view.getLayoutParams();
                         rollbackParams.leftMargin = iconOriginalLeft;
@@ -4859,7 +4951,13 @@ public class MainActivity extends Activity {
                         iconDragPageIndex = -1;
                         iconOriginalPageIndex = -1;
                         iconEdgeLatch = 0;
-                        showWorkspaceOverlapRejected();
+                        if (boundaryHasMajorityCell) {
+                            showWorkspaceOverlapRejected();
+                        } else {
+                            Toast.makeText(this,
+                                    "Move at least half of the drag boundary into a grid cell.",
+                                    Toast.LENGTH_SHORT).show();
+                        }
                         return true;
                     }
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
@@ -6990,30 +7088,21 @@ public class MainActivity extends Activity {
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
-        boolean useBlackDateInnerBorder = shouldApplyClockDateInnerBorder();
         float borderDensity = getResources().getDisplayMetrics().density;
-        // The normal text renderer masks the outside half of the stroke, leaving a 0.5dp
-        // white inner contour. The thinner black contour is drawn as a separate inner pass.
-        applyClockTextInnerBorder(dateText, useWhiteGradientInnerBorder, 1f * borderDensity);
-        applyClockTextInnerBorder(amPmText, useWhiteGradientInnerBorder, 1f * borderDensity);
-        // Matched-artwork mode styles the date and AM/PM spans directly, so those spans
-        // receive their own black inner contour instead of a duplicate whole-view pass.
-        boolean useBlackViewInnerBorder = useBlackDateInnerBorder && !isClockIconArtworkActive();
-        applyClockDateBlackInnerBorder(dateText, useBlackViewInnerBorder, 0.2f * borderDensity);
-        applyClockDateBlackInnerBorder(amPmText, useBlackViewInnerBorder, 0.2f * borderDensity);
+        // Date/AM-PM outlines are drawn by ClockTextOutlineSpan so the black inner contour
+        // stays above the fill in every mode without a second renderer contour over it.
+        applyClockTextInnerBorder(dateText, false, 1f * borderDensity);
+        applyClockTextInnerBorder(amPmText, false, 1f * borderDensity);
+        applyClockDateBlackInnerBorder(dateText, false, 0.5f * borderDensity);
+        applyClockDateBlackInnerBorder(amPmText, false, 0.5f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
         boolean useClockWhiteInnerBorder = useWhiteGradientInnerBorder || iconArtworkActive;
         int artworkThemeForText = prefs == null
                 ? LauncherIconDrawable.ARTWORK_ORIGINAL
                 : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
                         KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
-        boolean neonCircuitForText = prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
-        boolean nothingArtworkForText = iconArtworkActive
-                && artworkThemeForText == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
         int[] artworkTextColours = iconArtworkActive
-                ? (nothingArtworkForText && !neonCircuitForText
-                        ? CLOCK_NOTHING_MATCH_DIGIT_GRADIENT_COLORS
-                        : getClockArtworkTransitionColours())
+                ? getClockArtworkTransitionColours()
                 : CLOCK_DATE_GRADIENT_COLORS;
 
         // Artwork matching uses the same selected palette gradient for the date and
@@ -7190,23 +7279,23 @@ public class MainActivity extends Activity {
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            // Every visible date/AM-PM glyph keeps a 0.4dp white outer outline.
-            // Artwork-matched spans preserve the selected palette gradient and retain the
-            // existing 0.2dp inner white contour on themes that support it.
+            // Every visible date/AM-PM glyph keeps a 0.4dp white outer outline plus
+            // a 0.5sp black contour masked inside its fill in every colour/theme mode.
             int dateStart = use24Hour ? 0 : periodLength + 2;
             float density = getResources().getDisplayMetrics().density;
             float whiteOuterWidth = 0.4f * density;
-            float whiteInnerWidth = iconArtworkActive && shouldApplyClockDateInnerBorder()
-                    ? 0.2f * density : 0f;
+            float blackInnerWidth = android.util.TypedValue.applyDimension(
+                    android.util.TypedValue.COMPLEX_UNIT_SP, 0.5f,
+                    getResources().getDisplayMetrics());
             if (dateStart < dateLine.length()) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.WHITE, whiteOuterWidth, whiteInnerWidth),
+                                Color.WHITE, whiteOuterWidth, blackInnerWidth),
                         dateStart, dateLine.length(),
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             if (!use24Hour && periodLength > 0) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.WHITE, whiteOuterWidth, whiteInnerWidth),
+                                Color.WHITE, whiteOuterWidth, blackInnerWidth),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             String clockValue = formatClockDigits(now, use24Hour);
@@ -9821,8 +9910,8 @@ public class MainActivity extends Activity {
                 drawerFont = old >= 0 && old < legacyFontSizes.length ? legacyFontSizes[old] : 9;
             }
         }
-        if (homeFont < 8 || homeFont > 20) edit.putInt(KEY_HOME_FONT_SIZE, Math.max(8, Math.min(20, homeFont)));
-        if (drawerFont < 8 || drawerFont > 20) edit.putInt(KEY_DRAWER_FONT_SIZE, Math.max(8, Math.min(20, drawerFont)));
+        if (homeFont < 8 || homeFont > 15) edit.putInt(KEY_HOME_FONT_SIZE, Math.max(8, Math.min(15, homeFont)));
+        if (drawerFont < 8 || drawerFont > 15) edit.putInt(KEY_DRAWER_FONT_SIZE, Math.max(8, Math.min(15, drawerFont)));
         // Six icons per row are available only for Small and Medium icon sizes.
         if (homeSize > 64 && homeColumns > 5) {
             homeColumns = 5;
@@ -10426,7 +10515,7 @@ public class MainActivity extends Activity {
             refreshWorkspaceIconAppearance();
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
-        addSliderRowOnStop(content, "Home app font size", 8, 20,
+        addSliderRowOnStop(content, "Home app font size", 8, 15,
                 homeFontSizeSp(), " sp", value -> {
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
             renderHomePages(false);
@@ -10654,8 +10743,8 @@ public class MainActivity extends Activity {
             drawerGrid.setSelection(0);
             drawerGrid.requestLayout();
         });
-        addSliderRowOnStop(content, "App drawer font size", 8, 20,
-                Math.max(8, Math.min(20, prefs.getInt(KEY_DRAWER_FONT_SIZE, 9))), " sp", value -> {
+        addSliderRowOnStop(content, "App drawer font size", 8, 15,
+                Math.max(8, Math.min(15, prefs.getInt(KEY_DRAWER_FONT_SIZE, 9))), " sp", value -> {
             prefs.edit().putInt(KEY_DRAWER_FONT_SIZE, value).apply();
             drawerAdapter.notifyDataSetChanged();
             drawerGrid.requestLayout();
@@ -10897,6 +10986,46 @@ public class MainActivity extends Activity {
         }
     }
 
+    private int measureClockDateLineWidth(String text, int dateSizeSp, int pmSizeSp) {
+        if (dateText == null || text == null || text.isEmpty()) return 1;
+        float scaledDensity = Math.max(0.1f, getResources().getDisplayMetrics().scaledDensity);
+        android.graphics.Paint datePaint = new android.graphics.Paint(dateText.getPaint());
+        datePaint.setTypeface(Typeface.create(clockDateFontFamily(), Typeface.BOLD));
+        datePaint.setTextSize(dateSizeSp * scaledDensity);
+
+        float width;
+        if (!DateFormat.is24HourFormat(this)) {
+            String period = new SimpleDateFormat("a", Locale.getDefault()).format(new Date());
+            String prefix = period + ", ";
+            if (text.startsWith(prefix)) {
+                android.graphics.Paint pmPaint = new android.graphics.Paint(datePaint);
+                pmPaint.setTypeface(Typeface.create(clockPmFontFamily(), Typeface.BOLD_ITALIC));
+                pmPaint.setTextSize(pmSizeSp * scaledDensity);
+                width = pmPaint.measureText(period)
+                        + datePaint.measureText(", ")
+                        + datePaint.measureText(text.substring(prefix.length()));
+            } else {
+                width = datePaint.measureText(text);
+            }
+        } else {
+            width = datePaint.measureText(text);
+        }
+
+        // Paint.measureText omits the em-based letter spacing set on the date TextView.
+        float tracking = dateText.getLetterSpacing();
+        int periodChars = 0;
+        if (!DateFormat.is24HourFormat(this)) {
+            String period = new SimpleDateFormat("a", Locale.getDefault()).format(new Date());
+            if (text.startsWith(period + ", ")) periodChars = period.length();
+        }
+        int dateSizedChars = Math.max(0, text.length() - periodChars);
+        width += tracking * dateSizeSp * scaledDensity * Math.max(0, dateSizedChars - 1);
+        if (periodChars > 1) {
+            width += tracking * pmSizeSp * scaledDensity * (periodChars - 1);
+        }
+        return Math.max(1, (int) Math.ceil(width));
+    }
+
     private void applyClockPositionAndSize() {
         if (clockPanel == null || clockText == null) return;
         final LinearLayout targetPanel = clockPanel;
@@ -11025,13 +11154,8 @@ public class MainActivity extends Activity {
                 measuredDate = new SimpleDateFormat("a", Locale.getDefault()).format(new Date())
                         + "  " + measuredDate;
             }
-            measuredDateWidth = (int) Math.ceil(dateText.getPaint().measureText(measuredDate));
-            if (!DateFormat.is24HourFormat(this)) {
-                String period = new SimpleDateFormat("a", Locale.getDefault()).format(new Date());
-                float extraPmWidth = dateText.getPaint().measureText(period)
-                        * (configuredPmSize / (float) configuredDateSize - 1f);
-                measuredDateWidth = Math.max(1, (int) Math.ceil(measuredDateWidth + extraPmWidth));
-            }
+            measuredDateWidth = measureClockDateLineWidth(
+                    measuredDate, configuredDateSize, configuredPmSize);
         }
         final int dateWidth = measuredDateWidth;
         // Measure the panel at its natural width, then scale the complete panel.
@@ -11096,17 +11220,26 @@ public class MainActivity extends Activity {
                 return;
             }
             float targetTranslationX = targetPanel.getTranslationX();
-            FrameLayout groupForAnchor = clockGroupsByPage[targetPage];
-            if (preserveClockGroupScreenX && groupForAnchor != null) {
-                int[] currentClockGroupLocation = new int[2];
-                groupForAnchor.getLocationOnScreen(currentClockGroupLocation);
-                // Correct the horizontal gravity shift caused by a wider date line.
-                targetTranslationX += previousClockGroupLocation[0] - currentClockGroupLocation[0];
-            }
             float[] bounded = clampClockTranslation(targetPanel,
                     targetTranslationX, targetPanel.getTranslationY());
             setClampedClockTranslationForPanel(
                     targetPanel, targetPage, bounded[0], bounded[1], true);
+
+            FrameLayout groupForAnchor = clockGroupsByPage[targetPage];
+            if (preserveClockGroupScreenX && groupForAnchor != null) {
+                int[] currentClockGroupLocation = new int[2];
+                groupForAnchor.getLocationOnScreen(currentClockGroupLocation);
+                // Date/AM-PM size can change the panel width, scale pivot and gravity.
+                // Keep the digits at their prior screen X by translating only their fixed-
+                // width group after parent bounds and clamping have settled.
+                float parentScale = Math.max(0.01f, Math.abs(targetPanel.getScaleX()));
+                float localCorrection = (previousClockGroupLocation[0]
+                        - currentClockGroupLocation[0]) / parentScale;
+                if (Math.abs(localCorrection) > 0.25f) {
+                    groupForAnchor.setTranslationX(
+                            groupForAnchor.getTranslationX() + localCorrection);
+                }
+            }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
                 updateClockResizeHandles();
             }
