@@ -9428,7 +9428,11 @@ public class MainActivity extends Activity {
                     clockText.setText(displayClock, TextView.BufferType.NORMAL);
                     clockText.postInvalidateOnAnimation();
                 } else {
-                    clockText.setText(displayClock);
+                    // Keep replacement spans in a mutable buffer on API 23. This forces
+                    // the two-digit glyph/colon layout to be rebuilt after package updates.
+                    clockText.setText(displayClock, TextView.BufferType.SPANNABLE);
+                    clockText.requestLayout();
+                    clockText.invalidate();
                 }
                 clockDigitInnerBorderModeApplied.put(clockText, useWhiteDigitInnerBorder);
             }
@@ -13230,7 +13234,18 @@ public class MainActivity extends Activity {
                             + prefixWidth + colonAdvance * 0.5f;
                     // Center the colon in parent-local coordinates. Do not divide by
                     // panelScaleX: the background receives that same parent transform.
-                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
+                    float measuredTargetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
+                    // API 23 can briefly report inconsistent desired widths for two-digit
+                    // hours with ReplacementSpans immediately after package replacement.
+                    // Bound this correction so bad transient metrics cannot push all digits
+                    // outside their clock group.
+                    if (Float.isNaN(measuredTargetX) || Float.isInfinite(measuredTargetX)) {
+                        measuredTargetX = 0f;
+                    }
+                    float safeOffsetLimit = Math.min(groupWidth * 0.18f,
+                            LauncherUiUtils.dp(this, 24));
+                    targetX = Math.max(-safeOffsetLimit,
+                            Math.min(safeOffsetLimit, measuredTargetX));
                 } else {
                     targetX = 0f;
                 }
