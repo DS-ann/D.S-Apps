@@ -124,19 +124,61 @@ public class MainActivity extends Activity {
         calculatedPercent.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         calculatedPercent.setTextColor(0xFF63E6A8);
         calculator.addView(calculatedPercent,top(4));
-        calculatedMah=text("Remaining charge: waiting for capacity data",13);
+        calculatedMah=text("Remaining charge: set custom capacity to start",13);
         calculatedMah.setTextColor(0xFFD2D8E0);
         calculator.addView(calculatedMah,top(2));
-        calculatedStatus=text("Waiting for the first current sample.",12);
+        calculatedStatus=text("System capacity data is not used by this calculator.",12);
         calculatedStatus.setTextColor(0xFF9AA0AA);
         calculator.addView(calculatedStatus,top(4));
-        TextView calculatorHint=text("Calculated independently by integrating current every 1 second. Enable Background recording to keep it updated while the app is closed.",11);
+
+        TextView capacityLabel=text("Your battery's full capacity (mAh)",13);
+        capacityLabel.setTextColor(0xFFD2D8E0);
+        calculator.addView(capacityLabel,top(10));
+        EditText customCapacityInput=new EditText(this);
+        customCapacityInput.setSingleLine(true);
+        customCapacityInput.setHint("Enter a value, e.g. 4050");
+        customCapacityInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        double savedCustomCapacity=BatteryPercentCalculator.getCustomCapacityMah(this);
+        if(savedCustomCapacity>0){
+            customCapacityInput.setText(String.format(java.util.Locale.US,"%.2f",savedCustomCapacity)
+                    .replaceAll("\\.?0+$",""));
+        }
+        calculator.addView(customCapacityInput,top(3));
+
+        TextView calculatorHint=text("When you save, the current Android percentage is used only to set the starting mAh. After that, the estimate changes from current × elapsed time. Enable Background recording to keep it updating when the app is closed.",11);
         calculatorHint.setTextColor(0xFF858D99);
         calculatorHint.setLineSpacing(dp(1),1.0f);
-        calculator.addView(calculatorHint,top(7));
-        Button recalibrate=actionButton("Recalibrate");
-        calculator.addView(recalibrate,top(8));
-        recalibrate.setOnClickListener(v->{
+        calculator.addView(calculatorHint,top(5));
+
+        LinearLayout calculatorActions=new LinearLayout(this);
+        calculatorActions.setGravity(Gravity.CENTER_VERTICAL);
+        Button saveCapacity=actionButton("Save & start");
+        Button rebaseline=actionButton("Reset estimate");
+        calculatorActions.addView(saveCapacity,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(0,-2,1);
+        resetParams.leftMargin=dp(8);
+        calculatorActions.addView(rebaseline,resetParams);
+        calculator.addView(calculatorActions,top(8));
+        saveCapacity.setOnClickListener(v->{
+            String input=customCapacityInput.getText().toString().trim();
+            if(input.isEmpty()){
+                calculatedStatus.setText("Enter your battery capacity in mAh first.");
+                return;
+            }
+            try{
+                double mah=Double.parseDouble(input);
+                if(Double.isNaN(mah)||Double.isInfinite(mah)||mah<100.0||mah>100000.0){
+                    calculatedStatus.setText("Enter a capacity between 100 and 100000 mAh.");
+                    return;
+                }
+                BatteryReader.Reading sample=BatteryReader.read(this);
+                updateCalculatedLevel(BatteryPercentCalculator.setCustomCapacity(this,mah,sample));
+            }catch(NumberFormatException e){
+                calculatedStatus.setText("Enter a valid numeric capacity in mAh.");
+            }
+        });
+        rebaseline.setOnClickListener(v->{
             BatteryReader.Reading sample=BatteryReader.read(this);
             updateCalculatedLevel(BatteryPercentCalculator.recalibrate(this,sample));
         });
@@ -416,7 +458,9 @@ public class MainActivity extends Activity {
         if(calculatedPercent==null||calculatedMah==null||calculatedStatus==null)return;
         if(estimate==null||!estimate.isAvailable()){
             calculatedPercent.setText("--%");
-            calculatedMah.setText("Remaining charge: unavailable");
+            calculatedMah.setText(estimate!=null&&estimate.capacityMah>0
+                    ?"Remaining charge: waiting for starting percentage"
+                    :"Remaining charge: set custom capacity to start");
             calculatedStatus.setText(estimate==null?"Calculator unavailable":estimate.status);
             return;
         }

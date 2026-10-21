@@ -13,7 +13,7 @@ ARCHIVED	e0e724691032ca53ed59ab0fa3eb3a957510aafe	battery-monitor/app/src/main/j
 ARCHIVED	d09c9bce94fc9a96338c287ff4d6b9741b253c12	battery-monitor/app/src/main/java/com/dsann/batterymonitor/BatteryReader.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/BatteryReader.java	100644
 ARCHIVED	f99ece1ce55dfc9de13520b7575a8700cac95451	battery-monitor/app/src/main/java/com/dsann/batterymonitor/BootReceiver.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/BootReceiver.java	100644
 ARCHIVED	a4a88abde3271851a3f2e8e61a53651df2e6545a	battery-monitor/app/src/main/java/com/dsann/batterymonitor/DozeController.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/DozeController.java	100644
-ARCHIVED	dac40bcd2a420e7a45b7d6fad846cd7af8f7fee0	battery-monitor/app/src/main/java/com/dsann/batterymonitor/MainActivity.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/MainActivity.java	100644
+ARCHIVED	f82cf7e2ed7c966c52e4be531a89a9336c2142b8	battery-monitor/app/src/main/java/com/dsann/batterymonitor/MainActivity.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/MainActivity.java	100644
 ARCHIVED	abba6768b019a2550339dfbe44cc62b2a1b9725d	battery-monitor/app/src/main/java/com/dsann/batterymonitor/SessionStore.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/SessionStore.java	100644
 ARCHIVED	7be79a2e3afe8702e310fd6ee0b807809f037b38	battery-monitor/app/src/main/res/drawable/battery_logo.xml	branch-archive/battery-monitor/battery-monitor/app/src/main/res/drawable/battery_logo.xml	100644
 ARCHIVED	13140a0d1e56352c2d981457c1633b3ff605c373	battery-monitor/app/src/main/res/values/styles.xml	branch-archive/battery-monitor/battery-monitor/app/src/main/res/values/styles.xml	100644
@@ -332,4 +332,4 @@ DUPLICATE	9f7e7e07c5f4eadc22ee6540a906b53ef381fd36	Source code audio files/Speec
 DUPLICATE	7a3817957d112078e0f9b3bd4679ff89eaa24e5d	Source code audio files/WCNChipController.cpp	branch-archive/main/Source code audio files/WCNChipController.cpp	100644
 DUPLICATE	5857ed7e96bba9f898bb21a068f033921db5921f	Source code audio files/WCNChipController.h	branch-archive/main/Source code audio files/WCNChipController.h	100644
 
-ARCHIVED	e8e00993d3b204468a5791d801c909c0852993df	battery-monitor/app/src/main/java/com/dsann/batterymonitor/BatteryPercentCalculator.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/BatteryPercentCalculator.java	100644
+ARCHIVED	61eee0c4d00c514960143f8e21556a8367df38a1	battery-monitor/app/src/main/java/com/dsann/batterymonitor/BatteryPercentCalculator.java	branch-archive/battery-monitor/battery-monitor/app/src/main/java/com/dsann/batterymonitor/BatteryPercentCalculator.java	100644
