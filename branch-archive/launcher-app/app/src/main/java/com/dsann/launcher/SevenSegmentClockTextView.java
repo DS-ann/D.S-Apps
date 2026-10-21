@@ -471,11 +471,11 @@ public final class SevenSegmentClockTextView extends TextView {
                 segmentPaint.setStyle(Paint.Style.FILL);
                 segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
                 segmentPaint.setColor(segmentGradientEnabled ? Color.WHITE : color);
-                // Double the complete colon around its existing vertical center:
-                // both dots are twice the radius and twice as far apart.
+                // Keep the doubled dot radius, but reduce center-to-center
+                // separation by 40% from the previous doubled spacing.
                 float radius = 2f * Math.max(2.5f, thickness * 0.38f);
                 float colonCenterY = y + digitHeight * 0.51f;
-                float colonHalfSpread = digitHeight * 0.34f;
+                float colonHalfSpread = digitHeight * 0.204f;
                 float upperDotY = colonCenterY - colonHalfSpread;
                 float lowerDotY = colonCenterY + colonHalfSpread;
                 canvas.drawCircle(dotX, upperDotY, radius, segmentPaint);
