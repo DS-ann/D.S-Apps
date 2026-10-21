@@ -12207,15 +12207,35 @@ public class MainActivity extends Activity {
     }
 
     private float getClockColonCenterY() {
-        // The TextView is scaled around this pivot when the clock's height changes.
-        // Anchoring the colon to it keeps the dots centered in the visible clock row.
+        // ReplacementSpan draws in TextView Layout coordinates, not the outer
+        // TextView's coordinates. Convert the clock row's scaling pivot into the
+        // Layout's coordinate space; using pivotY directly can place the dots
+        // outside the rendered line and make the colon disappear.
         if (clockText != null) {
-            float pivotY = clockText.getPivotY();
-            if (pivotY > 0f) return pivotY;
-            int measuredHeight = clockText.getHeight();
-            if (measuredHeight > 0) return measuredHeight / 2f;
-            ViewGroup.LayoutParams params = clockText.getLayoutParams();
-            if (params != null && params.height > 0) return params.height / 2f;
+            float viewCenterY = clockText.getPivotY();
+            if (viewCenterY <= 0f) {
+                int measuredHeight = clockText.getHeight();
+                if (measuredHeight > 0) {
+                    viewCenterY = measuredHeight / 2f;
+                } else {
+                    ViewGroup.LayoutParams params = clockText.getLayoutParams();
+                    if (params != null && params.height > 0) {
+                        viewCenterY = params.height / 2f;
+                    } else {
+                        viewCenterY = LauncherUiUtils.dp(this, 114) / 2f;
+                    }
+                }
+            }
+
+            android.text.Layout layout = clockText.getLayout();
+            if (layout != null && layout.getLineCount() > 0) {
+                int baseline = clockText.getBaseline();
+                if (baseline >= 0) {
+                    float layoutToViewOffset = baseline - layout.getLineBaseline(0);
+                    return Math.max(0f, viewCenterY - layoutToViewOffset);
+                }
+            }
+            return viewCenterY;
         }
         return LauncherUiUtils.dp(this, 114) / 2f;
     }
