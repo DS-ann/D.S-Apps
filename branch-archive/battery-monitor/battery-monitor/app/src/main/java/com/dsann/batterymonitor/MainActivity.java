@@ -18,16 +18,19 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 import java.util.ArrayList;
 
 public class MainActivity extends Activity {
     private static final String PREFS="settings";
     private static final String KEY_INTERVAL_MS="sampling_interval_ms";
-    private static final long[] INTERVALS_MS={500L,1000L,5000L,10000L,15000L,30000L};
-    private static final String[] INTERVAL_LABELS={"0.5 s","1 s","5 s","10 s","15 s","30 s"};
+    private static final long MIN_RECORDING_INTERVAL_MS=100L;
+    private static final long MAX_RECORDING_INTERVAL_MS=2000L;
+    private static final long RECORDING_INTERVAL_STEP_MS=10L;
+    private static final long DEFAULT_RECORDING_INTERVAL_MS=1000L;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private TextView voltage,current;
-    private TextView calculatedPercent,calculatedMah,calculatedStatus;
+    private TextView calculatedPercent,calculatedMah;
     private EditText customCapacityInput,startingChargeInput;
     private Switch notificationSwitch;
     private SeekBar samplingBar;
@@ -39,7 +42,7 @@ public class MainActivity extends Activity {
     private LinearLayout healthView;
     private ScrollView healthScroll;
     private TextView healthLevel,healthStatus,healthTemp,healthVoltage,healthCurrent,healthSource,healthFullCharge,healthRemaining,healthDesign,healthRatio,healthRaw,healthFile,healthFullEnergy,healthDesignEnergy,healthSessionEstimate,healthSessionHealth;
-    private final Runnable updater=new Runnable(){public void run(){updateValues();handler.postDelayed(this,1000);}};
+    private final Runnable updater=new Runnable(){public void run(){updateValues();handler.postDelayed(this,currentRecordingIntervalMs());}};
     
     @Override protected void onCreate(Bundle state){
         super.onCreate(state);
@@ -146,25 +149,27 @@ public class MainActivity extends Activity {
         
         LinearLayout sampling=new LinearLayout(this);
         sampling.setOrientation(LinearLayout.VERTICAL);
-        samplingLabel=text("History interval  •  15 s",13);
+        samplingLabel=text("Current recording interval  •  1.00 s",13);
         samplingLabel.setTextColor(0xFF9AA0AA);
         sampling.addView(samplingLabel,full());
         samplingBar=new SeekBar(this);
-        samplingBar.setMax(INTERVALS_MS.length-1);
+        samplingBar.setMax((int)((MAX_RECORDING_INTERVAL_MS-MIN_RECORDING_INTERVAL_MS)/RECORDING_INTERVAL_STEP_MS));
         sampling.addView(samplingBar,new LinearLayout.LayoutParams(-1,-2));
         recording.addView(sampling,top(10));
         r.addView(recording,top(12));
         
         android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
-        int index=indexForInterval(prefs.getLong(KEY_INTERVAL_MS,15000L));
-        samplingBar.setProgress(index);
-        samplingLabel.setText("History interval  •  "+INTERVAL_LABELS[index]);
+        long savedInterval=prefs.getLong(KEY_INTERVAL_MS,DEFAULT_RECORDING_INTERVAL_MS);
+        if(savedInterval<MIN_RECORDING_INTERVAL_MS||savedInterval>MAX_RECORDING_INTERVAL_MS)
+            savedInterval=DEFAULT_RECORDING_INTERVAL_MS;
+        samplingBar.setProgress((int)((savedInterval-MIN_RECORDING_INTERVAL_MS)/RECORDING_INTERVAL_STEP_MS));
+        samplingLabel.setText(formatRecordingInterval(savedInterval));
         notificationSwitch.setChecked(prefs.getBoolean("notification_enabled",false));
-        samplingBar.setEnabled(notificationSwitch.isChecked());
         samplingBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onProgressChanged(SeekBar b,int progress,boolean fromUser){
-                samplingLabel.setText("History interval  •  "+INTERVAL_LABELS[progress]);
-                if(fromUser)getSharedPreferences(PREFS,0).edit().putLong(KEY_INTERVAL_MS,INTERVALS_MS[progress]).apply();
+                long interval=MIN_RECORDING_INTERVAL_MS+progress*RECORDING_INTERVAL_STEP_MS;
+                samplingLabel.setText(formatRecordingInterval(interval));
+                if(fromUser)getSharedPreferences(PREFS,0).edit().putLong(KEY_INTERVAL_MS,interval).apply();
             }
             public void onStartTrackingTouch(SeekBar b){}
             public void onStopTrackingTouch(SeekBar b){}
@@ -222,7 +227,6 @@ public class MainActivity extends Activity {
         
         notificationSwitch.setOnCheckedChangeListener((b,on)->{
             getSharedPreferences(PREFS,0).edit().putBoolean("notification_enabled",on).apply();
-            samplingBar.setEnabled(on);
             if(on){
                 startNotificationService();
             }else { SessionStore.finish(this); stopService(new Intent(this,BatteryNotificationService.class)); }
@@ -238,10 +242,6 @@ public class MainActivity extends Activity {
         TextView title=text("My Battery",22);
         title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         r.addView(title,full());
-        TextView subtitle=text("An independent mAh-based estimate. Its starting point comes only from the values you enter here.",13);
-        subtitle.setTextColor(0xFF9AA0AA);
-        r.addView(subtitle,top(3));
-
         LinearLayout calculator=card(0xFF17271F,0xFF63E6A8);
         TextView calculatorTitle=text("Current estimate",16);
         calculatorTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
@@ -253,10 +253,6 @@ public class MainActivity extends Activity {
         calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
         calculatedMah.setTextColor(0xFFD2D8E0);
         calculator.addView(calculatedMah,top(2));
-        calculatedStatus=text("Waiting for user-entered values.",12);
-        calculatedStatus.setTextColor(0xFF9AA0AA);
-        calculator.addView(calculatedStatus,top(4));
-
         TextView capacityLabel=text("Full usable battery capacity (mAh)",13);
         capacityLabel.setTextColor(0xFFD2D8E0);
         calculator.addView(capacityLabel,top(12));
@@ -287,35 +283,21 @@ public class MainActivity extends Activity {
         }
         calculator.addView(startingChargeInput,top(3));
 
-        TextView calculatorHint=text("Enter both values yourself. Example: for a 4050 mAh battery with an estimated 1800 mAh remaining, enter 4050 and 1800. Tap Save & start to begin from 1800 mAh. Android battery percentage is never used to calibrate this estimate. Subsequent changes are calculated from measured current × elapsed time; unavailable or inaccurate current readings can cause drift.",11);
-        calculatorHint.setTextColor(0xFF858D99);
-        calculatorHint.setLineSpacing(dp(1),1.0f);
-        calculator.addView(calculatorHint,top(6));
-
         LinearLayout actions=new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         Button saveStart=actionButton("Save & start");
-        Button resetEstimate=actionButton("Reset estimate");
+        Button stopMeasurement=actionButton("Stop");
         actions.addView(saveStart,new LinearLayout.LayoutParams(0,-2,1));
-        LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(0,-2,1);
-        resetParams.leftMargin=dp(8);
-        actions.addView(resetEstimate,resetParams);
-        calculator.addView(actions,top(8));
+        LinearLayout.LayoutParams stopParams=new LinearLayout.LayoutParams(0,-2,1);
+        stopParams.leftMargin=dp(8);
+        actions.addView(stopMeasurement,stopParams);
+        calculator.addView(actions,top(10));
+        Button clearAll=actionButton("Clear all");
+        calculator.addView(clearAll,top(6));
         saveStart.setOnClickListener(v->startCalculatorFromInputs());
-        resetEstimate.setOnClickListener(v->{
-            updateCalculatedLevel(BatteryPercentCalculator.resetEstimate(this,BatteryReader.read(this)));
-        });
+        stopMeasurement.setOnClickListener(v->stopMeasurement());
+        clearAll.setOnClickListener(v->clearAllMeasurementData());
         r.addView(calculator,top(12));
-
-        LinearLayout details=card();
-        TextView detailsTitle=text("How the estimate works",15);
-        detailsTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
-        details.addView(detailsTitle,full());
-        TextView detailsText=text("Starting remaining mAh ÷ full usable mAh gives the displayed estimate. Every valid sample then integrates battery current over elapsed time and adds or subtracts the resulting mAh. A long sampling gap is not guessed across; the app holds the estimate and resumes integration.",12);
-        detailsText.setTextColor(0xFF9AA0AA);
-        detailsText.setLineSpacing(dp(1),1.0f);
-        details.addView(detailsText,top(5));
-        r.addView(details,top(12));
         return r;
     }
 
@@ -487,7 +469,10 @@ public class MainActivity extends Activity {
             BatteryReader.Reading r=BatteryReader.read(this);
             voltage.setText(r.voltageText());
             current.setText(r.currentText());
-            updateCalculatedLevel(BatteryPercentCalculator.sample(this,r));
+            boolean backgroundRecording=getSharedPreferences(PREFS,0).getBoolean("notification_enabled",false);
+            updateCalculatedLevel(backgroundRecording
+                    ?BatteryPercentCalculator.current(this)
+                    :BatteryPercentCalculator.sample(this,r));
         } catch (Throwable ignored) {
             voltage.setText("N/A");
             current.setText("N/A");
@@ -496,19 +481,16 @@ public class MainActivity extends Activity {
     }
 
     private void updateCalculatedLevel(BatteryPercentCalculator.Estimate estimate){
-        if(calculatedPercent==null||calculatedMah==null||calculatedStatus==null)return;
+        if(calculatedPercent==null||calculatedMah==null)return;
         if(estimate==null||!estimate.isAvailable()){
-            calculatedPercent.setText("--%");
-            calculatedMah.setText(estimate!=null&&estimate.capacityMah>0
-                    ? "Remaining charge: enter starting mAh and tap Save & start"
-                    : "Remaining charge: enter capacity and starting mAh");
-            calculatedStatus.setText(estimate==null?"Calculator unavailable":estimate.status);
+            calculatedPercent.setText("--");
+            calculatedMah.setText(estimate!=null&&estimate.capacityMah==0.0
+                    ? "Remaining charge: 0 mAh" : "Remaining charge: -- mAh");
             return;
         }
         calculatedPercent.setText(estimate.percent+"%");
         calculatedMah.setText(String.format(java.util.Locale.US,
                 "Remaining charge: %.1f / %.0f mAh",estimate.remainingMah,estimate.capacityMah));
-        calculatedStatus.setText(estimate.status+"  •  "+estimate.capacitySource);
     }
 
     private void startCalculatorFromInputs(){
@@ -516,32 +498,64 @@ public class MainActivity extends Activity {
         String capacityText=customCapacityInput.getText().toString().trim();
         String startingText=startingChargeInput.getText().toString().trim();
         if(capacityText.isEmpty()){
-            calculatedStatus.setText("Enter your full usable battery capacity in mAh.");
+            Toast.makeText(this,"Enter full usable capacity in mAh.",Toast.LENGTH_SHORT).show();
             return;
         }
         if(startingText.isEmpty()){
-            calculatedStatus.setText("Enter your own starting remaining charge in mAh.");
+            Toast.makeText(this,"Enter starting remaining charge in mAh.",Toast.LENGTH_SHORT).show();
             return;
         }
         try{
             double capacity=Double.parseDouble(capacityText);
             double starting=Double.parseDouble(startingText);
             if(Double.isNaN(capacity)||Double.isInfinite(capacity)||capacity<100.0||capacity>100000.0){
-                calculatedStatus.setText("Enter a capacity between 100 and 100000 mAh.");
+                Toast.makeText(this,"Capacity must be between 100 and 100000 mAh.",Toast.LENGTH_SHORT).show();
                 return;
             }
             if(Double.isNaN(starting)||Double.isInfinite(starting)||starting<0.0||starting>capacity){
-                calculatedStatus.setText("Starting charge must be between 0 and the capacity ("+
-                        String.format(java.util.Locale.US,"%.0f",capacity)+" mAh).");
+                Toast.makeText(this,"Starting charge must be between 0 and the capacity.",Toast.LENGTH_SHORT).show();
                 return;
             }
             updateCalculatedLevel(BatteryPercentCalculator.startEstimate(
                     this,capacity,starting,BatteryReader.read(this)));
         }catch(NumberFormatException e){
-            calculatedStatus.setText("Enter valid numeric values in mAh.");
+            Toast.makeText(this,"Enter valid numeric mAh values.",Toast.LENGTH_SHORT).show();
         }
     }
-    
+
+    private void stopMeasurement(){
+        BatteryPercentCalculator.stopMeasurement(this);
+        boolean wasRecording=notificationSwitch!=null&&notificationSwitch.isChecked();
+        if(wasRecording){
+            notificationSwitch.setChecked(false);
+        }else{
+            getSharedPreferences(PREFS,0).edit().putBoolean("notification_enabled",false).apply();
+            SessionStore.finish(this);
+            stopService(new Intent(this,BatteryNotificationService.class));
+        }
+        updateCalculatedLevel(BatteryPercentCalculator.current(this));
+    }
+
+    private void clearAllMeasurementData(){
+        stopMeasurement();
+        SessionStore.clear(this);
+        BatteryPercentCalculator.clearAll(this);
+        if(customCapacityInput!=null)customCapacityInput.setText("0");
+        if(startingChargeInput!=null)startingChargeInput.setText("0");
+        updateCalculatedLevel(BatteryPercentCalculator.current(this));
+        if(historyView!=null&&historyView.getVisibility()==View.VISIBLE)refreshHistory();
+    }
+
+    private long currentRecordingIntervalMs(){
+        long value=getSharedPreferences(PREFS,0).getLong(KEY_INTERVAL_MS,DEFAULT_RECORDING_INTERVAL_MS);
+        return value<MIN_RECORDING_INTERVAL_MS||value>MAX_RECORDING_INTERVAL_MS
+                ?DEFAULT_RECORDING_INTERVAL_MS:value;
+    }
+
+    private String formatRecordingInterval(long ms){
+        return String.format(java.util.Locale.US,"Current recording interval  •  %.2f s",ms/1000.0);
+    }
+
     private void refreshHistory(){
         historyList.removeAllViews();
         ArrayList<SessionStore.Record> rs=SessionStore.getRecords(this);

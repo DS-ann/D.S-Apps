@@ -22,7 +22,7 @@ final class BatteryReader {
 
     private BatteryReader() {}
 
-    private static final long READ_CACHE_MS = 650L;
+    private static final long READ_CACHE_MS = 40L;
     private static Reading cachedReading;
     private static long cachedReadAtMs;
 

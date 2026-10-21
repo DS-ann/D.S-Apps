@@ -195,7 +195,7 @@ final class SessionStore {
         return out;
     }
 
-    static synchronized void clear(Context c){c.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove(KEY_HISTORY).apply();}
+    static synchronized void clear(Context c){c.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().clear().apply();}
 
     private static void addRecord(android.content.SharedPreferences p,long start,long end,boolean charging,double mah,double minCurrent,double maxCurrent,
                                   int startPercent,int endPercent,long onMs,double onMah,double onMin,double onMax,int onStartPercent,int onEndPercent,
