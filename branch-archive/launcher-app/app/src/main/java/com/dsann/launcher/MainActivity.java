@@ -3949,9 +3949,7 @@ public class MainActivity extends Activity {
             // Long-press movement owns the next move stream, but quick vertical swipes
             // before this timer still belong to the group's ScrollView.
             android.view.ViewParent parent = item.getParent();
-            if (parent instanceof View) {
-                ((View) parent).requestDisallowInterceptTouchEvent(true);
-            }
+            if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
         };
         final Runnable showOptions = () -> {
             if (movedTooEarly[0] || draggingOut[0] || optionsShown[0]) return;
@@ -3999,9 +3997,7 @@ public class MainActivity extends Activity {
                     memberDragging[0] = true;
                     touchHandler.removeCallbacks(showOptions);
                     android.view.ViewParent parent = memberView.getParent();
-                    if (parent instanceof View) {
-                        ((View) parent).requestDisallowInterceptTouchEvent(true);
-                    }
+                    if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
                     memberView.setTranslationX(dx);
                     memberView.setTranslationY(dy);
                     int[] panelLocation = new int[2];
@@ -4038,9 +4034,7 @@ public class MainActivity extends Activity {
                 memberView.setTranslationY(0f);
                 memberView.setAlpha(1f);
                 android.view.ViewParent parent = memberView.getParent();
-                if (parent instanceof View) {
-                    ((View) parent).requestDisallowInterceptTouchEvent(false);
-                }
+                if (parent != null) parent.requestDisallowInterceptTouchEvent(false);
                 if (optionsShown[0]) return true;
                 if (action == MotionEvent.ACTION_UP && draggingOut[0]) {
                     clearAppGroupMemberMoveMode();
