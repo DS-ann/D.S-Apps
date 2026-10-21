@@ -100,39 +100,10 @@ jobs:
           "$APK_SIGNER" verify --verbose "$APK"
           echo "Signed D.S Launcher 18.7.0 APK verified."
 
-      - name: Publish direct APK download on GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cat > release-notes.md <<'EOF'
-          # D.S Launcher 18.7.0
-
-          A lightweight, customizable Android launcher with an updated modern app icon.
-
-          ## Highlights
-          - New D.S Launcher app icon with a dark, neon-accented design.
-          - App display name updated to **D.S Launcher**.
-          - Retains the launcher’s home screen, app drawer, widget, clock customization, and page transition features.
-          - Version name: **18.7.0** (version code **180700**).
-
-          ## Compatibility
-          - Minimum Android version: **Android 6.0 (API 23)**.
-          - Target SDK: **API 37 (Android 17)**.
-          - The APK is signed, and CI verifies its signature before publishing.
-
-          **Testing note:** The release build and signature are verified by CI. Full physical-device testing across every Android version from 6 through 17 has not been completed.
-          EOF
-          APK="branch-archive/launcher-app/app/build/outputs/apk/release/D.S.Launcher-18.7.0.apk"
-          RELEASE_TAG="v18.7.0"
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            # Replace the existing direct-download asset without creating a ZIP artifact.
-            gh release upload "$RELEASE_TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG" "$APK" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "D.S Launcher 18.7.0" \
-              --notes-file release-notes.md \
-              --target "$GITHUB_SHA"
-          fi
+      - name: Upload signed APK as workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: D.S-Launcher-18.7.0-signed-APK
+          path: branch-archive/launcher-app/app/build/outputs/apk/release/D.S.Launcher-18.7.0.apk
+          if-no-files-found: error
+          retention-days: 14
