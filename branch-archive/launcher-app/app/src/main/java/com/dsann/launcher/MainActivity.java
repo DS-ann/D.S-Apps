@@ -5486,6 +5486,19 @@ public class MainActivity extends Activity {
 
     private long calculateDrawerSnapshotItemSignature() {
         long signature = 17L;
+        // These settings affect the positions/geometry under the cached pixels, so a fallback
+        // image must never cover different live hit targets after a layout change.
+        if (prefs != null) {
+            String[] layoutKeys = new String[] {
+                    KEY_DRAWER_COLUMNS, KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE,
+                    KEY_SHOW_DRAWER_LABELS, KEY_DRAWER_SPACING, KEY_DRAWER_DESCENDING
+            };
+            java.util.Map<String, ?> values = prefs.getAll();
+            for (String key : layoutKeys) {
+                signature = signature * 31L + String.valueOf(values.get(key)).hashCode();
+            }
+        }
+        signature = signature * 31L + (drawerGrid == null ? 0 : drawerGrid.getNumColumns());
         for (ResolveInfo app : drawerApps) {
             if (app == null || app.activityInfo == null) continue;
             signature = signature * 31L
