@@ -105,5 +105,6 @@ jobs:
         with:
           name: D.S-Launcher-18.7.0-signed-APK
           path: branch-archive/launcher-app/app/build/outputs/apk/release/D.S.Launcher-18.7.0.apk
-          if-no-files-found: error
+        archive: false
+        if-no-files-found: error
           retention-days: 14
