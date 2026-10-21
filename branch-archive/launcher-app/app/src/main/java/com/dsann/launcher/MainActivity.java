@@ -3794,7 +3794,7 @@ public class MainActivity extends Activity {
     private void openAppGroup(String groupId) {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
         ArrayList<String> members = getAppGroupMembers(groupId);
-        final View openingGroupIcon = findAppGroupView(groupId);
+        final View openingGroupIcon = findAppGroupLogoView(groupId);
         final Dialog dialog = new Dialog(this);
         dialog.setOnDismissListener(ignored -> {
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
@@ -4193,6 +4193,15 @@ public class MainActivity extends Activity {
             }
         }
         return null;
+    }
+
+    private View findAppGroupLogoView(String groupId) {
+        View cell = findAppGroupView(groupId);
+        if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 0) {
+            View firstChild = ((ViewGroup) cell).getChildAt(0);
+            if (firstChild instanceof FrameLayout) return firstChild;
+        }
+        return cell;
     }
 
     private void installAppGroupMemberTouch(View item, View icon, Dialog groupDialog,
