@@ -466,7 +466,10 @@ public final class LauncherAppAdapter extends BaseAdapter {
      */
     void prewarmAllDrawerArtwork() {
         if (!drawer || preferences == null || activity.isFinishing()) return;
-        long signature = preferences.getAll().hashCode();
+        // Only artwork mode and installed package identities affect the expensive theme
+        // conversion. Clock/widget preferences must not restart this preload on every opening.
+        long signature = preferences.getInt("icon_artwork_theme",
+                LauncherIconDrawable.ARTWORK_ORIGINAL);
         for (ResolveInfo app : drawerApps) {
             if (app == null || app.activityInfo == null) continue;
             signature = signature * 31L + key(app).hashCode();
