@@ -18,12 +18,14 @@ final class LauncherClockStyler {
             case 1:
                 clock.setTypeface(Typeface.create("monospace", Typeface.BOLD));
                 clock.setLetterSpacing(0.12f);
-                clock.setShadowLayer(12f, 0f, 0f, Color.rgb(40, 190, 255));
+                // Preserve Cyber HUD glow without tinting the digits blue; clock colour effects supply the fill.
+                clock.setShadowLayer(12f, 0f, 0f, Color.rgb(196, 200, 209));
                 break;
             case 2:
                 clock.setTypeface(Typeface.create("cursive", Typeface.NORMAL));
                 clock.setLetterSpacing(0.035f);
-                clock.setShadowLayer(10f, 0f, 0f, Color.rgb(111, 90, 255));
+                // Keep the Neon Circuit glow neutral so it follows the shared clock colour settings.
+                clock.setShadowLayer(10f, 0f, 0f, Color.rgb(196, 200, 209));
                 break;
             case 3:
                 clock.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
