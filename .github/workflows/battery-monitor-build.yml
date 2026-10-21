@@ -78,8 +78,9 @@ jobs:
           if-no-files-found: error
 
       - name: Upload release APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: battery-monitor-release
+        
           path: branch-archive/battery-monitor/battery-monitor/app/build/outputs/apk/release/*.apk
+          archive: false
           if-no-files-found: error
