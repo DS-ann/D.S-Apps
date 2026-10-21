@@ -468,11 +468,13 @@ public class MainActivity extends Activity {
 
             // Load the durable viewport image while the drawer is still hidden at Home.
             // If the settings or app list changed, loadPersistentSnapshot rejects it safely.
-            long signature = calculateDrawerSnapshotSignature();
-            if (drawerSnapshotCurrentSignature != signature) {
-                drawerSnapshotCurrentSignature = signature;
+            // Compute package/file metadata only once per cache refresh, not on every 100 ms
+            // artwork poll. Package and relevant preference updates reset the signature to MIN.
+            if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
+                drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
                 drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
             }
+            long signature = drawerSnapshotCurrentSignature;
             int firstVisible = drawerGrid.getFirstVisiblePosition();
             if (drawerSnapshotDiskLoadSignature != signature) {
                 drawerSnapshotBody.loadPersistentSnapshot(signature, firstVisible);
@@ -5461,6 +5463,7 @@ public class MainActivity extends Activity {
         }
         handler.removeCallbacks(drawerSnapshotReadyCheck);
         drawerSnapshotReadyChecks = 0;
+        drawerSnapshotCurrentSignature = Long.MIN_VALUE;
         drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
         handler.postDelayed(drawerSnapshotReadyCheck, 100L);
     }
