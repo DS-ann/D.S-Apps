@@ -2860,6 +2860,11 @@ public class MainActivity extends Activity {
                         MainActivity.this.showAppOptions(app, onHome);
                     }
                     @Override public int getColumns() { return getDrawerColumns(); }
+                    @Override public void onDrawerDataChanged() {
+                        drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+                        drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
+                        scheduleDrawerSnapshotRefresh();
+                    }
                 });
         drawerScreen = built.screen;
         drawerGrid = built.grid;
