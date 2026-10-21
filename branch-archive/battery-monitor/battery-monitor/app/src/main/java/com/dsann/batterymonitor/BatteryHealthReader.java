@@ -59,7 +59,14 @@ final class BatteryHealthReader {
             String key = e.getKey();
             String value = e.getValue();
             if ("charge_full".equals(key) && d.fullChargeUaH == UNAVAILABLE) d.fullChargeUaH = parse(value);
-            else if ("charge_full_design".equals(key) && d.designChargeUaH == UNAVAILABLE) d.designChargeUaH = parse(value);
+            else if ("charge_full_design".equals(key) && d.designChargeUaH == UNAVAILABLE) {
+                d.designChargeUaH = parse(value);
+                if (d.designChargeUaH > 0) {
+                    String path = files.get("_source_charge_full_design");
+                    d.designSource = path == null || path.isEmpty()
+                            ? "Device-reported design capacity" : path;
+                }
+            }
             else if ("charge_counter".equals(key) && d.remainingChargeUaH == UNAVAILABLE) d.remainingChargeUaH = parse(value);
             else if ("energy_full".equals(key) && d.fullEnergyUWh == UNAVAILABLE) d.fullEnergyUWh = parse(value);
             else if ("energy_full_design".equals(key) && d.designEnergyUWh == UNAVAILABLE) d.designEnergyUWh = parse(value);

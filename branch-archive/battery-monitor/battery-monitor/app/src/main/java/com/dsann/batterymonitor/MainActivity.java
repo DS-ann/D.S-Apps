@@ -27,6 +27,7 @@ public class MainActivity extends Activity {
     private static final String[] INTERVAL_LABELS={"0.5 s","1 s","5 s","10 s","15 s","30 s"};
     private final Handler handler=new Handler(Looper.getMainLooper());
     private TextView voltage,current;
+    private TextView calculatedPercent,calculatedMah,calculatedStatus;
     private Switch notificationSwitch;
     private SeekBar samplingBar;
     private TextView samplingLabel;
@@ -115,6 +116,32 @@ public class MainActivity extends Activity {
         metrics.addView(currentCard,curLp);
         r.addView(metrics);
         
+        LinearLayout calculator=card(0xFF17271F,0xFF63E6A8);
+        TextView calculatorTitle=text("mAh-calculated battery level",16);
+        calculatorTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        calculator.addView(calculatorTitle,full());
+        calculatedPercent=text("--%",38);
+        calculatedPercent.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        calculatedPercent.setTextColor(0xFF63E6A8);
+        calculator.addView(calculatedPercent,top(4));
+        calculatedMah=text("Remaining charge: waiting for capacity data",13);
+        calculatedMah.setTextColor(0xFFD2D8E0);
+        calculator.addView(calculatedMah,top(2));
+        calculatedStatus=text("Waiting for the first current sample.",12);
+        calculatedStatus.setTextColor(0xFF9AA0AA);
+        calculator.addView(calculatedStatus,top(4));
+        TextView calculatorHint=text("Calculated independently by integrating current every 1 second. Enable Background recording to keep it updated while the app is closed.",11);
+        calculatorHint.setTextColor(0xFF858D99);
+        calculatorHint.setLineSpacing(dp(1),1.0f);
+        calculator.addView(calculatorHint,top(7));
+        Button recalibrate=actionButton("Recalibrate");
+        calculator.addView(recalibrate,top(8));
+        recalibrate.setOnClickListener(v->{
+            BatteryReader.Reading sample=BatteryReader.read(this);
+            updateCalculatedLevel(BatteryPercentCalculator.recalibrate(this,sample));
+        });
+        r.addView(calculator,top(12));
+        
         LinearLayout recording=card();
         LinearLayout recordingTop=new LinearLayout(this);
         recordingTop.setGravity(Gravity.CENTER_VERTICAL);
@@ -130,7 +157,7 @@ public class MainActivity extends Activity {
         
         LinearLayout sampling=new LinearLayout(this);
         sampling.setOrientation(LinearLayout.VERTICAL);
-        samplingLabel=text("Sampling interval  •  15 s",13);
+        samplingLabel=text("History interval  •  15 s",13);
         samplingLabel.setTextColor(0xFF9AA0AA);
         sampling.addView(samplingLabel,full());
         samplingBar=new SeekBar(this);
@@ -142,12 +169,12 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
         int index=indexForInterval(prefs.getLong(KEY_INTERVAL_MS,15000L));
         samplingBar.setProgress(index);
-        samplingLabel.setText("Sampling interval  •  "+INTERVAL_LABELS[index]);
+        samplingLabel.setText("History interval  •  "+INTERVAL_LABELS[index]);
         notificationSwitch.setChecked(prefs.getBoolean("notification_enabled",false));
         samplingBar.setEnabled(notificationSwitch.isChecked());
         samplingBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onProgressChanged(SeekBar b,int progress,boolean fromUser){
-                samplingLabel.setText("Sampling interval  •  "+INTERVAL_LABELS[progress]);
+                samplingLabel.setText("History interval  •  "+INTERVAL_LABELS[progress]);
                 if(fromUser)getSharedPreferences(PREFS,0).edit().putLong(KEY_INTERVAL_MS,INTERVALS_MS[progress]).apply();
             }
             public void onStartTrackingTouch(SeekBar b){}
@@ -377,10 +404,26 @@ public class MainActivity extends Activity {
             BatteryReader.Reading r=BatteryReader.read(this);
             voltage.setText(r.voltageText());
             current.setText(r.currentText());
+            updateCalculatedLevel(BatteryPercentCalculator.sample(this,r));
         } catch (Throwable ignored) {
             voltage.setText("N/A");
             current.setText("N/A");
+            updateCalculatedLevel(BatteryPercentCalculator.current(this));
         }
+    }
+
+    private void updateCalculatedLevel(BatteryPercentCalculator.Estimate estimate){
+        if(calculatedPercent==null||calculatedMah==null||calculatedStatus==null)return;
+        if(estimate==null||!estimate.isAvailable()){
+            calculatedPercent.setText("--%");
+            calculatedMah.setText("Remaining charge: unavailable");
+            calculatedStatus.setText(estimate==null?"Calculator unavailable":estimate.status);
+            return;
+        }
+        calculatedPercent.setText(estimate.percent+"%");
+        calculatedMah.setText(String.format(java.util.Locale.US,
+                "Remaining charge: %.1f / %.0f mAh",estimate.remainingMah,estimate.capacityMah));
+        calculatedStatus.setText(estimate.status+"  •  Capacity: "+estimate.capacitySource);
     }
     
     private void refreshHistory(){

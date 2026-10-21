@@ -22,7 +22,21 @@ final class BatteryReader {
 
     private BatteryReader() {}
 
-    static Reading read(Context context) {
+    private static final long READ_CACHE_MS = 650L;
+    private static Reading cachedReading;
+    private static long cachedReadAtMs;
+
+    static synchronized Reading read(Context context) {
+        long now = System.currentTimeMillis();
+        if (cachedReading != null && now >= cachedReadAtMs && now - cachedReadAtMs < READ_CACHE_MS) {
+            return cachedReading;
+        }
+        cachedReading = readUncached(context);
+        cachedReadAtMs = now;
+        return cachedReading;
+    }
+
+    private static Reading readUncached(Context context) {
         Long currentRaw = readSysfs(FG_CURRENT);
         Long voltageMv = readSysfs(INSTAT_VOLT);
 

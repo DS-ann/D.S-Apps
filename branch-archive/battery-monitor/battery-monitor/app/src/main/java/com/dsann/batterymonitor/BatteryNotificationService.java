@@ -16,18 +16,21 @@ public class BatteryNotificationService extends Service {
     private static final String CHANNEL_ID = "battery_monitor";
     private static final String PREFS = "settings";
     private static final String KEY_INTERVAL_MS = "sampling_interval_ms";
+    private static final long CALCULATOR_INTERVAL_MS = 1000L;
+    private long lastHistorySampleMs = 0L;
+    private long lastNotificationUpdateMs = 0L;
     private final Handler handler = new Handler();
     private final Runnable updater = new Runnable() {
         @Override public void run() {
             updateNotification();
-            handler.postDelayed(this, getSamplingInterval());
+            handler.postDelayed(this, CALCULATOR_INTERVAL_MS);
         }
     };
 
     @Override public void onCreate() {
         super.onCreate();
         createChannel();
-        startForeground(NOTIFICATION_ID, buildNotification("Reading battery...", 0.0, 0));
+        startForeground(NOTIFICATION_ID, buildNotification("Reading battery...", 0.0, 0, BatteryPercentCalculator.current(this)));
         updateNotification();
         handler.postDelayed(updater, getSamplingInterval());
     }
@@ -46,14 +49,31 @@ public class BatteryNotificationService extends Service {
             return;
         }
         BatteryReader.Reading r = BatteryReader.read(this);
-        SessionStore.sample(this, r);
+        BatteryPercentCalculator.Estimate estimate = BatteryPercentCalculator.sample(this, r);
+        long now = System.currentTimeMillis();
+        long interval = getSamplingInterval();
+
+        // The independent percentage calculator uses 1-second current samples.
+        // Keep heavier session-history writes and notification updates on the
+        // user-selected history interval.
+        if (lastHistorySampleMs == 0L || now < lastHistorySampleMs
+                || now - lastHistorySampleMs >= interval) {
+            SessionStore.sample(this, r);
+            lastHistorySampleMs = now;
+        }
+
         double mah = SessionStore.getActiveMah(this);
         long screenOnMs = SessionStore.getActiveScreenOnMs(this);
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm != null) nm.notify(NOTIFICATION_ID, buildNotification(r.compact(), mah, screenOnMs));
+        if (nm != null && (lastNotificationUpdateMs == 0L || now < lastNotificationUpdateMs
+                || now - lastNotificationUpdateMs >= interval)) {
+            nm.notify(NOTIFICATION_ID, buildNotification(r.compact(), mah, screenOnMs, estimate));
+            lastNotificationUpdateMs = now;
+        }
     }
 
-    private Notification buildNotification(String text, double mah, long screenOnMs) {
+    private Notification buildNotification(String text, double mah, long screenOnMs,
+                                           BatteryPercentCalculator.Estimate estimate) {
         Intent open = new Intent(this, MainActivity.class);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
@@ -62,10 +82,16 @@ public class BatteryNotificationService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
+        String title = estimate != null && estimate.isAvailable()
+                ? String.format(Locale.US, "Calculated %d%% • Used %.1f mAh", estimate.percent, mah)
+                : String.format(Locale.US, "Battery • Used %.1f mAh", mah);
+        String remaining = estimate != null && estimate.isAvailable()
+                ? String.format(Locale.US, "Remaining %.0f/%.0f mAh", estimate.remainingMah, estimate.capacityMah)
+                : "Calculated percentage unavailable";
         b.setSmallIcon(android.R.drawable.ic_menu_info_details)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
-                .setContentTitle(String.format(Locale.US, "Battery  •  Used %.1f mAh", mah))
-                .setContentText("Screen ON: " + SessionStore.formatDuration(screenOnMs) + "  •  " + text)
+                .setContentTitle(title)
+                .setContentText(remaining + " • Screen ON: " + SessionStore.formatDuration(screenOnMs) + " • " + text)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
