@@ -3929,10 +3929,12 @@ public class MainActivity extends Activity {
         final boolean[] armed = new boolean[1];
         final boolean[] movedTooEarly = new boolean[1];
         final boolean[] draggingOut = new boolean[1];
+        final boolean[] memberDragging = new boolean[1];
         final boolean[] optionsShown = new boolean[1];
 
         final Runnable armMove = () -> {
-            if (movedTooEarly[0] || draggingOut[0] || optionsShown[0]) return;
+            if (movedTooEarly[0] || draggingOut[0] || memberDragging[0]
+                    || optionsShown[0]) return;
             armed[0] = true;
             activeAppGroupMemberMoveModeId = groupId;
             activeAppGroupMemberMoveModePackage = packageName;
@@ -3968,6 +3970,7 @@ public class MainActivity extends Activity {
                 armed[0] = resumeMove;
                 movedTooEarly[0] = false;
                 draggingOut[0] = false;
+                memberDragging[0] = false;
                 optionsShown[0] = false;
                 touchHandler.removeCallbacks(armMove);
                 touchHandler.removeCallbacks(showOptions);
@@ -3987,6 +3990,8 @@ public class MainActivity extends Activity {
                     return true;
                 }
                 if (pastSlop && armed[0]) {
+                    memberDragging[0] = true;
+                    touchHandler.removeCallbacks(showOptions);
                     android.view.ViewParent parent = memberView.getParent();
                     if (parent instanceof View) {
                         ((View) parent).requestDisallowInterceptTouchEvent(true);
@@ -4291,7 +4296,7 @@ public class MainActivity extends Activity {
                     return true;
                 }
                 LauncherUiUtils.stopMoveHint(cell);
-                if (!optionsShown[0] && !movedTooEarly[0]) {
+                if (commit && !optionsShown[0] && !movedTooEarly[0]) {
                     if (armed[0]) {
                         activeAppGroupMoveModeId = groupId;
                         setAppGroupMoveModeVisual(cell, true);
@@ -4302,6 +4307,10 @@ public class MainActivity extends Activity {
                         setAppGroupMoveModeVisual(cell, false);
                         openAppGroup(groupId);
                     }
+                } else if (!commit) {
+                    activeAppGroupMoveModeId = null;
+                    setAppGroupMoveModeVisual(cell, false);
+                    setWorkspaceGridVisible(false, null);
                 }
                 if (armed[0] || optionsShown[0]) setWorkspaceGridVisible(false, null);
                 return true;
@@ -12060,11 +12069,7 @@ public class MainActivity extends Activity {
         addSettingRow(content, "▣", "Add an app group",
                 "Create a round group icon for apps on this home screen", () -> {
             dialog.dismiss();
-            if (pageViewport != null && pageViewport.getWidth() <= 0) {
-                pageViewport.post(this::createAppGroup);
-            } else {
-                createAppGroup();
-            }
+            createAppGroup();
         });
 
         addSection(content, "Clocks");
