@@ -6428,8 +6428,9 @@ public class MainActivity extends Activity {
                         targetGroupId = findAppGroupAtGridSlot(
                                 targetPage, targetCol, targetRow, cellWidth, cellHeight);
                     }
-                    if (targetGroupId != null) {
-                        String groupLabel = getAppGroupLabel(targetGroupId);
+                    final String dropTargetGroupId = targetGroupId;
+                    if (dropTargetGroupId != null) {
+                        String groupLabel = getAppGroupLabel(dropTargetGroupId);
                         ResolveInfo draggedApp = findApp(packageName);
                         String appLabel = draggedApp == null ? packageName
                                 : String.valueOf(draggedApp.loadLabel(packageManager));
@@ -6454,7 +6455,7 @@ public class MainActivity extends Activity {
                         iconDragPageIndex = -1;
                         iconOriginalPageIndex = -1;
                         iconEdgeLatch = 0;
-                        if (getAppGroupMembers(targetGroupId).contains(packageName)) {
+                        if (getAppGroupMembers(dropTargetGroupId).contains(packageName)) {
                             Toast.makeText(MainActivity.this,
                                     "This app is already in the group.", Toast.LENGTH_SHORT).show();
                             return true;
@@ -6464,7 +6465,7 @@ public class MainActivity extends Activity {
                                 .setMessage("Add " + appLabel + " to this app group?")
                                 .setNegativeButton("Cancel", null)
                                 .setPositiveButton("Add", (groupDialog, button) ->
-                                        moveHomeAppIntoGroup(targetGroupId, packageName))
+                                        moveHomeAppIntoGroup(dropTargetGroupId, packageName))
                                 .show();
                         return true;
                     }
