@@ -76,6 +76,10 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_ICON_ARTWORK = "clock_icon_artwork";
     private static final String KEY_CLOCK_DATE_SIZE = "clock_date_size_sp";
     private static final String KEY_CLOCK_PM_SIZE = "clock_pm_size_sp";
+    private static final String KEY_CLOCK_DATE_FONT = "clock_date_font_family";
+    private static final String KEY_CLOCK_PM_FONT = "clock_ampm_font_family";
+    private static final String KEY_HOME_LABEL_FONT = "home_label_font_family";
+    private static final String KEY_HOME_LABEL_COLOR = "home_label_color_position";
     private static final String KEY_PAGE_ROTATION = "page_rotation_degrees";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final String KEY_PAGE_TRANSITION = "page_transition";
@@ -2579,7 +2583,7 @@ public class MainActivity extends Activity {
         hero.addView(clockRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
         // Keep the existing 13sp date size; improve contrast instead of enlarging it.
         dateText = createClockDateTextView();
-        dateText.setTypeface(Typeface.create("cursive", Typeface.BOLD));
+        dateText.setTypeface(Typeface.create(clockDateFontFamily(), Typeface.BOLD));
         dateText.setGravity(Gravity.CENTER);
         dateText.setLetterSpacing(0.04f);
         dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
@@ -2662,11 +2666,47 @@ public class MainActivity extends Activity {
                 prefs == null ? 9 : prefs.getInt(KEY_HOME_FONT_SIZE, 9)));
     }
 
+    private String homeLabelTypefaceFamily() {
+        int family = prefs == null ? 0 : Math.max(0, Math.min(2,
+                prefs.getInt(KEY_HOME_LABEL_FONT, 0)));
+        switch (family) {
+            case 1: return "serif";
+            case 2: return "monospace";
+            default: return "sans-serif";
+        }
+    }
+
+    private int homeLabelColor() {
+        int position = prefs == null ? 0 : Math.max(0, Math.min(1000,
+                prefs.getInt(KEY_HOME_LABEL_COLOR, 0)));
+        return LauncherIconDrawable.spectrumColorForPosition(position);
+    }
+
+    private String clockDateFontFamily() {
+        int family = prefs == null ? 0 : Math.max(0, Math.min(2,
+                prefs.getInt(KEY_CLOCK_DATE_FONT, 0)));
+        switch (family) {
+            case 1: return "sans-serif";
+            case 2: return "serif";
+            default: return "cursive";
+        }
+    }
+
+    private String clockPmFontFamily() {
+        int family = prefs == null ? 0 : Math.max(0, Math.min(2,
+                prefs.getInt(KEY_CLOCK_PM_FONT, 0)));
+        switch (family) {
+            case 1: return "sans-serif";
+            case 2: return "serif";
+            default: return "sans-serif-black";
+        }
+    }
+
     private int homeLabelHeightDp() {
         float targetTextSize = homeFontSizeSp();
         android.graphics.Paint labelPaint = new android.graphics.Paint(
                 android.graphics.Paint.ANTI_ALIAS_FLAG);
-        labelPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        labelPaint.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.NORMAL));
         labelPaint.setTextSize(targetTextSize * getResources().getDisplayMetrics().scaledDensity);
         android.graphics.Paint.FontMetrics metrics = labelPaint.getFontMetrics();
         float density = Math.max(0.1f, getResources().getDisplayMetrics().density);
@@ -2797,7 +2837,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
 
         TextView date = createClockDateTextView();
-        date.setTypeface(Typeface.create("cursive", Typeface.BOLD));
+        date.setTypeface(Typeface.create(clockDateFontFamily(), Typeface.BOLD));
         date.setGravity(Gravity.CENTER);
         date.setLetterSpacing(0.04f);
         date.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f, LauncherUiUtils.dp(this, 1),
@@ -3172,7 +3212,10 @@ public class MainActivity extends Activity {
 
         TextView label = LauncherUiUtils.text(this,
                 prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
-                homeFontSizeSp(), Color.WHITE, true);
+                homeFontSizeSp(), homeLabelColor(), true);
+        label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.BOLD));
+        label.setShadowLayer(LauncherUiUtils.dp(this, 1), 0f, LauncherUiUtils.dp(this, 1),
+                Color.argb(210, 0, 0, 0));
         label.setGravity(Gravity.CENTER);
         label.setSingleLine(true);
         label.setMaxLines(1);
@@ -3186,8 +3229,11 @@ public class MainActivity extends Activity {
         label.setVisibility(prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
                 ? View.VISIBLE : View.GONE);
 
+        int initialLabelExtraHeight = prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
+                ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
-                initialIconSize, initialIconSize, Gravity.TOP | Gravity.LEFT);
+                initialIconSize, initialIconSize + initialLabelExtraHeight,
+                Gravity.TOP | Gravity.LEFT);
         tileParams.leftMargin = tileLeft;
         tileParams.topMargin = tileTop;
         chosenPage.addView(tile, tileParams);
@@ -3529,7 +3575,7 @@ public class MainActivity extends Activity {
         if (prefs == null || !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)) return visual;
         String text = prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut");
         android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        paint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        paint.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.BOLD));
         paint.setTextSize(homeFontSizeSp() * getResources().getDisplayMetrics().scaledDensity);
         android.graphics.Paint.FontMetrics metrics = paint.getFontMetrics();
         int textHeight = Math.max(1, (int) Math.ceil(metrics.descent - metrics.ascent));
@@ -3629,7 +3675,9 @@ public class MainActivity extends Activity {
                 int target = shortcutIconSizePx(cellWidth, cellHeight);
                 FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) shortcut.getLayoutParams();
                 tileParams.width = target;
-                tileParams.height = target;
+                int labelExtraHeight = prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
+                        ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
+                tileParams.height = target + labelExtraHeight;
                 tileParams.leftMargin = homeGridIconLeftAt(null, slot[0], cellWidth, target);
                 tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight)
                         + LauncherUiUtils.dp(this, 14);
@@ -3756,6 +3804,50 @@ public class MainActivity extends Activity {
         icon.setImageDrawable(new LauncherIconDrawable(current, false,
                 LauncherIconDrawable.SHAPE_SQUARE, backgroundColor, requestedTheme,
                 "shortcut:" + token, false));
+    }
+
+    private void applyWorkspaceLabelAppearance(TextView label, boolean shortcut) {
+        if (label == null) return;
+        label.setTypeface(Typeface.create(homeLabelTypefaceFamily(),
+                shortcut ? Typeface.BOLD : Typeface.NORMAL));
+        label.setTextColor(homeLabelColor());
+        label.setShadowLayer(LauncherUiUtils.dp(this, 1), 0f, LauncherUiUtils.dp(this, 1),
+                Color.argb(190, 0, 0, 0));
+        label.invalidate();
+    }
+
+    private void refreshWorkspaceLabelAppearance() {
+        if (pagesStrip != null) {
+            for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
+                View pageView = pagesStrip.getChildAt(pageIndex);
+                if (!(pageView instanceof ViewGroup)) continue;
+                ViewGroup page = (ViewGroup) pageView;
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View child = page.getChildAt(childIndex);
+                    if (!(child instanceof ViewGroup) || !(child.getTag() instanceof String)) continue;
+                    String tag = (String) child.getTag();
+                    ViewGroup cell = (ViewGroup) child;
+                    if ("launcher_contact_shortcut".equals(tag)) {
+                        if (cell.getChildCount() > 1 && cell.getChildAt(1) instanceof TextView) {
+                            applyWorkspaceLabelAppearance((TextView) cell.getChildAt(1), true);
+                        }
+                    } else if (tag.startsWith("launcher_app:")) {
+                        if (cell.getChildCount() > 1 && cell.getChildAt(1) instanceof TextView) {
+                            applyWorkspaceLabelAppearance((TextView) cell.getChildAt(1), false);
+                        }
+                    }
+                }
+            }
+        }
+        if (drawerGrid != null) {
+            for (int i = 0; i < drawerGrid.getChildCount(); i++) {
+                View cell = drawerGrid.getChildAt(i);
+                if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 1
+                        && ((ViewGroup) cell).getChildAt(1) instanceof TextView) {
+                    applyWorkspaceLabelAppearance((TextView) ((ViewGroup) cell).getChildAt(1), false);
+                }
+            }
+        }
     }
 
     private void refreshWorkspaceIconAppearance() {
@@ -6906,8 +6998,18 @@ public class MainActivity extends Activity {
         applyClockDateBlackInnerBorder(amPmText, useBlackViewInnerBorder, 0.2f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
         boolean useClockWhiteInnerBorder = useWhiteGradientInnerBorder || iconArtworkActive;
+        int artworkThemeForText = prefs == null
+                ? LauncherIconDrawable.ARTWORK_ORIGINAL
+                : LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                        KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+        boolean neonCircuitForText = prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
+        boolean nothingArtworkForText = iconArtworkActive
+                && artworkThemeForText == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
         int[] artworkTextColours = iconArtworkActive
-                ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
+                ? (nothingArtworkForText && !neonCircuitForText
+                        ? CLOCK_NOTHING_MATCH_DIGIT_GRADIENT_COLORS
+                        : getClockArtworkTransitionColours())
+                : CLOCK_DATE_GRADIENT_COLORS;
 
         // Artwork matching uses the same selected palette gradient for the date and
         // AM/PM as the digits. Its phase stays fixed when the live-gradient option is off.
@@ -7072,7 +7174,7 @@ public class MainActivity extends Activity {
                 dateLine.insert(0, period + ", ");
                 dateLine.setSpan(new android.text.style.StyleSpan(Typeface.BOLD_ITALIC), 0,
                         periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
+                dateLine.setSpan(new android.text.style.TypefaceSpan(clockPmFontFamily()),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
                         && !iconArtworkActive) {
@@ -7200,7 +7302,8 @@ public class MainActivity extends Activity {
             boolean dateModeChanged = previousDateGradient == null
                     || previousDateGradient.booleanValue() != useDateGradient;
             String dateAppearanceKey = configuredDateSize + ":" + configuredPmSize + ":"
-                    + useDateGradient + ":" + isClockIconArtworkActive();
+                    + useDateGradient + ":" + isClockIconArtworkActive() + ":"
+                    + clockDateFontFamily() + ":" + clockPmFontFamily();
             String previousDateAppearance = dateTextAppearanceApplied.get(dateText);
             if (!dateLine.toString().contentEquals(dateText.getText())
                     || dateModeChanged || !dateAppearanceKey.equals(previousDateAppearance)) {
@@ -10100,6 +10203,68 @@ public class MainActivity extends Activity {
         panel.addView(block, blockParams);
     }
 
+    private void addSideBySideChoicePair(LinearLayout panel,
+            String leftTitle, int leftSelected, String[] leftChoices, IntAction leftAction,
+            String rightTitle, int rightSelected, String[] rightChoices, IntAction rightAction) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+        rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+        panel.addView(row, rowParams);
+        addCompactChoiceCard(row, leftTitle, leftSelected, leftChoices, leftAction, true);
+        addCompactChoiceCard(row, rightTitle, rightSelected, rightChoices, rightAction, false);
+    }
+
+    private void addCompactChoiceCard(LinearLayout row, String title, int selected,
+            String[] choices, IntAction action, boolean leftCard) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 7),
+                LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 6));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
+        LinearLayout.LayoutParams blockParams =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        if (leftCard) blockParams.rightMargin = LauncherUiUtils.dp(this, 3);
+        else blockParams.leftMargin = LauncherUiUtils.dp(this, 3);
+        row.addView(block, blockParams);
+
+        TextView heading = LauncherUiUtils.text(this, title, 12.5f,
+                Color.rgb(247, 249, 255), true);
+        heading.setMaxLines(2);
+        heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        block.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+
+        android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
+        horizontal.setHorizontalScrollBarEnabled(false);
+        horizontal.setFillViewport(false);
+        LinearLayout chips = new LinearLayout(this);
+        chips.setGravity(Gravity.CENTER_VERTICAL);
+        for (int i = 0; i < choices.length; i++) {
+            final int value = i;
+            boolean isSelected = i == selected;
+            TextView chip = LauncherUiUtils.text(this, choices[i], 10.5f,
+                    isSelected ? Color.rgb(10, 15, 27) : Color.rgb(205, 214, 233), isSelected);
+            chip.setGravity(Gravity.CENTER);
+            chip.setSingleLine(true);
+            chip.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 8),
+                    LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 8));
+            chip.setBackground(LauncherUiUtils.roundRect(this,
+                    isSelected
+                            ? new int[]{homeStudioAccentColor, studioDarken(homeStudioAccentColor)}
+                            : new int[]{Color.rgb(39, 47, 68), Color.rgb(29, 36, 54)},
+                    LauncherUiUtils.dp(this, 8)));
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2,
+                    LauncherUiUtils.dp(this, 34));
+            chipParams.setMargins(LauncherUiUtils.dp(this, 1), 0, LauncherUiUtils.dp(this, 3), 0);
+            chips.addView(chip, chipParams);
+            chip.setOnClickListener(v -> action.onSelect(value));
+        }
+        horizontal.addView(chips, new android.widget.HorizontalScrollView.LayoutParams(-2, -2));
+        block.addView(horizontal, new LinearLayout.LayoutParams(-1, -2));
+    }
+
     private void showCustomizationMenu() {
         showCustomizationMenu(null, 0, true);
     }
@@ -10263,6 +10428,20 @@ public class MainActivity extends Activity {
             rebuildContactShortcutViews();
             validateWorkspacePagesAfterLayout();
         });
+        addChoiceRow(content, "App and shortcut label font",
+                Math.max(0, Math.min(2, prefs.getInt(KEY_HOME_LABEL_FONT, 0))),
+                new String[]{"Sans Serif (current)", "Serif", "Monospace"}, value -> {
+            prefs.edit().putInt(KEY_HOME_LABEL_FONT, value).apply();
+            renderHomePages(false);
+            refreshWorkspaceLabelAppearance();
+            validateWorkspacePagesAfterLayout();
+            showCustomizationMenu(dialog, scroll.getScrollY(), false);
+        });
+        addColorSliderRow(content, "App and shortcut label colour",
+                Math.max(0, Math.min(1000, prefs.getInt(KEY_HOME_LABEL_COLOR, 0))), true, value -> {
+            prefs.edit().putInt(KEY_HOME_LABEL_COLOR, value).apply();
+            refreshWorkspaceLabelAppearance();
+        });
         int shortcutSizeMax = Math.max(24, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
         addSliderRowOnStop(content, "Contact shortcut icon size", 24, shortcutSizeMax,
                 Math.max(24, Math.min(shortcutSizeMax, getShortcutIconSizeDp())), " dp", value -> {
@@ -10407,6 +10586,23 @@ public class MainActivity extends Activity {
                     prefs.edit().putInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 1), value).apply();
                     refreshClockTypographyAndGeometry();
                 });
+        addSection(content, "Clock text fonts");
+        addSideBySideChoicePair(content,
+                "Date font",
+                Math.max(0, Math.min(2, prefs.getInt(KEY_CLOCK_DATE_FONT, 0))),
+                new String[]{"Cursive (current)", "Sans", "Serif"}, value -> {
+                    prefs.edit().putInt(KEY_CLOCK_DATE_FONT, value).apply();
+                    refreshClockTypographyAndGeometry();
+                    showCustomizationMenu(dialog, scroll.getScrollY(), false);
+                },
+                "AM/PM font",
+                Math.max(0, Math.min(2, prefs.getInt(KEY_CLOCK_PM_FONT, 0))),
+                new String[]{"Black Sans (current)", "Sans", "Serif"}, value -> {
+                    prefs.edit().putInt(KEY_CLOCK_PM_FONT, value).apply();
+                    refreshClockTypographyAndGeometry();
+                    showCustomizationMenu(dialog, scroll.getScrollY(), false);
+                });
+
         addSection(content, "Page animations");
         addChoiceRow(content, "Page transition effect", getPageTransition(),
                 new String[]{"3D Wheel", "3D Cube", "Parallax", "Page Flip"}, value -> {
@@ -10799,6 +10995,7 @@ public class MainActivity extends Activity {
         final int configuredPmSize = Math.max(8, Math.min(24,
                 prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, activeClockPage), 14)));
         if (dateText != null) {
+            dateText.setTypeface(Typeface.create(clockDateFontFamily(), Typeface.BOLD));
             dateText.setTextSize(configuredDateSize);
             String measuredDate = dateText.getText().toString();
             // The AM/PM prefix is part of the date line in 12-hour mode. Measure
@@ -10839,8 +11036,10 @@ public class MainActivity extends Activity {
         // across the full page, but never beyond the page's horizontal bounds.
         // The cap is based on the actual page width (not half-width/grid columns),
         // so normal typography clocks can expand all the way to either screen edge.
+        // Keep the scale cap tied to the digit group, not the date line. Enlarging or
+        // changing the date font may widen the background, but never moves/compresses digits.
         final float lengthScale = Math.min(requestedLengthScale,
-                Math.max(0.01f, availablePanelWidth / (float) naturalPanelWidth));
+                Math.max(0.01f, availablePanelWidth / (float) clockWithMarkerWidth));
         // Let the real clock panel height grow with the breadth setting. Scaling only
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
@@ -11064,7 +11263,7 @@ public class MainActivity extends Activity {
 
         if (amPmText != null) {
             amPmText.setTextColor(clockText.getCurrentTextColor());
-            amPmText.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
+            amPmText.setTypeface(Typeface.create(clockPmFontFamily(), Typeface.BOLD));
             // Keep the marker's font size independent of workspace resizing.
             // 13.5sp is 50% taller than the previous 9sp setting.
             amPmText.setTextSize(configuredPmSize);
