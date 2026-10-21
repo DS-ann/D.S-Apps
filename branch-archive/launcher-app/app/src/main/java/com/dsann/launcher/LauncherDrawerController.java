@@ -146,7 +146,7 @@ final class LauncherDrawerController {
                     if (decoded != null && !decoded.isRecycled()) decoded.recycle();
                     return false;
                 }
-            } catch (java.io.IOException | RuntimeException ignored) {
+            } catch (java.io.IOException | RuntimeException | OutOfMemoryError ignored) {
                 if (decoded != null && !decoded.isRecycled()) decoded.recycle();
                 return false;
             }
@@ -180,6 +180,7 @@ final class LauncherDrawerController {
             } catch (OutOfMemoryError | RuntimeException ignored) {
                 return;
             }
+            if (copy == null) return;
             final int bitmapWidth = copy.getWidth();
             final int bitmapHeight = copy.getHeight();
             SNAPSHOT_DISK_EXECUTOR.execute(() -> {
