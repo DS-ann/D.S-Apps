@@ -3957,6 +3957,7 @@ public class MainActivity extends Activity {
             showAppGroupMemberOptions(groupId, packageName);
         };
 
+        item.setTag("launcher_app_group_member:" + packageName);
         item.setOnTouchListener((memberView, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
@@ -4010,6 +4011,22 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                String reorderTargetPackage = null;
+                if (action == MotionEvent.ACTION_UP && memberDragging[0] && !draggingOut[0]) {
+                    View dropTarget = findViewAt(popupPanel,
+                            (int) event.getRawX(), (int) event.getRawY());
+                    while (dropTarget != null && dropTarget != popupPanel) {
+                        Object tag = dropTarget.getTag();
+                        if (tag instanceof String
+                                && ((String) tag).startsWith("launcher_app_group_member:")) {
+                            reorderTargetPackage = ((String) tag)
+                                    .substring("launcher_app_group_member:".length());
+                            break;
+                        }
+                        android.view.ViewParent dropParent = dropTarget.getParent();
+                        dropTarget = dropParent instanceof View ? (View) dropParent : null;
+                    }
+                }
                 touchHandler.removeCallbacks(armMove);
                 touchHandler.removeCallbacks(showOptions);
                 memberView.setTranslationX(0f);
@@ -4024,6 +4041,31 @@ public class MainActivity extends Activity {
                     clearAppGroupMemberMoveMode();
                     groupDialog.dismiss();
                     moveAppGroupMemberToHome(groupId, packageName);
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP && memberDragging[0]) {
+                    if (reorderTargetPackage != null
+                            && !packageName.equals(reorderTargetPackage)) {
+                        ArrayList<String> members = getAppGroupMembers(groupId);
+                        int sourceIndex = members.indexOf(packageName);
+                        int targetIndex = members.indexOf(reorderTargetPackage);
+                        if (sourceIndex >= 0 && targetIndex >= 0) {
+                            members.remove(sourceIndex);
+                            targetIndex = members.indexOf(reorderTargetPackage);
+                            members.add(Math.max(0, targetIndex), packageName);
+                            saveAppGroupMembers(groupId, members);
+                            clearAppGroupMemberMoveMode();
+                            groupDialog.dismiss();
+                            openAppGroup(groupId);
+                            Toast.makeText(MainActivity.this, "Apps reordered",
+                                    Toast.LENGTH_SHORT).show();
+                            return true;
+                        }
+                    }
+                    activeAppGroupMemberMoveModeId = groupId;
+                    activeAppGroupMemberMoveModePackage = packageName;
+                    activeAppGroupMemberMoveModeView = item;
+                    setAppGroupMoveModeVisual(item, true);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP && armed[0] && !movedTooEarly[0]) {
