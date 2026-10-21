@@ -269,7 +269,12 @@ final class LauncherDrawerController {
 
         @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
             super.onSizeChanged(width, height, oldWidth, oldHeight);
-            if (cachedSnapshot != null && (width != oldWidth || height != oldHeight)) {
+            // GONE briefly causes some Android versions to report a zero-sized pass.
+            // Keep the last complete image across that pass; a real non-zero size change
+            // (rotation/resolution change) invalidates it and a new one is captured at Home.
+            if (cachedSnapshot != null && width > 0 && height > 0
+                    && oldWidth > 0 && oldHeight > 0
+                    && (width != oldWidth || height != oldHeight)) {
                 invalidateSnapshot();
             }
             snapshotBounds.set(0, 0, width, height);
