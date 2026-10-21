@@ -335,20 +335,20 @@ public class MainActivity extends Activity {
         private final int fillColor;
         private final int outlineColor;
         private final float borderPx;
-        private final float innerBlackBorderPx;
-        private final float outerBlackBorderPx;
+        private final float innerBorderPx;
+        private final float outerBorderPx;
         private final boolean preserveFill;
         private final boolean extraBold;
 
         ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
-                float innerBlackBorderPx) {
-            this(fillColor, outlineColor, borderPx, innerBlackBorderPx, 0f, false, true);
+                float innerBorderPx) {
+            this(fillColor, outlineColor, borderPx, innerBorderPx, 0f, false, true);
         }
 
         ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
-                float innerBlackBorderPx, float outerBlackBorderPx) {
-            this(fillColor, outlineColor, borderPx, innerBlackBorderPx,
-                    outerBlackBorderPx, false, true);
+                float innerBorderPx, float outerBorderPx) {
+            this(fillColor, outlineColor, borderPx, innerBorderPx,
+                    outerBorderPx, false, true);
         }
 
         // Keep the current TextView color/shader for ordinary and gradient modes.
@@ -356,19 +356,19 @@ public class MainActivity extends Activity {
             this(outlineColor, borderPx, 0f);
         }
 
-        // Preserve the existing inner black contour while keeping the current fill gradient.
-        ClockTextOutlineSpan(int outlineColor, float borderPx, float innerBlackBorderPx) {
-            this(0, outlineColor, borderPx, innerBlackBorderPx, 0f, true, true);
+        // Preserve the existing inner contour color while keeping the current fill gradient.
+        ClockTextOutlineSpan(int outlineColor, float borderPx, float innerBorderPx) {
+            this(0, outlineColor, borderPx, innerBorderPx, 0f, true, true);
         }
 
         private ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
-                float innerBlackBorderPx, float outerBlackBorderPx,
+                float innerBorderPx, float outerBorderPx,
                 boolean preserveFill, boolean extraBold) {
             this.fillColor = fillColor;
             this.outlineColor = outlineColor;
             this.borderPx = Math.max(0.1f, borderPx);
-            this.innerBlackBorderPx = Math.max(0f, innerBlackBorderPx);
-            this.outerBlackBorderPx = Math.max(0f, outerBlackBorderPx);
+            this.innerBorderPx = Math.max(0f, innerBorderPx);
+            this.outerBorderPx = Math.max(0f, outerBorderPx);
             this.preserveFill = preserveFill;
             this.extraBold = extraBold;
         }
@@ -400,12 +400,12 @@ public class MainActivity extends Activity {
                 paint.setXfermode(null);
                 paint.setFakeBoldText(extraBold || oldFakeBold);
 
-                // Artwork-matched mode already has a theme-specific outline. Draw a
-                // black underlay another 0.3dp beyond it to add the requested outer rim.
-                if (outerBlackBorderPx > 0f) {
+                // Artwork-matched mode already has a theme-specific outline. Draw an
+                // underlay beyond it to add the requested outer rim.
+                if (outerBorderPx > 0f) {
                     paint.setColor(Color.BLACK);
                     paint.setStyle(Paint.Style.STROKE);
-                    paint.setStrokeWidth((borderPx + outerBlackBorderPx) * 2f);
+                    paint.setStrokeWidth((borderPx + outerBorderPx) * 2f);
                     paint.setStrokeJoin(Paint.Join.ROUND);
                     paint.setStrokeCap(Paint.Cap.ROUND);
                     canvas.drawText(text, start, end, x, y, paint);
@@ -438,20 +438,20 @@ public class MainActivity extends Activity {
                 }
                 canvas.drawText(text, start, end, x, y, paint);
 
-                if (innerBlackBorderPx > 0f) {
+                if (innerBorderPx > 0f) {
                     // Mask the fine black stroke to the glyph fill, retaining the
                     // existing matched-artwork outline while adding a true inner contour.
                     float textWidth = Math.max(1f, paint.measureText(text, start, end));
-                    float strokeMargin = (borderPx + outerBlackBorderPx) * 2f;
+                    float strokeMargin = (borderPx + outerBorderPx) * 2f;
                     int innerLayer = canvas.saveLayer(x - strokeMargin, top - strokeMargin,
                             x + textWidth + strokeMargin, bottom + strokeMargin, null);
                     try {
                         paint.setShader(null);
                         paint.setXfermode(null);
                         paint.setFakeBoldText(extraBold || oldFakeBold);
-                        paint.setColor(Color.BLACK);
+                        paint.setColor(outlineColor);
                         paint.setStyle(Paint.Style.STROKE);
-                        paint.setStrokeWidth(innerBlackBorderPx * 2f);
+                        paint.setStrokeWidth(innerBorderPx * 2f);
                         paint.setStrokeJoin(Paint.Join.ROUND);
                         paint.setStrokeCap(Paint.Cap.ROUND);
                         canvas.drawText(text, start, end, x, y, paint);
@@ -485,6 +485,8 @@ public class MainActivity extends Activity {
     private final java.util.WeakHashMap<TextView, Boolean> dateGradientModeApplied =
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, String> dateTextAppearanceApplied =
+            new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, String> clockDateGeometrySignatures =
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
@@ -2667,11 +2669,12 @@ public class MainActivity extends Activity {
     }
 
     private String homeLabelTypefaceFamily() {
-        int family = prefs == null ? 0 : Math.max(0, Math.min(2,
+        int family = prefs == null ? 0 : Math.max(0, Math.min(3,
                 prefs.getInt(KEY_HOME_LABEL_FONT, 0)));
         switch (family) {
             case 1: return "serif";
             case 2: return "monospace";
+            case 3: return "cursive";
             default: return "sans-serif";
         }
     }
@@ -2683,21 +2686,23 @@ public class MainActivity extends Activity {
     }
 
     private String clockDateFontFamily() {
-        int family = prefs == null ? 0 : Math.max(0, Math.min(2,
+        int family = prefs == null ? 0 : Math.max(0, Math.min(3,
                 prefs.getInt(KEY_CLOCK_DATE_FONT, 0)));
         switch (family) {
             case 1: return "sans-serif";
             case 2: return "serif";
+            case 3: return "monospace";
             default: return "cursive";
         }
     }
 
     private String clockPmFontFamily() {
-        int family = prefs == null ? 0 : Math.max(0, Math.min(2,
+        int family = prefs == null ? 0 : Math.max(0, Math.min(3,
                 prefs.getInt(KEY_CLOCK_PM_FONT, 0)));
         switch (family) {
             case 1: return "sans-serif";
             case 2: return "serif";
+            case 3: return "monospace";
             default: return "sans-serif-black";
         }
     }
@@ -6793,7 +6798,7 @@ public class MainActivity extends Activity {
         return !nothingArtwork || !artworkMatchingEnabled;
     }
 
-    private boolean shouldApplyClockDateBlackInnerBorder() {
+    private boolean shouldApplyClockDateInnerBorder() {
         if (prefs == null) return false;
         boolean gradientEnabled = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean artworkMatchingEnabled = prefs.getBoolean(KEY_CLOCK_ICON_ARTWORK, false);
@@ -6985,7 +6990,7 @@ public class MainActivity extends Activity {
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
         boolean useWhiteGradientInnerBorder = shouldApplyClockGradientInnerBorder();
-        boolean useBlackDateInnerBorder = shouldApplyClockDateBlackInnerBorder();
+        boolean useBlackDateInnerBorder = shouldApplyClockDateInnerBorder();
         float borderDensity = getResources().getDisplayMetrics().density;
         // The normal text renderer masks the outside half of the stroke, leaving a 0.5dp
         // white inner contour. The thinner black contour is drawn as a separate inner pass.
@@ -7185,23 +7190,23 @@ public class MainActivity extends Activity {
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            // Every visible date/AM-PM glyph keeps a 0.4dp black outer outline.
+            // Every visible date/AM-PM glyph keeps a 0.4dp white outer outline.
             // Artwork-matched spans preserve the selected palette gradient and retain the
-            // existing 0.2dp inner black contour on themes that support it.
+            // existing 0.2dp inner white contour on themes that support it.
             int dateStart = use24Hour ? 0 : periodLength + 2;
             float density = getResources().getDisplayMetrics().density;
-            float blackOuterWidth = 0.4f * density;
-            float blackInnerWidth = iconArtworkActive && shouldApplyClockDateBlackInnerBorder()
+            float whiteOuterWidth = 0.4f * density;
+            float whiteInnerWidth = iconArtworkActive && shouldApplyClockDateInnerBorder()
                     ? 0.2f * density : 0f;
             if (dateStart < dateLine.length()) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.BLACK, blackOuterWidth, blackInnerWidth),
+                                Color.WHITE, whiteOuterWidth, whiteInnerWidth),
                         dateStart, dateLine.length(),
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             if (!use24Hour && periodLength > 0) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.BLACK, blackOuterWidth, blackInnerWidth),
+                                Color.WHITE, whiteOuterWidth, whiteInnerWidth),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             String clockValue = formatClockDigits(now, use24Hour);
@@ -10429,8 +10434,8 @@ public class MainActivity extends Activity {
             validateWorkspacePagesAfterLayout();
         });
         addChoiceRow(content, "App and shortcut label font",
-                Math.max(0, Math.min(2, prefs.getInt(KEY_HOME_LABEL_FONT, 0))),
-                new String[]{"Sans Serif (current)", "Serif", "Monospace"}, value -> {
+                Math.max(0, Math.min(3, prefs.getInt(KEY_HOME_LABEL_FONT, 0))),
+                new String[]{"Sans Serif", "Serif", "Monospace", "Cursive"}, value -> {
             prefs.edit().putInt(KEY_HOME_LABEL_FONT, value).apply();
             renderHomePages(false);
             refreshWorkspaceLabelAppearance();
@@ -10589,15 +10594,15 @@ public class MainActivity extends Activity {
         addSection(content, "Clock text fonts");
         addSideBySideChoicePair(content,
                 "Date font",
-                Math.max(0, Math.min(2, prefs.getInt(KEY_CLOCK_DATE_FONT, 0))),
-                new String[]{"Cursive (current)", "Sans", "Serif"}, value -> {
+                Math.max(0, Math.min(3, prefs.getInt(KEY_CLOCK_DATE_FONT, 0))),
+                new String[]{"Cursive", "Sans", "Serif", "Monospace"}, value -> {
                     prefs.edit().putInt(KEY_CLOCK_DATE_FONT, value).apply();
                     refreshClockTypographyAndGeometry();
                     showCustomizationMenu(dialog, scroll.getScrollY(), false);
                 },
                 "AM/PM font",
-                Math.max(0, Math.min(2, prefs.getInt(KEY_CLOCK_PM_FONT, 0))),
-                new String[]{"Black Sans (current)", "Sans", "Serif"}, value -> {
+                Math.max(0, Math.min(3, prefs.getInt(KEY_CLOCK_PM_FONT, 0))),
+                new String[]{"Black Sans", "Sans", "Serif", "Monospace"}, value -> {
                     prefs.edit().putInt(KEY_CLOCK_PM_FONT, value).apply();
                     refreshClockTypographyAndGeometry();
                     showCustomizationMenu(dialog, scroll.getScrollY(), false);
@@ -10612,7 +10617,7 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
-        addSliderRowWithHint(content, "Animation speed", 40, 200,
+        addSliderRowWithHint(content, "Animation speed", 20, 300,
                 LauncherMotion.speedPercent(this), "%",
                 "Applies to timed launcher animations. Left = slower; 100% = normal; right = faster.",
                 value -> prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply());
@@ -10897,6 +10902,20 @@ public class MainActivity extends Activity {
         final LinearLayout targetPanel = clockPanel;
         final int targetPage = Math.max(0, Math.min(1, activeClockPage));
         final int geometryGeneration = ++clockLayoutGenerationByPage[targetPage];
+        final int configuredDateSize = Math.max(8, Math.min(24,
+                prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, targetPage), 15)));
+        final int configuredPmSize = Math.max(8, Math.min(24,
+                prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, targetPage), 14)));
+        final String dateGeometrySignature = configuredDateSize + ":" + configuredPmSize + ":"
+                + clockDateFontFamily() + ":" + clockPmFontFamily();
+        String previousDateGeometrySignature = dateText == null ? null
+                : clockDateGeometrySignatures.get(dateText);
+        final int[] previousClockGroupLocation = new int[2];
+        final boolean preserveClockGroupScreenX = previousDateGeometrySignature != null
+                && !previousDateGeometrySignature.equals(dateGeometrySignature)
+                && clockGroup != null && clockGroup.getWidth() > 0;
+        if (preserveClockGroupScreenX) clockGroup.getLocationOnScreen(previousClockGroupLocation);
+        if (dateText != null) clockDateGeometrySignatures.put(dateText, dateGeometrySignature);
 
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
@@ -10990,10 +11009,6 @@ public class MainActivity extends Activity {
         // groups. Without reserving it, the max-width cap compresses the custom
         // glyph layout and the left grip appears to stop widening the background.
         int measuredDateWidth = 0;
-        final int configuredDateSize = Math.max(8, Math.min(24,
-                prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15)));
-        final int configuredPmSize = Math.max(8, Math.min(24,
-                prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, activeClockPage), 14)));
         if (dateText != null) {
             dateText.setTypeface(Typeface.create(clockDateFontFamily(), Typeface.BOLD));
             dateText.setTextSize(configuredDateSize);
@@ -11080,8 +11095,16 @@ public class MainActivity extends Activity {
                 updateClockResizeHandles();
                 return;
             }
+            float targetTranslationX = targetPanel.getTranslationX();
+            FrameLayout groupForAnchor = clockGroupsByPage[targetPage];
+            if (preserveClockGroupScreenX && groupForAnchor != null) {
+                int[] currentClockGroupLocation = new int[2];
+                groupForAnchor.getLocationOnScreen(currentClockGroupLocation);
+                // Correct the horizontal gravity shift caused by a wider date line.
+                targetTranslationX += previousClockGroupLocation[0] - currentClockGroupLocation[0];
+            }
             float[] bounded = clampClockTranslation(targetPanel,
-                    targetPanel.getTranslationX(), targetPanel.getTranslationY());
+                    targetTranslationX, targetPanel.getTranslationY());
             setClampedClockTranslationForPanel(
                     targetPanel, targetPage, bounded[0], bounded[1], true);
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
