@@ -2750,51 +2750,19 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Fit shortcut labels to their actual label width. Keep the original title in the
-     * content description so font or layout changes can safely recalculate the visible text.
-     * The explicit two-dot suffix is used only when truncation is necessary.
+     * Use the same native end-ellipsis behavior as app labels. Keep the full shortcut
+     * title in the content description so Android can recalculate the ellipsis whenever
+     * the label font or available width changes.
      */
     private void fitShortcutLabelWithDots(TextView label) {
         if (label == null) return;
         CharSequence source = label.getContentDescription();
         if (source == null) source = label.getText();
         String fullText = source == null ? "" : source.toString();
-        if (fullText.isEmpty()) return;
-
-        ViewGroup.LayoutParams params = label.getLayoutParams();
-        int availableWidth = label.getWidth();
-        if (availableWidth <= 0 && params != null && params.width > 0) {
-            availableWidth = params.width;
-        }
-        availableWidth -= label.getPaddingLeft() + label.getPaddingRight();
-        if (availableWidth <= 0) return;
-
-        Paint labelPaint = label.getPaint();
-        String fittedText = fullText;
-        if (labelPaint.measureText(fullText) > availableWidth) {
-            final String suffix = "..";
-            fittedText = "";
-            int end = fullText.length();
-            while (end > 0) {
-                int candidateEnd = end;
-                if (candidateEnd < fullText.length() && candidateEnd > 0
-                        && Character.isHighSurrogate(fullText.charAt(candidateEnd - 1))
-                        && Character.isLowSurrogate(fullText.charAt(candidateEnd))) {
-                    candidateEnd--;
-                }
-                String prefix = fullText.substring(0, candidateEnd).trim();
-                String candidate = prefix + suffix;
-                if (labelPaint.measureText(candidate) <= availableWidth) {
-                    fittedText = candidate;
-                    break;
-                }
-                end = candidateEnd - 1;
-            }
-            if (fittedText.isEmpty() && labelPaint.measureText(suffix) <= availableWidth) {
-                fittedText = suffix;
-            }
-        }
-        if (!fittedText.contentEquals(label.getText())) label.setText(fittedText);
+        if (!fullText.contentEquals(label.getText())) label.setText(fullText);
+        label.setSingleLine(true);
+        label.setMaxLines(1);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
     }
 
     /**
@@ -3342,7 +3310,7 @@ public class MainActivity extends Activity {
         label.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
         label.setSingleLine(true);
         label.setMaxLines(1);
-        label.setEllipsize(null);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setIncludeFontPadding(false);
         int shortcutLabelHeight = workspaceLabelHeightPx(label);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
@@ -3975,7 +3943,7 @@ public class MainActivity extends Activity {
                 Color.argb(180, 0, 0, 0));
         label.setSingleLine(true);
         label.setMaxLines(1);
-        label.setEllipsize(shortcut ? null : android.text.TextUtils.TruncateAt.END);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setIncludeFontPadding(false);
         if (shortcut && label.getParent() instanceof ViewGroup) {
             ViewGroup shortcutTile = (ViewGroup) label.getParent();
@@ -7412,8 +7380,11 @@ public class MainActivity extends Activity {
                     android.util.TypedValue.COMPLEX_UNIT_SP, 0.5f,
                     getResources().getDisplayMetrics());
             float dateBorderWidthPx = density * (configuredDateSize / 20f);
-            int dateFillColor = (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
-                    && !iconArtworkActive) ? clockDateFillColor() : Color.rgb(238, 240, 244);
+            int selectedArtworkTheme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
+                    KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
+            boolean forceWhiteDateFill = iconArtworkActive
+                    && selectedArtworkTheme == LauncherIconDrawable.ARTWORK_NOTHING_MONOCHROME;
+            int dateFillColor = forceWhiteDateFill ? Color.WHITE : clockDateFillColor();
             if (dateStart < dateLine.length()) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
                                 dateFillColor, Color.BLACK,
@@ -7471,32 +7442,40 @@ public class MainActivity extends Activity {
                         displayClock.insert(0, "\u2007");
                     }
                 }
-                // Draw the colon's two dots at the vertical center of the clock
-                // view/background instead of using the font's naturally raised colon.
+                // Center the colon independently of the date typography. Every numeric
+                // glyph uses a span that can paint the same 1dp inner-white contour without
+                // changing the existing gradient/artwork fill or the tuned digit spacing.
                 int colonAt = displayClock.toString().indexOf(':');
                 if (colonAt >= 0) {
-                    // Tighten the minute pair by reducing the first digit's advance,
-                    // leaving that digit anchored. Move the first hour digit toward
-                    // the second digit while keeping the second digit anchored.
                     int minuteFirst = colonAt + 1;
-                    if (minuteFirst + 1 < displayClock.length()
+                    boolean hasMinutePair = minuteFirst + 1 < displayClock.length()
                             && Character.digit(displayClock.charAt(minuteFirst), 10) >= 0
-                            && Character.digit(displayClock.charAt(minuteFirst + 1), 10) >= 0) {
-                        displayClock.setSpan(new TightDigitSpan(false, clockText.getTextSize()
-                                        * Math.max(0f, clockText.getLetterSpacing()) * 0.5f),
-                                minuteFirst, minuteFirst + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
+                            && Character.digit(displayClock.charAt(minuteFirst + 1), 10) >= 0;
+                    float tightenedDigitGap = clockText.getTextSize()
+                            * Math.max(0f, clockText.getLetterSpacing()) * 0.5f;
                     int hourEnd = colonAt - 1;
                     int hourStart = hourEnd;
-                    while (hourStart >= 0 && Character.digit(displayClock.charAt(hourStart), 10) >= 0) hourStart--;
+                    while (hourStart >= 0
+                            && Character.digit(displayClock.charAt(hourStart), 10) >= 0) {
+                        hourStart--;
+                    }
                     hourStart++;
-                    if (hourEnd - hourStart + 1 >= 2) {
-                        displayClock.setSpan(new TightDigitSpan(true, clockText.getTextSize()
-                                        * Math.max(0f, clockText.getLetterSpacing()) * 0.5f),
-                                hourStart, hourStart + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    int hourDigitCount = hourEnd - hourStart + 1;
+                    float innerWhiteBorderPx = LauncherUiUtils.dp(this, 1f);
+                    for (int digitAt = 0; digitAt < displayClock.length(); digitAt++) {
+                        if (Character.digit(displayClock.charAt(digitAt), 10) < 0) continue;
+                        boolean moveFirstHourDigitRight = digitAt == hourStart && hourDigitCount >= 2;
+                        float gap = digitAt == minuteFirst && hasMinutePair
+                                ? tightenedDigitGap : 0f;
+                        displayClock.setSpan(new TightDigitSpan(
+                                        moveFirstHourDigitRight, gap,
+                                        useWhiteDigitInnerBorder, innerWhiteBorderPx),
+                                digitAt, digitAt + 1,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                     displayClock.setSpan(new CenteredColonSpan(
-                                    LauncherUiUtils.dp(this, 114) / 2f, useWhiteDigitInnerBorder),
+                                    LauncherUiUtils.dp(this, 114) / 2f,
+                                    useWhiteDigitInnerBorder, innerWhiteBorderPx),
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
@@ -10825,12 +10804,10 @@ public class MainActivity extends Activity {
                     refreshClockTypographyAndGeometry();
                     showCustomizationMenu(dialog, scroll.getScrollY(), false);
                 });
-        boolean dateColourSliderEnabled = !prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
-                && !isClockIconArtworkActive();
         addColorSliderRow(content, "Clock date inner colour",
                 Math.max(0, Math.min(1000,
                         prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, 0))),
-                dateColourSliderEnabled, value -> {
+                true, value -> {
                     prefs.edit().putInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, value).apply();
                     updateClock();
                 });
@@ -11083,10 +11060,10 @@ public class MainActivity extends Activity {
                 float leadingCellWidth = clockText.getPaint().measureText("\u2007");
                 float trackingWidth = clockText.getTextSize() * clockText.getLetterSpacing();
                 float leadingCellAdvance = Math.max(0f, leadingCellWidth + trackingWidth);
-                // Convert the desired on-screen offset back through both local glyph
-                // scaling and the parent panel scale. Date sizing can resize that panel,
-                // but must never change this position relative to the background.
-                targetX = -(leadingCellAdvance * 0.5f) * textScaleX / panelScaleX;
+                // TranslationX is in the clock text's parent coordinates. The parent
+                // panel transforms both the background and this correction together, so
+                // dividing by its scale would make date-size changes move the visible clock.
+                targetX = -(leadingCellAdvance * 0.5f) * textScaleX;
             } else if (colon >= 0) {
                 // Center the colon itself, not merely the entire string. This accounts for
                 // the custom colon/digit spans and the actual advances of the displayed
@@ -11113,7 +11090,9 @@ public class MainActivity extends Activity {
                     }
                     float colonCenter = (groupWidth - fullTextWidth) * 0.5f
                             + prefixWidth + colonAdvance * 0.5f;
-                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX / panelScaleX;
+                    // Center the colon in parent-local coordinates. Do not divide by
+                    // panelScaleX: the background receives that same parent transform.
+                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
                 } else {
                     targetX = 0f;
                 }
@@ -11685,13 +11664,48 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static void drawClockGlyphInnerWhiteBorder(Canvas canvas, CharSequence text,
+            int start, int end, float x, int top, int y, int bottom, Paint sourcePaint,
+            float innerWhiteBorderPx) {
+        float textWidth = Math.max(1f, sourcePaint.measureText(text, start, end));
+        float margin = Math.max(2f, innerWhiteBorderPx * 2f);
+        int contourLayer = canvas.saveLayer(x - margin, top - margin,
+                x + textWidth + margin, bottom + margin, null);
+        try {
+            Paint contour = new Paint(sourcePaint);
+            contour.setShader(null);
+            contour.setXfermode(null);
+            contour.setColor(Color.WHITE);
+            contour.setStyle(Paint.Style.STROKE);
+            contour.setStrokeWidth(innerWhiteBorderPx * 2f);
+            contour.setStrokeJoin(Paint.Join.ROUND);
+            contour.setStrokeCap(Paint.Cap.ROUND);
+            canvas.drawText(text, start, end, x, y, contour);
+
+            // Mask the centered stroke to the actual glyph fill. This leaves a thin
+            // white contour inside the letter edge without modifying its gradient fill.
+            contour.setStyle(Paint.Style.FILL);
+            contour.setStrokeWidth(0f);
+            contour.setXfermode(new android.graphics.PorterDuffXfermode(
+                    android.graphics.PorterDuff.Mode.DST_IN));
+            canvas.drawText(text, start, end, x, y, contour);
+        } finally {
+            canvas.restoreToCount(contourLayer);
+        }
+    }
+
     private static final class TightDigitSpan extends android.text.style.ReplacementSpan {
         private final boolean moveDigitRight;
         private final float gap;
+        private final boolean drawWhiteInnerBorder;
+        private final float innerWhiteBorderPx;
 
-        TightDigitSpan(boolean moveDigitRight, float gap) {
+        TightDigitSpan(boolean moveDigitRight, float gap, boolean drawWhiteInnerBorder,
+                float innerWhiteBorderPx) {
             this.moveDigitRight = moveDigitRight;
             this.gap = Math.max(0f, gap);
+            this.drawWhiteInnerBorder = drawWhiteInnerBorder;
+            this.innerWhiteBorderPx = Math.max(0f, innerWhiteBorderPx);
         }
 
         @Override public int getSize(Paint paint, CharSequence text, int start, int end,
@@ -11705,17 +11719,25 @@ public class MainActivity extends Activity {
             // For minutes, the first digit stays put and its reduced advance pulls
             // the second digit left. For hours, shift the first digit right while
             // preserving the second digit's original position.
-            canvas.drawText(text, start, end, x + (moveDigitRight ? gap : 0f), y, paint);
+            float glyphX = x + (moveDigitRight ? gap : 0f);
+            canvas.drawText(text, start, end, glyphX, y, paint);
+            if (drawWhiteInnerBorder && innerWhiteBorderPx > 0f) {
+                drawClockGlyphInnerWhiteBorder(canvas, text, start, end,
+                        glyphX, top, y, bottom, paint, innerWhiteBorderPx);
+            }
         }
     }
 
     private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
         private final float rowCenterY;
         private final boolean drawWhiteInnerBorder;
+        private final float innerWhiteBorderPx;
 
-        CenteredColonSpan(float rowCenterY, boolean drawWhiteInnerBorder) {
+        CenteredColonSpan(float rowCenterY, boolean drawWhiteInnerBorder,
+                float innerWhiteBorderPx) {
             this.rowCenterY = rowCenterY;
             this.drawWhiteInnerBorder = drawWhiteInnerBorder;
+            this.innerWhiteBorderPx = Math.max(0f, innerWhiteBorderPx);
         }
 
         @Override
@@ -11729,22 +11751,6 @@ public class MainActivity extends Activity {
         @Override
         public void draw(Canvas canvas, CharSequence text, int start, int end,
                 float x, int top, int y, int bottom, Paint paint) {
-            boolean borderPass = paint.getStyle() == Paint.Style.STROKE;
-            if (borderPass && !drawWhiteInnerBorder) return;
-            Paint dots = new Paint(paint);
-            if (borderPass) {
-                // The renderer masks this stroke to the filled dots below, leaving a
-                // 1dp white contour inside their edges without changing the dot fill.
-                dots.setShader(null);
-                dots.setColor(Color.WHITE);
-                dots.setStyle(Paint.Style.STROKE);
-                dots.setStrokeWidth(paint.getStrokeWidth());
-                dots.setStrokeJoin(Paint.Join.ROUND);
-                dots.setStrokeCap(Paint.Cap.ROUND);
-            } else {
-                dots.setStyle(Paint.Style.FILL);
-                dots.setStrokeWidth(0f);
-            }
             float naturalWidth = paint.measureText(":");
             float radius = Math.max(1f, paint.getTextSize() * 0.045f);
             // Match the horizontal center of the colon's compact reserved advance.
@@ -11756,8 +11762,41 @@ public class MainActivity extends Activity {
             // Parent resizing scales the row and this coordinate together.
             float centerY = rowCenterY;
             float gap = paint.getTextSize() * 0.18f;
+
+            Paint dots = new Paint(paint);
+            dots.setXfermode(null);
+            dots.setStyle(Paint.Style.FILL);
+            dots.setStrokeWidth(0f);
             canvas.drawCircle(centerX, centerY - gap, radius, dots);
             canvas.drawCircle(centerX, centerY + gap, radius, dots);
+
+            if (!drawWhiteInnerBorder || innerWhiteBorderPx <= 0f) return;
+            float margin = innerWhiteBorderPx * 2f;
+            int contourLayer = canvas.saveLayer(centerX - radius - margin,
+                    centerY - gap - radius - margin,
+                    centerX + radius + margin,
+                    centerY + gap + radius + margin, null);
+            try {
+                Paint contour = new Paint(paint);
+                contour.setShader(null);
+                contour.setXfermode(null);
+                contour.setColor(Color.WHITE);
+                contour.setStyle(Paint.Style.STROKE);
+                contour.setStrokeWidth(innerWhiteBorderPx * 2f);
+                contour.setStrokeJoin(Paint.Join.ROUND);
+                contour.setStrokeCap(Paint.Cap.ROUND);
+                canvas.drawCircle(centerX, centerY - gap, radius, contour);
+                canvas.drawCircle(centerX, centerY + gap, radius, contour);
+
+                contour.setStyle(Paint.Style.FILL);
+                contour.setStrokeWidth(0f);
+                contour.setXfermode(new android.graphics.PorterDuffXfermode(
+                        android.graphics.PorterDuff.Mode.DST_IN));
+                canvas.drawCircle(centerX, centerY - gap, radius, contour);
+                canvas.drawCircle(centerX, centerY + gap, radius, contour);
+            } finally {
+                canvas.restoreToCount(contourLayer);
+            }
         }
     }
 
