@@ -8950,18 +8950,6 @@ public class MainActivity extends Activity {
             ledClock.setSevenSegmentMode(ledMode);
             ledClock.invalidate();
         }
-        // Renderer mode changes must never leave standard clock text hidden.
-        clockText.setVisibility(View.VISIBLE);
-        clockText.setAlpha(1f);
-        clockText.invalidate();
-        // Renderer mode changes must never leave standard clock text hidden.
-        clockText.setVisibility(View.VISIBLE);
-        clockText.setAlpha(1f);
-        if (Color.alpha(clockText.getCurrentTextColor()) == 0
-                && clockText.getPaint().getShader() == null) {
-            clockText.setTextColor(CLOCK_DIGIT_SILVER);
-        }
-        clockText.invalidate();
         appliedClockStyles.put(clockText, style);
     }
 
@@ -13257,12 +13245,6 @@ public class MainActivity extends Activity {
 
     private void syncClockColonVerticalCenter() {
         if (clockText == null) return;
-        // Time updates keep all presets visible; style selects drawing mode only.
-        clockText.setVisibility(View.VISIBLE);
-        clockText.setAlpha(1f);
-        // Every clock preset uses the same visible time view; only its renderer changes.
-        clockText.setVisibility(View.VISIBLE);
-        clockText.setAlpha(1f);
         CharSequence value = clockText.getText();
         if (!(value instanceof android.text.Spanned)) return;
         android.text.Spanned spanned = (android.text.Spanned) value;
