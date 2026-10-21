@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.Outline;
 import android.view.ViewOutlineProvider;
 import android.view.Gravity;
@@ -143,6 +144,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         TextView label = new TextView(activity);
         label.setTextSize(10);
         label.setTextColor(Color.rgb(236, 239, 249));
+        label.setShadowLayer(dp(1), 0f, dp(1), Color.argb(180, 0, 0, 0));
         label.setGravity(Gravity.CENTER);
         label.setSingleLine(true);
         label.setMaxLines(1);
@@ -636,6 +638,23 @@ public final class LauncherAppAdapter extends BaseAdapter {
         if (Math.abs(label.getTextSize() - targetTextSize * activity.getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
             label.setTextSize(targetTextSize);
         }
+        // Shared system-font and colour choices apply to both Home and the app drawer.
+        int labelFontSelection = Math.max(0, Math.min(2,
+                preferences == null ? 0 : preferences.getInt("home_label_font_family", 0)));
+        String labelTypefaceFamily;
+        switch (labelFontSelection) {
+            case 1: labelTypefaceFamily = "serif"; break;
+            case 2: labelTypefaceFamily = "monospace"; break;
+            default: labelTypefaceFamily = "sans-serif";
+        }
+        Typeface wantedTypeface = Typeface.create(labelTypefaceFamily, Typeface.NORMAL);
+        if (label.getTypeface() == null || !wantedTypeface.equals(label.getTypeface())) {
+            label.setTypeface(wantedTypeface);
+        }
+        int labelColorPosition = Math.max(0, Math.min(1000,
+                preferences == null ? 0 : preferences.getInt("home_label_color_position", 0)));
+        int wantedLabelColor = LauncherIconDrawable.spectrumColorForPosition(labelColorPosition);
+        if (label.getCurrentTextColor() != wantedLabelColor) label.setTextColor(wantedLabelColor);
         // Native ellipsizing avoids posting a measurement task for every recycled cell.
         int targetVisibility = preferences == null || preferences.getBoolean(showLabelsKey, true)
                 ? View.VISIBLE : View.GONE;
