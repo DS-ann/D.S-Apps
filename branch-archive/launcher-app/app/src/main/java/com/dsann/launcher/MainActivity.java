@@ -2833,7 +2833,7 @@ public class MainActivity extends Activity {
 
     /**
      * Finds the home-grid slot with the greatest intersection with the drag boundary.
-     * A slot is returned only when it contains at least 50% of that boundary's area.
+     * A slot is returned only when at least half of that grid cell is covered by the boundary.
      */
     private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
             int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
@@ -3459,6 +3459,42 @@ public class MainActivity extends Activity {
         } finally {
             appGroupCreationPending = false;
         }
+    }
+
+    private String findAppGroupAtDragBoundary(FrameLayout page,
+            int boundaryLeft, int boundaryTop, int boundaryWidth, int boundaryHeight,
+            int cellWidth, int cellHeight) {
+        if (page == null || cellWidth <= 0 || cellHeight <= 0) return null;
+        int pageWidth = page.getWidth();
+        int pageHeight = page.getHeight();
+        int columns = Math.max(1, getHomeColumns());
+        int rows = homeGridRowsForHeight(pageHeight, cellHeight);
+        int boundaryRight = boundaryLeft + Math.max(1, boundaryWidth);
+        int boundaryBottom = boundaryTop + Math.max(1, boundaryHeight);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (!isAppGroupItem(child)
+                    || !(child.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
+            int groupCol = Math.max(0, Math.min(columns - 1,
+                    Math.round(lp.leftMargin / (float) Math.max(1, cellWidth))));
+            int groupRow = homeGridRowFromTop(lp.topMargin, rows, pageHeight, cellHeight);
+            int gridLeft = groupCol * cellWidth;
+            int gridTop = homeGridRowTop(groupRow, rows, pageHeight, cellHeight);
+            int gridRight = Math.min(pageWidth, gridLeft + cellWidth);
+            int gridBottom = Math.min(pageHeight, gridTop + cellHeight);
+            int overlapWidth = Math.max(0, Math.min(boundaryRight, gridRight)
+                    - Math.max(boundaryLeft, gridLeft));
+            int overlapHeight = Math.max(0, Math.min(boundaryBottom, gridBottom)
+                    - Math.max(boundaryTop, gridTop));
+            long overlapArea = (long) overlapWidth * overlapHeight;
+            long gridCellArea = (long) Math.max(1, gridRight - gridLeft)
+                    * Math.max(1, gridBottom - gridTop);
+            if (gridCellArea > 0L && overlapArea * 2L >= gridCellArea) {
+                return appGroupId(child);
+            }
+        }
+        return null;
     }
 
     private String findAppGroupAtGridSlot(FrameLayout page, int col, int row,
@@ -6303,8 +6339,9 @@ public class MainActivity extends Activity {
                             Math.max(0, targetHeight - dragBoundaryHeight),
                             Math.round(desiredBoundaryTop)));
 
-                    // A slot qualifies only when at least half of the drag-boundary area overlaps
-                    // it. This makes release placement follow the same visible movement boundary.
+                    // Generic placement follows the greatest-overlap grid cell; app-group drops
+                    // are detected separately against the actual target grid cell, so an adjacent
+                    // cell cannot steal a qualifying 50% group drop.
                     int[] majorityOverlapSlot = findHomeGridSlotForDragBoundary(
                             boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
                             targetWidth, targetHeight, columns, rows, cellWidth, cellHeight);
@@ -6314,9 +6351,9 @@ public class MainActivity extends Activity {
                                     Math.round(boundaryLeft / (float) cellWidth)));
                     int targetRow = boundaryHasMajorityCell ? majorityOverlapSlot[1]
                             : homeGridRowFromTop(boundaryTop, rows, targetHeight, cellHeight);
-                    String targetGroupId = boundaryHasMajorityCell
-                            ? findAppGroupAtGridSlot(targetPage, targetCol, targetRow,
-                                    cellWidth, cellHeight) : null;
+                    String targetGroupId = findAppGroupAtDragBoundary(targetPage,
+                            boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
+                            cellWidth, cellHeight);
                     if (targetGroupId != null) {
                         String groupLabel = getAppGroupLabel(targetGroupId);
                         ResolveInfo draggedApp = findApp(packageName);
