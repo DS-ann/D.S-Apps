@@ -50,6 +50,14 @@ public final class LauncherAppAdapter extends BaseAdapter {
     private final java.util.Set<String> pendingIconLoads = new java.util.HashSet<>();
     private int iconCacheGeneration;
     private Runnable dataChangedListener;
+    // Temporary ImageViews keep artwork waiters alive while all drawer icons are prewarmed at
+    // Home. Completed entries are released immediately so the cache remains suitable for low-RAM
+    // Android 6 devices rather than retaining a second permanent icon grid.
+    private final android.os.Handler artworkPrewarmHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private final ArrayList<ImageView> artworkPrewarmWaiters = new ArrayList<>();
+    private int artworkPrewarmGeneration;
+    private long lastArtworkPrewarmSignature = Long.MIN_VALUE;
 
     // PackageManager icon resolution is I/O/resource-heavy on Android 6. Never do it on the
     // UI thread during the drawer's opening animation or while GridView is scrolling.
@@ -451,6 +459,67 @@ public final class LauncherAppAdapter extends BaseAdapter {
         dataChangedListener = listener;
     }
 
+    /**
+     * Starts all package-icon loads and selected-theme artwork conversions while the drawer is
+     * hidden. The real GridView remains virtualized; only one lightweight waiter view per pending
+     * icon is retained, and each waiter is released as soon as its final artwork is ready.
+     */
+    void prewarmAllDrawerArtwork() {
+        if (!drawer || preferences == null || activity.isFinishing()) return;
+        long signature = preferences.getAll().hashCode();
+        for (ResolveInfo app : drawerApps) {
+            if (app == null || app.activityInfo == null) continue;
+            signature = signature * 31L + key(app).hashCode();
+            android.content.pm.ApplicationInfo application = app.activityInfo.applicationInfo;
+            if (application != null && application.sourceDir != null) {
+                try {
+                    java.io.File apk = new java.io.File(application.sourceDir);
+                    signature = signature * 31L + apk.lastModified();
+                    signature = signature * 31L + apk.length();
+                } catch (RuntimeException ignored) {}
+            }
+        }
+        if (signature == lastArtworkPrewarmSignature) return;
+        lastArtworkPrewarmSignature = signature;
+        artworkPrewarmGeneration++;
+        final int generation = artworkPrewarmGeneration;
+        artworkPrewarmHandler.removeCallbacksAndMessages(null);
+        artworkPrewarmWaiters.clear();
+
+        for (ResolveInfo app : new ArrayList<>(drawerApps)) {
+            if (app == null || app.activityInfo == null) continue;
+            String appKey = key(app);
+            ImageView waiter = new ImageView(activity);
+            waiter.setTag(appKey);
+            android.graphics.drawable.Drawable icon = cachedIcon(app, waiter, appKey);
+            if (icon != null) bindIconAppearance(waiter, app, icon, appKey);
+            artworkPrewarmWaiters.add(waiter);
+        }
+        pollArtworkPrewarm(generation, 0);
+    }
+
+    private void pollArtworkPrewarm(int generation, int checks) {
+        if (generation != artworkPrewarmGeneration || activity.isFinishing()) return;
+        java.util.Iterator<ImageView> iterator = artworkPrewarmWaiters.iterator();
+        while (iterator.hasNext()) {
+            ImageView waiter = iterator.next();
+            String appKey = String.valueOf(waiter.getTag());
+            android.graphics.drawable.Drawable icon = waiter.getDrawable();
+            boolean pending = icon instanceof LauncherIconDrawable
+                    && !((LauncherIconDrawable) icon).isArtworkReady();
+            if (icon == null) pending = pendingIconLoads.contains(appKey);
+            if (!pending) iterator.remove();
+        }
+        if (artworkPrewarmWaiters.isEmpty()) return;
+        if (checks >= 300) {
+            // A malformed third-party icon must not pin view/drawable references indefinitely.
+            artworkPrewarmWaiters.clear();
+            return;
+        }
+        artworkPrewarmHandler.postDelayed(
+                () -> pollArtworkPrewarm(generation, checks + 1), 100L);
+    }
+
     @Override public void notifyDataSetChanged() {
         if (dataChangedListener != null) dataChangedListener.run();
         super.notifyDataSetChanged();
@@ -461,6 +530,10 @@ public final class LauncherAppAdapter extends BaseAdapter {
         // Keep per-package artwork identities. Re-reading unchanged package metadata after
         // every install/uninstall would add needless PackageManager work during drawer refresh.
         iconCacheGeneration++;
+        artworkPrewarmGeneration++;
+        artworkPrewarmHandler.removeCallbacksAndMessages(null);
+        artworkPrewarmWaiters.clear();
+        lastArtworkPrewarmSignature = Long.MIN_VALUE;
         labelCache.clear();
         iconCache.clear();
         pendingIconLoads.clear();
