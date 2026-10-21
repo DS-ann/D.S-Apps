@@ -638,7 +638,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         if (Math.abs(label.getTextSize() - targetTextSize * activity.getResources().getDisplayMetrics().scaledDensity) > 0.5f) {
             label.setTextSize(targetTextSize);
         }
-        // Shared system-font and colour choices apply to both Home and the app drawer.
+        // Apply shared system-font and colour choices before measuring each recycled Home/drawer label.
         int labelFontSelection = Math.max(0, Math.min(2,
                 preferences == null ? 0 : preferences.getInt("home_label_font_family", 0)));
         String labelTypefaceFamily;
