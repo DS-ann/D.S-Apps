@@ -862,8 +862,12 @@ public class MainActivity extends Activity {
 
             if (standardClockStyle && hourDigits >= 2) {
                 CharSequence currentText = targetClock.getText();
-                if (currentText != null) {
-                    // Copy the spans so TextView discards the prior Layout/span cache.
+                if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M) {
+                    // Android 6 must not inherit the old per-digit/colon replacement spans.
+                    // Install plain text so TextView uses its native glyph layout for this case.
+                    targetClock.setText(currentValue, TextView.BufferType.NORMAL);
+                } else if (currentText != null) {
+                    // Newer TextView implementations can safely rebuild the existing span buffer.
                     targetClock.setText(new android.text.SpannableStringBuilder(currentText),
                             TextView.BufferType.SPANNABLE);
                 }
@@ -9491,6 +9495,17 @@ public class MainActivity extends Activity {
             boolean digitBorderModeChanged = previousDigitBorderMode == null
                     || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
             boolean missingDisplaySpans = false;
+            boolean staleApi23ReplacementSpans = false;
+            if (api23TwoDigitTextFallback) {
+                CharSequence existingText = clockText.getText();
+                if (existingText instanceof android.text.Spanned) {
+                    android.text.Spanned oldSpanned = (android.text.Spanned) existingText;
+                    staleApi23ReplacementSpans =
+                            oldSpanned.getSpans(0, oldSpanned.length(), TightDigitSpan.class).length > 0
+                            || oldSpanned.getSpans(0, oldSpanned.length(),
+                                    CenteredColonSpan.class).length > 0;
+                }
+            }
             int expectedColon = displayClock.toString().indexOf(':');
             if (!sevenSegmentClock && !api23TwoDigitTextFallback
                     && !clockValue.isEmpty() && expectedColon >= 0) {
@@ -9512,7 +9527,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            if (forceTextRefresh || missingDisplaySpans
+            if (forceTextRefresh || missingDisplaySpans || staleApi23ReplacementSpans
                     || !displayClock.toString().contentEquals(clockText.getText())
                     || digitBorderModeChanged) {
                 // The seven-segment renderer owns its glyph geometry; standard styles
