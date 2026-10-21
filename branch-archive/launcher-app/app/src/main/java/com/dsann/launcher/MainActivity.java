@@ -162,6 +162,7 @@ public class MainActivity extends Activity {
             (sharedPreferences, key) -> {
                 if (!isDrawerCachePreference(key)) return;
                 drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+                drawerSnapshotCurrentItemSignature = Long.MIN_VALUE;
                 drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
                 // Preference listeners run on the main thread. Rebuild the cache in the background
                 // while Home is visible so a later drawer opening never shows a partial artwork pass.
@@ -457,6 +458,7 @@ public class MainActivity extends Activity {
     private Runnable refreshDrawerAppList;
     private LauncherDrawerController.CachedDrawerBody drawerSnapshotBody;
     private long drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+    private long drawerSnapshotCurrentItemSignature = Long.MIN_VALUE;
     private long drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
     private boolean drawerSnapshotSwipeOpeningPrepared = false;
     private int drawerSnapshotReadyChecks = 0;
@@ -476,9 +478,12 @@ public class MainActivity extends Activity {
             // artwork poll. Package and relevant preference updates reset the signature to MIN.
             if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
                 drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+                drawerSnapshotCurrentItemSignature = calculateDrawerSnapshotItemSignature();
                 drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
             }
             long signature = drawerSnapshotCurrentSignature;
+            long itemSignature = drawerSnapshotCurrentItemSignature == Long.MIN_VALUE
+                    ? calculateDrawerSnapshotItemSignature() : drawerSnapshotCurrentItemSignature;
             int firstVisible = drawerGrid.getFirstVisiblePosition();
             boolean cachedFrameValid = false;
             if (drawerSnapshotDiskLoadSignature != signature) {
@@ -492,8 +497,11 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            // Keep the last complete pixels visible while new artwork is loading. The item-order
+            // signature makes this fallback safe only while taps still map to the same apps.
+            drawerSnapshotBody.showLastPersistentSnapshot(itemSignature, firstVisible);
             if (drawerAdapter.areVisibleIconsReady(drawerGrid)) {
-                drawerSnapshotBody.captureSnapshot(signature, firstVisible);
+                drawerSnapshotBody.captureSnapshot(signature, firstVisible, itemSignature);
                 drawerSnapshotReadyChecks = 0;
             } else if (++drawerSnapshotReadyChecks <= 100) {
                 // Allow slow first-run theme artwork to finish while the user stays at Home.
@@ -2873,6 +2881,7 @@ public class MainActivity extends Activity {
                     @Override public int getColumns() { return getDrawerColumns(); }
                     @Override public void onDrawerDataChanged() {
                         drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+                        drawerSnapshotCurrentItemSignature = Long.MIN_VALUE;
                         drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
                         scheduleDrawerSnapshotRefresh();
                     }
@@ -5473,6 +5482,21 @@ public class MainActivity extends Activity {
         return signature;
     }
 
+    private long calculateDrawerSnapshotItemSignature() {
+        long signature = 17L;
+        for (ResolveInfo app : drawerApps) {
+            if (app == null || app.activityInfo == null) continue;
+            signature = signature * 31L
+                    + String.valueOf(app.activityInfo.packageName).hashCode();
+            signature = signature * 31L
+                    + String.valueOf(app.activityInfo.name).hashCode();
+            String labelKey = app.activityInfo.packageName + "/" + app.activityInfo.name;
+            signature = signature * 31L
+                    + String.valueOf(preloadedAppLabels.get(labelKey)).hashCode();
+        }
+        return signature * 31L + drawerApps.size();
+    }
+
     private void scheduleDrawerSnapshotRefresh() {
         if (drawerSnapshotBody == null) return;
         // Keep the drawer measured but fully invisible while Home is displayed. This lets
@@ -5491,6 +5515,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(drawerSnapshotReadyCheck);
         drawerSnapshotReadyChecks = 0;
         drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+        drawerSnapshotCurrentItemSignature = Long.MIN_VALUE;
         drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
         handler.postDelayed(drawerSnapshotReadyCheck, 100L);
     }
@@ -5498,13 +5523,20 @@ public class MainActivity extends Activity {
     private void prepareDrawerSnapshotForOpening() {
         if (drawerSnapshotBody == null) return;
         drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+        drawerSnapshotCurrentItemSignature = calculateDrawerSnapshotItemSignature();
         drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
         drawerSnapshotSwipeOpeningPrepared = true;
         int firstVisible = drawerGrid == null ? 0 : drawerGrid.getFirstVisiblePosition();
-        // Prefer the image already loaded from internal storage. Decoding/rebuilding happens
-        // from the Home prewarm callback rather than inside the opening animation.
-        drawerSnapshotBody.loadPersistentSnapshot(drawerSnapshotCurrentSignature, firstVisible);
-        drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible);
+        // Use an exact cached frame when available. If only appearance settings changed, keep
+        // the same ordered app grid visible until Home's background prewarm finishes the update.
+        boolean exactSnapshot = drawerSnapshotBody.loadPersistentSnapshot(
+                drawerSnapshotCurrentSignature, firstVisible);
+        if (exactSnapshot) {
+            drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible);
+        } else {
+            drawerSnapshotBody.showLastPersistentSnapshot(
+                    drawerSnapshotCurrentItemSignature, firstVisible);
+        }
         scheduleDrawerSnapshotRefresh();
     }
 
@@ -5551,10 +5583,14 @@ public class MainActivity extends Activity {
         if (!drawerOpen && drawerSwipePendingProgress > 0.001f && drawerSnapshotBody != null) {
             if (!drawerSnapshotSwipeOpeningPrepared) {
                 drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+                drawerSnapshotCurrentItemSignature = calculateDrawerSnapshotItemSignature();
                 drawerSnapshotSwipeOpeningPrepared = true;
             }
             int firstVisible = drawerGrid == null ? 0 : drawerGrid.getFirstVisiblePosition();
-            drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible);
+            if (!drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible)) {
+                drawerSnapshotBody.showLastPersistentSnapshot(
+                        drawerSnapshotCurrentItemSignature, firstVisible);
+            }
         } else {
             drawerSnapshotSwipeOpeningPrepared = false;
         }
