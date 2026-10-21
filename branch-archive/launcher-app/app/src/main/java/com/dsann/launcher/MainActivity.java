@@ -446,6 +446,7 @@ public class MainActivity extends Activity {
     private Runnable refreshDrawerAppList;
     private LauncherDrawerController.CachedDrawerBody drawerSnapshotBody;
     private long drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+    private long drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
     private boolean drawerSnapshotSwipeOpeningPrepared = false;
     private int drawerSnapshotReadyChecks = 0;
     private final Runnable drawerSnapshotReadyCheck = new Runnable() {
@@ -453,17 +454,28 @@ public class MainActivity extends Activity {
             if (drawerSnapshotBody == null || drawerGrid == null || drawerAdapter == null
                     || drawerScreen == null || drawerScreen.getVisibility() == View.GONE
                     || isFinishing()) return;
+
+            // Load the durable viewport image while the drawer is still hidden at Home.
+            // If the settings or app list changed, loadPersistentSnapshot rejects it safely.
+            long signature = calculateDrawerSnapshotSignature();
+            if (drawerSnapshotCurrentSignature != signature) {
+                drawerSnapshotCurrentSignature = signature;
+                drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
+            }
+            int firstVisible = drawerGrid.getFirstVisiblePosition();
+            if (drawerSnapshotDiskLoadSignature != signature) {
+                drawerSnapshotBody.loadPersistentSnapshot(signature, firstVisible);
+                drawerSnapshotDiskLoadSignature = signature;
+            }
+
             if (drawerAdapter.areVisibleIconsReady(drawerGrid)) {
-                if (drawerSnapshotCurrentSignature == Long.MIN_VALUE) {
-                    drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
-                }
-                drawerSnapshotBody.captureSnapshot(drawerSnapshotCurrentSignature,
-                        drawerGrid.getFirstVisiblePosition());
+                drawerSnapshotBody.captureSnapshot(signature, firstVisible);
                 drawerSnapshotReadyChecks = 0;
-            } else if (++drawerSnapshotReadyChecks <= 30) {
+            } else if (++drawerSnapshotReadyChecks <= 100) {
+                // Allow slow first-run theme artwork to finish while the user stays at Home.
                 handler.postDelayed(this, 100L);
             } else {
-                // An app with a broken icon must not keep a frozen picture over the real grid.
+                // Never leave a stale snapshot over a real grid whose icon provider is broken.
                 drawerSnapshotBody.hideCachedSnapshot();
                 drawerSnapshotReadyChecks = 0;
             }
@@ -2037,6 +2049,16 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // A hidden INVISIBLE drawer can measure and warm its first viewport without appearing
+        // over Home. GONE prevents GridView from laying out cells, so restore the warm state
+        // when we return to the launcher and persist the finished viewport from there.
+        if (!drawerOpen && drawerScreen != null && homeScreen != null
+                && homeScreen.getVisibility() == View.VISIBLE
+                && drawerScreen.getVisibility() == View.GONE) {
+            drawerScreen.setVisibility(View.INVISIBLE);
+            drawerScreen.requestLayout();
+            handler.postDelayed(this::scheduleDrawerSnapshotRefresh, 120L);
+        }
         clockUpdatesActive = true;
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
@@ -5350,21 +5372,50 @@ public class MainActivity extends Activity {
         signature = signature * 31L + (drawerGrid == null ? 0 : drawerGrid.getNumColumns());
         signature = signature * 31L + (drawerSnapshotBody == null ? 0 : drawerSnapshotBody.getWidth());
         signature = signature * 31L + (drawerSnapshotBody == null ? 0 : drawerSnapshotBody.getHeight());
+        // Include identity, label, and package source metadata so updates that replace an icon
+        // without changing the app count cannot reuse an obsolete drawer image.
+        for (ResolveInfo app : drawerApps) {
+            if (app == null || app.activityInfo == null) continue;
+            signature = signature * 31L + String.valueOf(app.activityInfo.packageName).hashCode();
+            signature = signature * 31L + String.valueOf(app.activityInfo.name).hashCode();
+            String labelKey = app.activityInfo.packageName + "/" + app.activityInfo.name;
+            signature = signature * 31L + String.valueOf(preloadedAppLabels.get(labelKey)).hashCode();
+            android.content.pm.ApplicationInfo application = app.activityInfo.applicationInfo;
+            if (application != null && application.sourceDir != null) {
+                try {
+                    java.io.File source = new java.io.File(application.sourceDir);
+                    signature = signature * 31L + source.lastModified();
+                    signature = signature * 31L + source.length();
+                } catch (RuntimeException ignored) {}
+            }
+        }
         return signature;
     }
 
     private void scheduleDrawerSnapshotRefresh() {
         if (drawerSnapshotBody == null) return;
+        // Keep the drawer measured but fully invisible while Home is displayed. This lets
+        // GridView bind its cells and lets the artwork workers finish before a drawer gesture.
+        if (!drawerOpen && homeScreen != null && homeScreen.getVisibility() == View.VISIBLE
+                && drawerScreen != null && drawerScreen.getVisibility() == View.GONE) {
+            drawerScreen.setVisibility(View.INVISIBLE);
+            drawerScreen.requestLayout();
+        }
         handler.removeCallbacks(drawerSnapshotReadyCheck);
         drawerSnapshotReadyChecks = 0;
-        handler.postDelayed(drawerSnapshotReadyCheck, 80L);
+        drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
+        handler.postDelayed(drawerSnapshotReadyCheck, 100L);
     }
 
     private void prepareDrawerSnapshotForOpening() {
         if (drawerSnapshotBody == null) return;
         drawerSnapshotCurrentSignature = calculateDrawerSnapshotSignature();
+        drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
         drawerSnapshotSwipeOpeningPrepared = true;
         int firstVisible = drawerGrid == null ? 0 : drawerGrid.getFirstVisiblePosition();
+        // Prefer the image already loaded from internal storage. Decoding/rebuilding happens
+        // from the Home prewarm callback rather than inside the opening animation.
+        drawerSnapshotBody.loadPersistentSnapshot(drawerSnapshotCurrentSignature, firstVisible);
         drawerSnapshotBody.showCachedSnapshot(drawerSnapshotCurrentSignature, firstVisible);
         scheduleDrawerSnapshotRefresh();
     }
