@@ -158,6 +158,17 @@ public class MainActivity extends Activity {
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
     private PackageManager packageManager;
     private SharedPreferences prefs;
+    private final SharedPreferences.OnSharedPreferenceChangeListener drawerCachePreferenceListener =
+            (sharedPreferences, key) -> {
+                if (!isDrawerCachePreference(key)) return;
+                drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+                drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
+                // Preference listeners run on the main thread. Rebuild the cache in the background
+                // while Home is visible so a later drawer opening never shows a partial artwork pass.
+                if (root != null && !isFinishing()) {
+                    root.post(this::scheduleDrawerSnapshotRefresh);
+                }
+            };
     private int homeStudioAccentColor = Color.rgb(119, 205, 255);
     private AppWidgetManager widgetManager;
     private AppWidgetHost widgetHost;
@@ -774,6 +785,7 @@ public class MainActivity extends Activity {
         LauncherIconDrawable.configurePersistentArtworkCache(this,
                 prefs.getInt(KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
         normalizeClockVisualModePreferences();
+        prefs.registerOnSharedPreferenceChangeListener(drawerCachePreferenceListener);
         IntentFilter packageFilter = new IntentFilter();
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
         packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
@@ -2122,6 +2134,9 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        if (prefs != null) {
+            prefs.unregisterOnSharedPreferenceChangeListener(drawerCachePreferenceListener);
+        }
         cancelPendingLiveDisplacementUpdate();
         liveDragGeometryCache.clear();
         handler.removeCallbacksAndMessages(null);
@@ -5369,8 +5384,42 @@ public class MainActivity extends Activity {
         dismissShortcutEditMode();
     }
 
+    private boolean isDrawerCachePreference(String key) {
+        if (key == null) return false;
+        return KEY_ICON_ARTWORK_THEME.equals(key)
+                || KEY_ICON_BACKGROUND_COLOR.equals(key)
+                || KEY_ICON_BACKGROUND_COLOR_POSITION.equals(key)
+                || KEY_ICON_FIT_BACKGROUND.equals(key)
+                || "icon_rounded_square_background".equals(key)
+                || "app_icon_shape".equals(key)
+                || KEY_DRAWER_ICON_SIZE.equals(key)
+                || KEY_DRAWER_FONT_SIZE.equals(key)
+                || KEY_SHOW_DRAWER_LABELS.equals(key)
+                || KEY_DRAWER_COLUMNS.equals(key)
+                || KEY_DRAWER_SPACING.equals(key)
+                || KEY_DRAWER_OPACITY.equals(key)
+                || KEY_COLOR_THEME.equals(key)
+                || KEY_DRAWER_DESCENDING.equals(key);
+    }
+
     private long calculateDrawerSnapshotSignature() {
-        long signature = prefs == null ? 0L : prefs.getAll().hashCode();
+        long signature = 17L;
+        if (prefs != null) {
+            // Only drawer-related preferences belong in this cache key. Clock/date settings
+            // should not force an expensive app-grid redraw.
+            String[] keys = new String[] {
+                    KEY_ICON_ARTWORK_THEME, KEY_ICON_BACKGROUND_COLOR,
+                    KEY_ICON_BACKGROUND_COLOR_POSITION, KEY_ICON_FIT_BACKGROUND,
+                    "icon_rounded_square_background", "app_icon_shape",
+                    KEY_DRAWER_ICON_SIZE, KEY_DRAWER_FONT_SIZE, KEY_SHOW_DRAWER_LABELS,
+                    KEY_DRAWER_COLUMNS, KEY_DRAWER_SPACING, KEY_DRAWER_OPACITY,
+                    KEY_COLOR_THEME, KEY_DRAWER_DESCENDING
+            };
+            java.util.Map<String, ?> values = prefs.getAll();
+            for (String key : keys) {
+                signature = signature * 31L + String.valueOf(values.get(key)).hashCode();
+            }
+        }
         signature = signature * 31L + (drawerAdapter == null ? 0 : drawerAdapter.getCount());
         signature = signature * 31L + (drawerGrid == null ? 0 : drawerGrid.getNumColumns());
         signature = signature * 31L + (drawerSnapshotBody == null ? 0 : drawerSnapshotBody.getWidth());
