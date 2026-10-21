@@ -486,8 +486,6 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, String> dateTextAppearanceApplied =
             new java.util.WeakHashMap<>();
-    private final java.util.WeakHashMap<TextView, String> clockDateGeometrySignatures =
-            new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
@@ -874,6 +872,9 @@ public class MainActivity extends Activity {
                     }
                     @Override public void setWorkspaceGridVisible(boolean visible, View movingView) {
                         MainActivity.this.setWorkspaceGridVisible(visible, movingView);
+                    }
+                    @Override public void refreshWorkspaceGrid() {
+                        MainActivity.this.refreshWorkspaceGrid();
                     }
                     @Override public void beginWorkspaceTransferDrag(View item, int sourcePage,
                             float rawX, float rawY, float fingerOffsetX, float fingerOffsetY) {
@@ -2444,6 +2445,7 @@ public class MainActivity extends Activity {
                 overlay.bringToFront();
             }
         }
+        refreshWorkspaceGrid();
     }
 
     private void refreshWorkspaceGrid() {
@@ -2468,7 +2470,7 @@ public class MainActivity extends Activity {
             // Use a quiet filled placement marker, not a full grid of heavy lines.
             gridPaint.setStyle(Paint.Style.FILL);
             // More visible while moving, while remaining translucent over wallpaper.
-            gridPaint.setColor(Color.argb(72, 120, 165, 255));
+            gridPaint.setColor(Color.argb(105, 88, 145, 255));
         }
         void configure(int cw, int ch) {
             int nextW = Math.max(1, cw);
@@ -7279,17 +7281,19 @@ public class MainActivity extends Activity {
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            // Every visible date/AM-PM glyph keeps a 0.4dp white outer outline plus
-            // a 0.5sp black contour masked inside its fill in every colour/theme mode.
+            // Keep AM/PM's existing styling. The date itself uses a bright silver-white
+            // fill and a black outer contour in every clock preset and artwork mode.
             int dateStart = use24Hour ? 0 : periodLength + 2;
             float density = getResources().getDisplayMetrics().density;
             float whiteOuterWidth = 0.4f * density;
             float blackInnerWidth = android.util.TypedValue.applyDimension(
                     android.util.TypedValue.COMPLEX_UNIT_SP, 0.5f,
                     getResources().getDisplayMetrics());
+            float dateBorderWidthPx = density * (configuredDateSize / 20f);
             if (dateStart < dateLine.length()) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.WHITE, whiteOuterWidth, blackInnerWidth),
+                                Color.rgb(238, 240, 244), Color.BLACK,
+                                dateBorderWidthPx, 0f),
                         dateStart, dateLine.length(),
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
@@ -11035,17 +11039,6 @@ public class MainActivity extends Activity {
                 prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, targetPage), 15)));
         final int configuredPmSize = Math.max(8, Math.min(24,
                 prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, targetPage), 14)));
-        final String dateGeometrySignature = configuredDateSize + ":" + configuredPmSize + ":"
-                + clockDateFontFamily() + ":" + clockPmFontFamily();
-        String previousDateGeometrySignature = dateText == null ? null
-                : clockDateGeometrySignatures.get(dateText);
-        final int[] previousClockGroupLocation = new int[2];
-        final boolean preserveClockGroupScreenX = previousDateGeometrySignature != null
-                && !previousDateGeometrySignature.equals(dateGeometrySignature)
-                && clockGroup != null && clockGroup.getWidth() > 0;
-        if (preserveClockGroupScreenX) clockGroup.getLocationOnScreen(previousClockGroupLocation);
-        if (dateText != null) clockDateGeometrySignatures.put(dateText, dateGeometrySignature);
-
         final int alignment = clockGravity();
         final float requestedLengthScale = getClockLength() / 100f;
         final float breadthScale = getClockBreadth() / 100f;
@@ -11225,21 +11218,9 @@ public class MainActivity extends Activity {
             setClampedClockTranslationForPanel(
                     targetPanel, targetPage, bounded[0], bounded[1], true);
 
-            FrameLayout groupForAnchor = clockGroupsByPage[targetPage];
-            if (preserveClockGroupScreenX && groupForAnchor != null) {
-                int[] currentClockGroupLocation = new int[2];
-                groupForAnchor.getLocationOnScreen(currentClockGroupLocation);
-                // Date/AM-PM size can change the panel width, scale pivot and gravity.
-                // Keep the digits at their prior screen X by translating only their fixed-
-                // width group after parent bounds and clamping have settled.
-                float parentScale = Math.max(0.01f, Math.abs(targetPanel.getScaleX()));
-                float localCorrection = (previousClockGroupLocation[0]
-                        - currentClockGroupLocation[0]) / parentScale;
-                if (Math.abs(localCorrection) > 0.25f) {
-                    groupForAnchor.setTranslationX(
-                            groupForAnchor.getTranslationX() + localCorrection);
-                }
-            }
+            // Do not apply a screen-coordinate correction to the digit group here.
+            // Its gravity anchors it to the clock panel; a compensating translation
+            // makes the digits drift against the background when date typography changes.
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
                 updateClockResizeHandles();
             }
@@ -11275,6 +11256,9 @@ public class MainActivity extends Activity {
             groupParams.width = clockGroupWidth;
             groupParams.height = rowHeight;
             clockGroup.setLayoutParams(groupParams);
+            // Keep the digit group anchored to the panel's alignment, never to a
+            // previous screen coordinate captured before the date line was remeasured.
+            clockGroup.setTranslationX(0f);
             clockGroup.setClipChildren(false);
             clockGroup.setClipToPadding(false);
         }
