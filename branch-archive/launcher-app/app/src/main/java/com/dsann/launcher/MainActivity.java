@@ -3694,12 +3694,21 @@ public class MainActivity extends Activity {
     private void openAppGroup(String groupId) {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
         ArrayList<String> members = getAppGroupMembers(groupId);
+        final View openingGroupIcon = findAppGroupView(groupId);
         Dialog dialog = new Dialog(this);
+        dialog.setOnDismissListener(ignored -> {
+            if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
+        });
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         panel.setBackground(appGroupGradient(false));
+        panel.setScaleX(0.72f);
+        panel.setScaleY(0.72f);
+        panel.setAlpha(0f);
+        panel.setClipChildren(false);
+        panel.setClipToPadding(false);
 
         TextView title = new TextView(this);
         title.setText(getAppGroupLabel(groupId));
@@ -3716,6 +3725,7 @@ public class MainActivity extends Activity {
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(false);
         scroll.setClipToPadding(false);
+        scroll.setClipChildren(false);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
@@ -3755,10 +3765,7 @@ public class MainActivity extends Activity {
             label.setVisibility(prefs.getBoolean("show_home_labels", true) ? View.VISIBLE : View.GONE);
             item.addView(label, new LinearLayout.LayoutParams(-1,
                     LauncherUiUtils.dp(this, Math.max(11, Math.round(homeLabelHeightDp() * 0.8f)))));
-            item.setOnClickListener(v -> {
-                dialog.dismiss();
-                launchApp(app, icon);
-            });
+            installAppGroupMemberTouch(item, icon, dialog, panel, groupId, packageName, app);
             row.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
             rowCount++;
         }
@@ -3813,7 +3820,228 @@ public class MainActivity extends Activity {
                     scrollHeight + LauncherUiUtils.dp(this, 100));
             dialog.getWindow().setLayout(Math.max(LauncherUiUtils.dp(this, 240), width),
                     Math.max(LauncherUiUtils.dp(this, 180), height));
+            panel.post(() -> {
+                int[] panelLocation = new int[2];
+                panel.getLocationOnScreen(panelLocation);
+                float pivotX = panel.getWidth() / 2f;
+                float pivotY = panel.getHeight() / 2f;
+                if (openingGroupIcon != null && openingGroupIcon.getWidth() > 0
+                        && openingGroupIcon.getHeight() > 0) {
+                    int[] iconLocation = new int[2];
+                    openingGroupIcon.getLocationOnScreen(iconLocation);
+                    pivotX = iconLocation[0] + openingGroupIcon.getWidth() / 2f
+                            - panelLocation[0];
+                    pivotY = iconLocation[1] + openingGroupIcon.getHeight() / 2f
+                            - panelLocation[1];
+                    pivotX = Math.max(0f, Math.min(panel.getWidth(), pivotX));
+                    pivotY = Math.max(0f, Math.min(panel.getHeight(), pivotY));
+                }
+                panel.setPivotX(pivotX);
+                panel.setPivotY(pivotY);
+                panel.animate().cancel();
+                panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                        .setDuration(animationDuration(260L))
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f))
+                        .start();
+            });
         }
+    }
+
+    private void clearAppGroupMemberMoveMode() {
+        View previous = activeAppGroupMemberMoveModeView;
+        activeAppGroupMemberMoveModeId = null;
+        activeAppGroupMemberMoveModePackage = null;
+        activeAppGroupMemberMoveModeView = null;
+        if (previous != null) {
+            LauncherUiUtils.stopMoveHint(previous);
+            previous.animate().cancel();
+            previous.setTranslationX(0f);
+            previous.setTranslationY(0f);
+            previous.setBackground(null);
+            previous.setAlpha(1f);
+        }
+    }
+
+    private void moveAppGroupMemberToHome(String groupId, String packageName) {
+        if (groupId == null || packageName == null) return;
+        ArrayList<String> members = getAppGroupMembers(groupId);
+        if (members.remove(packageName)) saveAppGroupMembers(groupId, members);
+        clearAppGroupMemberMoveMode();
+        ArrayList<String> restore = new ArrayList<String>();
+        restore.add(packageName);
+        // Already-present standalone icons remain untouched; only missing Home icons are restored.
+        restoreGroupedAppsToHome(getAppGroupPage(groupId), restore);
+        Toast.makeText(this, "Removed from group", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showAppGroupMemberOptions(String groupId, String packageName) {
+        ResolveInfo app = findApp(packageName);
+        if (app == null || app.activityInfo == null) {
+            Toast.makeText(this, "This app is no longer installed.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String label = String.valueOf(app.loadLabel(packageManager));
+        showActionDialog(label, new String[]{"−", "×", "ⓘ"},
+                new String[]{"Remove from group", "Uninstall app", "App info"},
+                (optionsDialog, which) -> {
+            if (which == 0) {
+                moveAppGroupMemberToHome(groupId, packageName);
+            } else if (which == 1) {
+                try {
+                    startActivity(new Intent(Intent.ACTION_DELETE,
+                            android.net.Uri.parse("package:" + packageName)));
+                } catch (RuntimeException error) {
+                    Toast.makeText(this, "Unable to open the uninstall screen.",
+                            Toast.LENGTH_SHORT).show();
+                }
+            } else if (which == 2) {
+                try {
+                    startActivity(new Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.parse("package:" + packageName)));
+                } catch (RuntimeException error) {
+                    Toast.makeText(this, "Unable to open app info.",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    private View findAppGroupView(String groupId) {
+        if (pagesStrip == null || groupId == null) return null;
+        for (int p = 0; p < pagesStrip.getChildCount(); p++) {
+            View pageView = pagesStrip.getChildAt(p);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                if (isAppGroupItem(child) && groupId.equals(appGroupId(child))) return child;
+            }
+        }
+        return null;
+    }
+
+    private void installAppGroupMemberTouch(View item, View icon, Dialog groupDialog,
+            LinearLayout popupPanel, String groupId, String packageName, ResolveInfo app) {
+        final android.os.Handler touchHandler = new android.os.Handler(
+                android.os.Looper.getMainLooper());
+        final float[] down = new float[2];
+        final boolean[] armed = new boolean[1];
+        final boolean[] movedTooEarly = new boolean[1];
+        final boolean[] draggingOut = new boolean[1];
+        final boolean[] optionsShown = new boolean[1];
+
+        final Runnable armMove = () -> {
+            if (movedTooEarly[0] || draggingOut[0] || optionsShown[0]) return;
+            armed[0] = true;
+            activeAppGroupMemberMoveModeId = groupId;
+            activeAppGroupMemberMoveModePackage = packageName;
+            activeAppGroupMemberMoveModeView = item;
+            setAppGroupMoveModeVisual(item, true);
+            LauncherUiUtils.startScaleHint(item, 1.08f);
+            // Long-press movement owns the next move stream, but quick vertical swipes
+            // before this timer still belong to the group's ScrollView.
+            android.view.ViewParent parent = item.getParent();
+            if (parent instanceof View) {
+                ((View) parent).requestDisallowInterceptTouchEvent(true);
+            }
+        };
+        final Runnable showOptions = () -> {
+            if (movedTooEarly[0] || draggingOut[0] || optionsShown[0]) return;
+            optionsShown[0] = true;
+            touchHandler.removeCallbacks(armMove);
+            clearAppGroupMemberMoveMode();
+            groupDialog.dismiss();
+            showAppGroupMemberOptions(groupId, packageName);
+        };
+
+        item.setOnTouchListener((memberView, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                boolean resumeMove = groupId.equals(activeAppGroupMemberMoveModeId)
+                        && packageName.equals(activeAppGroupMemberMoveModePackage);
+                if (!resumeMove && activeAppGroupMemberMoveModeView != null) {
+                    clearAppGroupMemberMoveMode();
+                }
+                down[0] = event.getRawX();
+                down[1] = event.getRawY();
+                armed[0] = resumeMove;
+                movedTooEarly[0] = false;
+                draggingOut[0] = false;
+                optionsShown[0] = false;
+                touchHandler.removeCallbacks(armMove);
+                touchHandler.removeCallbacks(showOptions);
+                if (!resumeMove) touchHandler.postDelayed(armMove, 1000L);
+                touchHandler.postDelayed(showOptions, 2000L);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                float dx = event.getRawX() - down[0];
+                float dy = event.getRawY() - down[1];
+                boolean pastSlop = Math.abs(dx) > LauncherUiUtils.dp(MainActivity.this, 8)
+                        || Math.abs(dy) > LauncherUiUtils.dp(MainActivity.this, 8);
+                if (pastSlop && !armed[0]) {
+                    movedTooEarly[0] = true;
+                    touchHandler.removeCallbacks(armMove);
+                    touchHandler.removeCallbacks(showOptions);
+                    return true;
+                }
+                if (pastSlop && armed[0]) {
+                    android.view.ViewParent parent = memberView.getParent();
+                    if (parent instanceof View) {
+                        ((View) parent).requestDisallowInterceptTouchEvent(true);
+                    }
+                    memberView.setTranslationX(dx);
+                    memberView.setTranslationY(dy);
+                    int[] panelLocation = new int[2];
+                    popupPanel.getLocationOnScreen(panelLocation);
+                    float margin = LauncherUiUtils.dp(MainActivity.this, 10);
+                    draggingOut[0] = event.getRawX() < panelLocation[0] - margin
+                            || event.getRawY() < panelLocation[1] - margin
+                            || event.getRawX() > panelLocation[0] + popupPanel.getWidth() + margin
+                            || event.getRawY() > panelLocation[1] + popupPanel.getHeight() + margin;
+                    memberView.setAlpha(draggingOut[0] ? 0.78f : 1f);
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                touchHandler.removeCallbacks(armMove);
+                touchHandler.removeCallbacks(showOptions);
+                memberView.setTranslationX(0f);
+                memberView.setTranslationY(0f);
+                memberView.setAlpha(1f);
+                android.view.ViewParent parent = memberView.getParent();
+                if (parent instanceof View) {
+                    ((View) parent).requestDisallowInterceptTouchEvent(false);
+                }
+                if (optionsShown[0]) return true;
+                if (action == MotionEvent.ACTION_UP && draggingOut[0]) {
+                    clearAppGroupMemberMoveMode();
+                    groupDialog.dismiss();
+                    moveAppGroupMemberToHome(groupId, packageName);
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP && armed[0] && !movedTooEarly[0]) {
+                    activeAppGroupMemberMoveModeId = groupId;
+                    activeAppGroupMemberMoveModePackage = packageName;
+                    activeAppGroupMemberMoveModeView = item;
+                    setAppGroupMoveModeVisual(item, true);
+                    Toast.makeText(MainActivity.this,
+                            "Move mode active. Drag this app outside the group to remove it.",
+                            Toast.LENGTH_SHORT).show();
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP && !movedTooEarly[0] && !armed[0]) {
+                    clearAppGroupMemberMoveMode();
+                    groupDialog.dismiss();
+                    launchApp(app, icon);
+                } else if (!armed[0]) {
+                    memberView.setBackground(null);
+                }
+                return true;
+            }
+            return true;
+        });
     }
 
     private GradientDrawable appGroupMoveHighlight() {
