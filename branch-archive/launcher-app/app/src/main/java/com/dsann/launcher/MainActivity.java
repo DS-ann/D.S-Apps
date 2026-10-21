@@ -8954,6 +8954,14 @@ public class MainActivity extends Activity {
         clockText.setVisibility(View.VISIBLE);
         clockText.setAlpha(1f);
         clockText.invalidate();
+        // Renderer mode changes must never leave standard clock text hidden.
+        clockText.setVisibility(View.VISIBLE);
+        clockText.setAlpha(1f);
+        if (Color.alpha(clockText.getCurrentTextColor()) == 0
+                && clockText.getPaint().getShader() == null) {
+            clockText.setTextColor(CLOCK_DIGIT_SILVER);
+        }
+        clockText.invalidate();
         appliedClockStyles.put(clockText, style);
     }
 
@@ -9953,8 +9961,8 @@ public class MainActivity extends Activity {
                     Math.round(preferredX / (float) cellWidth)));
             requestedRow = homeGridRowFromTop(preferredY, rows, page.getHeight(), cellHeight);
         } else {
-            // When no individual slot is available, plan from the actual collision vector.
-            // This is the precise case where moving a contiguous cohort creates the vacancy.
+            // If every single-item slot is blocked by the row itself, use the actual
+            // collision vector; moving the chain may create the first viable destination.
             requestedCol = Math.max(0, Math.min(columns - 1,
                     seedSlot[0] + Integer.signum(pushDx)));
             requestedRow = Math.max(0, Math.min(rows - 1,
@@ -10002,41 +10010,40 @@ public class MainActivity extends Activity {
         cohortSet.put(seed, Boolean.TRUE);
         slots.put(seed, seedSlot);
 
-        // Collect the complete contiguous row/column on both sides of the seed.
-        // The old forward-only scan split the row whenever the collision approached
-        // from the opposite side, so only a suffix moved instead of the connected run.
-        for (int directionSign : new int[]{-1, 1}) {
-            int col = seedSlot[0];
-            int row = seedSlot[1];
-            while (true) {
-                int nextCol = col + deltaCol * directionSign;
-                int nextRow = row + deltaRow * directionSign;
-                if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) break;
-                View next = null;
-                int[] nextSlot = null;
-                for (int i = 0; i < page.getChildCount(); i++) {
-                    View candidate = page.getChildAt(i);
-                    if (candidate == movingView || candidate == seed
-                            || !isHomeGridIcon(candidate)
-                            || isWorkspaceContactShortcut(candidate)
-                                    != isWorkspaceContactShortcut(seed)) continue;
-                    int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
-                    if (candidateSlot != null
-                            && candidateSlot[0] == nextCol && candidateSlot[1] == nextRow) {
-                        next = candidate;
-                        nextSlot = candidateSlot;
-                        break;
-                    }
-                }
-                if (next == null) break;
-                if (cohortSet.containsKey(next)) return false;
-                cohort.add(next);
-                cohortSet.put(next, Boolean.TRUE);
-                slots.put(next, nextSlot);
-                col = nextSlot[0];
-                row = nextSlot[1];
-                if (cohort.size() > page.getChildCount()) return false;
+        int col = seedSlot[0];
+        int row = seedSlot[1];
+        // Extend only through immediately adjacent home-grid items in the same
+        // grid family. Every member advances by the identical cell vector, keeping
+        // the row/column together and moving its last member into the open slot.
+        while (true) {
+            int nextCol = col + deltaCol;
+            int nextRow = row + deltaRow;
+            if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) {
+                return false;
             }
+            View next = null;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View candidate = page.getChildAt(i);
+                if (candidate == movingView || candidate == seed
+                        || !isHomeGridIcon(candidate)
+                        || isWorkspaceContactShortcut(candidate)
+                                != isWorkspaceContactShortcut(seed)) continue;
+                int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
+                if (candidateSlot != null
+                        && candidateSlot[0] == nextCol && candidateSlot[1] == nextRow) {
+                    next = candidate;
+                    slots.put(candidate, candidateSlot);
+                    break;
+                }
+            }
+            if (next == null) break;
+            if (next == movingView || cohortSet.containsKey(next)) return false;
+            cohort.add(next);
+            cohortSet.put(next, Boolean.TRUE);
+            int[] nextSlot = slots.get(next);
+            col = nextSlot[0];
+            row = nextSlot[1];
+            if (cohort.size() > page.getChildCount()) return false;
         }
         // A one-item shift is handled by the ordinary placement planner. This fast
         // path is specifically the together-row/column behaviour.
@@ -10108,8 +10115,7 @@ public class MainActivity extends Activity {
             geometries.put(member, geometry);
         }
 
-        // Reserve every destination before starting the first animation so later
-        // members cannot select a target which this cohort is about to occupy.
+        // Reserve every destination before starting the first animation.
         for (View member : cohort) {
             int[] geometry = geometries.get(member);
             int[] target = targets.get(member);
@@ -10125,7 +10131,6 @@ public class MainActivity extends Activity {
         }
         return true;
     }
-
     private void addAppShiftDirection(java.util.ArrayList<int[]> directions,
             java.util.HashSet<String> seen, int dx, int dy) {
         String key = dx + ":" + dy;
@@ -13252,6 +13257,9 @@ public class MainActivity extends Activity {
 
     private void syncClockColonVerticalCenter() {
         if (clockText == null) return;
+        // Time updates keep all presets visible; style selects drawing mode only.
+        clockText.setVisibility(View.VISIBLE);
+        clockText.setAlpha(1f);
         // Every clock preset uses the same visible time view; only its renderer changes.
         clockText.setVisibility(View.VISIBLE);
         clockText.setAlpha(1f);
