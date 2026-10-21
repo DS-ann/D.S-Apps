@@ -145,7 +145,7 @@ final class LauncherDrawerController {
                     if (decoded != null && !decoded.isRecycled()) decoded.recycle();
                     return false;
                 }
-            } catch (java.io.IOException | NumberFormatException | RuntimeException ignored) {
+            } catch (java.io.IOException | RuntimeException ignored) {
                 if (decoded != null && !decoded.isRecycled()) decoded.recycle();
                 return false;
             }
