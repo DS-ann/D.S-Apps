@@ -653,6 +653,7 @@ public class MainActivity extends Activity {
     private String activeAppGroupMemberMoveModePackage;
     private View activeAppGroupMemberMoveModeView;
     private boolean appGroupCreationPending;
+    private boolean appGroupRenderDeferred;
     private long lastAppGroupCreationUptime;
     private View workspaceTransferItem;
     private FrameLayout workspaceTransferSourcePage;
@@ -3278,6 +3279,13 @@ public class MainActivity extends Activity {
     private void removeDuplicateAppGroupViews(String groupId, View keep) {
         if (groupId == null || pagesStrip == null) return;
         String expectedTag = APP_GROUP_TAG_PREFIX + groupId;
+        // Prefer the dragged view only while it is still attached. If a layout callback
+        // has already rebuilt it, keep that rebuilt canonical instance instead of either
+        // retaining two views or deleting every copy of the group.
+        if (keep == null || keep.getParent() == null || !expectedTag.equals(keep.getTag())) {
+            keep = findAppGroupView(groupId);
+        }
+        if (keep == null) return;
         for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof ViewGroup)) continue;
@@ -3293,6 +3301,14 @@ public class MainActivity extends Activity {
 
     private void renderAppGroups() {
         if (prefs == null || pagesStrip == null || pageViewport == null) return;
+        // A full home refresh can be triggered by a settings/layout callback during a
+        // long-press drag. Rebuilding groups then detaches the active touch target and
+        // can leave an old and new instance visible. Defer the group pass until release.
+        if (workspaceTransferItem != null && isAppGroupItem(workspaceTransferItem)) {
+            appGroupRenderDeferred = true;
+            return;
+        }
+        appGroupRenderDeferred = false;
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
             pageViewport.post(this::renderAppGroups);
             return;
@@ -4422,15 +4438,24 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(false, null);
                     activeAppGroupMoveModeId = null;
                     setAppGroupMoveModeVisual(cell, false);
-                    if (commit) {
-                        // Keep the dragged instance; rebuilding the entire workspace here
-                        // used to race with the cross-page reparent and leave a second view
-                        // carrying the same group ID. Displaced items and the group position
-                        // have already been committed to preferences.
-                        removeDuplicateAppGroupViews(groupId, cell);
-                    } else {
+                    if (appGroupRenderDeferred) {
+                        // The previous render was intentionally skipped during the
+                        // gesture. It is now safe to rebuild after ACTION_UP has committed
+                        // or rolled back and finishWorkspaceTransferDrag cleared the owner.
+                        appGroupRenderDeferred = false;
+                        renderAppGroups();
+                    } else if (!commit) {
                         renderHomePages(false);
                     }
+                    // Prefer whichever instance is actually attached if a previous render
+                    // callback already rebuilt this group. Run once more after posted
+                    // layout callbacks to enforce the one-ID/one-view invariant.
+                    removeDuplicateAppGroupViews(groupId,
+                            cell.getParent() != null ? cell : findAppGroupView(groupId));
+                    final View preferredGroupView = cell;
+                    pageViewport.post(() -> removeDuplicateAppGroupViews(groupId,
+                            preferredGroupView.getParent() != null
+                                    ? preferredGroupView : findAppGroupView(groupId)));
                     refreshWorkspaceGrid();
                     return true;
                 }
@@ -9917,7 +9942,8 @@ public class MainActivity extends Activity {
     }
 
     private boolean isHomeGridIcon(View view) {
-        return isWorkspaceAppIcon(view) || isWorkspaceContactShortcut(view);
+        return isWorkspaceAppIcon(view) || isWorkspaceContactShortcut(view)
+                || isAppGroupItem(view);
     }
 
     private int homeGridColumnsForItem(View item) {
@@ -10703,9 +10729,10 @@ public class MainActivity extends Activity {
         flushPendingAppDisplacementAnimations();
         liveDragGeometryCache.clear();
         int[] requestedBeforeSafety = itemGeometry(movingView);
-        enforceLiveDragCollisionSafety(page, movingView);
+        boolean collisionSafetyRejected = enforceLiveDragCollisionSafety(page, movingView);
         int[] acceptedAfterSafety = itemGeometry(movingView);
-        if (requestedBeforeSafety[0] != acceptedAfterSafety[0]
+        if (collisionSafetyRejected
+                || requestedBeforeSafety[0] != acceptedAfterSafety[0]
                 || requestedBeforeSafety[1] != acceptedAfterSafety[1]) {
             liveDragRejectedMoves.put(movingView, Boolean.TRUE);
         } else {
@@ -10723,12 +10750,12 @@ public class MainActivity extends Activity {
      * Invisible destination proxies are excluded; real cross-page drops are checked at
      * their exact snapped destination before the gesture commits.
      */
-    private void enforceLiveDragCollisionSafety(FrameLayout page, View movingView) {
+    private boolean enforceLiveDragCollisionSafety(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
-                || "workspace_transfer_proxy".equals(movingView.getTag())) return;
+                || "workspace_transfer_proxy".equals(movingView.getTag())) return false;
         if (movingView == workspaceTransferItem
                 && workspaceTransferOriginPage >= 0 && workspaceTransferTargetPage >= 0
-                && workspaceTransferTargetPage != workspaceTransferOriginPage) return;
+                && workspaceTransferTargetPage != workspaceTransferOriginPage) return false;
 
         int[] geometry = itemGeometry(movingView);
         boolean collision = false;
@@ -10753,11 +10780,17 @@ public class MainActivity extends Activity {
         if (!collision) {
             liveDragLastSafeGeometry.put(movingView,
                     new int[]{geometry[0], geometry[1]});
-            return;
+            return false;
         }
 
+        // Never pull an app icon away from the finger mid-gesture. A neighbour may
+        // still be travelling toward a reserved slot, or the live planner may need
+        // another frame to resolve a push chain. Keep the icon responsive and mark
+        // the unresolved overlap so the final drop can still be rejected safely.
+        if (isWorkspaceAppIcon(movingView)) return true;
+
         int[] safe = liveDragLastSafeGeometry.get(movingView);
-        if (safe == null) return;
+        if (safe == null) return true;
         if (isClockWorkspaceItem(movingView)) {
             setClockVisualPosition(movingView, safe[0], safe[1], false);
         } else if (movingView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
@@ -10773,6 +10806,7 @@ public class MainActivity extends Activity {
             movingView.setTranslationY(0f);
             movingView.setLayoutParams(lp);
         }
+        return true;
     }
     /**
      * Recursively plans a short push chain when every direct destination is occupied.
