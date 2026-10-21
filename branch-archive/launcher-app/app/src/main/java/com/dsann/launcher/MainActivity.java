@@ -8950,6 +8950,10 @@ public class MainActivity extends Activity {
             ledClock.setSevenSegmentMode(ledMode);
             ledClock.invalidate();
         }
+        // Renderer mode changes must never leave standard clock text hidden.
+        clockText.setVisibility(View.VISIBLE);
+        clockText.setAlpha(1f);
+        clockText.invalidate();
         appliedClockStyles.put(clockText, style);
     }
 
@@ -9930,7 +9934,7 @@ public class MainActivity extends Activity {
      */
     private boolean tryShiftHomeIconCohort(FrameLayout page, View movingView, View seed,
             int preferredX, int preferredY, int pushDx, int pushDy) {
-        if (page == null || movingView == null || seed == null || preferredX < 0 || preferredY < 0
+        if (page == null || movingView == null || seed == null
                 || !isHomeGridDragMover(movingView) || !isHomeGridIcon(seed)
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
 
@@ -9942,9 +9946,20 @@ public class MainActivity extends Activity {
         int[] seedSlot = homeGridIconSlot(page, seed, cellHeight, rows);
         if (seedSlot == null) return false;
 
-        int requestedCol = Math.max(0, Math.min(columns - 1,
-                Math.round(preferredX / (float) cellWidth)));
-        int requestedRow = homeGridRowFromTop(preferredY, rows, page.getHeight(), cellHeight);
+        int requestedCol;
+        int requestedRow;
+        if (preferredX >= 0 && preferredY >= 0) {
+            requestedCol = Math.max(0, Math.min(columns - 1,
+                    Math.round(preferredX / (float) cellWidth)));
+            requestedRow = homeGridRowFromTop(preferredY, rows, page.getHeight(), cellHeight);
+        } else {
+            // When no individual slot is available, plan from the actual collision vector.
+            // This is the precise case where moving a contiguous cohort creates the vacancy.
+            requestedCol = Math.max(0, Math.min(columns - 1,
+                    seedSlot[0] + Integer.signum(pushDx)));
+            requestedRow = Math.max(0, Math.min(rows - 1,
+                    seedSlot[1] + Integer.signum(pushDy)));
+        }
         int deltaCol = requestedCol - seedSlot[0];
         int deltaRow = requestedRow - seedSlot[1];
 
@@ -10093,8 +10108,8 @@ public class MainActivity extends Activity {
             geometries.put(member, geometry);
         }
 
-        // Record the complete shift before any animator starts. All members share
-        // a common direction and are committed together on release.
+        // Reserve every destination before starting the first animation so later
+        // members cannot select a target which this cohort is about to occupy.
         for (View member : cohort) {
             int[] geometry = geometries.get(member);
             int[] target = targets.get(member);
@@ -10103,6 +10118,9 @@ public class MainActivity extends Activity {
             }
             liveDisplacementTargets.put(member, new int[]{target[0], target[1]});
             liveDragGeometryCache.remove(member);
+        }
+        for (View member : cohort) {
+            int[] target = targets.get(member);
             animateDisplacedItemTo(member, target[0], target[1]);
         }
         return true;
@@ -13234,6 +13252,9 @@ public class MainActivity extends Activity {
 
     private void syncClockColonVerticalCenter() {
         if (clockText == null) return;
+        // Every clock preset uses the same visible time view; only its renderer changes.
+        clockText.setVisibility(View.VISIBLE);
+        clockText.setAlpha(1f);
         CharSequence value = clockText.getText();
         if (!(value instanceof android.text.Spanned)) return;
         android.text.Spanned spanned = (android.text.Spanned) value;
