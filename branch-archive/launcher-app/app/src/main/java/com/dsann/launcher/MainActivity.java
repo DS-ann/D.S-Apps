@@ -349,7 +349,12 @@ public class MainActivity extends Activity {
 
         // Keep the current TextView color/shader for ordinary and gradient modes.
         ClockTextOutlineSpan(int outlineColor, float borderPx) {
-            this(0, outlineColor, borderPx, 0f, 0f, true, true);
+            this(outlineColor, borderPx, 0f);
+        }
+
+        // Preserve the existing inner black contour while keeping the current fill gradient.
+        ClockTextOutlineSpan(int outlineColor, float borderPx, float innerBlackBorderPx) {
+            this(0, outlineColor, borderPx, innerBlackBorderPx, 0f, true, true);
         }
 
         private ClockTextOutlineSpan(int fillColor, int outlineColor, float borderPx,
@@ -433,8 +438,9 @@ public class MainActivity extends Activity {
                     // Mask the fine black stroke to the glyph fill, retaining the
                     // existing matched-artwork outline while adding a true inner contour.
                     float textWidth = Math.max(1f, paint.measureText(text, start, end));
-                    int innerLayer = canvas.saveLayer(x, top,
-                            x + textWidth + (borderPx + outerBlackBorderPx) * 2f, bottom, null);
+                    float strokeMargin = (borderPx + outerBlackBorderPx) * 2f;
+                    int innerLayer = canvas.saveLayer(x - strokeMargin, top - strokeMargin,
+                            x + textWidth + strokeMargin, bottom + strokeMargin, null);
                     try {
                         paint.setShader(null);
                         paint.setXfermode(null);
@@ -6899,20 +6905,16 @@ public class MainActivity extends Activity {
         applyClockDateBlackInnerBorder(dateText, useBlackViewInnerBorder, 0.2f * borderDensity);
         applyClockDateBlackInnerBorder(amPmText, useBlackViewInnerBorder, 0.2f * borderDensity);
         boolean iconArtworkActive = isClockIconArtworkActive();
+        boolean useClockWhiteInnerBorder = useWhiteGradientInnerBorder || iconArtworkActive;
         int[] artworkTextColours = iconArtworkActive
                 ? getClockArtworkTransitionColours() : CLOCK_DATE_GRADIENT_COLORS;
 
-        // Match Artwork gives the date a white fill and AM/PM a grey fill with
-        // independent black outlines. Their exact spans are applied to dateLine below.
+        // Artwork matching uses the same selected palette gradient for the date and
+        // AM/PM as the digits. Its phase stays fixed when the live-gradient option is off.
         if (dateText != null) {
             if (iconArtworkActive) {
-                clockDateGradients.remove(dateText);
-                if (dateText.getPaint().getShader() != null) {
-                    dateText.getPaint().setShader(null);
-                }
-                dateText.setTextColor(Color.WHITE);
                 dateText.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT);
-                dateText.invalidate();
+                applyAnimatedTextGradient(dateText, artworkTextColours, 0f, clockDateGradients);
             } else if (digitGradient) {
                 dateText.setShadowLayer(LauncherUiUtils.dp(this, 2), 0f,
                         LauncherUiUtils.dp(this, 1), Color.argb(220, 0, 0, 0));
@@ -6973,12 +6975,13 @@ public class MainActivity extends Activity {
                     useDigitGradient && sevenSegment, digitPhase, digitColours);
 
             boolean useNothingInnerBorder = nothingArtworkMatch && !neonCircuit;
-            boolean useGradientInnerBorder = useWhiteGradientInnerBorder;
-            float innerBorderWidth = useNothingInnerBorder
-                    ? 3f * borderDensity
-                    // Text-mode glyph borders are masked to the glyph interior, so their
-                    // centered stroke is doubled. LED segment borders are directly inset.
-                    : (sevenSegment ? 0.5f : 1f) * borderDensity;
+            boolean useGradientInnerBorder = useClockWhiteInnerBorder;
+            // Artwork matching also gets the thin white inner contour: LED segments use
+            // 0.5dp directly; normal glyph text doubles the centered stroke before masking.
+            float innerBorderWidth = useClockWhiteInnerBorder
+                    ? (sevenSegment ? 0.5f : 1f) * borderDensity
+                    : (useNothingInnerBorder ? 3f * borderDensity
+                            : (sevenSegment ? 0.5f : 1f) * borderDensity);
             clockRenderer.setDigitOnlyInnerBorder(useGradientInnerBorder);
             boolean useAnyInnerBorder = useNothingInnerBorder || useGradientInnerBorder;
             clockRenderer.setContrastInnerBorderEnabled(
@@ -7058,6 +7061,7 @@ public class MainActivity extends Activity {
                     prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15)));
             int configuredPmSize = Math.max(8, Math.min(24,
                     prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, activeClockPage), 14)));
+            boolean iconArtworkActive = isClockIconArtworkActive();
             android.text.SpannableStringBuilder dateLine =
                     new android.text.SpannableStringBuilder(dateValue);
             int periodLength = 0;
@@ -7070,7 +7074,8 @@ public class MainActivity extends Activity {
                         periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 dateLine.setSpan(new android.text.style.TypefaceSpan("sans-serif-black"),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)) {
+                if (!prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                        && !iconArtworkActive) {
                     dateLine.setSpan(new android.text.style.ForegroundColorSpan(CLOCK_DIGIT_SILVER),
                             0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
@@ -7078,30 +7083,24 @@ public class MainActivity extends Activity {
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            // Always outline both text runs. Artwork mode retains its established fills
-            // and inner contour, with an additional 0.3dp black rim outside that outline.
-            // Other modes preserve their live solid/gradient paint and get the same outer rim.
-            boolean iconArtworkActive = isClockIconArtworkActive();
+            // Every visible date/AM-PM glyph keeps a 0.4dp black outer outline.
+            // Artwork-matched spans preserve the selected palette gradient and retain the
+            // existing 0.2dp inner black contour on themes that support it.
             int dateStart = use24Hour ? 0 : periodLength + 2;
             float density = getResources().getDisplayMetrics().density;
-            float blackOuterWidth = 0.3f * density;
+            float blackOuterWidth = 0.4f * density;
             float blackInnerWidth = iconArtworkActive && shouldApplyClockDateBlackInnerBorder()
                     ? 0.2f * density : 0f;
             if (dateStart < dateLine.length()) {
-                ClockTextOutlineSpan dateOutline = iconArtworkActive
-                        ? new ClockTextOutlineSpan(Color.WHITE, Color.BLACK,
-                                0.5f * density, blackInnerWidth, blackOuterWidth)
-                        : new ClockTextOutlineSpan(Color.BLACK, blackOuterWidth);
-                dateLine.setSpan(dateOutline, dateStart, dateLine.length(),
+                dateLine.setSpan(new ClockTextOutlineSpan(
+                                Color.BLACK, blackOuterWidth, blackInnerWidth),
+                        dateStart, dateLine.length(),
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             if (!use24Hour && periodLength > 0) {
-                ClockTextOutlineSpan periodOutline = iconArtworkActive
-                        ? new ClockTextOutlineSpan(Color.rgb(160, 163, 170), Color.BLACK,
-                                1f * density, blackInnerWidth, blackOuterWidth)
-                        : new ClockTextOutlineSpan(Color.BLACK, blackOuterWidth);
-                dateLine.setSpan(periodOutline, 0, periodLength,
-                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                dateLine.setSpan(new ClockTextOutlineSpan(
+                                Color.BLACK, blackOuterWidth, blackInnerWidth),
+                        0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             String clockValue = formatClockDigits(now, use24Hour);
             if (amPmText != null) {
@@ -7123,7 +7122,8 @@ public class MainActivity extends Activity {
             clockValue = clockValue.trim();
             boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
                     && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-            boolean useWhiteDigitInnerBorder = shouldApplyClockGradientInnerBorder();
+            boolean useWhiteDigitInnerBorder = shouldApplyClockGradientInnerBorder()
+                    || isClockIconArtworkActive();
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
             if (!sevenSegmentClock && !clockValue.isEmpty()) {
