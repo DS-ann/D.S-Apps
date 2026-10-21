@@ -159,17 +159,7 @@ public class MainActivity extends Activity {
     private PackageManager packageManager;
     private SharedPreferences prefs;
     private final SharedPreferences.OnSharedPreferenceChangeListener drawerCachePreferenceListener =
-            (sharedPreferences, key) -> {
-                if (!isDrawerCachePreference(key)) return;
-                drawerSnapshotCurrentSignature = Long.MIN_VALUE;
-                drawerSnapshotCurrentItemSignature = Long.MIN_VALUE;
-                drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
-                // Preference listeners run on the main thread. Rebuild the cache in the background
-                // while Home is visible so a later drawer opening never shows a partial artwork pass.
-                if (root != null && !isFinishing()) {
-                    root.post(this::scheduleDrawerSnapshotRefresh);
-                }
-            };
+            (sharedPreferences, key) -> handleDrawerCachePreferenceChanged(key);
     private int homeStudioAccentColor = Color.rgb(119, 205, 255);
     private AppWidgetManager widgetManager;
     private AppWidgetHost widgetHost;
@@ -5420,6 +5410,18 @@ public class MainActivity extends Activity {
         if (clockWidgetEditing) exitClockWidgetEditMode();
         dismissShortcutEditMode();
         scheduleDrawerSnapshotRefreshAfterHomeTransition();
+    }
+
+    private void handleDrawerCachePreferenceChanged(String key) {
+        if (!isDrawerCachePreference(key)) return;
+        drawerSnapshotCurrentSignature = Long.MIN_VALUE;
+        drawerSnapshotCurrentItemSignature = Long.MIN_VALUE;
+        drawerSnapshotDiskLoadSignature = Long.MIN_VALUE;
+        // Preference changes run on the UI thread. Refresh the cached frame while Home is visible
+        // so the next drawer opening can continue showing its last complete image meanwhile.
+        if (root != null && !isFinishing()) {
+            root.post(this::scheduleDrawerSnapshotRefresh);
+        }
     }
 
     private boolean isDrawerCachePreference(String key) {
