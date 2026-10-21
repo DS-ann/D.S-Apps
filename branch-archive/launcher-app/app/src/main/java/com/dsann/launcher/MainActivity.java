@@ -3913,7 +3913,9 @@ public class MainActivity extends Activity {
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         GradientDrawable panelBackground = appGroupGradient(false);
-        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 180));
+        // Keep the panel shape static during motion. Animating a GradientDrawable radius
+        // invalidates the hardware layer every frame on older GPUs and causes visible jank.
+        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 24));
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
@@ -3935,7 +3937,6 @@ public class MainActivity extends Activity {
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
-        title.setAlpha(0f);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
@@ -3946,7 +3947,6 @@ public class MainActivity extends Activity {
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
         rows.setClipToPadding(false);
-        final ArrayList<View> openingMemberViews = new ArrayList<View>();
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int miniIconPx = Math.max(LauncherUiUtils.dp(this, 18),
                 Math.round(LauncherUiUtils.dp(this, iconSizeDp) * 0.8f));
@@ -3969,7 +3969,6 @@ public class MainActivity extends Activity {
             item.setGravity(Gravity.CENTER_HORIZONTAL);
             item.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 5),
                     LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 5));
-            item.setAlpha(0f);
             // The enclosing panel already scales from the group icon. Keep member
             // transforms at identity so every icon is not doing a second scale animation.
             item.setScaleX(1f);
@@ -3993,7 +3992,6 @@ public class MainActivity extends Activity {
                     LauncherUiUtils.dp(this, Math.max(11, Math.round(homeLabelHeightDp() * 0.8f)))));
             installAppGroupMemberTouch(item, icon, dialog, panel, groupId, packageName, app);
             row.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
-            openingMemberViews.add(item);
             rowCount++;
         }
         if (rowCount == 0) {
@@ -4028,7 +4026,6 @@ public class MainActivity extends Activity {
         manage.setTextSize(12f);
         manage.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 3));
-        manage.setAlpha(0f);
         manage.setOnClickListener(v -> {
             dialog.dismiss();
             showAppGroupOptions(groupId);
@@ -4049,14 +4046,12 @@ public class MainActivity extends Activity {
 
         final boolean[] closing = new boolean[]{false};
         final float[] iconScale = new float[]{0.12f, 0.12f};
-        final android.animation.ValueAnimator[] shapeAnimator =
-                new android.animation.ValueAnimator[1];
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
-                dialog, panel, dimLayer, openingMemberViews, closing, iconScale, shapeAnimator));
+                dialog, panel, dimLayer, closing, iconScale));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                closeAppGroupWithAnimation(dialog, panel, dimLayer, openingMemberViews, closing, iconScale, shapeAnimator);
+                closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -4234,19 +4229,8 @@ public class MainActivity extends Activity {
             dimLayer.setAlpha(0f);
 
             final long duration = animationDuration(175L);
-            android.animation.ValueAnimator radiusAnimator =
-                    android.animation.ValueAnimator.ofFloat(
-                            LauncherUiUtils.dp(this, 180), LauncherUiUtils.dp(this, 24));
-            radiusAnimator.setDuration(duration);
-            radiusAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f));
-            radiusAnimator.addUpdateListener(a ->
-                    panelBackground.setCornerRadius((Float) a.getAnimatedValue()));
-            if (shapeAnimator[0] != null) shapeAnimator[0].cancel();
-            shapeAnimator[0] = radiusAnimator;
-            radiusAnimator.start();
-
-            // Cache this complex gradient/card hierarchy while its parent transform animates.
-            // Clear the temporary layer when closing finishes to keep idle RAM use low.
+            // Render the complete group once, then animate only this single hardware
+            // layer. No per-member animators or per-frame background redraws.
             panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             panel.animate().cancel();
             panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
@@ -4255,44 +4239,15 @@ public class MainActivity extends Activity {
                     .start();
             dimLayer.animate().cancel();
             dimLayer.setAlpha(0f);
-            title.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
-                    .setStartDelay(duration / 6).start();
-            manage.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
-                    .setStartDelay(duration / 5).start();
-            int total = Math.max(1, openingMemberViews.size());
-            long stagger = Math.min(5L, Math.max(0L, duration / (total * 5L)));
-            for (int i = 0; i < openingMemberViews.size(); i++) {
-                View memberView = openingMemberViews.get(i);
-                long delay = Math.min(24L, i * stagger);
-                memberView.animate().cancel();
-                // The parent already supplies the scale-up motion; a light alpha-only
-                // reveal avoids dozens of simultaneous child scale transforms on Android 6.
-                memberView.animate().alpha(1f)
-                        .setStartDelay(delay)
-                        .setDuration(Math.max(65L, Math.min(115L, duration - delay)))
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.1f))
-                        .start();
-            }
         });
     }
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
-            ArrayList<View> memberViews, boolean[] closing, float[] iconScale,
-            android.animation.ValueAnimator[] shapeAnimator) {
+            boolean[] closing, float[] iconScale) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
         long duration = animationDuration(150L);
-        for (View memberView : memberViews) {
-            if (memberView == null) continue;
-            memberView.animate().cancel();
-            // The parent card shrinks back to the launcher icon. Fade children without
-            // stacking another per-view scale animation on top of that transform.
-            memberView.animate().alpha(0f)
-                    .setStartDelay(0L).setDuration(Math.max(45L, duration / 2))
-                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                    .start();
-        }
         panel.animate().cancel();
         float targetScaleX = iconScale != null ? iconScale[0] : 0.08f;
         float targetScaleY = iconScale != null ? iconScale[1] : 0.08f;
@@ -4306,24 +4261,6 @@ public class MainActivity extends Activity {
         if (dimLayer != null) {
             dimLayer.animate().cancel();
             dimLayer.animate().alpha(0f).setDuration(duration).start();
-        }
-        if (panel.getBackground() instanceof GradientDrawable) {
-            if (shapeAnimator != null && shapeAnimator.length > 0 && shapeAnimator[0] != null) {
-                shapeAnimator[0].cancel();
-            }
-            GradientDrawable background = (GradientDrawable) panel.getBackground();
-            android.animation.ValueAnimator radiusAnimator = android.animation.ValueAnimator.ofFloat(
-                    Math.max(panel.getWidth(), panel.getHeight()) / 2f,
-                    LauncherUiUtils.dp(this, 24));
-            // On close, the rounded corners return to their original icon-like shape.
-            radiusAnimator.setFloatValues(LauncherUiUtils.dp(this, 24),
-                    Math.max(panel.getWidth(), panel.getHeight()) / 2f);
-            radiusAnimator.setDuration(duration);
-            radiusAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator());
-            if (shapeAnimator != null && shapeAnimator.length > 0) shapeAnimator[0] = radiusAnimator;
-            radiusAnimator.addUpdateListener(a ->
-                    background.setCornerRadius((Float) a.getAnimatedValue()));
-            radiusAnimator.start();
         }
     }
 
