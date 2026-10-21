@@ -8926,6 +8926,10 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         if (clockText == null) return;
         Integer previousStyle = appliedClockStyles.get(clockText);
+        // Rebuild the displayed text after renderer changes, even when the clock characters
+        // are identical. The LED renderer may have installed a plain NORMAL buffer; standard
+        // styles require the replacement spans used for regular text/colon drawing.
+        clockDigitInnerBorderModeApplied.remove(clockText);
         // Always reassert the custom renderer mode. A cached style index is not
         // proof that the active TextView still has the correct drawing mode,
         // especially when switching between the two independent page clocks.
@@ -8950,6 +8954,15 @@ public class MainActivity extends Activity {
             ledClock.setSevenSegmentMode(ledMode);
             ledClock.invalidate();
         }
+        // Reassert a drawable TextView state; alpha/color left by a previous renderer must
+        // not blank standard styles when the same clock view is reused.
+        clockText.setVisibility(View.VISIBLE);
+        clockText.setAlpha(1f);
+        if (Color.alpha(clockText.getCurrentTextColor()) == 0) {
+            clockText.setTextColor(CLOCK_DIGIT_SILVER);
+        }
+        clockText.requestLayout();
+        clockText.invalidate();
         appliedClockStyles.put(clockText, style);
     }
 
@@ -9301,6 +9314,13 @@ public class MainActivity extends Activity {
             clockValue = clockValue.trim();
             boolean sevenSegmentClock = clockText instanceof SevenSegmentClockTextView
                     && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+            if (clockText instanceof SevenSegmentClockTextView) {
+                ((SevenSegmentClockTextView) clockText).setSevenSegmentMode(sevenSegmentClock);
+            }
+            if (!sevenSegmentClock) {
+                if (clockText.getVisibility() != View.VISIBLE) clockText.setVisibility(View.VISIBLE);
+                if (clockText.getAlpha() != 1f) clockText.setAlpha(1f);
+            }
             boolean useWhiteDigitInnerBorder = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
                     || isClockIconArtworkActive();
             android.text.SpannableStringBuilder displayClock =
