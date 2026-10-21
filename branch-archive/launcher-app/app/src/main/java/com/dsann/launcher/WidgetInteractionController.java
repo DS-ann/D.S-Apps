@@ -38,6 +38,7 @@ final class WidgetInteractionController {
         void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView);
         boolean finishLiveDisplacements(boolean commit, View movingView);
         void setWorkspaceGridVisible(boolean visible, View movingView);
+        void refreshWorkspaceGrid();
         void beginWorkspaceTransferDrag(View item, int sourcePage, float rawX, float rawY,
                 float fingerOffsetX, float fingerOffsetY);
         void updateWorkspaceTransferEdge(float rawX, float rawY);
@@ -591,6 +592,10 @@ final class WidgetInteractionController {
                     handler.removeCallbacks(menuPress[0]);
                     listener.beginWorkspaceTransferDrag(container, originalPageAtDown[0],
                             event.getRawX(), event.getRawY(), fingerOffset[0], fingerOffset[1]);
+                    // Widgets must explicitly activate the shared grid overlay; unlike app
+                    // cells, their drag path previously never showed the destination guides.
+                    listener.setWorkspaceGridVisible(true, container);
+                    listener.refreshWorkspaceGrid();
                 }
                 listener.updateWorkspaceTransferEdge(event.getRawX(), event.getRawY());
                 cancelWidgetTouch.run();
@@ -635,6 +640,9 @@ final class WidgetInteractionController {
                 } else {
                     listener.scheduleLiveDisplacementUpdate(sourcePage, container);
                 }
+                // Occupied-cell highlights follow live widget movement and any neighbors
+                // displaced by the shared collision resolver.
+                listener.refreshWorkspaceGrid();
                 widgetPage[0] = destinationPage;
                 return true;
             }
