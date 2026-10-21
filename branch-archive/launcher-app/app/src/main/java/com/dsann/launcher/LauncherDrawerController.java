@@ -5,17 +5,11 @@ import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.view.View;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.widget.AbsListView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridView;
@@ -39,325 +33,25 @@ final class LauncherDrawerController {
         final GridView grid;
         final LauncherAppAdapter adapter;
         final Runnable refreshAppList;
-        final CachedDrawerBody snapshotBody;
         BuiltDrawer(LinearLayout screen, GridView grid, LauncherAppAdapter adapter,
-                    Runnable refreshAppList, CachedDrawerBody snapshotBody) {
+                    Runnable refreshAppList) {
             this.screen = screen;
             this.grid = grid;
             this.adapter = adapter;
             this.refreshAppList = refreshAppList;
-            this.snapshotBody = snapshotBody;
         }
     }
 
-    /**
-     * Paints the last complete drawer viewport while visible icons are warming up.
-     * The bitmap is drawn by dispatchDraw, not as a touch-blocking child, so the real GridView
-     * continues to receive taps and long presses while the static view is shown.
-     */
-    static final class CachedDrawerBody extends FrameLayout {
-        private static final long MAX_SNAPSHOT_PIXELS = 1200000L;
-        private final Paint snapshotPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
-        private final Rect snapshotBounds = new Rect();
-        private Bitmap cachedSnapshot;
-        private boolean displayCachedSnapshot;
-        private boolean capturingSnapshot;
-        private long cachedSignature = Long.MIN_VALUE;
-        private long cachedItemSignature = Long.MIN_VALUE;
-        private int cachedFirstVisible = -1;
-        private final java.io.File persistentSnapshotFile;
-        private final java.io.File persistentSnapshotMetaFile;
-        private static final java.util.concurrent.ExecutorService SNAPSHOT_DISK_EXECUTOR =
-                java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
-                    Thread thread = new Thread(runnable, "DrawerSnapshotDiskCache");
-                    thread.setDaemon(true);
-                    return thread;
-                });
-
-        CachedDrawerBody(Activity activity) {
+    /** Live drawer viewport; icons are cached per app rather than as a screenshot. */
+    static final class DrawerBody extends FrameLayout {
+        DrawerBody(Activity activity) {
             super(activity);
-            setWillNotDraw(false);
-            java.io.File directory = new java.io.File(activity.getFilesDir(), "drawer-cache-v1");
-            if (!directory.exists()) directory.mkdirs();
-            persistentSnapshotFile = new java.io.File(directory, "viewport.png");
-            persistentSnapshotMetaFile = new java.io.File(directory, "viewport.meta");
-        }
-
-        boolean isShowingCachedSnapshot() {
-            return displayCachedSnapshot && cachedSnapshot != null && !cachedSnapshot.isRecycled();
-        }
-
-        void hideCachedSnapshot() {
-            if (!displayCachedSnapshot) return;
-            displayCachedSnapshot = false;
-            invalidate();
-        }
-
-        private void clearMemorySnapshot() {
-            displayCachedSnapshot = false;
-            Bitmap previous = cachedSnapshot;
-            cachedSnapshot = null;
-            cachedSignature = Long.MIN_VALUE;
-            cachedItemSignature = Long.MIN_VALUE;
-            cachedFirstVisible = -1;
-            if (previous != null && !previous.isRecycled()) previous.recycle();
-        }
-
-        void invalidateSnapshot() {
-            // Keep the last disk snapshot. Its signature, viewport, and dimensions are checked
-            // before reuse; stale files are replaced once a fresh, artwork-complete frame exists.
-            clearMemorySnapshot();
-            invalidate();
-        }
-
-        /**
-         * Load the last complete drawer viewport from app-private internal storage. This runs
-         * while the home screen is visible, not during the opening animation.
-         */
-        private long[] readPersistentSnapshotMetadata() {
-            try (java.io.BufferedReader reader =
-                         new java.io.BufferedReader(new java.io.FileReader(persistentSnapshotMetaFile))) {
-                long[] values = new long[7];
-                for (int i = 0; i < values.length; i++) {
-                    String line = reader.readLine();
-                    if (line == null) return null;
-                    values[i] = Long.parseLong(line);
-                }
-                return values;
-            } catch (java.io.IOException | RuntimeException ignored) {
-                return null;
-            }
-        }
-
-        private void adoptSnapshot(Bitmap decoded, long signature, int firstVisiblePosition,
-                long itemSignature, int viewWidth, int viewHeight) {
-            Bitmap previous = cachedSnapshot;
-            cachedSnapshot = decoded;
-            cachedSignature = signature;
-            cachedItemSignature = itemSignature;
-            cachedFirstVisible = firstVisiblePosition;
-            snapshotBounds.set(0, 0, viewWidth, viewHeight);
-            if (previous != null && previous != decoded && !previous.isRecycled()) {
-                previous.recycle();
-            }
-            invalidate();
-        }
-
-        /**
-         * Load the exact, current drawer viewport from app-private internal storage.
-         * A cache miss deliberately preserves any in-memory complete frame: it can remain
-         * visible while a new theme or icon list is prepared, then be swapped atomically.
-         */
-        boolean loadPersistentSnapshot(long signature, int firstVisiblePosition) {
-            int viewWidth = getWidth();
-            int viewHeight = getHeight();
-            if (viewWidth <= 0 || viewHeight <= 0) return false;
-            if (cachedSnapshot != null && !cachedSnapshot.isRecycled()
-                    && cachedSignature == signature
-                    && cachedFirstVisible == firstVisiblePosition) return true;
-            if (!persistentSnapshotFile.isFile() || !persistentSnapshotMetaFile.isFile()) {
-                return false;
-            }
-
-            long[] metadata = readPersistentSnapshotMetadata();
-            if (metadata == null || metadata[0] != signature
-                    || metadata[1] != firstVisiblePosition
-                    || metadata[2] != viewWidth || metadata[3] != viewHeight
-                    || metadata[4] <= 0 || metadata[5] <= 0
-                    || metadata[4] * metadata[5] > MAX_SNAPSHOT_PIXELS) {
-                return false;
-            }
-
-            Bitmap decoded = null;
-            try {
-                decoded = BitmapFactory.decodeFile(persistentSnapshotFile.getAbsolutePath());
-                if (decoded == null || decoded.getWidth() != (int) metadata[4]
-                        || decoded.getHeight() != (int) metadata[5]) {
-                    if (decoded != null && !decoded.isRecycled()) decoded.recycle();
-                    return false;
-                }
-            } catch (RuntimeException | OutOfMemoryError ignored) {
-                if (decoded != null && !decoded.isRecycled()) decoded.recycle();
-                return false;
-            }
-
-            adoptSnapshot(decoded, metadata[0], (int) metadata[1],
-                    metadata[6], viewWidth, viewHeight);
-            return true;
-        }
-
-        /**
-         * Display the last stored image as a temporary visual placeholder when only icon
-         * appearance changed. The ordered app identity signature and viewport must still match,
-         * so installs, removals, search results, and scrolling never get mismatched hit targets.
-         */
-        boolean showLastPersistentSnapshot(long itemSignature, int firstVisiblePosition) {
-            int viewWidth = getWidth();
-            int viewHeight = getHeight();
-            if (viewWidth <= 0 || viewHeight <= 0) return false;
-            if (cachedSnapshot != null && !cachedSnapshot.isRecycled()
-                    && cachedItemSignature == itemSignature
-                    && cachedFirstVisible == firstVisiblePosition) {
-                displayCachedSnapshot = true;
-                invalidate();
-                return true;
-            }
-            if (!persistentSnapshotFile.isFile() || !persistentSnapshotMetaFile.isFile()) {
-                return false;
-            }
-
-            long[] metadata = readPersistentSnapshotMetadata();
-            if (metadata == null || metadata[1] != firstVisiblePosition
-                    || metadata[2] != viewWidth || metadata[3] != viewHeight
-                    || metadata[4] <= 0 || metadata[5] <= 0
-                    || metadata[4] * metadata[5] > MAX_SNAPSHOT_PIXELS
-                    || metadata[6] != itemSignature) {
-                return false;
-            }
-
-            Bitmap decoded = null;
-            try {
-                decoded = BitmapFactory.decodeFile(persistentSnapshotFile.getAbsolutePath());
-                if (decoded == null || decoded.getWidth() != (int) metadata[4]
-                        || decoded.getHeight() != (int) metadata[5]) {
-                    if (decoded != null && !decoded.isRecycled()) decoded.recycle();
-                    return false;
-                }
-            } catch (RuntimeException | OutOfMemoryError ignored) {
-                if (decoded != null && !decoded.isRecycled()) decoded.recycle();
-                return false;
-            }
-
-            adoptSnapshot(decoded, metadata[0], (int) metadata[1],
-                    metadata[6], viewWidth, viewHeight);
-            displayCachedSnapshot = true;
-            invalidate();
-            return true;
-        }
-
-        boolean showCachedSnapshot(long signature, int firstVisiblePosition) {
-            if (cachedSnapshot == null || cachedSnapshot.isRecycled()
-                    || cachedSignature != signature
-                    || cachedFirstVisible != firstVisiblePosition) {
-                if (!loadPersistentSnapshot(signature, firstVisiblePosition)) return false;
-            }
-            if (!displayCachedSnapshot) {
-                displayCachedSnapshot = true;
-                invalidate();
-            }
-            return true;
-        }
-
-        private void persistSnapshot(Bitmap source, long signature, int firstVisiblePosition,
-                long itemSignature, int viewWidth, int viewHeight) {
-            final Bitmap copy;
-            try {
-                copy = source.copy(Bitmap.Config.ARGB_8888, false);
-            } catch (OutOfMemoryError | RuntimeException ignored) {
-                return;
-            }
-            if (copy == null) return;
-            final int bitmapWidth = copy.getWidth();
-            final int bitmapHeight = copy.getHeight();
-            SNAPSHOT_DISK_EXECUTOR.execute(() -> {
-                java.io.File imageTemp = new java.io.File(
-                        persistentSnapshotFile.getAbsolutePath() + ".tmp");
-                java.io.File metaTemp = new java.io.File(
-                        persistentSnapshotMetaFile.getAbsolutePath() + ".tmp");
-                try {
-                    java.io.File parent = persistentSnapshotFile.getParentFile();
-                    if (parent != null && !parent.exists() && !parent.mkdirs()) return;
-                    try (java.io.FileOutputStream output = new java.io.FileOutputStream(imageTemp)) {
-                        if (!copy.compress(Bitmap.CompressFormat.PNG, 100, output)) return;
-                        output.flush();
-                        output.getFD().sync();
-                    }
-                    try (java.io.BufferedWriter writer =
-                                 new java.io.BufferedWriter(new java.io.FileWriter(metaTemp))) {
-                        writer.write(Long.toString(signature)); writer.newLine();
-                        writer.write(Integer.toString(firstVisiblePosition)); writer.newLine();
-                        writer.write(Integer.toString(viewWidth)); writer.newLine();
-                        writer.write(Integer.toString(viewHeight)); writer.newLine();
-                        writer.write(Integer.toString(bitmapWidth)); writer.newLine();
-                        writer.write(Integer.toString(bitmapHeight)); writer.newLine();
-                        writer.write(Long.toString(itemSignature)); writer.newLine();
-                        writer.flush();
-                    }
-                    // Both files live in the same private directory. A metadata mismatch makes
-                    // an interrupted replacement a cache miss, never a wrong-screen display.
-                    if (persistentSnapshotFile.exists() && !persistentSnapshotFile.delete()) return;
-                    if (!imageTemp.renameTo(persistentSnapshotFile)) return;
-                    if (persistentSnapshotMetaFile.exists()
-                            && !persistentSnapshotMetaFile.delete()) return;
-                    metaTemp.renameTo(persistentSnapshotMetaFile);
-                } catch (java.io.IOException | RuntimeException ignored) {
-                    imageTemp.delete();
-                    metaTemp.delete();
-                } finally {
-                    if (!copy.isRecycled()) copy.recycle();
-                }
-            });
-        }
-
-        void captureSnapshot(long signature, int firstVisiblePosition, long itemSignature) {
-            int width = getWidth();
-            int height = getHeight();
-            if (width <= 0 || height <= 0) return;
-
-            long area = (long) width * (long) height;
-            float scale = area > MAX_SNAPSHOT_PIXELS
-                    ? (float) Math.sqrt((double) MAX_SNAPSHOT_PIXELS / (double) area) : 1f;
-            int bitmapWidth = Math.max(1, Math.round(width * scale));
-            int bitmapHeight = Math.max(1, Math.round(height * scale));
-            Bitmap next = null;
-            try {
-                next = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(next);
-                canvas.scale(bitmapWidth / (float) width, bitmapHeight / (float) height);
-                capturingSnapshot = true;
-                // Force live child rendering even when a previous cached frame is showing.
-                super.draw(canvas);
-            } catch (OutOfMemoryError | RuntimeException ignored) {
-                if (next != null && !next.isRecycled()) next.recycle();
-                return;
-            } finally {
-                capturingSnapshot = false;
-            }
-
-            Bitmap previous = cachedSnapshot;
-            cachedSnapshot = next;
-            cachedSignature = signature;
-            cachedItemSignature = itemSignature;
-            cachedFirstVisible = firstVisiblePosition;
-            displayCachedSnapshot = false;
-            snapshotBounds.set(0, 0, width, height);
-            if (previous != null && previous != next && !previous.isRecycled()) previous.recycle();
-            persistSnapshot(next, signature, firstVisiblePosition, itemSignature, width, height);
-            invalidate();
-        }
-
-        @Override protected void dispatchDraw(Canvas canvas) {
-            Bitmap current = cachedSnapshot;
-            if (!capturingSnapshot && displayCachedSnapshot
-                    && current != null && !current.isRecycled()) {
-                snapshotBounds.set(0, 0, getWidth(), getHeight());
-                canvas.drawBitmap(current, null, snapshotBounds, snapshotPaint);
-                return;
-            }
-            super.dispatchDraw(canvas);
-        }
-
-        @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
-            super.onSizeChanged(width, height, oldWidth, oldHeight);
-            // GONE briefly causes some Android versions to report a zero-sized pass.
-            // Keep the last complete image across that pass; a real non-zero size change
-            // (rotation/resolution change) invalidates it and a new one is captured at Home.
-            if (cachedSnapshot != null && width > 0 && height > 0
-                    && oldWidth > 0 && oldHeight > 0
-                    && (width != oldWidth || height != oldHeight)) {
-                invalidateSnapshot();
-            }
-            snapshotBounds.set(0, 0, width, height);
+            // Remove the obsolete viewport screenshot from earlier launcher versions.
+            java.io.File legacyDirectory =
+                    new java.io.File(activity.getFilesDir(), "drawer-cache-v1");
+            new java.io.File(legacyDirectory, "viewport.png").delete();
+            new java.io.File(legacyDirectory, "viewport.meta").delete();
+            legacyDirectory.delete();
         }
     }
 
@@ -397,7 +91,7 @@ final class LauncherDrawerController {
                 Gravity.RIGHT | Gravity.CENTER_VERTICAL));
         screen.addView(headerRow, headerParams);
 
-        CachedDrawerBody drawerBody = new CachedDrawerBody(activity);
+        DrawerBody drawerBody = new DrawerBody(activity);
         GridView grid = new GridView(activity);
         grid.setNumColumns(actions.getColumns());
         grid.setVerticalSpacing(LauncherUiUtils.dp(activity, spacing));
@@ -422,21 +116,8 @@ final class LauncherDrawerController {
                         actions.showAppOptions(app, onHome);
                     }
                 });
-        adapter.setOnDataChangedListener(() -> {
-            drawerBody.invalidateSnapshot();
-            actions.onDrawerDataChanged();
-        });
+        adapter.setOnDataChangedListener(actions::onDrawerDataChanged);
         grid.setAdapter(adapter);
-        grid.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override public void onScrollStateChanged(AbsListView view, int scrollState) {
-                if (scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE) {
-                    // A scroll changes the cached viewport even if it is not currently displayed.
-                    drawerBody.invalidateSnapshot();
-                }
-            }
-            @Override public void onScroll(AbsListView view, int firstVisibleItem,
-                    int visibleItemCount, int totalItemCount) {}
-        });
         drawerBody.addView(grid, new FrameLayout.LayoutParams(-1, -1));
         screen.addView(drawerBody, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -545,6 +226,6 @@ final class LauncherDrawerController {
             });
         });
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
-        return new BuiltDrawer(screen, grid, adapter, refreshAppList, drawerBody);
+        return new BuiltDrawer(screen, grid, adapter, refreshAppList);
     }
 }

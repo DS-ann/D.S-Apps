@@ -165,8 +165,8 @@ final class LauncherIconDrawable extends Drawable {
     static void configurePersistentArtworkCache(Context context, int selectedTheme) {
         if (context == null) return;
         final int theme = clampArtworkTheme(selectedTheme);
-        final File root = new File(context.getCacheDir(), "launcher-icon-artwork-v2");
-        final File legacyRoot = new File(context.getCacheDir(), "launcher-icon-artwork-v1");
+        final File root = new File(context.getFilesDir(), "launcher-icon-artwork-v3");
+        final File legacyRoot = new File(context.getCacheDir(), "launcher-icon-artwork-v2");
         final File active = new File(root, "theme-" + theme);
         File priorRoot = DISK_ARTWORK_CACHE_ROOT;
         boolean rootChanged = priorRoot == null || !priorRoot.equals(root);
@@ -184,7 +184,7 @@ final class LauncherIconDrawable extends Drawable {
                 if (selectedPersistentArtworkTheme != theme
                         || !root.equals(DISK_ARTWORK_CACHE_ROOT)) return;
                 if (!root.exists()) root.mkdirs();
-                // Delete the older format whose filenames did not encode package identity.
+                // Remove the previous temporary-cache version after switching to durable files.
                 deleteRecursively(legacyRoot);
                 File[] children = root.listFiles();
                 if (children != null) {
@@ -429,6 +429,9 @@ final class LauncherIconDrawable extends Drawable {
     // While a non-original theme is being loaded from disk or generated, do not draw the
     // unprocessed app icon. This prevents a visible original-colour -> themed-colour flash.
     private boolean awaitingThemedArtwork;
+    // Tracks completion even for Original Colours, where the source remains drawable while
+    // its per-app persistent artwork bitmap is being loaded or written.
+    private volatile boolean artworkCacheRequestPending;
     private int drawableAlpha = 255;
     private ColorFilter drawableColorFilter;
     // Force the first appearance bind through the cache so Original icons get the outline too.
@@ -748,6 +751,7 @@ final class LauncherIconDrawable extends Drawable {
             processedArtworkTheme = -1;
         }
         awaitingThemedArtwork = false;
+        artworkCacheRequestPending = false;
         if (original == null) {
             source = null;
             processedArtworkSourceToken = null;
@@ -792,6 +796,7 @@ final class LauncherIconDrawable extends Drawable {
             // so that cached/generated artwork appears once, already in its final palette.
             awaitingThemedArtwork = theme != ARTWORK_ORIGINAL;
         }
+        artworkCacheRequestPending = true;
         requestArtworkBitmap(key, state, theme, sourceCacheToken, this);
     }
 
@@ -800,7 +805,24 @@ final class LauncherIconDrawable extends Drawable {
         return !awaitingThemedArtwork;
     }
 
+    /** True only after the per-app cache entry has been read or generated. */
+    boolean isArtworkCacheReady() {
+        return !artworkCacheRequestPending;
+    }
+
+    private void onArtworkRequestFailed() {
+        artworkCacheRequestPending = false;
+        awaitingThemedArtwork = false;
+        Drawable original = originalSource;
+        if (original != null) {
+            source = original;
+            source.setBounds(getBounds());
+        }
+        invalidateSelf();
+    }
+
     private void applyArtworkBitmap(Bitmap bitmap) {
+        artworkCacheRequestPending = false;
         BitmapDrawable result = new BitmapDrawable(Resources.getSystem(), bitmap);
         result.setFilterBitmap(true);
         result.setDither(true);
@@ -914,11 +936,12 @@ final class LauncherIconDrawable extends Drawable {
                 && selectedPersistentArtworkTheme == theme) {
             ARTWORK_CACHE.put(key, bitmap);
         }
-        if (waiters == null || bitmap == null) return;
+        if (waiters == null) return;
         for (WeakReference<LauncherIconDrawable> reference : waiters) {
             LauncherIconDrawable drawable = reference.get();
             if (drawable != null && drawable.matchesArtworkRequest(key, theme)) {
-                drawable.applyArtworkBitmap(bitmap);
+                if (bitmap != null) drawable.applyArtworkBitmap(bitmap);
+                else drawable.onArtworkRequestFailed();
             }
         }
     }

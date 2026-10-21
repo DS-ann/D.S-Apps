@@ -58,6 +58,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
     private final ArrayList<ImageView> artworkPrewarmWaiters = new ArrayList<>();
     private int artworkPrewarmGeneration;
     private long lastArtworkPrewarmSignature = Long.MIN_VALUE;
+    private boolean artworkPrewarmComplete;
 
     // PackageManager icon resolution is I/O/resource-heavy on Android 6. Never do it on the
     // UI thread during the drawer's opening animation or while GridView is scrolling.
@@ -484,6 +485,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         }
         if (signature == lastArtworkPrewarmSignature) return;
         lastArtworkPrewarmSignature = signature;
+        artworkPrewarmComplete = false;
         artworkPrewarmGeneration++;
         final int generation = artworkPrewarmGeneration;
         artworkPrewarmHandler.removeCallbacksAndMessages(null);
@@ -508,19 +510,32 @@ public final class LauncherAppAdapter extends BaseAdapter {
             ImageView waiter = iterator.next();
             String appKey = String.valueOf(waiter.getTag());
             android.graphics.drawable.Drawable icon = waiter.getDrawable();
-            boolean pending = icon instanceof LauncherIconDrawable
-                    && !((LauncherIconDrawable) icon).isArtworkReady();
-            if (icon == null) pending = pendingIconLoads.contains(appKey);
+            boolean pending;
+            if (icon instanceof LauncherIconDrawable) {
+                // Includes Original Colours: the source draws immediately, but the durable
+                // per-app artwork entry must finish reading/generation before prewarm is complete.
+                pending = !((LauncherIconDrawable) icon).isArtworkCacheReady();
+            } else {
+                pending = icon == null && pendingIconLoads.contains(appKey);
+            }
             if (!pending) iterator.remove();
         }
-        if (artworkPrewarmWaiters.isEmpty()) return;
+        if (artworkPrewarmWaiters.isEmpty()) {
+            artworkPrewarmComplete = true;
+            return;
+        }
         if (checks >= 300) {
             // A malformed third-party icon must not pin view/drawable references indefinitely.
             artworkPrewarmWaiters.clear();
+            artworkPrewarmComplete = true;
             return;
         }
         artworkPrewarmHandler.postDelayed(
                 () -> pollArtworkPrewarm(generation, checks + 1), 100L);
+    }
+
+    boolean isArtworkPrewarmComplete() {
+        return artworkPrewarmComplete;
     }
 
     @Override public void notifyDataSetChanged() {
@@ -537,6 +552,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         artworkPrewarmHandler.removeCallbacksAndMessages(null);
         artworkPrewarmWaiters.clear();
         lastArtworkPrewarmSignature = Long.MIN_VALUE;
+        artworkPrewarmComplete = false;
         labelCache.clear();
         iconCache.clear();
         pendingIconLoads.clear();
