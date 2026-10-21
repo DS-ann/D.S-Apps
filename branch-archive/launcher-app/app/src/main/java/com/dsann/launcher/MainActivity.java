@@ -3966,8 +3966,10 @@ public class MainActivity extends Activity {
             item.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 5),
                     LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 5));
             item.setAlpha(0f);
-            item.setScaleX(0.62f);
-            item.setScaleY(0.62f);
+            // The enclosing panel already scales from the group icon. Keep member
+            // transforms at identity so every icon is not doing a second scale animation.
+            item.setScaleX(1f);
+            item.setScaleY(1f);
             ImageView icon = new ImageView(this);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             icon.setImageDrawable(createAppGroupMemberDrawable(app));
@@ -4227,20 +4229,21 @@ public class MainActivity extends Activity {
             panel.setAlpha(0f);
             dimLayer.setAlpha(0f);
 
-            final long duration = animationDuration(280L);
+            final long duration = animationDuration(175L);
             android.animation.ValueAnimator radiusAnimator =
                     android.animation.ValueAnimator.ofFloat(
                             LauncherUiUtils.dp(this, 180), LauncherUiUtils.dp(this, 24));
             radiusAnimator.setDuration(duration);
             radiusAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f));
-            radiusAnimator.addUpdateListener(a -> {
-                panelBackground.setCornerRadius((Float) a.getAnimatedValue());
-                panel.invalidate();
-            });
+            radiusAnimator.addUpdateListener(a ->
+                    panelBackground.setCornerRadius((Float) a.getAnimatedValue()));
             if (shapeAnimator[0] != null) shapeAnimator[0].cancel();
             shapeAnimator[0] = radiusAnimator;
             radiusAnimator.start();
 
+            // Cache this complex gradient/card hierarchy while its parent transform animates.
+            // Clear the temporary layer when closing finishes to keep idle RAM use low.
+            panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             panel.animate().cancel();
             panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
                     .setDuration(duration)
@@ -4253,14 +4256,16 @@ public class MainActivity extends Activity {
             manage.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
                     .setStartDelay(duration / 5).start();
             int total = Math.max(1, openingMemberViews.size());
-            long stagger = Math.min(18L, Math.max(4L, duration / (total * 2L)));
+            long stagger = Math.min(5L, Math.max(0L, duration / (total * 5L)));
             for (int i = 0; i < openingMemberViews.size(); i++) {
                 View memberView = openingMemberViews.get(i);
-                long delay = Math.min(duration / 3, i * stagger);
+                long delay = Math.min(24L, i * stagger);
                 memberView.animate().cancel();
-                memberView.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                // The parent already supplies the scale-up motion; a light alpha-only
+                // reveal avoids dozens of simultaneous child scale transforms on Android 6.
+                memberView.animate().alpha(1f)
                         .setStartDelay(delay)
-                        .setDuration(Math.max(80L, duration - delay))
+                        .setDuration(Math.max(65L, Math.min(115L, duration - delay)))
                         .setInterpolator(new android.view.animation.DecelerateInterpolator(1.1f))
                         .start();
             }
@@ -4273,12 +4278,14 @@ public class MainActivity extends Activity {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
-        long duration = animationDuration(240L);
+        long duration = animationDuration(150L);
         for (View memberView : memberViews) {
             if (memberView == null) continue;
             memberView.animate().cancel();
-            memberView.animate().alpha(0f).scaleX(0.62f).scaleY(0.62f)
-                    .setStartDelay(0L).setDuration(Math.max(60L, duration * 2 / 3))
+            // The parent card shrinks back to the launcher icon. Fade children without
+            // stacking another per-view scale animation on top of that transform.
+            memberView.animate().alpha(0f)
+                    .setStartDelay(0L).setDuration(Math.max(45L, duration / 2))
                     .setInterpolator(new android.view.animation.AccelerateInterpolator())
                     .start();
         }
@@ -4289,6 +4296,7 @@ public class MainActivity extends Activity {
                 .setDuration(duration)
                 .setInterpolator(new android.view.animation.AccelerateInterpolator(1.2f))
                 .withEndAction(() -> {
+                    panel.setLayerType(View.LAYER_TYPE_NONE, null);
                     if (dialog.isShowing()) dialog.dismiss();
                 }).start();
         if (dimLayer != null) {
@@ -4309,10 +4317,8 @@ public class MainActivity extends Activity {
             radiusAnimator.setDuration(duration);
             radiusAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator());
             if (shapeAnimator != null && shapeAnimator.length > 0) shapeAnimator[0] = radiusAnimator;
-            radiusAnimator.addUpdateListener(a -> {
-                background.setCornerRadius((Float) a.getAnimatedValue());
-                panel.invalidate();
-            });
+            radiusAnimator.addUpdateListener(a ->
+                    background.setCornerRadius((Float) a.getAnimatedValue()));
             radiusAnimator.start();
         }
     }
@@ -10129,8 +10135,11 @@ public class MainActivity extends Activity {
         addAppShiftDirection(directions, seenDirections, 0, 1);
         addAppShiftDirection(directions, seenDirections, 0, -1);
 
+        int[] moverGeometry = itemGeometry(movingView);
         for (int[] direction : directions) {
-            int dxCells = direction[0], dyCells = direction[1];
+            int dxCells = direction[0];
+            int dyCells = direction[1];
+            if (dxCells == 0 && dyCells == 0) continue;
             if (seedSlot[0] + dxCells < 0 || seedSlot[0] + dxCells >= columns
                     || seedSlot[1] + dyCells < 0 || seedSlot[1] + dyCells >= rows) continue;
 
@@ -10144,33 +10153,86 @@ public class MainActivity extends Activity {
             slots.put(seed, seedSlot);
             boolean blocked = false;
 
-            // Expanding only along the shifted row/column groups the whole chain but
-            // avoids unexpectedly dragging unrelated apps from adjacent rows.
+            // Follow the occupied slot chain in one grid direction. This does not depend
+            // on animation-frame rectangles, which can be between cells while the row moves.
             for (int memberIndex = 0; memberIndex < cohort.size() && !blocked; memberIndex++) {
                 View member = cohort.get(memberIndex);
-                // A cohort can be re-targeted while its previous synchronized
-                // displacement animation is in flight. Its layout margins already
-                // represent the reserved grid slot, so use that slot and replace the
-                // destination as a group instead of falling back to single-item pushes.
                 int[] originSlot = slots.get(member);
-                int targetCol = originSlot[0] + dxCells;
-                int targetRow = originSlot[1] + dyCells;
-                if (targetCol < 0 || targetCol >= columns || targetRow < 0 || targetRow >= rows) {
+                int nextCol = originSlot[0] + dxCells;
+                int nextRow = originSlot[1] + dyCells;
+                if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) {
                     blocked = true;
                     break;
                 }
-                int[] memberGeometry = itemGeometry(member);
-                int originX = homeGridIconLeftAt(
-                        member, originSlot[0], cellWidth, memberGeometry[2]);
-                int originY = homeGridIconTopAt(
-                        page, member, originSlot[1], rows, cellHeight);
-                int targetX = homeGridIconLeftAt(
-                        member, targetCol, cellWidth, memberGeometry[2]);
+
+                View occupant = null;
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View candidate = page.getChildAt(childIndex);
+                    if (candidate == movingView || candidate == member
+                            || candidate.getVisibility() != View.VISIBLE
+                            || !isHomeGridIcon(candidate)) continue;
+                    int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
+                    if (candidateSlot == null || candidateSlot[0] != nextCol
+                            || candidateSlot[1] != nextRow) continue;
+
+                    boolean sameGridFamily = isWorkspaceContactShortcut(candidate)
+                            == isWorkspaceContactShortcut(seed);
+                    if (!sameGridFamily || (occupant != null && occupant != candidate)) {
+                        blocked = true;
+                        break;
+                    }
+                    occupant = candidate;
+                }
+                if (blocked || occupant == null) continue;
+                if (members.containsKey(occupant)) {
+                    blocked = true;
+                    break;
+                }
+                int[] occupiedSlot = homeGridIconSlot(page, occupant, cellHeight, rows);
+                if (occupiedSlot == null) {
+                    blocked = true;
+                    break;
+                }
+                members.put(occupant, Boolean.TRUE);
+                slots.put(occupant, occupiedSlot);
+                cohort.add(occupant);
+            }
+
+            // A single icon is handled by the ordinary collision planner. This path is
+            // specifically for a contiguous row/column that must stay spatially together.
+            if (blocked || cohort.size() < 2) continue;
+
+            java.util.IdentityHashMap<View, int[]> targets =
+                    new java.util.IdentityHashMap<View, int[]>();
+            java.util.IdentityHashMap<View, int[]> geometries =
+                    new java.util.IdentityHashMap<View, int[]>();
+
+            // Validate every target and swept path against widgets, clocks, shortcuts,
+            // unrelated grid rows, and destinations already reserved by another animation.
+            for (View member : cohort) {
+                int[] originSlot = slots.get(member);
+                int[] geometry = itemGeometry(member);
+                int targetCol = originSlot[0] + dxCells;
+                int targetRow = originSlot[1] + dyCells;
+                if (targetCol < 0 || targetCol >= columns || targetRow < 0 || targetRow >= rows
+                        || geometry[2] <= 0 || geometry[3] <= 0) {
+                    blocked = true;
+                    break;
+                }
+                int originX = homeGridIconLeftAt(member, originSlot[0], cellWidth, geometry[2]);
+                int originY = homeGridIconTopAt(page, member, originSlot[1], rows, cellHeight);
+                int targetX = homeGridIconLeftAt(member, targetCol, cellWidth, geometry[2]);
                 int targetY = homeGridIconTopAt(page, member, targetRow, rows, cellHeight);
+                if (targetX < 0 || targetY < 0 || targetX + geometry[2] > page.getWidth()
+                        || targetY + geometry[3] > page.getHeight()) {
+                    blocked = true;
+                    break;
+                }
+
                 android.graphics.Rect startVisible = appIconVisualRectAt(
-                        member, originX, originY, memberGeometry[2], memberGeometry[3]);
+                        member, originX, originY, geometry[2], geometry[3]);
                 android.graphics.Rect targetVisible = appIconVisualRectAt(
-                        member, targetX, targetY, memberGeometry[2], memberGeometry[3]);
+                        member, targetX, targetY, geometry[2], geometry[3]);
                 android.graphics.Rect movingVisible = collisionRectForInteraction(
                         movingView, moverGeometry, member);
                 if (android.graphics.Rect.intersects(targetVisible, movingVisible)) {
@@ -10182,84 +10244,43 @@ public class MainActivity extends Activity {
 
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View blocker = page.getChildAt(childIndex);
-                    if (blocker == member || blocker == movingView
+                    if (blocker == member || blocker == movingView || members.containsKey(blocker)
                             || blocker.getVisibility() != View.VISIBLE
-                            || !isWorkspaceItem(blocker) || members.containsKey(blocker)) continue;
+                            || !isWorkspaceItem(blocker)) continue;
                     int[] blockerGeometry = itemGeometry(blocker);
                     if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
 
-                    boolean gridBlocker = isHomeGridIcon(blocker);
-                    boolean sameGridFamily = gridBlocker
-                            && (isWorkspaceContactShortcut(blocker) == isWorkspaceContactShortcut(seed));
-                    int[] blockerSlot = gridBlocker
-                            ? homeGridIconSlot(page, blocker, cellHeight, rows) : null;
-                    boolean targetSlotOccupied = sameGridFamily && blockerSlot != null
-                            && blockerSlot[0] == targetCol && blockerSlot[1] == targetRow;
-                    android.graphics.Rect sweepForBlocker = new android.graphics.Rect(swept);
-                    if (!gridBlocker) {
+                    android.graphics.Rect collisionSweep = new android.graphics.Rect(swept);
+                    if (!isHomeGridIcon(blocker)) {
                         int margin = workspaceCollisionMargin(member);
-                        if (margin > 0) sweepForBlocker.inset(-margin, -margin);
+                        if (margin > 0) collisionSweep.inset(-margin, -margin);
                     }
-                    android.graphics.Rect blockerVisible =
-                            collisionRectForInteraction(blocker, blockerGeometry, member);
+                    android.graphics.Rect blockerBounds = collisionRectForInteraction(
+                            blocker, blockerGeometry, member);
+                    if (android.graphics.Rect.intersects(collisionSweep, blockerBounds)) {
+                        blocked = true;
+                        break;
+                    }
                     int[] blockerTarget = liveDisplacementTargets.get(blocker);
-                    boolean targetPathCollision = android.graphics.Rect.intersects(
-                            sweepForBlocker, blockerVisible);
                     if (blockerTarget != null) {
-                        android.graphics.Rect plannedBounds = collisionRectAtForInteraction(
+                        android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
                                 blocker, blockerTarget[0], blockerTarget[1],
                                 blockerGeometry[2], blockerGeometry[3], member);
-                        targetPathCollision = targetPathCollision
-                                || android.graphics.Rect.intersects(sweepForBlocker, plannedBounds);
-                    }
-
-                    if (!targetSlotOccupied && !targetPathCollision) continue;
-                    if (!gridBlocker) {
-                        blocked = true;
-                        break;
-                    }
-                    // Do not mix unlike column geometries in one cohort; the generic
-                    // planner handles app/shortcut interactions without mis-snapping.
-                    boolean sameLane = sameGridFamily && (dxCells != 0
-                            ? blockerSlot != null && blockerSlot[1] == originSlot[1]
-                            : blockerSlot != null && blockerSlot[0] == originSlot[0]);
-                    // Existing cohort members may already have a reserved grid
-                    // destination or a running synchronized animator. They still belong
-                    // to the same row/column and must be re-targeted together when the
-                    // dragged item advances into the next reserved slot.
-                    if (!sameLane) {
-                        blocked = true;
-                        break;
-                    }
-                    if (!members.containsKey(blocker)) {
-                        int[] actualSlot = homeGridIconSlot(page, blocker, cellHeight, rows);
-                        if (actualSlot == null) {
+                        if (android.graphics.Rect.intersects(collisionSweep, reservedBounds)) {
                             blocked = true;
                             break;
                         }
-                        members.put(blocker, Boolean.TRUE);
-                        slots.put(blocker, actualSlot);
-                        cohort.add(blocker);
                     }
                 }
-            }
-
-            if (blocked || cohort.size() < 2) continue;
-            // Calculate every destination first, then reserve every member, then animate.
-            java.util.IdentityHashMap<View, int[]> targets =
-                    new java.util.IdentityHashMap<View, int[]>();
-            java.util.IdentityHashMap<View, int[]> geometries =
-                    new java.util.IdentityHashMap<View, int[]>();
-            for (View member : cohort) {
-                int[] originSlot = slots.get(member);
-                int[] geometry = itemGeometry(member);
-                int targetX = homeGridIconLeftAt(
-                        member, originSlot[0] + dxCells, cellWidth, geometry[2]);
-                int targetY = homeGridIconTopAt(
-                        page, member, originSlot[1] + dyCells, rows, cellHeight);
+                if (blocked) break;
                 targets.put(member, new int[]{targetX, targetY});
                 geometries.put(member, geometry);
             }
+
+            if (blocked || targets.size() != cohort.size()) continue;
+
+            // Reserve every member before launching any animation so they all receive
+            // the exact same cell vector and keep their row/column spacing unchanged.
             for (View member : cohort) {
                 int[] geometry = geometries.get(member);
                 int[] target = targets.get(member);
@@ -10277,6 +10298,7 @@ public class MainActivity extends Activity {
         }
         return false;
     }
+
     private void addAppShiftDirection(java.util.ArrayList<int[]> directions,
             java.util.HashSet<String> seen, int dx, int dy) {
         String key = dx + ":" + dy;
