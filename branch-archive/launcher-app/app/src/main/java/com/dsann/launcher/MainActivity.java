@@ -3794,19 +3794,39 @@ public class MainActivity extends Activity {
     private void openAppGroup(String groupId) {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
         ArrayList<String> members = getAppGroupMembers(groupId);
-        final View openingGroupIcon = findAppGroupView(groupId);
-        Dialog dialog = new Dialog(this);
+        final View openingGroupIcon = findAppGroupLogoView(groupId);
+        final Dialog dialog = new Dialog(this);
         dialog.setOnDismissListener(ignored -> {
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
         });
+
+        // Use a transparent full-screen dialog host so the group panel can be placed
+        // beside the icon instead of being forced into the centre by Dialog's default
+        // window gravity. The dim layer owns outside taps; the content panel consumes
+        // inside taps so member gestures remain unchanged.
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setClickable(true);
+        overlay.setFocusableInTouchMode(true);
+        overlay.setBackgroundColor(Color.TRANSPARENT);
+        View dimLayer = new View(this);
+        dimLayer.setBackgroundColor(Color.BLACK);
+        dimLayer.setAlpha(0f);
+        overlay.addView(dimLayer, new FrameLayout.LayoutParams(-1, -1));
+
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
-        panel.setBackground(appGroupGradient(false));
-        panel.setScaleX(0.72f);
-        panel.setScaleY(0.72f);
+        GradientDrawable panelBackground = appGroupGradient(false);
+        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 180));
+        panel.setBackground(panelBackground);
+        panel.setScaleX(0.12f);
+        panel.setScaleY(0.12f);
         panel.setAlpha(0f);
+        panel.setPivotX(0f);
+        panel.setPivotY(0f);
+        panel.setClickable(true);
+        panel.setOnClickListener(v -> { /* Consume blank-panel taps; only outside taps close. */ });
         panel.setClipChildren(false);
         panel.setClipToPadding(false);
 
@@ -3820,6 +3840,7 @@ public class MainActivity extends Activity {
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
+        title.setAlpha(0f);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
@@ -3830,6 +3851,7 @@ public class MainActivity extends Activity {
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
         rows.setClipToPadding(false);
+        final ArrayList<View> openingMemberViews = new ArrayList<View>();
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int miniIconPx = Math.max(LauncherUiUtils.dp(this, 18),
                 Math.round(LauncherUiUtils.dp(this, iconSizeDp) * 0.8f));
@@ -3852,6 +3874,9 @@ public class MainActivity extends Activity {
             item.setGravity(Gravity.CENTER_HORIZONTAL);
             item.setPadding(LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 5),
                     LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 5));
+            item.setAlpha(0f);
+            item.setScaleX(0.62f);
+            item.setScaleY(0.62f);
             ImageView icon = new ImageView(this);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             icon.setImageDrawable(createAppGroupMemberDrawable(app));
@@ -3871,6 +3896,7 @@ public class MainActivity extends Activity {
                     LauncherUiUtils.dp(this, Math.max(11, Math.round(homeLabelHeightDp() * 0.8f)))));
             installAppGroupMemberTouch(item, icon, dialog, panel, groupId, packageName, app);
             row.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
+            openingMemberViews.add(item);
             rowCount++;
         }
         if (rowCount == 0) {
@@ -3893,8 +3919,8 @@ public class MainActivity extends Activity {
                 + LauncherUiUtils.dp(this, Math.max(11, Math.round(homeLabelHeightDp() * 0.8f)))
                 + LauncherUiUtils.dp(this, 18);
         int scrollHeight = Math.min(
-                Math.max(LauncherUiUtils.dp(this, 100), getResources().getDisplayMetrics().heightPixels
-                        * 2 / 3),
+                Math.max(LauncherUiUtils.dp(this, 100),
+                        getResources().getDisplayMetrics().heightPixels * 2 / 3),
                 Math.max(LauncherUiUtils.dp(this, 120), targetRowHeight * 2));
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
@@ -3905,49 +3931,192 @@ public class MainActivity extends Activity {
         manage.setTextSize(12f);
         manage.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 3));
+        manage.setAlpha(0f);
         manage.setOnClickListener(v -> {
             dialog.dismiss();
             showAppGroupOptions(groupId);
         });
         panel.addView(manage, new LinearLayout.LayoutParams(-1, -2));
 
-        dialog.setContentView(panel);
-        dialog.setCanceledOnTouchOutside(true);
+        final int panelWidth = Math.max(LauncherUiUtils.dp(this, 240),
+                Math.min(getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 380)));
+        final int panelHeight = Math.max(LauncherUiUtils.dp(this, 180),
+                Math.min(getResources().getDisplayMetrics().heightPixels
+                        - LauncherUiUtils.dp(this, 64),
+                        scrollHeight + LauncherUiUtils.dp(this, 100)));
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+                panelWidth, panelHeight, Gravity.TOP | Gravity.LEFT);
+        overlay.addView(panel, panelParams);
+        panel.bringToFront();
+
+        final boolean[] closing = new boolean[]{false};
+        final float[] iconScale = new float[]{0.12f, 0.12f};
+        final android.animation.ValueAnimator[] shapeAnimator =
+                new android.animation.ValueAnimator[1];
+        overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
+                dialog, panel, dimLayer, openingMemberViews, closing, iconScale, shapeAnimator));
+        overlay.setOnKeyListener((v, keyCode, event) -> {
+            if (keyCode == android.view.KeyEvent.KEYCODE_BACK
+                    && event.getAction() == android.view.KeyEvent.ACTION_UP) {
+                closeAppGroupWithAnimation(dialog, panel, dimLayer, openingMemberViews, closing, iconScale, shapeAnimator);
+                return true;
+            }
+            return keyCode == android.view.KeyEvent.KEYCODE_BACK;
+        });
+
+        dialog.setContentView(overlay);
+        dialog.setCancelable(false);
+        dialog.setCanceledOnTouchOutside(false);
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(
-                    new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-            int width = Math.min(getResources().getDisplayMetrics().widthPixels
-                            - LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 380));
-            int height = Math.min(getResources().getDisplayMetrics().heightPixels
-                            - LauncherUiUtils.dp(this, 64),
-                    scrollHeight + LauncherUiUtils.dp(this, 100));
-            dialog.getWindow().setLayout(Math.max(LauncherUiUtils.dp(this, 240), width),
-                    Math.max(LauncherUiUtils.dp(this, 180), height));
-            panel.post(() -> {
-                int[] panelLocation = new int[2];
-                panel.getLocationOnScreen(panelLocation);
-                float pivotX = panel.getWidth() / 2f;
-                float pivotY = panel.getHeight() / 2f;
-                if (openingGroupIcon != null && openingGroupIcon.getWidth() > 0
-                        && openingGroupIcon.getHeight() > 0) {
-                    int[] iconLocation = new int[2];
-                    openingGroupIcon.getLocationOnScreen(iconLocation);
-                    pivotX = iconLocation[0] + openingGroupIcon.getWidth() / 2f
-                            - panelLocation[0];
-                    pivotY = iconLocation[1] + openingGroupIcon.getHeight() / 2f
-                            - panelLocation[1];
-                    pivotX = Math.max(0f, Math.min(panel.getWidth(), pivotX));
-                    pivotY = Math.max(0f, Math.min(panel.getHeight(), pivotY));
-                }
-                panel.setPivotX(pivotX);
-                panel.setPivotY(pivotY);
-                panel.animate().cancel();
-                panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
-                        .setDuration(animationDuration(260L))
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f))
-                        .start();
+            android.view.Window window = dialog.getWindow();
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            window.setGravity(Gravity.TOP | Gravity.LEFT);
+            window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        }
+
+        overlay.requestFocus();
+        overlay.post(() -> {
+            if (!dialog.isShowing() || panel.getParent() != overlay) return;
+            int availableW = Math.max(1, overlay.getWidth());
+            int availableH = Math.max(1, overlay.getHeight());
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) panel.getLayoutParams();
+            lp.width = Math.min(panelWidth, Math.max(1, availableW - LauncherUiUtils.dp(this, 16)));
+            lp.height = Math.min(panelHeight, Math.max(1, availableH - LauncherUiUtils.dp(this, 16)));
+
+            int iconX = availableW / 2;
+            int iconY = availableH / 2;
+            int iconW = LauncherUiUtils.dp(this, 64);
+            int iconH = iconW;
+            if (openingGroupIcon != null && openingGroupIcon.getWidth() > 0
+                    && openingGroupIcon.getHeight() > 0) {
+                int[] iconLocation = new int[2];
+                int[] overlayLocation = new int[2];
+                openingGroupIcon.getLocationOnScreen(iconLocation);
+                overlay.getLocationOnScreen(overlayLocation);
+                iconX = iconLocation[0] - overlayLocation[0] + openingGroupIcon.getWidth() / 2;
+                iconY = iconLocation[1] - overlayLocation[1] + openingGroupIcon.getHeight() / 2;
+                iconW = openingGroupIcon.getWidth();
+                iconH = openingGroupIcon.getHeight();
+            }
+
+            int safe = LauncherUiUtils.dp(this, 8);
+            int panelLeft = Math.max(safe, Math.min(availableW - lp.width - safe,
+                    iconX - lp.width / 2));
+            // Bias the panel down from the icon; open upwards when there is not
+            // enough vertical space below. This keeps it visibly attached to its icon.
+            int preferredTop = iconY - LauncherUiUtils.dp(this, 54);
+            if (preferredTop + lp.height > availableH - safe) {
+                preferredTop = iconY - lp.height + LauncherUiUtils.dp(this, 54);
+            }
+            int panelTop = Math.max(safe, Math.min(availableH - lp.height - safe, preferredTop));
+            lp.leftMargin = panelLeft;
+            lp.topMargin = panelTop;
+            panel.setLayoutParams(lp);
+
+            float pivotX = Math.max(0f, Math.min(lp.width, iconX - panelLeft));
+            float pivotY = Math.max(0f, Math.min(lp.height, iconY - panelTop));
+            panel.setPivotX(pivotX);
+            panel.setPivotY(pivotY);
+            float startScaleX = Math.min(1f, Math.max(0.06f, iconW / (float) Math.max(1, lp.width)));
+            float startScaleY = Math.min(1f, Math.max(0.06f, iconH / (float) Math.max(1, lp.height)));
+            panel.setScaleX(startScaleX);
+            panel.setScaleY(startScaleY);
+            iconScale[0] = startScaleX;
+            iconScale[1] = startScaleY;
+            panel.setAlpha(0f);
+            dimLayer.setAlpha(0f);
+
+            final long duration = animationDuration(280L);
+            android.animation.ValueAnimator radiusAnimator =
+                    android.animation.ValueAnimator.ofFloat(
+                            LauncherUiUtils.dp(this, 180), LauncherUiUtils.dp(this, 24));
+            radiusAnimator.setDuration(duration);
+            radiusAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f));
+            radiusAnimator.addUpdateListener(a -> {
+                panelBackground.setCornerRadius((Float) a.getAnimatedValue());
+                panel.invalidate();
             });
+            if (shapeAnimator[0] != null) shapeAnimator[0].cancel();
+            shapeAnimator[0] = radiusAnimator;
+            radiusAnimator.start();
+
+            panel.animate().cancel();
+            panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                    .setDuration(duration)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f))
+                    .start();
+            dimLayer.animate().cancel();
+            dimLayer.animate().alpha(0.28f).setDuration(duration).start();
+            title.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
+                    .setStartDelay(duration / 6).start();
+            manage.animate().alpha(1f).setDuration(Math.max(80L, duration * 3 / 4))
+                    .setStartDelay(duration / 5).start();
+            int total = Math.max(1, openingMemberViews.size());
+            long stagger = Math.min(18L, Math.max(4L, duration / (total * 2L)));
+            for (int i = 0; i < openingMemberViews.size(); i++) {
+                View memberView = openingMemberViews.get(i);
+                long delay = Math.min(duration / 3, i * stagger);
+                memberView.animate().cancel();
+                memberView.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                        .setStartDelay(delay)
+                        .setDuration(Math.max(80L, duration - delay))
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.1f))
+                        .start();
+            }
+        });
+    }
+
+    private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
+            ArrayList<View> memberViews, boolean[] closing, float[] iconScale,
+            android.animation.ValueAnimator[] shapeAnimator) {
+        if (dialog == null || !dialog.isShowing() || panel == null
+                || closing == null || closing[0]) return;
+        closing[0] = true;
+        long duration = animationDuration(240L);
+        for (View memberView : memberViews) {
+            if (memberView == null) continue;
+            memberView.animate().cancel();
+            memberView.animate().alpha(0f).scaleX(0.62f).scaleY(0.62f)
+                    .setStartDelay(0L).setDuration(Math.max(60L, duration * 2 / 3))
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                    .start();
+        }
+        panel.animate().cancel();
+        float targetScaleX = iconScale != null ? iconScale[0] : 0.08f;
+        float targetScaleY = iconScale != null ? iconScale[1] : 0.08f;
+        panel.animate().scaleX(targetScaleX).scaleY(targetScaleY).alpha(0f)
+                .setDuration(duration)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator(1.2f))
+                .withEndAction(() -> {
+                    if (dialog.isShowing()) dialog.dismiss();
+                }).start();
+        if (dimLayer != null) {
+            dimLayer.animate().cancel();
+            dimLayer.animate().alpha(0f).setDuration(duration).start();
+        }
+        if (panel.getBackground() instanceof GradientDrawable) {
+            if (shapeAnimator != null && shapeAnimator.length > 0 && shapeAnimator[0] != null) {
+                shapeAnimator[0].cancel();
+            }
+            GradientDrawable background = (GradientDrawable) panel.getBackground();
+            android.animation.ValueAnimator radiusAnimator = android.animation.ValueAnimator.ofFloat(
+                    Math.max(panel.getWidth(), panel.getHeight()) / 2f,
+                    LauncherUiUtils.dp(this, 24));
+            // On close, the rounded corners return to their original icon-like shape.
+            radiusAnimator.setFloatValues(LauncherUiUtils.dp(this, 24),
+                    Math.max(panel.getWidth(), panel.getHeight()) / 2f);
+            radiusAnimator.setDuration(duration);
+            radiusAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator());
+            if (shapeAnimator != null && shapeAnimator.length > 0) shapeAnimator[0] = radiusAnimator;
+            radiusAnimator.addUpdateListener(a -> {
+                background.setCornerRadius((Float) a.getAnimatedValue());
+                panel.invalidate();
+            });
+            radiusAnimator.start();
         }
     }
 
@@ -4024,6 +4193,15 @@ public class MainActivity extends Activity {
             }
         }
         return null;
+    }
+
+    private View findAppGroupLogoView(String groupId) {
+        View cell = findAppGroupView(groupId);
+        if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 0) {
+            View firstChild = ((ViewGroup) cell).getChildAt(0);
+            if (firstChild instanceof FrameLayout) return firstChild;
+        }
+        return cell;
     }
 
     private void installAppGroupMemberTouch(View item, View icon, Dialog groupDialog,
