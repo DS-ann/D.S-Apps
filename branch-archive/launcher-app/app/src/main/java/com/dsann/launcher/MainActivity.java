@@ -6514,7 +6514,8 @@ public class MainActivity extends Activity {
                     }
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = slotHeight;
-                    int sourceRows = Math.max(1, sourceView.getHeight() / sourceCellHeight);
+                    int sourceRows = homeGridRowsForHeight(
+                            sourceView.getHeight(), sourceCellHeight);
                     int sourceCol = Math.max(0, Math.min(columns - 1,
                             Math.round(iconOriginalLeft / (float) sourceCellWidth)));
                     int sourceRow = homeGridRowFromTop(
