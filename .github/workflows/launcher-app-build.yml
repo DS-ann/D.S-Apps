@@ -91,7 +91,7 @@ jobs:
         working-directory: branch-archive/launcher-app
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/release/D.S Launcher-18.7.0.apk"
+          APK="app/build/outputs/apk/release/D.S.Launcher-18.7.0.apk"
           APK_SIGNER="$ANDROID_HOME/build-tools/37.0.0/apksigner"
           test -s "app/build/outputs/apk/release/app-release.apk"
           cp "app/build/outputs/apk/release/app-release.apk" "$APK"
@@ -100,16 +100,8 @@ jobs:
           "$APK_SIGNER" verify --verbose "$APK"
           echo "Signed D.S Launcher 18.7.0 APK verified."
 
-      - name: Upload signed release APK
-        uses: actions/upload-artifact@v5
-        with:
-          name: D.S-Launcher-18.7.0-signed-APK
-          path: branch-archive/launcher-app/app/build/outputs/apk/release/D.S Launcher-18.7.0.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish GitHub release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Release D.S Launcher v18.7.0'
+      - name: Publish direct APK download on GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -132,8 +124,15 @@ jobs:
 
           **Testing note:** The release build and signature are verified by CI. Full physical-device testing across every Android version from 6 through 17 has not been completed.
           EOF
-          gh release create "v18.7.0" "branch-archive/launcher-app/app/build/outputs/apk/release/D.S Launcher-18.7.0.apk" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "D.S Launcher 18.7.0" \
-            --notes-file release-notes.md \
-            --target "$GITHUB_SHA"
+          APK="branch-archive/launcher-app/app/build/outputs/apk/release/D.S.Launcher-18.7.0.apk"
+          RELEASE_TAG="v18.7.0"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Replace the existing direct-download asset without creating a ZIP artifact.
+            gh release upload "$RELEASE_TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "$APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "D.S Launcher 18.7.0" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA"
+          fi

@@ -27,7 +27,7 @@ The exact options visible in Home Studio can evolve as the launcher is updated.
 | Item | Details |
 | --- | --- |
 | Minimum Android version | Android 6.0 (API 23) |
-| Compile SDK | Android SDK 35 |
+| Compile SDK | Android SDK 37 |
 | Language | Java |
 | UI | Native Android views |
 | Application ID | `com.dsann.launcher` |
@@ -36,12 +36,11 @@ The launcher is intended to run on Android 6.0 and later. Android versions and d
 
 ## Install the APK
 
-### Download a build from GitHub Actions
+### Download the signed APK directly
 
-1. Open the [Build Launcher APK workflow](https://github.com/DS-ann/PhoneBridge/actions/workflows/build-launcher.yml).
-2. Select a **successful** run for the `launcher-app` branch.
-3. In the run's **Artifacts** section, download **My-Launcher-release-signed-APK**.
-4. Extract the ZIP and install the APK on the Android device.
+Open the [D.S Launcher 18.7.0 release](https://github.com/DS-ann/D.S-Apps/releases/tag/v18.7.0) and select **D.S.Launcher-18.7.0.apk** under Assets, or [download the APK directly](https://github.com/DS-ann/D.S-Apps/releases/download/v18.7.0/D.S.Launcher-18.7.0.apk). This is a direct APK file; no artifact ZIP needs to be extracted.
+
+Successful builds on `main` replace the release's APK asset after the signature check passes. Pull-request builds run the build and signature checks but do not publish a release asset.
 
 If Android blocks installation, allow installation from the app you used to open the APK, where required by your Android version and device settings.
 
@@ -56,13 +55,13 @@ Menu names vary between Android versions and manufacturers.
 
 ## Build with GitHub Actions
 
-The repository includes a workflow at [`.github/workflows/build-launcher.yml`](.github/workflows/build-launcher.yml).
+The repository includes a workflow at [`.github/workflows/launcher-app-build.yml`](../../.github/workflows/launcher-app-build.yml).
 
 - Runs on pushes to `launcher-app` and can be started manually with **Run workflow**.
 - Uses JDK 17, Gradle 8.7, and Android Build Tools 35.0.0.
-- Builds the release APK and verifies its signature before publishing the artifact.
-- Uploads the signed APK as **My-Launcher-release-signed-APK**.
-- Artifacts are retained for 14 days.
+- Builds the signed release APK and verifies its signature before publishing.
+- Publishes the APK as a direct `.apk` asset on the existing GitHub Release after a successful push to `main`.
+- Does not upload ZIP-wrapped Actions artifacts.
 
 The release workflow requires the repository's configured signing secrets for the existing PKCS#12 keystore. The secret values must remain in GitHub Actions Secrets; do not commit keystores, passwords, signing keys, or generated APKs to the repository.
 
@@ -95,7 +94,7 @@ Key files:
 - **`LauncherUiUtils.java`** — shared UI helpers.
 - **`AndroidManifest.xml`** — launcher entry points, Home intent filter, and declared permissions.
 - **`app/build.gradle`** — Android SDK levels, app identity, and Java compatibility.
-- **`.github/workflows/build-launcher.yml`** — automated release build, signing verification, and artifact upload.
+- **`.github/workflows/launcher-app-build.yml`** — automated release build, signing verification, and direct APK release upload.
 
 ## Development notes
 
