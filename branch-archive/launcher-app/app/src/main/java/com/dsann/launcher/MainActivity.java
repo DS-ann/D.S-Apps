@@ -2205,6 +2205,7 @@ public class MainActivity extends Activity {
             // list instead of allowing search state to restore a stale startup snapshot.
             if (refreshDrawerAppList != null) refreshDrawerAppList.run();
             else drawerAdapter.notifyDataSetChanged();
+            scheduleDrawerSnapshotRefresh();
         }
     }
 
@@ -2849,8 +2850,10 @@ public class MainActivity extends Activity {
         refreshDrawerAppList = built.refreshAppList;
         drawerSnapshotBody = built.snapshotBody;
         drawerAdapter.seedLabelCache(preloadedAppLabels);
-        // Pre-render the initial viewport while the drawer is invisible, so even the first
-        // opening can use a complete cached frame instead of showing icons as they load.
+        // Start native icon loading and artwork generation for every drawer app while Home is
+        // shown. The adapter releases each temporary waiter as its processed artwork is ready.
+        drawerAdapter.prewarmAllDrawerArtwork();
+        // The completed viewport is then captured to private storage for immediate future opens.
         scheduleDrawerSnapshotRefresh();
     }
 
@@ -5400,6 +5403,12 @@ public class MainActivity extends Activity {
                 && drawerScreen != null && drawerScreen.getVisibility() == View.GONE) {
             drawerScreen.setVisibility(View.INVISIBLE);
             drawerScreen.requestLayout();
+        }
+        if (!drawerOpen && homeScreen != null && homeScreen.getVisibility() == View.VISIBLE
+                && drawerAdapter != null) {
+            // This is cheap when the icon/theme signature is unchanged; after an artwork or
+            // package update it prepares the new icon cache before the next drawer opening.
+            drawerAdapter.prewarmAllDrawerArtwork();
         }
         handler.removeCallbacks(drawerSnapshotReadyCheck);
         drawerSnapshotReadyChecks = 0;
