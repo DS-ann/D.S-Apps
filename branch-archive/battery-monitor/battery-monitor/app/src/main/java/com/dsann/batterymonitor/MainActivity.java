@@ -28,12 +28,14 @@ public class MainActivity extends Activity {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private TextView voltage,current;
     private TextView calculatedPercent,calculatedMah,calculatedStatus;
+    private EditText customCapacityInput,startingChargeInput;
     private Switch notificationSwitch;
     private SeekBar samplingBar;
     private TextView samplingLabel;
-    private LinearLayout monitorView,historyView,historyList;
+    private LinearLayout monitorView,myBatteryView,historyView,historyList;
     private View monitorContainer;
-    private TextView monitorTab,historyTab,healthTab;
+    private ScrollView myBatteryScroll;
+    private TextView monitorTab,myBatteryTab,historyTab,healthTab;
     private LinearLayout healthView;
     private ScrollView healthScroll;
     private TextView healthLevel,healthStatus,healthTemp,healthVoltage,healthCurrent,healthSource,healthFullCharge,healthRemaining,healthDesign,healthRatio,healthRaw,healthFile,healthFullEnergy,healthDesignEnergy,healthSessionEstimate,healthSessionHealth;
@@ -62,9 +64,11 @@ public class MainActivity extends Activity {
         LinearLayout tabs=new LinearLayout(this);
         tabs.setPadding(dp(16),dp(4),dp(16),dp(10));
         monitorTab=tab("Monitor");
+        myBatteryTab=tab("My Battery");
         historyTab=tab("History");
         healthTab=tab("Health");
         tabs.addView(monitorTab,new LinearLayout.LayoutParams(0,dp(42),1));
+        tabs.addView(myBatteryTab,new LinearLayout.LayoutParams(0,dp(42),1));
         tabs.addView(historyTab,new LinearLayout.LayoutParams(0,dp(42),1));
         tabs.addView(healthTab,new LinearLayout.LayoutParams(0,dp(42),1));
         root.addView(tabs);
@@ -73,6 +77,12 @@ public class MainActivity extends Activity {
         monitorContainer=new ScrollView(this);
         ((ScrollView)monitorContainer).setFillViewport(true);
         ((ScrollView)monitorContainer).addView(monitorView);
+        myBatteryView=buildMyBattery();
+        myBatteryScroll=new ScrollView(this);
+        myBatteryScroll.setFillViewport(true);
+        myBatteryScroll.setClipToPadding(false);
+        myBatteryScroll.setPadding(0,0,0,dp(8));
+        myBatteryScroll.addView(myBatteryView);
         historyView=buildHistory();
         LinearLayout healthContent=buildHealth();
         healthScroll=new ScrollView(this);
@@ -83,14 +93,17 @@ public class MainActivity extends Activity {
         healthView=healthContent;
         
         root.addView(monitorContainer,new LinearLayout.LayoutParams(-1,0,1));
+        root.addView(myBatteryScroll,new LinearLayout.LayoutParams(-1,0,1));
         root.addView(historyView,new LinearLayout.LayoutParams(-1,0,1));
         root.addView(healthScroll,new LinearLayout.LayoutParams(-1,0,1));
+        myBatteryScroll.setVisibility(View.GONE);
         historyView.setVisibility(View.GONE);
         healthScroll.setVisibility(View.GONE);
         selectTab(0);
         monitorTab.setOnClickListener(v->showTab(0));
-        historyTab.setOnClickListener(v->showTab(1));
-        healthTab.setOnClickListener(v->showTab(2));
+        myBatteryTab.setOnClickListener(v->showTab(1));
+        historyTab.setOnClickListener(v->showTab(2));
+        healthTab.setOnClickListener(v->showTab(3));
         
         setContentView(root);
         if (notificationSwitch.isChecked()) startNotificationService();
@@ -116,73 +129,7 @@ public class MainActivity extends Activity {
         metrics.addView(currentCard,curLp);
         r.addView(metrics);
         
-        LinearLayout calculator=card(0xFF17271F,0xFF63E6A8);
-        TextView calculatorTitle=text("mAh-calculated battery level",16);
-        calculatorTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
-        calculator.addView(calculatorTitle,full());
-        calculatedPercent=text("--%",38);
-        calculatedPercent.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
-        calculatedPercent.setTextColor(0xFF63E6A8);
-        calculator.addView(calculatedPercent,top(4));
-        calculatedMah=text("Remaining charge: set custom capacity to start",13);
-        calculatedMah.setTextColor(0xFFD2D8E0);
-        calculator.addView(calculatedMah,top(2));
-        calculatedStatus=text("System capacity data is not used by this calculator.",12);
-        calculatedStatus.setTextColor(0xFF9AA0AA);
-        calculator.addView(calculatedStatus,top(4));
 
-        TextView capacityLabel=text("Your battery's full capacity (mAh)",13);
-        capacityLabel.setTextColor(0xFFD2D8E0);
-        calculator.addView(capacityLabel,top(10));
-        EditText customCapacityInput=new EditText(this);
-        customCapacityInput.setSingleLine(true);
-        customCapacityInput.setHint("Enter a value, e.g. 4050");
-        customCapacityInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
-                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        double savedCustomCapacity=BatteryPercentCalculator.getCustomCapacityMah(this);
-        if(savedCustomCapacity>0){
-            customCapacityInput.setText(String.format(java.util.Locale.US,"%.2f",savedCustomCapacity)
-                    .replaceAll("\\.?0+$",""));
-        }
-        calculator.addView(customCapacityInput,top(3));
-
-        TextView calculatorHint=text("When you save, the current Android percentage is used only to set the starting mAh. After that, the estimate changes from current × elapsed time. Enable Background recording to keep it updating when the app is closed.",11);
-        calculatorHint.setTextColor(0xFF858D99);
-        calculatorHint.setLineSpacing(dp(1),1.0f);
-        calculator.addView(calculatorHint,top(5));
-
-        LinearLayout calculatorActions=new LinearLayout(this);
-        calculatorActions.setGravity(Gravity.CENTER_VERTICAL);
-        Button saveCapacity=actionButton("Save & start");
-        Button rebaseline=actionButton("Reset estimate");
-        calculatorActions.addView(saveCapacity,new LinearLayout.LayoutParams(0,-2,1));
-        LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(0,-2,1);
-        resetParams.leftMargin=dp(8);
-        calculatorActions.addView(rebaseline,resetParams);
-        calculator.addView(calculatorActions,top(8));
-        saveCapacity.setOnClickListener(v->{
-            String input=customCapacityInput.getText().toString().trim();
-            if(input.isEmpty()){
-                calculatedStatus.setText("Enter your battery capacity in mAh first.");
-                return;
-            }
-            try{
-                double mah=Double.parseDouble(input);
-                if(Double.isNaN(mah)||Double.isInfinite(mah)||mah<100.0||mah>100000.0){
-                    calculatedStatus.setText("Enter a capacity between 100 and 100000 mAh.");
-                    return;
-                }
-                BatteryReader.Reading sample=BatteryReader.read(this);
-                updateCalculatedLevel(BatteryPercentCalculator.setCustomCapacity(this,mah,sample));
-            }catch(NumberFormatException e){
-                calculatedStatus.setText("Enter a valid numeric capacity in mAh.");
-            }
-        });
-        rebaseline.setOnClickListener(v->{
-            BatteryReader.Reading sample=BatteryReader.read(this);
-            updateCalculatedLevel(BatteryPercentCalculator.recalibrate(this,sample));
-        });
-        r.addView(calculator,top(12));
         
         LinearLayout recording=card();
         LinearLayout recordingTop=new LinearLayout(this);
@@ -283,6 +230,95 @@ public class MainActivity extends Activity {
         return r;
     }
     
+    private LinearLayout buildMyBattery(){
+        LinearLayout r=new LinearLayout(this);
+        r.setOrientation(LinearLayout.VERTICAL);
+        r.setPadding(dp(16),dp(4),dp(16),dp(20));
+
+        TextView title=text("My Battery",22);
+        title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        r.addView(title,full());
+        TextView subtitle=text("An independent mAh-based estimate. Its starting point comes only from the values you enter here.",13);
+        subtitle.setTextColor(0xFF9AA0AA);
+        r.addView(subtitle,top(3));
+
+        LinearLayout calculator=card(0xFF17271F,0xFF63E6A8);
+        TextView calculatorTitle=text("Current estimate",16);
+        calculatorTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        calculator.addView(calculatorTitle,full());
+        calculatedPercent=text("--%",38);
+        calculatedPercent.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        calculatedPercent.setTextColor(0xFF63E6A8);
+        calculator.addView(calculatedPercent,top(4));
+        calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
+        calculatedMah.setTextColor(0xFFD2D8E0);
+        calculator.addView(calculatedMah,top(2));
+        calculatedStatus=text("Waiting for user-entered values.",12);
+        calculatedStatus.setTextColor(0xFF9AA0AA);
+        calculator.addView(calculatedStatus,top(4));
+
+        TextView capacityLabel=text("Full usable battery capacity (mAh)",13);
+        capacityLabel.setTextColor(0xFFD2D8E0);
+        calculator.addView(capacityLabel,top(12));
+        customCapacityInput=new EditText(this);
+        customCapacityInput.setSingleLine(true);
+        customCapacityInput.setHint("e.g. 4050");
+        customCapacityInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        double savedCapacity=BatteryPercentCalculator.getCustomCapacityMah(this);
+        if(!Double.isNaN(savedCapacity)&&!Double.isInfinite(savedCapacity)&&savedCapacity>0){
+            customCapacityInput.setText(String.format(java.util.Locale.US,"%.2f",savedCapacity)
+                    .replaceAll("\\.?0+$",""));
+        }
+        calculator.addView(customCapacityInput,top(3));
+
+        TextView startingLabel=text("Starting remaining charge (mAh)",13);
+        startingLabel.setTextColor(0xFFD2D8E0);
+        calculator.addView(startingLabel,top(10));
+        startingChargeInput=new EditText(this);
+        startingChargeInput.setSingleLine(true);
+        startingChargeInput.setHint("Your estimate, e.g. 1800");
+        startingChargeInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        double savedStarting=BatteryPercentCalculator.getStartingChargeMah(this);
+        if(!Double.isNaN(savedStarting)&&!Double.isInfinite(savedStarting)&&savedStarting>=0){
+            startingChargeInput.setText(String.format(java.util.Locale.US,"%.2f",savedStarting)
+                    .replaceAll("\\.?0+$",""));
+        }
+        calculator.addView(startingChargeInput,top(3));
+
+        TextView calculatorHint=text("Enter both values yourself. Example: for a 4050 mAh battery with an estimated 1800 mAh remaining, enter 4050 and 1800. Tap Save & start to begin from 1800 mAh. Android battery percentage is never used to calibrate this estimate. Subsequent changes are calculated from measured current × elapsed time; unavailable or inaccurate current readings can cause drift.",11);
+        calculatorHint.setTextColor(0xFF858D99);
+        calculatorHint.setLineSpacing(dp(1),1.0f);
+        calculator.addView(calculatorHint,top(6));
+
+        LinearLayout actions=new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button saveStart=actionButton("Save & start");
+        Button resetEstimate=actionButton("Reset estimate");
+        actions.addView(saveStart,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(0,-2,1);
+        resetParams.leftMargin=dp(8);
+        actions.addView(resetEstimate,resetParams);
+        calculator.addView(actions,top(8));
+        saveStart.setOnClickListener(v->startCalculatorFromInputs());
+        resetEstimate.setOnClickListener(v->{
+            updateCalculatedLevel(BatteryPercentCalculator.resetEstimate(this,BatteryReader.read(this)));
+        });
+        r.addView(calculator,top(12));
+
+        LinearLayout details=card();
+        TextView detailsTitle=text("How the estimate works",15);
+        detailsTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        details.addView(detailsTitle,full());
+        TextView detailsText=text("Starting remaining mAh ÷ full usable mAh gives the displayed estimate. Every valid sample then integrates battery current over elapsed time and adds or subtracts the resulting mAh. A long sampling gap is not guessed across; the app holds the estimate and resumes integration.",12);
+        detailsText.setTextColor(0xFF9AA0AA);
+        detailsText.setLineSpacing(dp(1),1.0f);
+        details.addView(detailsText,top(5));
+        r.addView(details,top(12));
+        return r;
+    }
+
     private LinearLayout buildHealth(){
         LinearLayout r=new LinearLayout(this);
         r.setOrientation(LinearLayout.VERTICAL);
@@ -347,9 +383,14 @@ public class MainActivity extends Activity {
         TextView v=text(value,17); v.setTypeface(Typeface.DEFAULT,Typeface.BOLD); c.setTag(v); c.addView(v,top(5)); return c;
     }
     private void showTab(int index){
-        monitorContainer.setVisibility(index==0?View.VISIBLE:View.GONE); historyView.setVisibility(index==1?View.VISIBLE:View.GONE); healthScroll.setVisibility(index==2?View.VISIBLE:View.GONE);
-        selectTab(index); handler.removeCallbacks(historyUpdater);
-        if(index==1){refreshHistory();handler.postDelayed(historyUpdater,10000);} else if(index==2) refreshHealth();
+        monitorContainer.setVisibility(index==0?View.VISIBLE:View.GONE);
+        myBatteryScroll.setVisibility(index==1?View.VISIBLE:View.GONE);
+        historyView.setVisibility(index==2?View.VISIBLE:View.GONE);
+        healthScroll.setVisibility(index==3?View.VISIBLE:View.GONE);
+        selectTab(index);
+        handler.removeCallbacks(historyUpdater);
+        if(index==2){refreshHistory();handler.postDelayed(historyUpdater,10000);}
+        else if(index==3) refreshHealth();
     }
     private void refreshHealth(){
         try{
@@ -459,15 +500,46 @@ public class MainActivity extends Activity {
         if(estimate==null||!estimate.isAvailable()){
             calculatedPercent.setText("--%");
             calculatedMah.setText(estimate!=null&&estimate.capacityMah>0
-                    ?"Remaining charge: waiting for starting percentage"
-                    :"Remaining charge: set custom capacity to start");
+                    ? "Remaining charge: enter starting mAh and tap Save & start"
+                    : "Remaining charge: enter capacity and starting mAh");
             calculatedStatus.setText(estimate==null?"Calculator unavailable":estimate.status);
             return;
         }
         calculatedPercent.setText(estimate.percent+"%");
         calculatedMah.setText(String.format(java.util.Locale.US,
                 "Remaining charge: %.1f / %.0f mAh",estimate.remainingMah,estimate.capacityMah));
-        calculatedStatus.setText(estimate.status+"  •  Capacity: "+estimate.capacitySource);
+        calculatedStatus.setText(estimate.status+"  •  "+estimate.capacitySource);
+    }
+
+    private void startCalculatorFromInputs(){
+        if(customCapacityInput==null||startingChargeInput==null)return;
+        String capacityText=customCapacityInput.getText().toString().trim();
+        String startingText=startingChargeInput.getText().toString().trim();
+        if(capacityText.isEmpty()){
+            calculatedStatus.setText("Enter your full usable battery capacity in mAh.");
+            return;
+        }
+        if(startingText.isEmpty()){
+            calculatedStatus.setText("Enter your own starting remaining charge in mAh.");
+            return;
+        }
+        try{
+            double capacity=Double.parseDouble(capacityText);
+            double starting=Double.parseDouble(startingText);
+            if(Double.isNaN(capacity)||Double.isInfinite(capacity)||capacity<100.0||capacity>100000.0){
+                calculatedStatus.setText("Enter a capacity between 100 and 100000 mAh.");
+                return;
+            }
+            if(Double.isNaN(starting)||Double.isInfinite(starting)||starting<0.0||starting>capacity){
+                calculatedStatus.setText("Starting charge must be between 0 and the capacity ("+
+                        String.format(java.util.Locale.US,"%.0f",capacity)+" mAh).");
+                return;
+            }
+            updateCalculatedLevel(BatteryPercentCalculator.startEstimate(
+                    this,capacity,starting,BatteryReader.read(this)));
+        }catch(NumberFormatException e){
+            calculatedStatus.setText("Enter valid numeric values in mAh.");
+        }
     }
     
     private void refreshHistory(){
@@ -595,9 +667,9 @@ public class MainActivity extends Activity {
     }
     
     private void selectTab(int selected){
-        TextView[] tabs={monitorTab,historyTab,healthTab};
-        int[] activeText={0xFF7CC7FF,0xFFB58CFF,0xFF63E6A8};
-        int[] activeBg={0xFF172334,0xFF211B2D,0xFF17271F};
+        TextView[] tabs={monitorTab,myBatteryTab,historyTab,healthTab};
+        int[] activeText={0xFF7CC7FF,0xFF63E6A8,0xFFB58CFF,0xFF63E6A8};
+        int[] activeBg={0xFF172334,0xFF17271F,0xFF211B2D,0xFF17271F};
         for(int i=0;i<tabs.length;i++){
             boolean active=i==selected;
             tabs[i].setTextColor(active?activeText[i]:0xFF8E96A3);

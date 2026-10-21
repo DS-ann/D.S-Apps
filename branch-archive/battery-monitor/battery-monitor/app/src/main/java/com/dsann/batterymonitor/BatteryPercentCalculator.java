@@ -15,6 +15,8 @@ import java.util.Locale;
 final class BatteryPercentCalculator {
     private static final String PREFS = "battery_percent_calculator_state";
     private static final String KEY_CUSTOM_CAPACITY_MAH = "custom_capacity_mah";
+    private static final String KEY_STARTING_CHARGE_MAH = "starting_charge_mah";
+    private static final String KEY_ESTIMATOR_VERSION = "estimator_version";
     private static final String KEY_INITIALIZED = "initialized";
     private static final String KEY_REMAINING_MAH = "remaining_mah";
     private static final String KEY_LAST_SAMPLE_MS = "last_sample_ms";
@@ -35,9 +37,10 @@ final class BatteryPercentCalculator {
     private static long lastSampleMs;
     private static long lastPersistMs;
     private static double capacityMah = Double.NaN;
+    private static double startingChargeMah = Double.NaN;
     private static double remainingMah = Double.NaN;
     private static double previousCurrentMa = Double.NaN;
-    private static String status = "Enter your custom battery capacity in mAh to start.";
+    private static String status = "Enter full capacity and starting remaining charge in mAh, then tap Save & start.";
 
     private BatteryPercentCalculator() {}
 
@@ -46,28 +49,53 @@ final class BatteryPercentCalculator {
         return isPositive(capacityMah) ? capacityMah : Double.NaN;
     }
 
-    static synchronized Estimate setCustomCapacity(Context context, double requestedMah,
-                                                    BatteryReader.Reading reading) {
+    static synchronized double getStartingChargeMah(Context context) {
         load(context);
-        if (!isValidCapacity(requestedMah)) {
+        return isAmount(startingChargeMah) ? startingChargeMah : Double.NaN;
+    }
+
+    static synchronized Estimate startEstimate(Context context, double requestedCapacityMah,
+                                               double requestedStartingMah, BatteryReader.Reading reading) {
+        load(context);
+        if (!isValidCapacity(requestedCapacityMah)) {
             status = "Enter a capacity between 100 and 100000 mAh.";
             return snapshot();
         }
-
-        BatteryState state = readBatteryState(context);
-        capacityMah = requestedMah;
-        if (state.percent >= 0) {
-            startFromPercentage(context, state, reading, System.currentTimeMillis(),
-                    "Custom capacity saved; baseline set from current Android level (" + state.percent + "%).");
-        } else {
-            initialized = false;
-            remainingMah = Double.NaN;
-            previousCurrentMa = Double.NaN;
-            lastSampleMs = 0L;
-            status = "Custom capacity saved. Waiting for the current battery percentage to establish the starting mAh.";
-            persist(context, System.currentTimeMillis(), true);
+        if (!isAmount(requestedStartingMah) || requestedStartingMah > requestedCapacityMah) {
+            status = "Starting charge must be between 0 mAh and the entered full capacity.";
+            return snapshot();
         }
+
+        capacityMah = requestedCapacityMah;
+        startingChargeMah = requestedStartingMah;
+        beginFromUserCharge(context, reading, System.currentTimeMillis(),
+                "Started from your entered starting charge.");
         return snapshot();
+    }
+
+    static synchronized Estimate resetEstimate(Context context, BatteryReader.Reading reading) {
+        load(context);
+        if (!isValidCapacity(capacityMah) || !isAmount(startingChargeMah)
+                || startingChargeMah > capacityMah) {
+            status = "Enter full capacity and starting remaining charge, then tap Save & start.";
+            persist(context, System.currentTimeMillis(), true);
+            return snapshot();
+        }
+        beginFromUserCharge(context, reading, System.currentTimeMillis(),
+                "Estimate reset to your saved starting charge.");
+        return snapshot();
+    }
+
+    private static void beginFromUserCharge(Context context, BatteryReader.Reading reading,
+                                            long now, String message) {
+        BatteryState state = readBatteryState(context);
+        remainingMah = clamp(startingChargeMah, capacityMah);
+        initialized = true;
+        lastSampleMs = now;
+        previousCurrentMa = currentMa(reading);
+        previousCharging = state.plugged;
+        status = message;
+        persist(context, now, true);
     }
 
     static synchronized Estimate sample(Context context, BatteryReader.Reading reading) {
@@ -82,14 +110,8 @@ final class BatteryPercentCalculator {
 
         BatteryState batteryState = readBatteryState(context);
         if (!initialized || !isAmount(remainingMah)) {
-            if (batteryState.percent < 0) {
-                status = "Custom capacity is saved; waiting for Android's battery percentage to set a starting level.";
-                persist(context, now, false);
-                return snapshot();
-            }
-            startFromPercentage(context, batteryState, reading, now,
-                    "Started from current Android level (" + batteryState.percent + "%); subsequent updates use current integration.");
-            persist(context, now, true);
+            status = "Enter starting remaining charge in mAh and tap Save & start.";
+            persist(context, now, false);
             return snapshot();
         }
 
@@ -142,65 +164,38 @@ final class BatteryPercentCalculator {
         return snapshot();
     }
 
-    /**
-     * Explicit user-requested re-baseline. This uses the current Android level
-     * only when the user taps Reset estimate; no system capacity/counter is read.
-     */
-    static synchronized Estimate recalibrate(Context context, BatteryReader.Reading reading) {
-        load(context);
-        if (!isValidCapacity(capacityMah)) {
-            status = "Enter and save a custom capacity before resetting the estimate.";
-            return snapshot();
-        }
-
-        BatteryState state = readBatteryState(context);
-        if (state.percent < 0) {
-            status = "Cannot reset the estimate because the current battery percentage is unavailable.";
-            persist(context, System.currentTimeMillis(), true);
-            return snapshot();
-        }
-
-        startFromPercentage(context, state, reading, System.currentTimeMillis(),
-                "Estimate reset from current Android level (" + state.percent + "%).");
-        return snapshot();
-    }
-
-    private static void startFromPercentage(Context context, BatteryState state,
-                                            BatteryReader.Reading reading, long now, String message) {
-        remainingMah = clamp(capacityMah * state.percent / 100.0, capacityMah);
-        initialized = true;
-        lastSampleMs = now;
-        previousCurrentMa = currentMa(reading);
-        previousCharging = state.plugged;
-        status = message;
-        persist(context, now, true);
-    }
-
     private static void load(Context context) {
         if (loaded) return;
         SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int version = p.getInt(KEY_ESTIMATOR_VERSION, 0);
         capacityMah = readDouble(p, KEY_CUSTOM_CAPACITY_MAH, Double.NaN);
-        initialized = p.getBoolean(KEY_INITIALIZED, false);
+        startingChargeMah = version >= 2
+                ? readDouble(p, KEY_STARTING_CHARGE_MAH, Double.NaN) : Double.NaN;
+        initialized = version >= 2 && p.getBoolean(KEY_INITIALIZED, false);
         remainingMah = readDouble(p, KEY_REMAINING_MAH, Double.NaN);
         lastSampleMs = p.getLong(KEY_LAST_SAMPLE_MS, 0L);
         previousCurrentMa = readDouble(p, KEY_LAST_CURRENT, Double.NaN);
         previousCharging = p.getBoolean(KEY_LAST_CHARGING, false);
-        status = p.getString(KEY_STATUS, "Enter your custom battery capacity in mAh to start.");
         lastPersistMs = p.getLong(KEY_LAST_PERSIST_MS, 0L);
-        if (!isValidCapacity(capacityMah) || !isAmount(remainingMah)) initialized = false;
+        if (!isValidCapacity(capacityMah)) {
+            initialized = false;
+            status = "Enter full capacity and starting remaining charge in mAh, then tap Save & start.";
+        } else if (!isAmount(startingChargeMah) || startingChargeMah > capacityMah
+                || !isAmount(remainingMah) || version < 2) {
+            initialized = false;
+            status = "Enter your starting remaining charge in mAh, then tap Save & start.";
+        } else {
+            status = p.getString(KEY_STATUS, "Ready to integrate measured current.");
+        }
         loaded = true;
     }
 
     private static BatteryState readBatteryState(Context context) {
         Intent intent = context.registerReceiver(null,
                 new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        if (intent == null) return new BatteryState(-1, false);
-        int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-        int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
-        int percent = level >= 0 && scale > 0 ? Math.max(0, Math.min(100,
-                Math.round(level * 100.0f / scale))) : -1;
+        if (intent == null) return new BatteryState(false);
         boolean plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
-        return new BatteryState(percent, plugged);
+        return new BatteryState(plugged);
     }
 
     private static double currentMa(BatteryReader.Reading reading) {
@@ -230,7 +225,9 @@ final class BatteryPercentCalculator {
                 && now - lastPersistMs < PERSIST_INTERVAL_MS) return;
         SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         p.edit()
+                .putInt(KEY_ESTIMATOR_VERSION, 2)
                 .putLong(KEY_CUSTOM_CAPACITY_MAH, Double.doubleToLongBits(capacityMah))
+                .putLong(KEY_STARTING_CHARGE_MAH, Double.doubleToLongBits(startingChargeMah))
                 .putBoolean(KEY_INITIALIZED, initialized)
                 .putLong(KEY_REMAINING_MAH, Double.doubleToLongBits(remainingMah))
                 .putLong(KEY_LAST_SAMPLE_MS, lastSampleMs)
@@ -244,7 +241,8 @@ final class BatteryPercentCalculator {
 
     private static Estimate snapshot() {
         if (!isValidCapacity(capacityMah) || !initialized || !isAmount(remainingMah)) {
-            return new Estimate(-1, Double.NaN, capacityMah, "Custom capacity not set", status);
+            String source = isValidCapacity(capacityMah) ? "User-defined capacity" : "Capacity not set";
+            return new Estimate(-1, Double.NaN, capacityMah, source, status);
         }
         int percent = (int) Math.round(clamp(remainingMah, capacityMah) * 100.0 / capacityMah);
         percent = Math.max(0, Math.min(100, percent));
@@ -278,11 +276,9 @@ final class BatteryPercentCalculator {
     }
 
     private static final class BatteryState {
-        final int percent;
         final boolean plugged;
 
-        BatteryState(int percent, boolean plugged) {
-            this.percent = percent;
+        BatteryState(boolean plugged) {
             this.plugged = plugged;
         }
     }
