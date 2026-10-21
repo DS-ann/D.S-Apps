@@ -7474,7 +7474,7 @@ public class MainActivity extends Activity {
                                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                     displayClock.setSpan(new CenteredColonSpan(
-                                    LauncherUiUtils.dp(this, 114) / 2f,
+                                    getClockColonCenterY(),
                                     useWhiteDigitInnerBorder, innerWhiteBorderPx),
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
@@ -7494,6 +7494,9 @@ public class MainActivity extends Activity {
                 }
                 clockDigitInnerBorderModeApplied.put(clockText, useWhiteDigitInnerBorder);
             }
+            // Keep the separator aligned with the active clock's vertical transform
+            // after every text refresh, independently of the date/AM-PM typography.
+            syncClockColonVerticalCenter();
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
             if (dateText.getVisibility() != dateVisibility) dateText.setVisibility(dateVisibility);
@@ -11147,6 +11150,35 @@ public class MainActivity extends Activity {
         return Math.max(1, (int) Math.ceil(width));
     }
 
+    private float getClockColonCenterY() {
+        // The TextView is scaled around this pivot when the clock's height changes.
+        // Anchoring the colon to it keeps the dots centered in the visible clock row.
+        if (clockText != null) {
+            float pivotY = clockText.getPivotY();
+            if (pivotY > 0f) return pivotY;
+            int measuredHeight = clockText.getHeight();
+            if (measuredHeight > 0) return measuredHeight / 2f;
+            ViewGroup.LayoutParams params = clockText.getLayoutParams();
+            if (params != null && params.height > 0) return params.height / 2f;
+        }
+        return LauncherUiUtils.dp(this, 114) / 2f;
+    }
+
+    private void syncClockColonVerticalCenter() {
+        if (clockText == null) return;
+        CharSequence value = clockText.getText();
+        if (!(value instanceof android.text.Spanned)) return;
+        android.text.Spanned spanned = (android.text.Spanned) value;
+        CenteredColonSpan[] spans = spanned.getSpans(
+                0, spanned.length(), CenteredColonSpan.class);
+        if (spans.length == 0) return;
+        float centerY = getClockColonCenterY();
+        for (CenteredColonSpan span : spans) {
+            span.setRowCenterY(centerY);
+        }
+        clockText.invalidate();
+    }
+
     private void applyClockPositionAndSize() {
         if (clockPanel == null || clockText == null) return;
         final LinearLayout targetPanel = clockPanel;
@@ -11472,6 +11504,8 @@ public class MainActivity extends Activity {
         // by breadthScale explicitly; otherwise layout/background breadth changes
         // while the LED glyph view can retain stale measured bounds during a drag.
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
+        // The typography colon must use the same vertical center as this transformed row.
+        syncClockColonVerticalCenter();
         // Normalize non-seven-segment glyph height across typography presets.
         // Typeface choices have different cap-height metrics at the same 78sp,
         // which otherwise makes some styles look smaller/larger. Use the default
@@ -11729,7 +11763,7 @@ public class MainActivity extends Activity {
     }
 
     private static final class CenteredColonSpan extends android.text.style.ReplacementSpan {
-        private final float rowCenterY;
+        private float rowCenterY;
         private final boolean drawWhiteInnerBorder;
         private final float innerWhiteBorderPx;
 
@@ -11738,6 +11772,10 @@ public class MainActivity extends Activity {
             this.rowCenterY = rowCenterY;
             this.drawWhiteInnerBorder = drawWhiteInnerBorder;
             this.innerWhiteBorderPx = Math.max(0f, innerWhiteBorderPx);
+        }
+
+        void setRowCenterY(float rowCenterY) {
+            this.rowCenterY = Math.max(0f, rowCenterY);
         }
 
         @Override
