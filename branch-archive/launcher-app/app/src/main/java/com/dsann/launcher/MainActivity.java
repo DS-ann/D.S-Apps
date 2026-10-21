@@ -2838,38 +2838,19 @@ public class MainActivity extends Activity {
     private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
             int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
             int columns, int rows, int cellWidth, int cellHeight) {
-        long bestOverlapArea = 0L;
-        long bestGridCellArea = 0L;
-        int bestColumn = -1;
-        int bestRow = -1;
-        int boundaryRight = boundaryLeft + Math.max(1, boundaryWidth);
-        int boundaryBottom = boundaryTop + Math.max(1, boundaryHeight);
+        if (pageWidth <= 0 || pageHeight <= 0 || columns <= 0 || rows <= 0
+                || cellWidth <= 0 || cellHeight <= 0) return null;
 
-        for (int row = 0; row < Math.max(1, rows); row++) {
-            int cellTop = homeGridRowTop(row, rows, pageHeight, cellHeight);
-            int cellBottom = Math.min(pageHeight, cellTop + cellHeight);
-            int overlapHeight = Math.max(0,
-                    Math.min(boundaryBottom, cellBottom) - Math.max(boundaryTop, cellTop));
-            if (overlapHeight <= 0) continue;
-            for (int column = 0; column < Math.max(1, columns); column++) {
-                int cellLeft = column * cellWidth;
-                int cellRight = Math.min(pageWidth, cellLeft + cellWidth);
-                int overlapWidth = Math.max(0,
-                        Math.min(boundaryRight, cellRight) - Math.max(boundaryLeft, cellLeft));
-                if (overlapWidth <= 0) continue;
-                long overlapArea = (long) overlapWidth * overlapHeight;
-                if (overlapArea > bestOverlapArea) {
-                    bestOverlapArea = overlapArea;
-                    bestGridCellArea = (long) Math.max(1, cellRight - cellLeft)
-                            * Math.max(1, cellBottom - cellTop);
-                    bestColumn = column;
-                    bestRow = row;
-                }
-            }
-        }
-        return bestColumn >= 0 && bestGridCellArea > 0L
-                && bestOverlapArea * 2L >= bestGridCellArea
-                ? new int[]{bestColumn, bestRow} : null;
+        // Use the dragged object's center to resolve all four edges identically.
+        // A 60% overlap means its center is already inside the intended cell; ties
+        // at exactly 50% go to the cell on the right/bottom consistently.
+        int centerX = boundaryLeft + Math.max(1, boundaryWidth) / 2;
+        int centerY = boundaryTop + Math.max(1, boundaryHeight) / 2;
+        int column = Math.max(0, Math.min(columns - 1, centerX / cellWidth));
+        int topInset = homeGridRowTop(0, rows, pageHeight, cellHeight);
+        int row = (centerY - topInset) / cellHeight;
+        row = Math.max(0, Math.min(rows - 1, row));
+        return new int[]{column, row};
     }
 
     private String clockPrefKey(String key, int page) {
@@ -3255,6 +3236,22 @@ public class MainActivity extends Activity {
                 || "icon_rounded_square_background".equals(key)
                 || "app_icon_shape".equals(key)
                 || "show_home_labels".equals(key);
+    }
+
+    private void removeDuplicateAppGroupViews(String groupId, View keep) {
+        if (groupId == null || pagesStrip == null) return;
+        String expectedTag = APP_GROUP_TAG_PREFIX + groupId;
+        for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            for (int i = page.getChildCount() - 1; i >= 0; i--) {
+                View candidate = page.getChildAt(i);
+                if (candidate == keep || !expectedTag.equals(candidate.getTag())) continue;
+                candidate.animate().cancel();
+                page.removeViewAt(i);
+            }
+        }
     }
 
     private void renderAppGroups() {
@@ -4351,8 +4348,26 @@ public class MainActivity extends Activity {
                         cell.setAlpha(1f);
                         cell.setLayoutParams(rollback);
                     }
+                    boolean displacementAccepted = finishLiveDisplacements(commit, cell);
+                    if (commit && !displacementAccepted) {
+                        commit = false;
+                        // The drag planner can reject the full displacement transaction even
+                        // after the candidate slot passed a local collision check. If the group
+                        // was already reparented, put it back before ending the transfer.
+                        if (sourcePage != null && cell.getParent() != sourcePage) {
+                            if (cell.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) cell.getParent()).removeView(cell);
+                            }
+                            FrameLayout.LayoutParams returnParams = new FrameLayout.LayoutParams(
+                                    cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
+                            returnParams.leftMargin = origin[0];
+                            returnParams.topMargin = origin[1];
+                            cell.setTranslationX(0f);
+                            cell.setTranslationY(0f);
+                            sourcePage.addView(cell, returnParams);
+                        }
+                    }
                     finishWorkspaceTransferDrag(cell, commit);
-                    finishLiveDisplacements(commit, cell);
                     if (commit && targetPage != null) {
                         persistWorkspaceItemPosition(targetPage, cell, left, top,
                                 cellWidth, cellHeight);
@@ -4364,12 +4379,22 @@ public class MainActivity extends Activity {
                     LauncherUiUtils.stopMoveHint(cell);
                     cell.setScaleX(1f);
                     cell.setScaleY(1f);
+                    cell.setTranslationX(0f);
+                    cell.setTranslationY(0f);
                     cell.setAlpha(1f);
                     setWorkspaceGridVisible(false, null);
-                    refreshWorkspaceGrid();
                     activeAppGroupMoveModeId = null;
                     setAppGroupMoveModeVisual(cell, false);
-                    renderHomePages(false);
+                    if (commit) {
+                        // Keep the dragged instance; rebuilding the entire workspace here
+                        // used to race with the cross-page reparent and leave a second view
+                        // carrying the same group ID. Displaced items and the group position
+                        // have already been committed to preferences.
+                        removeDuplicateAppGroupViews(groupId, cell);
+                    } else {
+                        renderHomePages(false);
+                    }
+                    refreshWorkspaceGrid();
                     return true;
                 }
                 LauncherUiUtils.stopMoveHint(cell);
@@ -6351,9 +6376,9 @@ public class MainActivity extends Activity {
                                     Math.round(boundaryLeft / (float) cellWidth)));
                     int targetRow = boundaryHasMajorityCell ? majorityOverlapSlot[1]
                             : homeGridRowFromTop(boundaryTop, rows, targetHeight, cellHeight);
-                    String targetGroupId = findAppGroupAtDragBoundary(targetPage,
-                            boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
-                            cellWidth, cellHeight);
+                    String targetGroupId = boundaryHasMajorityCell
+                            ? findAppGroupAtGridSlot(targetPage, targetCol, targetRow,
+                                    cellWidth, cellHeight) : null;
                     if (targetGroupId != null) {
                         String groupLabel = getAppGroupLabel(targetGroupId);
                         ResolveInfo draggedApp = findApp(packageName);
