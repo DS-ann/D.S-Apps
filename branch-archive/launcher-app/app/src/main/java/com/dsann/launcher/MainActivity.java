@@ -3858,6 +3858,7 @@ public class MainActivity extends Activity {
             previous.setTranslationX(0f);
             previous.setTranslationY(0f);
             previous.setBackground(null);
+            if (Build.VERSION.SDK_INT >= 21) previous.setElevation(0f);
             previous.setAlpha(1f);
         }
     }
