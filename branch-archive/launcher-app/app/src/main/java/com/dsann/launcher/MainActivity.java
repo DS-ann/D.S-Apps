@@ -2727,6 +2727,18 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * Match the app-cell label sizing rule for launcher-owned shortcut labels. Use the actual
+     * TextView paint after its selected size/typeface are applied so tall fonts are not clipped.
+     */
+    private int workspaceLabelHeightPx(TextView label) {
+        if (label == null) return LauncherUiUtils.dp(this, homeLabelHeightDp());
+        android.graphics.Paint.FontMetrics metrics = label.getPaint().getFontMetrics();
+        int textHeightPx = (int) Math.ceil(metrics.descent - metrics.ascent);
+        return Math.max(LauncherUiUtils.dp(this, 12),
+                textHeightPx + LauncherUiUtils.dp(this, 2));
+    }
+
+    /**
      * One shared row metric for rendering, capacity, snapping, and collision placement.
      * With home labels enabled, extra height is added below the icon to contain the
      * selected font's full line height; the top inset and icon anchor stay unchanged.
@@ -3272,8 +3284,9 @@ public class MainActivity extends Activity {
         label.setMaxLines(1);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setIncludeFontPadding(false);
+        int shortcutLabelHeight = workspaceLabelHeightPx(label);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
-                cellW, LauncherUiUtils.dp(this, homeLabelHeightDp()), Gravity.TOP | Gravity.LEFT);
+                cellW, shortcutLabelHeight, Gravity.TOP | Gravity.LEFT);
         labelParams.leftMargin = chosenCol * cellW - tileLeft;
         labelParams.topMargin = initialIconSize + LauncherUiUtils.dp(this, 1);
         tile.addView(label, labelParams);
@@ -3281,7 +3294,7 @@ public class MainActivity extends Activity {
                 ? View.VISIBLE : View.GONE);
 
         int initialLabelExtraHeight = prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
-                ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
+                ? shortcutLabelHeight + LauncherUiUtils.dp(this, 1) : 0;
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
                 initialIconSize, initialIconSize + initialLabelExtraHeight,
                 Gravity.TOP | Gravity.LEFT);
@@ -3726,8 +3739,11 @@ public class MainActivity extends Activity {
                 int target = shortcutIconSizePx(cellWidth, cellHeight);
                 FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) shortcut.getLayoutParams();
                 tileParams.width = target;
+                if (label != null) label.setTextSize(homeFontSizeSp());
                 int labelExtraHeight = prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
-                        ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
+                        ? (label != null ? workspaceLabelHeightPx(label)
+                                : LauncherUiUtils.dp(this, homeLabelHeightDp()))
+                                + LauncherUiUtils.dp(this, 1) : 0;
                 tileParams.height = target + labelExtraHeight;
                 int targetTileLeft = homeGridIconLeftAt(null, slot[0], cellWidth, target);
                 tileParams.leftMargin = targetTileLeft;
@@ -3745,6 +3761,7 @@ public class MainActivity extends Activity {
                     FrameLayout.LayoutParams labelParams =
                             (FrameLayout.LayoutParams) label.getLayoutParams();
                     labelParams.width = cellWidth;
+                    labelParams.height = workspaceLabelHeightPx(label);
                     labelParams.leftMargin = slot[0] * cellWidth - targetTileLeft;
                     labelParams.topMargin = target + LauncherUiUtils.dp(this, 1);
                     label.setLayoutParams(labelParams);
@@ -3870,7 +3887,11 @@ public class MainActivity extends Activity {
                 Object tag = page.getChildAt(childIndex).getTag();
                 if ("launcher_contact_shortcut".equals(tag)) {
                     hasContactShortcut = true;
-                    break;
+                    if (page.getChildAt(childIndex) instanceof ViewGroup) {
+                        ViewGroup shortcutTile = (ViewGroup) page.getChildAt(childIndex);
+                        shortcutTile.setClipChildren(false);
+                        shortcutTile.setClipToPadding(false);
+                    }
                 }
             }
             if (hasContactShortcut) {
@@ -3886,6 +3907,7 @@ public class MainActivity extends Activity {
         if (label == null) return;
         // Home and shortcut labels share the same font family and regular weight.
         label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.NORMAL));
+        if (shortcut) label.setTextSize(homeFontSizeSp());
         label.setTextColor(homeLabelColor());
         label.setShadowLayer(LauncherUiUtils.dp(this, 1), 0f, LauncherUiUtils.dp(this, 1),
                 Color.argb(180, 0, 0, 0));
@@ -3893,6 +3915,34 @@ public class MainActivity extends Activity {
         label.setMaxLines(1);
         label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setIncludeFontPadding(false);
+        if (shortcut && label.getParent() instanceof ViewGroup) {
+            ViewGroup shortcutTile = (ViewGroup) label.getParent();
+            shortcutTile.setClipChildren(false);
+            shortcutTile.setClipToPadding(false);
+            View shortcutIcon = shortcutTile.getChildCount() > 0
+                    ? shortcutTile.getChildAt(0) : null;
+            ViewGroup.LayoutParams iconRawParams = shortcutIcon == null
+                    ? null : shortcutIcon.getLayoutParams();
+            int iconHeight = iconRawParams != null && iconRawParams.height > 0
+                    ? iconRawParams.height : (shortcutIcon == null ? 0 : shortcutIcon.getHeight());
+            int labelHeight = workspaceLabelHeightPx(label);
+            ViewGroup.LayoutParams labelRawParams = label.getLayoutParams();
+            if (labelRawParams instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams labelParams = (FrameLayout.LayoutParams) labelRawParams;
+                labelParams.height = labelHeight;
+                labelParams.topMargin = iconHeight + LauncherUiUtils.dp(this, 1);
+                label.setLayoutParams(labelParams);
+            }
+            ViewGroup.LayoutParams tileRawParams = shortcutTile.getLayoutParams();
+            if (tileRawParams instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) tileRawParams;
+                boolean labelsVisible = prefs != null
+                        && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
+                tileParams.height = iconHeight + (labelsVisible
+                        ? labelHeight + LauncherUiUtils.dp(this, 1) : 0);
+                shortcutTile.setLayoutParams(tileParams);
+            }
+        }
         label.invalidate();
     }
 
@@ -10935,61 +10985,61 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
-        // Seven-segment positioning is already tuned. For typography clocks, undo
-        // the panel scale exactly so their visual offset remains fixed when the panel
-        // width changes to accommodate a different date size.
-        float offsetScaleDenominator = sevenSegment
-                ? Math.max(1f, panelScaleX) : panelScaleX;
         float targetX;
         if (sevenSegment) {
-            targetX = -LauncherUiUtils.dp(this, 15) / offsetScaleDenominator;
+            // Preserve the already-tuned seven-segment positioning exactly.
+            targetX = -LauncherUiUtils.dp(this, 15) / Math.max(1f, panelScaleX);
         } else {
-            boolean singleDigitHour = false;
-            boolean twoDigitNeonCircuitHour = false;
-            String currentClock = clockText.getText() == null
-                    ? "" : clockText.getText().toString();
+            CharSequence clockValue = clockText.getText() == null ? "" : clockText.getText();
+            String currentClock = clockValue.toString();
             int colon = currentClock.indexOf(':');
+            int hourDigits = 0;
             if (colon > 0) {
-                int hourDigits = 0;
                 for (int i = 0; i < colon; i++) {
                     if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
                 }
-                singleDigitHour = hourDigits == 1;
-                twoDigitNeonCircuitHour = style == 2 && hourDigits > 1;
             }
-
-            if (twoDigitNeonCircuitHour) {
-                // For a two-digit Neon Circuit hour, the text itself is centered
-                // in its full-width clock group. The 20dp width reduction is applied
-                // around that group's center, so no compensating translation is needed.
-                targetX = 0f;
-            } else {
-                float horizontalOffset = LauncherUiUtils.dp(this, 5);
-                if (singleDigitHour) {
-                    float singleDigitAdjustment;
-                    if (style == 2) {
-                        // Neon Circuit reserves a leading figure-space for single-digit
-                        // hours. Measure its actual advance to avoid a 9-to-10 jump.
-                        float figureSpaceWidth = clockText.getPaint().measureText("\u2007");
-                        float trackingWidth = clockText.getTextSize()
-                                * clockText.getLetterSpacing();
-                        singleDigitAdjustment = Math.max(0f, figureSpaceWidth + trackingWidth)
-                                * Math.abs(clockText.getScaleX());
-                    } else {
-                        // Preserve the established alignment for other clock presets.
-                        singleDigitAdjustment = LauncherUiUtils.dp(this, 20);
+            float textScaleX = Math.max(0.01f, Math.abs(clockText.getScaleX()));
+            if (hourDigits == 1) {
+                // The invisible leading figure-space equalizes 9:xx and 10:xx widths.
+                // Shift by half that reserved cell so the *visible* one-digit clock is
+                // balanced, leaving the colon slightly left of the background midpoint.
+                float leadingCellWidth = clockText.getPaint().measureText("\u2007");
+                float trackingWidth = clockText.getTextSize() * clockText.getLetterSpacing();
+                float leadingCellAdvance = Math.max(0f, leadingCellWidth + trackingWidth);
+                targetX = -(leadingCellAdvance * 0.5f) * textScaleX;
+            } else if (colon >= 0) {
+                // Center the colon itself, not merely the entire string. This accounts for
+                // the custom colon/digit spans and the actual advances of the displayed
+                // glyphs, while the clock group width remains independent of date sizing.
+                int groupWidth = 0;
+                ViewGroup.LayoutParams groupParams = clockGroup == null
+                        ? null : clockGroup.getLayoutParams();
+                if (groupParams != null && groupParams.width > 0) {
+                    groupWidth = groupParams.width;
+                } else if (clockGroup != null) {
+                    groupWidth = clockGroup.getWidth();
+                }
+                if (groupWidth > 0) {
+                    android.text.TextPaint paint = clockText.getPaint();
+                    float fullTextWidth = android.text.Layout.getDesiredWidth(
+                            clockValue, paint);
+                    float prefixWidth = android.text.Layout.getDesiredWidth(
+                            clockValue, 0, colon, paint);
+                    float colonAdvance = android.text.Layout.getDesiredWidth(
+                            clockValue, colon, colon + 1, paint);
+                    if (colonAdvance <= 0f) {
+                        colonAdvance = Math.max(1f,
+                                Math.round(paint.measureText(":") * 0.45f));
                     }
-                    horizontalOffset += singleDigitAdjustment;
+                    float colonCenter = (groupWidth - fullTextWidth) * 0.5f
+                            + prefixWidth + colonAdvance * 0.5f;
+                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
+                } else {
+                    targetX = 0f;
                 }
-                targetX = -horizontalOffset / offsetScaleDenominator;
-                // Neon Circuit single-digit hours should sit 20dp farther right than
-                // the normal figure-space-compensated position. Apply this in the
-                // geometry path, independently of the active colour mode, so colour
-                // changes cannot alter the alignment. Divide by the panel scale so the
-                // visible shift remains exactly 20dp while the clock is resized.
-                if (style == 2 && singleDigitHour) {
-                    targetX += LauncherUiUtils.dp(this, 20) / offsetScaleDenominator;
-                }
+            } else {
+                targetX = 0f;
             }
         }
         // Avoid invalidating the view when the computed offset hasn't actually changed.
@@ -11062,22 +11112,20 @@ public class MainActivity extends Activity {
                 : clockDateGeometrySignatures.get(dateText);
         final FrameLayout groupAtGeometryStart = clockGroupsByPage[targetPage] != null
                 ? clockGroupsByPage[targetPage] : clockGroup;
-        final int[] previousClockGroupLocation = new int[2];
-        final boolean preserveTypographyGroupScreenX =
+        final int[] previousClockPanelGeometry = targetPanel.getWidth() > 0
+                ? itemGeometry(targetPanel) : new int[]{0, 0, 0, 0};
+        final boolean preserveTypographyPanelCenterX =
                 !(clockText instanceof SevenSegmentClockTextView && selectedClockStyle == 5)
                 && !clockStyleChanged
                 && previousDateGeometrySignature != null
                 && !previousDateGeometrySignature.equals(dateGeometrySignature)
-                && groupAtGeometryStart != null && groupAtGeometryStart.getWidth() > 0;
+                && targetPanel.getWidth() > 0;
         if (clockText != null) {
             clockPositionStyleSignatures.put(clockText, selectedClockStyle);
         }
         if (clockStyleChanged && groupAtGeometryStart != null) {
             // Clear any correction from the previous preset before laying out the new one.
             groupAtGeometryStart.setTranslationX(0f);
-        }
-        if (preserveTypographyGroupScreenX) {
-            groupAtGeometryStart.getLocationOnScreen(previousClockGroupLocation);
         }
         if (dateText != null) {
             clockDateGeometrySignatures.put(dateText, dateGeometrySignature);
@@ -11264,19 +11312,20 @@ public class MainActivity extends Activity {
             setClampedClockTranslationForPanel(
                     targetPanel, targetPage, bounded[0], bounded[1], true);
 
-            // Typography clock rows can remeasure when date size/font or clock preset
-            // changes. Preserve their prior screen anchor after the parent's scale and
-            // bounds settle; keep the tuned seven-segment path free of this correction.
-            if (preserveTypographyGroupScreenX && groupAtGeometryStart != null
-                    && groupAtGeometryStart.getParent() != null) {
-                int[] currentGroupLocation = new int[2];
-                groupAtGeometryStart.getLocationOnScreen(currentGroupLocation);
-                float parentScale = Math.max(0.01f, Math.abs(targetPanel.getScaleX()));
-                float correction = (previousClockGroupLocation[0]
-                        - currentGroupLocation[0]) / parentScale;
+            // If date typography changes the panel width, keep its visual center fixed.
+            // The clock group is centered inside that panel, so the colon stays centered
+            // without using date size or font metrics to calculate its horizontal offset.
+            if (preserveTypographyPanelCenterX && targetPanel.getParent() != null) {
+                int[] currentClockPanelGeometry = itemGeometry(targetPanel);
+                float previousCenterX = previousClockPanelGeometry[0]
+                        + previousClockPanelGeometry[2] / 2f;
+                float currentCenterX = currentClockPanelGeometry[0]
+                        + currentClockPanelGeometry[2] / 2f;
+                float correction = previousCenterX - currentCenterX;
                 if (Math.abs(correction) > 0.25f) {
-                    groupAtGeometryStart.setTranslationX(
-                            groupAtGeometryStart.getTranslationX() + correction);
+                    setClampedClockTranslationForPanel(targetPanel, targetPage,
+                            targetPanel.getTranslationX() + correction,
+                            targetPanel.getTranslationY(), true);
                 }
             }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
@@ -11310,14 +11359,15 @@ public class MainActivity extends Activity {
             }
             FrameLayout.LayoutParams groupParams =
                     (FrameLayout.LayoutParams) clockGroup.getLayoutParams();
-            groupParams.gravity = alignment | Gravity.TOP;
+            groupParams.gravity = (sevenSegment ? alignment : Gravity.CENTER_HORIZONTAL)
+                    | Gravity.TOP;
             groupParams.width = clockGroupWidth;
             groupParams.height = rowHeight;
             clockGroup.setLayoutParams(groupParams);
-            // Seven-segment positioning remains exactly as tuned. Typography-clock
-            // translation may contain a date-geometry compensation and must be retained
-            // across unrelated layout refreshes.
-            if (sevenSegment) clockGroup.setTranslationX(0f);
+            // The group is centered within the background for typography clocks. Keep
+            // seven-segment positioning on its established alignment path; clear any
+            // stale typography offset left by earlier date-size compensation.
+            clockGroup.setTranslationX(0f);
             clockGroup.setClipChildren(false);
             clockGroup.setClipToPadding(false);
         }
@@ -11340,17 +11390,14 @@ public class MainActivity extends Activity {
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2
                 && hourDigitCountForWidthAdjustment > 1;
 
-        // Keep the glyph view at the left edge of its content group. The group
-        // itself is aligned as a unit, leaving a dedicated slot to the right for AM/PM.
-        // Non-seven-segment glyphs are vertically centered in the clock row so
-        // their visual center aligns with the shortened, vertically centered background.
-        clockText.setGravity((neonCircuitTwoDigitHour ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT)
+        // Center typography-clock text inside its fixed-width group; the group itself is
+        // centered inside the background. The seven-segment renderer retains its left anchor.
+        clockText.setGravity((sevenSegment ? Gravity.LEFT : Gravity.CENTER_HORIZONTAL)
                 | (sevenSegment ? Gravity.TOP : Gravity.CENTER_VERTICAL));
         // Use geometry derived from the current layout calculation, not getWidth()/getHeight()
         // from the previous frame. Those dimensions can be stale while the user resizes the
         // panel, causing scaled digits to jump or drift until the next layout pass.
-        clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
-                ? clockGroupWidth / 2f : 0f);
+        clockText.setPivotX(clockGroupWidth / 2f);
         // The LED renderer sizes its segments from its measured view height.
         // Keep that view at the natural 114dp height and scale the rendered digits
         // by breadthScale explicitly; otherwise layout/background breadth changes
@@ -11404,8 +11451,7 @@ public class MainActivity extends Activity {
         clockText.setScaleX(sevenSegment ? sevenSegmentWidthScale
                 : nonLedDigitScale * neonCircuitWidthScale);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
-        clockText.setPivotX((sevenSegment || neonCircuitTwoDigitHour)
-                ? clockGroupWidth / 2f : 0f);
+        clockText.setPivotX(clockGroupWidth / 2f);
         clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
@@ -11600,10 +11646,10 @@ public class MainActivity extends Activity {
             dots.setStyle(Paint.Style.FILL);
             float naturalWidth = paint.measureText(":");
             float radius = Math.max(1f, paint.getTextSize() * 0.045f);
-            // Keep the two dots centered in the original colon slot while the
-            // narrower advance pulls the next (minute) digit closer. A slight
-            // left bias also tightens the gap on the hour side.
-            float centerX = x + naturalWidth * 0.25f;
+            // Match the horizontal center of the colon's compact reserved advance.
+            // This keeps a balanced two-digit time centered in its background.
+            float colonAdvance = Math.max(1f, Math.round(naturalWidth * 0.45f));
+            float centerX = x + colonAdvance * 0.5f;
             // Anchor the dots to the actual 114 dp clock-row center, not the font
             // line bounds (which vary by typeface and can sit above the background center).
             // Parent resizing scales the row and this coordinate together.
