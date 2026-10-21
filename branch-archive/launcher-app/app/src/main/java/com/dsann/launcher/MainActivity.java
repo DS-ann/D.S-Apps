@@ -3951,12 +3951,13 @@ public class MainActivity extends Activity {
         panel.bringToFront();
 
         final boolean[] closing = new boolean[]{false};
+        final float[] iconScale = new float[]{0.12f, 0.12f};
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
-                dialog, panel, dimLayer, openingMemberViews, closing));
+                dialog, panel, dimLayer, openingMemberViews, closing, iconScale));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                closeAppGroupWithAnimation(dialog, panel, dimLayer, openingMemberViews, closing);
+                closeAppGroupWithAnimation(dialog, panel, dimLayer, openingMemberViews, closing, iconScale);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -4022,6 +4023,8 @@ public class MainActivity extends Activity {
             float startScaleY = Math.min(1f, Math.max(0.06f, iconH / (float) Math.max(1, lp.height)));
             panel.setScaleX(startScaleX);
             panel.setScaleY(startScaleY);
+            iconScale[0] = startScaleX;
+            iconScale[1] = startScaleY;
             panel.setAlpha(0f);
             dimLayer.setAlpha(0f);
 
@@ -4064,7 +4067,7 @@ public class MainActivity extends Activity {
     }
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
-            ArrayList<View> memberViews, boolean[] closing) {
+            ArrayList<View> memberViews, boolean[] closing, float[] iconScale) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -4078,7 +4081,9 @@ public class MainActivity extends Activity {
                     .start();
         }
         panel.animate().cancel();
-        panel.animate().scaleX(0.08f).scaleY(0.08f).alpha(0f)
+        float targetScaleX = iconScale != null ? iconScale[0] : 0.08f;
+        float targetScaleY = iconScale != null ? iconScale[1] : 0.08f;
+        panel.animate().scaleX(targetScaleX).scaleY(targetScaleY).alpha(0f)
                 .setDuration(duration)
                 .setInterpolator(new android.view.animation.AccelerateInterpolator(1.2f))
                 .withEndAction(() -> {
