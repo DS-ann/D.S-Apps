@@ -3268,7 +3268,7 @@ public class MainActivity extends Activity {
         label.setIncludeFontPadding(false);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
                 cellW, LauncherUiUtils.dp(this, homeLabelHeightDp()), Gravity.TOP | Gravity.LEFT);
-        labelParams.leftMargin = -Math.max(0, (cellW - initialIconSize) / 2);
+        labelParams.leftMargin = chosenCol * cellW - tileLeft;
         labelParams.topMargin = initialIconSize + LauncherUiUtils.dp(this, 1);
         tile.addView(label, labelParams);
         label.setVisibility(prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
@@ -3723,7 +3723,8 @@ public class MainActivity extends Activity {
                 int labelExtraHeight = prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
                         ? LauncherUiUtils.dp(this, homeLabelHeightDp()) + LauncherUiUtils.dp(this, 1) : 0;
                 tileParams.height = target + labelExtraHeight;
-                tileParams.leftMargin = homeGridIconLeftAt(null, slot[0], cellWidth, target);
+                int targetTileLeft = homeGridIconLeftAt(null, slot[0], cellWidth, target);
+                tileParams.leftMargin = targetTileLeft;
                 tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight)
                         + LauncherUiUtils.dp(this, 14);
                 shortcut.setLayoutParams(tileParams);
@@ -3738,7 +3739,7 @@ public class MainActivity extends Activity {
                     FrameLayout.LayoutParams labelParams =
                             (FrameLayout.LayoutParams) label.getLayoutParams();
                     labelParams.width = cellWidth;
-                    labelParams.leftMargin = -Math.max(0, (cellWidth - target) / 2);
+                    labelParams.leftMargin = slot[0] * cellWidth - targetTileLeft;
                     labelParams.topMargin = target + LauncherUiUtils.dp(this, 1);
                     label.setLayoutParams(labelParams);
                 }
@@ -7278,9 +7279,8 @@ public class MainActivity extends Activity {
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            // Every visible date/AM-PM glyph keeps a 0.4dp white outer outline.
-            // Artwork-matched spans preserve the selected palette gradient and retain the
-            // existing 0.2dp inner white contour on themes that support it.
+            // Every visible date/AM-PM glyph keeps a 0.4dp white outer outline plus
+            // a 0.5sp black contour masked inside its fill in every colour/theme mode.
             int dateStart = use24Hour ? 0 : periodLength + 2;
             float density = getResources().getDisplayMetrics().density;
             float whiteOuterWidth = 0.4f * density;
@@ -11013,7 +11013,16 @@ public class MainActivity extends Activity {
 
         // Paint.measureText omits the em-based letter spacing set on the date TextView.
         float tracking = dateText.getLetterSpacing();
-        width += tracking * dateSizeSp * scaledDensity * Math.max(0, text.length() - 1);
+        int periodChars = 0;
+        if (!DateFormat.is24HourFormat(this)) {
+            String period = new SimpleDateFormat("a", Locale.getDefault()).format(new Date());
+            if (text.startsWith(period + ", ")) periodChars = period.length();
+        }
+        int dateSizedChars = Math.max(0, text.length() - periodChars);
+        width += tracking * dateSizeSp * scaledDensity * Math.max(0, dateSizedChars - 1);
+        if (periodChars > 1) {
+            width += tracking * pmSizeSp * scaledDensity * (periodChars - 1);
+        }
         return Math.max(1, (int) Math.ceil(width));
     }
 
