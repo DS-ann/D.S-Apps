@@ -817,12 +817,81 @@ public class MainActivity extends Activity {
                 }
                 activateClockForPage(restorePage);
                 updateClockResizeHandles();
+                // Also recover after process-preserving updates. Recompute both clock
+                // renderers after Android has completed the new text/layout pass.
+                for (int page = 0; page < clockPanelsByPage.length; page++) {
+                    scheduleClockRendererPostLayoutRecovery(page);
+                }
             }
             // A provider update can temporarily invalidate an AppWidgetHostView. Re-run
             // restoration after the package manager has had time to publish new metadata.
             restoreWidgetsOnPages();
         }
     };
+
+    /**
+     * Rebuild the standard clock's text buffer only after its parent has completed layout.
+     * ReplacementSpan advances and the colon's center are measured by TextView; a package
+     * update can leave that view holding the previous Layout even after getText() is current.
+     * A fresh SpannableStringBuilder plus a second-frame alignment pass drops those stale
+     * measurements without changing the selected font, colours, spacing or saved geometry.
+     */
+    private void scheduleClockRendererPostLayoutRecovery(final int page) {
+        if (page < 0 || page >= clockPanelsByPage.length) return;
+        final LinearLayout targetPanel = clockPanelsByPage[page];
+        final TextView targetClock = clockTextsByPage[page];
+        if (targetPanel == null || targetClock == null) return;
+
+        targetPanel.postOnAnimation(() -> {
+            if (isFinishing() || targetPanel.getParent() == null
+                    || clockPanelsByPage[page] != targetPanel
+                    || clockTextsByPage[page] != targetClock) return;
+
+            int restorePage = Math.max(0, Math.min(1, activeClockPage));
+            activateClockForPage(page);
+            int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+            boolean standardClockStyle = !(targetClock instanceof SevenSegmentClockTextView
+                    && style == 5);
+            String currentValue = targetClock.getText() == null
+                    ? "" : targetClock.getText().toString();
+            int colonAt = currentValue.indexOf(':');
+            int hourDigits = 0;
+            for (int i = 0; colonAt >= 0 && i < colonAt; i++) {
+                if (Character.digit(currentValue.charAt(i), 10) >= 0) hourDigits++;
+            }
+
+            if (standardClockStyle && hourDigits >= 2) {
+                CharSequence currentText = targetClock.getText();
+                if (currentText != null) {
+                    // Copy the spans so TextView discards the prior Layout/span cache.
+                    targetClock.setText(new android.text.SpannableStringBuilder(currentText),
+                            TextView.BufferType.SPANNABLE);
+                }
+            }
+            targetClock.setVisibility(View.VISIBLE);
+            targetClock.setAlpha(1f);
+            targetClock.requestLayout();
+            targetClock.invalidate();
+
+            targetClock.postOnAnimation(() -> {
+                if (isFinishing() || targetPanel.getParent() == null
+                        || clockPanelsByPage[page] != targetPanel
+                        || clockTextsByPage[page] != targetClock) return;
+                int callbackRestorePage = Math.max(0, Math.min(1, activeClockPage));
+                activateClockForPage(page);
+                targetClock.setVisibility(View.VISIBLE);
+                targetClock.setAlpha(1f);
+                syncClockColonVerticalCenter();
+                updateClockDigitHorizontalOffset();
+                applyClockColorEffectsToActivePage(clockColorPhase);
+                targetClock.requestLayout();
+                targetClock.postInvalidateOnAnimation();
+                activateClockForPage(callbackRestorePage);
+            });
+            activateClockForPage(restorePage);
+        });
+    }
+
     private final Runnable clockUpdater = new Runnable() {
         @Override public void run() {
             if (!clockUpdatesActive) return;
@@ -2160,6 +2229,15 @@ public class MainActivity extends Activity {
         clockUpdatesActive = true;
         handler.removeCallbacks(clockUpdater);
         handler.post(clockUpdater);
+        // The system may kill a launcher process during installation, so its dynamic
+        // PACKAGE_REPLACED receiver is not guaranteed to run. Recover the standard
+        // two-digit renderer on resume as well as from the package broadcast.
+        handler.postDelayed(() -> {
+            if (!clockUpdatesActive) return;
+            for (int page = 0; page < clockPanelsByPage.length; page++) {
+                scheduleClockRendererPostLayoutRecovery(page);
+            }
+        }, 120L);
         startClockColorAnimator();
         // Do not reconnect every AppWidgetHost synchronously inside onResume: on
         // Android 6 that can delay the first Home frame when returning from an app.
@@ -13598,6 +13676,17 @@ public class MainActivity extends Activity {
                             targetPanel.getTranslationX() + correction,
                             targetPanel.getTranslationY(), true);
                 }
+            }
+            // Recalculate horizontal alignment after the new child width and Layout have
+            // been measured. The earlier synchronous pass can still see pre-update metrics.
+            int restoreGeometryPage = Math.max(0, Math.min(1, activeClockPage));
+            if (clockPanelsByPage[targetPage] == targetPanel
+                    && clockTextsByPage[targetPage] != null) {
+                activateClockForPage(targetPage);
+                updateClockDigitHorizontalOffset();
+                syncClockColonVerticalCenter();
+                if (clockText != null) clockText.invalidate();
+                activateClockForPage(restoreGeometryPage);
             }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
                 updateClockResizeHandles();
