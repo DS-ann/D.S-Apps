@@ -6397,14 +6397,12 @@ public class MainActivity extends Activity {
                     int boundaryLeft = Math.max(0, Math.min(
                             Math.max(0, targetWidth - dragBoundaryWidth),
                             Math.round(desiredBoundaryLeft)));
-                    int firstGridRowTop = homeGridRowTop(0, rows, targetHeight, cellHeight);
-                    int lastGridRowBottom = Math.min(targetHeight,
-                            homeGridRowTop(rows - 1, rows, targetHeight, cellHeight) + cellHeight);
-                    int minGridBoundaryTop = Math.max(0, firstGridRowTop);
-                    int maxGridBoundaryTop = Math.max(minGridBoundaryTop,
-                            lastGridRowBottom - dragBoundaryHeight);
-                    int boundaryTop = Math.max(minGridBoundaryTop, Math.min(
-                            maxGridBoundaryTop, Math.round(desiredBoundaryTop)));
+                    // Keep the true release rectangle. Clamping it to the first/last
+                    // grid row would artificially snap drops made outside the grid into
+                    // a legal cell and bypass the 50% overlap threshold.
+                    int boundaryTop = Math.max(0, Math.min(
+                            Math.max(0, targetHeight - dragBoundaryHeight),
+                            Math.round(desiredBoundaryTop)));
 
                     // Generic placement follows the greatest-overlap grid cell; app-group drops
                     // are detected separately against the actual target grid cell, so an adjacent
