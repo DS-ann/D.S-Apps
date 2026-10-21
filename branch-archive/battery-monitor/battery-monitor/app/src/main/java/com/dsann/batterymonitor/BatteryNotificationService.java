@@ -15,6 +15,7 @@ public class BatteryNotificationService extends Service {
     private static final String CHANNEL_ID = "battery_monitor";
     private static final String PREFS = "settings";
     private static final String KEY_INTERVAL_MS = "sampling_interval_ms";
+    private static final String KEY_MY_BATTERY_INTERVAL_MS = "my_battery_sampling_interval_ms";
     private static final long MIN_INTERVAL_MS = 100L;
     private static final long MAX_INTERVAL_MS = 2000L;
     private static final long DEFAULT_INTERVAL_MS = 1000L;
@@ -26,16 +27,18 @@ public class BatteryNotificationService extends Service {
     private final Runnable updater = new Runnable() {
         @Override public void run() {
             updateNotification();
-            handler.postDelayed(this, getSamplingInterval());
+            handler.postDelayed(this, getNextSamplingInterval());
         }
     };
 
     @Override public void onCreate() {
         super.onCreate();
         createChannel();
-        startForeground(NOTIFICATION_ID, buildNotification(BatteryPercentCalculator.current(this)));
+        startForeground(NOTIFICATION_ID,
+                buildNotification("--", SessionStore.getActiveMah(this),
+                        SessionStore.getActiveScreenOnMs(this), BatteryPercentCalculator.current(this)));
         updateNotification();
-        handler.postDelayed(updater, getSamplingInterval());
+        handler.postDelayed(updater, getNextSamplingInterval());
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -47,6 +50,16 @@ public class BatteryNotificationService extends Service {
                 .getLong(KEY_INTERVAL_MS, DEFAULT_INTERVAL_MS);
         return value < MIN_INTERVAL_MS || value > MAX_INTERVAL_MS
                 ? DEFAULT_INTERVAL_MS : value;
+    }
+
+    private long getMyBatterySamplingInterval() {
+        long value = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getLong(KEY_MY_BATTERY_INTERVAL_MS, 500L);
+        return value < 50L || value > 1500L ? 500L : value;
+    }
+
+    private long getNextSamplingInterval() {
+        return Math.min(getSamplingInterval(), getMyBatterySamplingInterval());
     }
 
     private void updateNotification() {
@@ -74,32 +87,42 @@ public class BatteryNotificationService extends Service {
                 Math.min(1000L, selectedInterval));
         if (manager != null && (lastNotificationUpdateMs == 0L || now < lastNotificationUpdateMs
                 || now - lastNotificationUpdateMs >= notificationInterval)) {
-            manager.notify(NOTIFICATION_ID, buildNotification(estimate));
+            double usedMah = SessionStore.getActiveMah(this);
+            long screenOnMs = SessionStore.getActiveScreenOnMs(this);
+            manager.notify(NOTIFICATION_ID,
+                    buildNotification(reading.compact(), usedMah, screenOnMs, estimate));
             lastNotificationUpdateMs = now;
         }
     }
 
-    private Notification buildNotification(BatteryPercentCalculator.Estimate estimate) {
+    private Notification buildNotification(String liveText, double usedMah, long screenOnMs,
+                                           BatteryPercentCalculator.Estimate estimate) {
         Intent open = new Intent(this, MainActivity.class);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, open, flags);
 
-        String value = estimate != null && estimate.running && estimate.isAvailable()
-                ? estimate.percent + "%" : "--";
+        boolean available = estimate != null && estimate.running && estimate.isAvailable();
+        String title = available
+                ? String.format(java.util.Locale.US, "Calculated %d%% • Used %.1f mAh",
+                        estimate.percent, usedMah)
+                : String.format(java.util.Locale.US, "Battery • Used %.1f mAh", usedMah);
+        String measuredPercentage = available ? estimate.percent + "%" : "--";
+        String details = measuredPercentage + " • Screen ON: "
+                + SessionStore.formatDuration(screenOnMs) + " • " + liveText;
 
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         builder.setSmallIcon(R.drawable.ic_battery_percentage)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
-                .setContentTitle(value)
+                .setContentTitle(title)
+                .setContentText(details)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_STATUS);
-        // Intentionally no content text: notification displays only the calculated value.
         return builder.build();
     }
 

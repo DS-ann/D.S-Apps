@@ -24,6 +24,11 @@ import java.util.ArrayList;
 public class MainActivity extends Activity {
     private static final String PREFS="settings";
     private static final String KEY_INTERVAL_MS="sampling_interval_ms";
+    private static final String KEY_MY_BATTERY_INTERVAL_MS="my_battery_sampling_interval_ms";
+    private static final long MIN_MY_BATTERY_INTERVAL_MS=50L;
+    private static final long MAX_MY_BATTERY_INTERVAL_MS=1500L;
+    private static final long MY_BATTERY_INTERVAL_STEP_MS=10L;
+    private static final long DEFAULT_MY_BATTERY_INTERVAL_MS=500L;
     private static final long MIN_RECORDING_INTERVAL_MS=100L;
     private static final long MAX_RECORDING_INTERVAL_MS=2000L;
     private static final long RECORDING_INTERVAL_STEP_MS=10L;
@@ -33,8 +38,8 @@ public class MainActivity extends Activity {
     private TextView calculatedPercent,calculatedMah;
     private EditText customCapacityInput,startingChargeInput;
     private Switch notificationSwitch;
-    private SeekBar samplingBar;
-    private TextView samplingLabel;
+    private SeekBar samplingBar,myBatterySamplingBar;
+    private TextView samplingLabel,myBatterySamplingLabel;
     private LinearLayout monitorView,myBatteryView,historyView,historyList;
     private View monitorContainer;
     private ScrollView myBatteryScroll;
@@ -43,6 +48,7 @@ public class MainActivity extends Activity {
     private ScrollView healthScroll;
     private TextView healthLevel,healthStatus,healthTemp,healthVoltage,healthCurrent,healthSource,healthFullCharge,healthRemaining,healthDesign,healthRatio,healthRaw,healthFile,healthFullEnergy,healthDesignEnergy,healthSessionEstimate,healthSessionHealth;
     private final Runnable updater=new Runnable(){public void run(){updateValues();handler.postDelayed(this,currentRecordingIntervalMs());}};
+    private final Runnable myBatteryUpdater=new Runnable(){public void run(){updateMyBatteryEstimate();handler.postDelayed(this,currentMyBatteryIntervalMs());}};
     
     @Override protected void onCreate(Bundle state){
         super.onCreate(state);
@@ -242,6 +248,31 @@ public class MainActivity extends Activity {
         TextView title=text("My Battery",22);
         title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         r.addView(title,full());
+
+        LinearLayout intervalCard=card();
+        myBatterySamplingLabel=text("My Battery calculation interval  •  0.50 s",13);
+        myBatterySamplingLabel.setTextColor(0xFF9AA0AA);
+        intervalCard.addView(myBatterySamplingLabel,full());
+        myBatterySamplingBar=new SeekBar(this);
+        myBatterySamplingBar.setMax((int)((MAX_MY_BATTERY_INTERVAL_MS-MIN_MY_BATTERY_INTERVAL_MS)/MY_BATTERY_INTERVAL_STEP_MS));
+        intervalCard.addView(myBatterySamplingBar,new LinearLayout.LayoutParams(-1,-2));
+        android.content.SharedPreferences batteryPrefs=getSharedPreferences(PREFS,0);
+        long savedBatteryInterval=batteryPrefs.getLong(KEY_MY_BATTERY_INTERVAL_MS,DEFAULT_MY_BATTERY_INTERVAL_MS);
+        if(savedBatteryInterval<MIN_MY_BATTERY_INTERVAL_MS||savedBatteryInterval>MAX_MY_BATTERY_INTERVAL_MS)
+            savedBatteryInterval=DEFAULT_MY_BATTERY_INTERVAL_MS;
+        myBatterySamplingBar.setProgress((int)((savedBatteryInterval-MIN_MY_BATTERY_INTERVAL_MS)/MY_BATTERY_INTERVAL_STEP_MS));
+        myBatterySamplingLabel.setText(formatMyBatteryInterval(savedBatteryInterval));
+        myBatterySamplingBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar b,int progress,boolean fromUser){
+                long interval=MIN_MY_BATTERY_INTERVAL_MS+progress*MY_BATTERY_INTERVAL_STEP_MS;
+                myBatterySamplingLabel.setText(formatMyBatteryInterval(interval));
+                if(fromUser)getSharedPreferences(PREFS,0).edit().putLong(KEY_MY_BATTERY_INTERVAL_MS,interval).apply();
+            }
+            public void onStartTrackingTouch(SeekBar b){}
+            public void onStopTrackingTouch(SeekBar b){}
+        });
+        r.addView(intervalCard,top(10));
+
         LinearLayout calculator=card(0xFF17271F,0xFF63E6A8);
         TextView calculatorTitle=text("Current estimate",16);
         calculatorTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
@@ -451,8 +482,11 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();
         updateValues();
+        updateMyBatteryEstimate();
         handler.removeCallbacks(updater);
         handler.post(updater);
+        handler.removeCallbacks(myBatteryUpdater);
+        handler.post(myBatteryUpdater);
         handler.removeCallbacks(historyUpdater);
         if(historyView!=null&&historyView.getVisibility()==View.VISIBLE){refreshHistory();handler.postDelayed(historyUpdater,10000);}
         if(healthView!=null&&healthView.getVisibility()==View.VISIBLE)refreshHealth();
@@ -460,6 +494,7 @@ public class MainActivity extends Activity {
     
     @Override protected void onPause(){
         handler.removeCallbacks(updater);
+        handler.removeCallbacks(myBatteryUpdater);
         handler.removeCallbacks(historyUpdater);
         super.onPause();
     }
@@ -469,13 +504,21 @@ public class MainActivity extends Activity {
             BatteryReader.Reading r=BatteryReader.read(this);
             voltage.setText(r.voltageText());
             current.setText(r.currentText());
-            boolean backgroundRecording=getSharedPreferences(PREFS,0).getBoolean("notification_enabled",false);
-            updateCalculatedLevel(backgroundRecording
-                    ?BatteryPercentCalculator.current(this)
-                    :BatteryPercentCalculator.sample(this,r));
+
         } catch (Throwable ignored) {
             voltage.setText("N/A");
             current.setText("N/A");
+        }
+    }
+
+    private void updateMyBatteryEstimate(){
+        try{
+            BatteryReader.Reading reading=BatteryReader.read(this);
+            boolean backgroundRecording=getSharedPreferences(PREFS,0).getBoolean("notification_enabled",false);
+            updateCalculatedLevel(backgroundRecording
+                    ?BatteryPercentCalculator.current(this)
+                    :BatteryPercentCalculator.sample(this,reading));
+        }catch(Throwable ignored){
             updateCalculatedLevel(BatteryPercentCalculator.current(this));
         }
     }
@@ -554,6 +597,16 @@ public class MainActivity extends Activity {
 
     private String formatRecordingInterval(long ms){
         return String.format(java.util.Locale.US,"Current recording interval  •  %.2f s",ms/1000.0);
+    }
+
+    private long currentMyBatteryIntervalMs(){
+        long value=getSharedPreferences(PREFS,0).getLong(KEY_MY_BATTERY_INTERVAL_MS,DEFAULT_MY_BATTERY_INTERVAL_MS);
+        return value<MIN_MY_BATTERY_INTERVAL_MS||value>MAX_MY_BATTERY_INTERVAL_MS
+                ?DEFAULT_MY_BATTERY_INTERVAL_MS:value;
+    }
+
+    private String formatMyBatteryInterval(long ms){
+        return String.format(java.util.Locale.US,"My Battery calculation interval  •  %.2f s",ms/1000.0);
     }
 
     private void refreshHistory(){
