@@ -1416,9 +1416,16 @@ public class MainActivity extends Activity {
                     top = Math.max(0, Math.min(top, pageHeight - minH));
                     bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
                 }
-                // Allow the live resize preview to cross neighbouring bounds. The existing
-                // displacement transaction rearranges surrounding items instead of freezing
-                // the handle at the first collision.
+                // Clamp the moving edge to the nearest workspace boundary. A clock resize
+                // is not a displacement gesture: apps, groups, shortcuts and widgets keep
+                // their full layout rectangles and the clock edge stops before touching them.
+                android.graphics.Rect constrainedBounds = constrainClockResizeBounds(
+                        activePage, clockPanel, left, top, right, bottom, clockResizeEdge,
+                        minW, minH);
+                left = constrainedBounds.left;
+                top = constrainedBounds.top;
+                right = constrainedBounds.right;
+                bottom = constrainedBounds.bottom;
 
                 // The panel's measured width is its unscaled natural width; scaleX
                 // is the saved length percentage. Convert the requested visible width
@@ -9635,194 +9642,182 @@ public class MainActivity extends Activity {
      * the fallback when a safe common shift is unavailable.
      */
     private boolean tryShiftHomeIconCohort(FrameLayout page, View movingView, View seed,
-            int preferredX, int preferredY) {
-        if (page == null || movingView == null || seed == null
+            int preferredX, int preferredY, int pushDx, int pushDy) {
+        if (page == null || movingView == null || seed == null || preferredX < 0 || preferredY < 0
                 || !isHomeGridDragMover(movingView) || !isHomeGridIcon(seed)
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
 
         int columns = homeGridColumnsForItem(seed);
-        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
         int[] seedSlot = homeGridIconSlot(page, seed, cellHeight, rows);
         if (seedSlot == null) return false;
 
-        java.util.ArrayList<int[]> directions = new java.util.ArrayList<int[]>();
-        java.util.HashSet<String> seenDirections = new java.util.HashSet<String>();
-        if (preferredX >= 0 && preferredY >= 0) {
-            int targetCol = Math.max(0, Math.min(columns - 1,
-                    Math.round(preferredX / (float) cellWidth)));
-            int targetRow = homeGridRowFromTop(preferredY, rows, page.getHeight(), cellHeight);
-            int deltaCol = targetCol - seedSlot[0];
-            int deltaRow = targetRow - seedSlot[1];
-            if (Math.abs(deltaCol) >= Math.abs(deltaRow) && deltaCol != 0) {
-                addAppShiftDirection(directions, seenDirections, Integer.signum(deltaCol), 0);
-                if (deltaRow != 0) addAppShiftDirection(
-                        directions, seenDirections, 0, Integer.signum(deltaRow));
-            } else if (deltaRow != 0) {
-                addAppShiftDirection(directions, seenDirections, 0, Integer.signum(deltaRow));
-                if (deltaCol != 0) addAppShiftDirection(
-                        directions, seenDirections, Integer.signum(deltaCol), 0);
+        int requestedCol = Math.max(0, Math.min(columns - 1,
+                Math.round(preferredX / (float) cellWidth)));
+        int requestedRow = homeGridRowFromTop(preferredY, rows, page.getHeight(), cellHeight);
+        int deltaCol = requestedCol - seedSlot[0];
+        int deltaRow = requestedRow - seedSlot[1];
+
+        // Use one grid direction for the whole contiguous run. Prefer the actual
+        // free target found by the collision planner; when it is diagonal/equal,
+        // fall back to the mover's real direction so the row does not split.
+        if (deltaCol == 0 && deltaRow == 0) {
+            if (pushDx != 0 || pushDy != 0) {
+                deltaCol = pushDx;
+                deltaRow = pushDy;
+            } else {
+                int[] mover = itemGeometry(movingView);
+                int[] obstacle = itemGeometry(seed);
+                int dx = mover[0] + mover[2] / 2 - obstacle[0] - obstacle[2] / 2;
+                int dy = mover[1] + mover[3] / 2 - obstacle[1] - obstacle[3] / 2;
+                if (Math.abs(dx) >= Math.abs(dy)) deltaCol = dx < 0 ? 1 : -1;
+                else deltaRow = dy < 0 ? 1 : -1;
             }
         }
-        int[] moverGeometry = itemGeometry(movingView);
-        int[] seedGeometry = itemGeometry(seed);
-        int moverCenterX = moverGeometry[0] + moverGeometry[2] / 2;
-        int moverCenterY = moverGeometry[1] + moverGeometry[3] / 2;
-        int seedCenterX = seedGeometry[0] + seedGeometry[2] / 2;
-        int seedCenterY = seedGeometry[1] + seedGeometry[3] / 2;
-        if (Math.abs(seedCenterX - moverCenterX) >= Math.abs(seedCenterY - moverCenterY)) {
-            addAppShiftDirection(directions, seenDirections,
-                    moverCenterX < seedCenterX ? 1 : -1, 0);
-            addAppShiftDirection(directions, seenDirections,
-                    0, moverCenterY < seedCenterY ? 1 : -1);
+        if (deltaCol != 0 && deltaRow != 0) {
+            if (Math.abs(deltaCol * cellWidth) >= Math.abs(deltaRow * cellHeight)) {
+                deltaCol = Integer.signum(deltaCol);
+                deltaRow = 0;
+            } else {
+                deltaRow = Integer.signum(deltaRow);
+                deltaCol = 0;
+            }
         } else {
-            addAppShiftDirection(directions, seenDirections,
-                    0, moverCenterY < seedCenterY ? 1 : -1);
-            addAppShiftDirection(directions, seenDirections,
-                    moverCenterX < seedCenterX ? 1 : -1, 0);
+            deltaCol = Integer.signum(deltaCol);
+            deltaRow = Integer.signum(deltaRow);
         }
-        addAppShiftDirection(directions, seenDirections, 1, 0);
-        addAppShiftDirection(directions, seenDirections, -1, 0);
-        addAppShiftDirection(directions, seenDirections, 0, 1);
-        addAppShiftDirection(directions, seenDirections, 0, -1);
+        if (deltaCol == 0 && deltaRow == 0) return false;
 
-        for (int[] direction : directions) {
-            int dxCells = direction[0], dyCells = direction[1];
-            if (seedSlot[0] + dxCells < 0 || seedSlot[0] + dxCells >= columns
-                    || seedSlot[1] + dyCells < 0 || seedSlot[1] + dyCells >= rows) continue;
+        java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
+        java.util.IdentityHashMap<View, Boolean> cohortSet =
+                new java.util.IdentityHashMap<View, Boolean>();
+        java.util.IdentityHashMap<View, int[]> slots =
+                new java.util.IdentityHashMap<View, int[]>();
+        cohort.add(seed);
+        cohortSet.put(seed, Boolean.TRUE);
+        slots.put(seed, seedSlot);
 
-            java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
-            java.util.IdentityHashMap<View, Boolean> members =
-                    new java.util.IdentityHashMap<View, Boolean>();
-            java.util.IdentityHashMap<View, int[]> slots =
-                    new java.util.IdentityHashMap<View, int[]>();
-            cohort.add(seed);
-            members.put(seed, Boolean.TRUE);
-            slots.put(seed, seedSlot);
-            boolean blocked = false;
-
-            // Expanding only along the shifted row/column groups the whole chain but
-            // avoids unexpectedly dragging unrelated apps from adjacent rows.
-            for (int memberIndex = 0; memberIndex < cohort.size() && !blocked; memberIndex++) {
-                View member = cohort.get(memberIndex);
-                // A cohort can be re-targeted while its previous synchronized
-                // displacement animation is in flight. Its layout margins already
-                // represent the reserved grid slot, so use that slot and replace the
-                // destination as a group instead of falling back to single-item pushes.
-                int[] originSlot = slots.get(member);
-                int targetCol = originSlot[0] + dxCells;
-                int targetRow = originSlot[1] + dyCells;
-                if (targetCol < 0 || targetCol >= columns || targetRow < 0 || targetRow >= rows) {
-                    blocked = true;
+        int col = seedSlot[0];
+        int row = seedSlot[1];
+        // Extend only through immediately adjacent home-grid items in the same
+        // grid family. Every member advances by the identical cell vector, keeping
+        // the row/column together and moving its last member into the open slot.
+        while (true) {
+            int nextCol = col + deltaCol;
+            int nextRow = row + deltaRow;
+            if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) {
+                return false;
+            }
+            View next = null;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View candidate = page.getChildAt(i);
+                if (candidate == movingView || candidate == seed
+                        || !isHomeGridIcon(candidate)
+                        || isWorkspaceContactShortcut(candidate)
+                                != isWorkspaceContactShortcut(seed)) continue;
+                int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
+                if (candidateSlot != null
+                        && candidateSlot[0] == nextCol && candidateSlot[1] == nextRow) {
+                    next = candidate;
+                    slots.put(candidate, candidateSlot);
                     break;
                 }
-                int[] memberGeometry = itemGeometry(member);
-                int originX = homeGridIconLeftAt(
-                        member, originSlot[0], cellWidth, memberGeometry[2]);
-                int originY = homeGridIconTopAt(
-                        page, member, originSlot[1], rows, cellHeight);
-                int targetX = homeGridIconLeftAt(
-                        member, targetCol, cellWidth, memberGeometry[2]);
-                int targetY = homeGridIconTopAt(page, member, targetRow, rows, cellHeight);
-                android.graphics.Rect startVisible = appIconVisualRectAt(
-                        member, originX, originY, memberGeometry[2], memberGeometry[3]);
-                android.graphics.Rect targetVisible = appIconVisualRectAt(
-                        member, targetX, targetY, memberGeometry[2], memberGeometry[3]);
-                android.graphics.Rect movingVisible = collisionRectForInteraction(
-                        movingView, moverGeometry, member);
-                if (android.graphics.Rect.intersects(targetVisible, movingVisible)) {
-                    blocked = true;
-                    break;
+            }
+            if (next == null) break;
+            if (next == movingView || cohortSet.containsKey(next)) return false;
+            cohort.add(next);
+            cohortSet.put(next, Boolean.TRUE);
+            int[] nextSlot = slots.get(next);
+            col = nextSlot[0];
+            row = nextSlot[1];
+            if (cohort.size() > page.getChildCount()) return false;
+        }
+        // A one-item shift is handled by the ordinary placement planner. This fast
+        // path is specifically the together-row/column behaviour.
+        if (cohort.size() < 2) return false;
+
+        int[] moverGeometry = itemGeometry(movingView);
+        java.util.IdentityHashMap<View, int[]> targets =
+                new java.util.IdentityHashMap<View, int[]>();
+        java.util.IdentityHashMap<View, int[]> geometries =
+                new java.util.IdentityHashMap<View, int[]>();
+
+        for (View member : cohort) {
+            int[] slot = slots.get(member);
+            int[] geometry = itemGeometry(member);
+            int targetCol = slot[0] + deltaCol;
+            int targetRow = slot[1] + deltaRow;
+            if (targetCol < 0 || targetCol >= columns || targetRow < 0 || targetRow >= rows) {
+                return false;
+            }
+            int targetX = homeGridIconLeftAt(member, targetCol, cellWidth, geometry[2]);
+            int targetY = homeGridIconTopAt(page, member, targetRow, rows, cellHeight);
+            if (targetX < 0 || targetY < 0 || targetX + geometry[2] > page.getWidth()
+                    || targetY + geometry[3] > page.getHeight()) return false;
+
+            android.graphics.Rect targetBounds = collisionRectAtForInteraction(
+                    member, targetX, targetY, geometry[2], geometry[3], movingView);
+            android.graphics.Rect moverBounds = collisionRectForInteraction(
+                    movingView, moverGeometry, member);
+            if (android.graphics.Rect.intersects(targetBounds, moverBounds)) return false;
+
+            // Validate every destination against both current and reserved bounds.
+            // Ignore cohort members because they move together by exactly one vector.
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View blocker = page.getChildAt(i);
+                if (blocker == member || blocker == movingView || cohortSet.containsKey(blocker)
+                        || blocker.getVisibility() != View.VISIBLE || !isWorkspaceItem(blocker)) {
+                    continue;
                 }
-                android.graphics.Rect swept = new android.graphics.Rect(startVisible);
-                swept.union(targetVisible);
+                int[] blockerGeometry = itemGeometry(blocker);
+                if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
+                android.graphics.Rect currentBounds = collisionRectForInteraction(
+                        blocker, blockerGeometry, member);
+                if (android.graphics.Rect.intersects(targetBounds, currentBounds)) return false;
 
-                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
-                    View blocker = page.getChildAt(childIndex);
-                    if (blocker == member || blocker == movingView
-                            || blocker.getVisibility() != View.VISIBLE
-                            || !isWorkspaceItem(blocker) || members.containsKey(blocker)) continue;
-                    int[] blockerGeometry = itemGeometry(blocker);
-                    if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
-
-                    boolean gridBlocker = isHomeGridIcon(blocker);
-                    boolean sameGridFamily = gridBlocker
-                            && (isWorkspaceContactShortcut(blocker) == isWorkspaceContactShortcut(seed));
-                    int[] blockerSlot = gridBlocker
-                            ? homeGridIconSlot(page, blocker, cellHeight, rows) : null;
-                    boolean targetSlotOccupied = sameGridFamily && blockerSlot != null
-                            && blockerSlot[0] == targetCol && blockerSlot[1] == targetRow;
-                    android.graphics.Rect sweepForBlocker = new android.graphics.Rect(swept);
-                    if (!gridBlocker) {
-                        int margin = workspaceCollisionMargin(member);
-                        if (margin > 0) sweepForBlocker.inset(-margin, -margin);
-                    }
-                    android.graphics.Rect blockerVisible =
-                            collisionRectForInteraction(blocker, blockerGeometry, member);
-                    int[] blockerTarget = liveDisplacementTargets.get(blocker);
-                    boolean targetPathCollision = android.graphics.Rect.intersects(
-                            sweepForBlocker, blockerVisible);
-                    if (blockerTarget != null) {
-                        android.graphics.Rect plannedBounds = collisionRectAtForInteraction(
-                                blocker, blockerTarget[0], blockerTarget[1],
-                                blockerGeometry[2], blockerGeometry[3], member);
-                        targetPathCollision = targetPathCollision
-                                || android.graphics.Rect.intersects(sweepForBlocker, plannedBounds);
-                    }
-
-                    if (!targetSlotOccupied && !targetPathCollision) continue;
-                    if (!gridBlocker) {
-                        blocked = true;
-                        break;
-                    }
-                    // Do not mix unlike column geometries in one cohort; the generic
-                    // planner handles app/shortcut interactions without mis-snapping.
-                    boolean sameLane = sameGridFamily && (dxCells != 0
-                            ? blockerSlot != null && blockerSlot[1] == originSlot[1]
-                            : blockerSlot != null && blockerSlot[0] == originSlot[0]);
-                    // Existing cohort members may already have a reserved grid
-                    // destination or a running synchronized animator. They still belong
-                    // to the same row/column and must be re-targeted together when the
-                    // dragged item advances into the next reserved slot.
-                    if (!sameLane) {
-                        blocked = true;
-                        break;
-                    }
-                    if (!members.containsKey(blocker)) {
-                        int[] actualSlot = homeGridIconSlot(page, blocker, cellHeight, rows);
-                        if (actualSlot == null) {
-                            blocked = true;
-                            break;
-                        }
-                        members.put(blocker, Boolean.TRUE);
-                        slots.put(blocker, actualSlot);
-                        cohort.add(blocker);
-                    }
+                int[] reservedTarget = liveDisplacementTargets.get(blocker);
+                if (reservedTarget != null) {
+                    android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
+                            blocker, reservedTarget[0], reservedTarget[1],
+                            blockerGeometry[2], blockerGeometry[3], member);
+                    if (android.graphics.Rect.intersects(targetBounds, reservedBounds)) return false;
                 }
             }
 
-            if (blocked || cohort.size() < 2) continue;
-            // Commit all reservations first, then enqueue the whole same-vector shift.
-            for (View member : cohort) {
-                int[] originSlot = slots.get(member);
-                int[] originGeometry = itemGeometry(member);
-                int targetX = homeGridIconLeftAt(
-                        member, originSlot[0] + dxCells, cellWidth, originGeometry[2]);
-                int targetY = homeGridIconTopAt(
-                        page, member, originSlot[1] + dyCells, rows, cellHeight);
-                if (!liveDisplacedItems.containsKey(member)) {
-                    liveDisplacedItems.put(member,
-                            new int[]{originGeometry[0], originGeometry[1]});
-                }
-                liveDisplacementTargets.put(member, new int[]{targetX, targetY});
-                liveDragGeometryCache.remove(member);
-                animateDisplacedItemTo(member, targetX, targetY);
+            // A transaction retains original locations so reversing the finger can
+            // restore them. Do not let this cohort claim one of those reserved slots.
+            for (java.util.Map.Entry<View, int[]> entry : liveDisplacedItems.entrySet()) {
+                View reserved = entry.getKey();
+                if (reserved == member || reserved.getParent() != page
+                        || cohortSet.containsKey(reserved) || reserved == movingView) continue;
+                int[] original = entry.getValue();
+                int[] reservedGeometry = itemGeometry(reserved);
+                android.graphics.Rect originalBounds = collisionRectAtForInteraction(
+                        reserved, original[0], original[1],
+                        reservedGeometry[2], reservedGeometry[3], member);
+                if (android.graphics.Rect.intersects(targetBounds, originalBounds)) return false;
             }
-            return true;
+
+            targets.put(member, new int[]{targetX, targetY});
+            geometries.put(member, geometry);
         }
-        return false;
+
+        // Record the complete shift before any animator starts. All members share
+        // a common direction and are committed together on release.
+        for (View member : cohort) {
+            int[] geometry = geometries.get(member);
+            int[] target = targets.get(member);
+            if (!liveDisplacedItems.containsKey(member)) {
+                liveDisplacedItems.put(member, new int[]{geometry[0], geometry[1]});
+            }
+            liveDisplacementTargets.put(member, new int[]{target[0], target[1]});
+            liveDragGeometryCache.remove(member);
+            animateDisplacedItemTo(member, target[0], target[1]);
+        }
+        return true;
     }
 
     private void addAppShiftDirection(java.util.ArrayList<int[]> directions,
@@ -10256,6 +10251,107 @@ public class MainActivity extends Activity {
         return true;
     }
 
+    /**
+     * Limits only the actively dragged clock edge against each workspace item's full
+     * layout bounds. Unlike canPlaceWorkspaceItem(), this clamps the requested edge to
+     * the nearest safe boundary instead of rejecting the entire resize frame.
+     */
+    private android.graphics.Rect constrainClockResizeBounds(FrameLayout page, View clock,
+            int left, int top, int right, int bottom, int edge, int minWidth, int minHeight) {
+        android.graphics.Rect bounds = new android.graphics.Rect(left, top, right, bottom);
+        if (page == null || clock == null || edge < 1 || edge > 4) return bounds;
+        int gap = Math.max(1, LauncherUiUtils.dp(this, 1));
+
+        // More than one obstacle can constrain the same edge. Revisit the list until
+        // the moving edge is stable; only that edge is changed, preserving the anchor.
+        int passLimit = Math.max(1, page.getChildCount() + 1);
+        for (int pass = 0; pass < passLimit; pass++) {
+            boolean changed = false;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View other = page.getChildAt(i);
+                if (other == clock || other == workspaceTransferProxy
+                        || other.getVisibility() != View.VISIBLE || !isWorkspaceItem(other)) continue;
+                int[] geometry = itemGeometry(other);
+                if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+
+                android.graphics.Rect obstacle = collisionRectForInteraction(other, geometry, clock);
+                changed |= constrainClockResizeAgainstObstacle(
+                        bounds, obstacle, edge, minWidth, minHeight, gap);
+                int[] reserved = liveDisplacementTargets.get(other);
+                if (reserved != null) {
+                    android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
+                            other, reserved[0], reserved[1],
+                            geometry[2], geometry[3], clock);
+                    changed |= constrainClockResizeAgainstObstacle(
+                            bounds, reservedBounds, edge, minWidth, minHeight, gap);
+                }
+            }
+            if (!changed) break;
+        }
+
+        if (edge == 1) bounds.left = Math.max(0,
+                Math.min(bounds.left, bounds.right - minWidth));
+        else if (edge == 2) bounds.right = Math.min(page.getWidth(),
+                Math.max(bounds.right, bounds.left + minWidth));
+        else if (edge == 3) bounds.top = Math.max(0,
+                Math.min(bounds.top, bounds.bottom - minHeight));
+        else bounds.bottom = Math.min(page.getHeight(),
+                Math.max(bounds.bottom, bounds.top + minHeight));
+        return bounds;
+    }
+
+    private boolean constrainClockResizeAgainstObstacle(android.graphics.Rect bounds,
+            android.graphics.Rect obstacle, int edge, int minWidth, int minHeight, int gap) {
+        int oldMovingEdge;
+        int newMovingEdge;
+        if (edge == 1) {
+            if (bounds.top >= obstacle.bottom || bounds.bottom <= obstacle.top
+                    || bounds.right <= obstacle.left || bounds.left >= obstacle.right + gap) {
+                return false;
+            }
+            oldMovingEdge = bounds.left;
+            newMovingEdge = Math.min(bounds.right - minWidth,
+                    Math.max(bounds.left, obstacle.right + gap));
+            if (newMovingEdge <= oldMovingEdge) return false;
+            bounds.left = newMovingEdge;
+            return true;
+        }
+        if (edge == 2) {
+            if (bounds.top >= obstacle.bottom || bounds.bottom <= obstacle.top
+                    || bounds.left >= obstacle.right || bounds.right <= obstacle.left - gap) {
+                return false;
+            }
+            oldMovingEdge = bounds.right;
+            newMovingEdge = Math.max(bounds.left + minWidth,
+                    Math.min(bounds.right, obstacle.left - gap));
+            if (newMovingEdge >= oldMovingEdge) return false;
+            bounds.right = newMovingEdge;
+            return true;
+        }
+        if (edge == 3) {
+            if (bounds.left >= obstacle.right || bounds.right <= obstacle.left
+                    || bounds.bottom <= obstacle.top || bounds.top >= obstacle.bottom + gap) {
+                return false;
+            }
+            oldMovingEdge = bounds.top;
+            newMovingEdge = Math.min(bounds.bottom - minHeight,
+                    Math.max(bounds.top, obstacle.bottom + gap));
+            if (newMovingEdge <= oldMovingEdge) return false;
+            bounds.top = newMovingEdge;
+            return true;
+        }
+        if (bounds.left >= obstacle.right || bounds.right <= obstacle.left
+                || bounds.top >= obstacle.bottom || bounds.bottom <= obstacle.top - gap) {
+            return false;
+        }
+        oldMovingEdge = bounds.bottom;
+        newMovingEdge = Math.max(bounds.top + minHeight,
+                Math.min(bounds.bottom, obstacle.top - gap));
+        if (newMovingEdge >= oldMovingEdge) return false;
+        bounds.bottom = newMovingEdge;
+        return true;
+    }
+
     private void showWorkspaceOverlapRejected() {
         Toast.makeText(this, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
     }
@@ -10675,7 +10771,7 @@ public class MainActivity extends Activity {
             if ((!alreadyDisplaced || targetCollides)
                     && isHomeGridDragMover(movingView)
                     && isHomeGridIcon(other)
-                    && tryShiftHomeIconCohort(page, movingView, other, bestX, bestY)) {
+                    && tryShiftHomeIconCohort(page, movingView, other, bestX, bestY, pushDx, pushDy)) {
                 continue;
             }
 
