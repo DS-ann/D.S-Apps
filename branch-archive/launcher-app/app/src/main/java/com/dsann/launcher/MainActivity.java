@@ -4126,8 +4126,8 @@ public class MainActivity extends Activity {
             lp.topMargin = panelBounds.top;
             panel.setLayoutParams(lp);
 
-            float pivotX = Math.max(0f, Math.min(lp.width, iconX - panelLeft));
-            float pivotY = Math.max(0f, Math.min(lp.height, iconY - panelTop));
+            float pivotX = Math.max(0f, Math.min(lp.width, iconX - panelBounds.left));
+            float pivotY = Math.max(0f, Math.min(lp.height, iconY - panelBounds.top));
             panel.setPivotX(pivotX);
             panel.setPivotY(pivotY);
             float startScaleX = Math.min(1f, Math.max(0.06f, iconW / (float) Math.max(1, lp.width)));
