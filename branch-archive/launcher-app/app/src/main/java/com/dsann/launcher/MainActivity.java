@@ -10985,17 +10985,13 @@ public class MainActivity extends Activity {
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
         float panelScaleX = Math.max(0.01f, Math.abs(clockPanel.getScaleX()));
-        // Preserve the established seven-segment offset. Typography clocks are centered
-        // within the background; the only one-digit correction balances the invisible
-        // leading figure-space against the two visible minute digits.
-        float offsetScaleDenominator = sevenSegment
-                ? Math.max(1f, panelScaleX) : panelScaleX;
         float targetX;
         if (sevenSegment) {
-            targetX = -LauncherUiUtils.dp(this, 15) / offsetScaleDenominator;
+            // Preserve the already-tuned seven-segment positioning exactly.
+            targetX = -LauncherUiUtils.dp(this, 15) / Math.max(1f, panelScaleX);
         } else {
-            String currentClock = clockText.getText() == null
-                    ? "" : clockText.getText().toString();
+            CharSequence clockValue = clockText.getText() == null ? "" : clockText.getText();
+            String currentClock = clockValue.toString();
             int colon = currentClock.indexOf(':');
             int hourDigits = 0;
             if (colon > 0) {
@@ -11003,14 +10999,46 @@ public class MainActivity extends Activity {
                     if (Character.digit(currentClock.charAt(i), 10) >= 0) hourDigits++;
                 }
             }
+            float textScaleX = Math.max(0.01f, Math.abs(clockText.getScaleX()));
             if (hourDigits == 1) {
+                // The invisible leading figure-space equalizes 9:xx and 10:xx widths.
+                // Shift by half that reserved cell so the *visible* one-digit clock is
+                // balanced, leaving the colon slightly left of the background midpoint.
                 float leadingCellWidth = clockText.getPaint().measureText("\u2007");
                 float trackingWidth = clockText.getTextSize() * clockText.getLetterSpacing();
-                float leadingCellAdvance = Math.max(0f, leadingCellWidth + trackingWidth)
-                        * Math.abs(clockText.getScaleX());
-                targetX = -(leadingCellAdvance * 0.5f) / offsetScaleDenominator;
+                float leadingCellAdvance = Math.max(0f, leadingCellWidth + trackingWidth);
+                targetX = -(leadingCellAdvance * 0.5f) * textScaleX;
+            } else if (colon >= 0) {
+                // Center the colon itself, not merely the entire string. This accounts for
+                // the custom colon/digit spans and the actual advances of the displayed
+                // glyphs, while the clock group width remains independent of date sizing.
+                int groupWidth = 0;
+                ViewGroup.LayoutParams groupParams = clockGroup == null
+                        ? null : clockGroup.getLayoutParams();
+                if (groupParams != null && groupParams.width > 0) {
+                    groupWidth = groupParams.width;
+                } else if (clockGroup != null) {
+                    groupWidth = clockGroup.getWidth();
+                }
+                if (groupWidth > 0) {
+                    android.text.TextPaint paint = clockText.getPaint();
+                    float fullTextWidth = android.text.Layout.getDesiredWidth(
+                            clockValue, paint);
+                    float prefixWidth = android.text.Layout.getDesiredWidth(
+                            clockValue, 0, colon, paint);
+                    float colonAdvance = android.text.Layout.getDesiredWidth(
+                            clockValue, colon, colon + 1, paint);
+                    if (colonAdvance <= 0f) {
+                        colonAdvance = Math.max(1f,
+                                Math.round(paint.measureText(":") * 0.45f));
+                    }
+                    float colonCenter = (groupWidth - fullTextWidth) * 0.5f
+                            + prefixWidth + colonAdvance * 0.5f;
+                    targetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
+                } else {
+                    targetX = 0f;
+                }
             } else {
-                // With two hour digits the colon itself sits at the panel midpoint.
                 targetX = 0f;
             }
         }
