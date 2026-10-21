@@ -5,7 +5,10 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -25,6 +28,9 @@ public class MainActivity extends Activity {
     private static final String PREFS="settings";
     private static final String KEY_INTERVAL_MS="sampling_interval_ms";
     private static final String KEY_MY_BATTERY_INTERVAL_MS="my_battery_sampling_interval_ms";
+    private static final String KEY_USE_ANDROID_PERCENT="my_battery_use_android_percent";
+    private static final String KEY_ANDROID_PERCENT_RESET_PENDING="my_battery_android_percent_reset_pending";
+    private static final String KEY_LAST_ANDROID_PERCENT="my_battery_last_android_percent";
     private static final long MIN_MY_BATTERY_INTERVAL_MS=50L;
     private static final long MAX_MY_BATTERY_INTERVAL_MS=1500L;
     private static final long MY_BATTERY_INTERVAL_STEP_MS=10L;
@@ -35,8 +41,9 @@ public class MainActivity extends Activity {
     private static final long DEFAULT_RECORDING_INTERVAL_MS=1000L;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private TextView voltage,current;
-    private TextView calculatedPercent,calculatedMah;
+    private TextView calculatedPercent,calculatedMah,androidPercentStatus;
     private EditText customCapacityInput,startingChargeInput;
+    private Button useAndroidPercentButton;
     private Switch notificationSwitch;
     private SeekBar samplingBar,myBatterySamplingBar;
     private TextView samplingLabel,myBatterySamplingLabel;
@@ -115,7 +122,12 @@ public class MainActivity extends Activity {
         healthTab.setOnClickListener(v->showTab(3));
         
         setContentView(root);
-        if (notificationSwitch.isChecked()) startNotificationService();
+        android.content.SharedPreferences initialPrefs=getSharedPreferences(PREFS,0);
+        if (notificationSwitch.isChecked()
+                || initialPrefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                || BatteryPercentCalculator.isRunning(this)) {
+            startNotificationService();
+        }
         root.setFocusableInTouchMode(true);
         root.requestFocus();
     }
@@ -235,7 +247,18 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS,0).edit().putBoolean("notification_enabled",on).apply();
             if(on){
                 startNotificationService();
-            }else { SessionStore.finish(this); stopService(new Intent(this,BatteryNotificationService.class)); }
+                requestBatteryOptimizationExemption();
+            }else{
+                SessionStore.finish(this);
+                android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
+                if(prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                        ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                        ||BatteryPercentCalculator.isRunning(this)){
+                    startNotificationService();
+                }else{
+                    stopService(new Intent(this,BatteryNotificationService.class));
+                }
+            }
         });
         return r;
     }
@@ -293,7 +316,7 @@ public class MainActivity extends Activity {
         customCapacityInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
                 | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         double savedCapacity=BatteryPercentCalculator.getCustomCapacityMah(this);
-        if(!Double.isNaN(savedCapacity)&&!Double.isInfinite(savedCapacity)&&savedCapacity>0){
+        if(!Double.isNaN(savedCapacity)&&!Double.isInfinite(savedCapacity)&&savedCapacity>=0){
             customCapacityInput.setText(String.format(java.util.Locale.US,"%.2f",savedCapacity)
                     .replaceAll("\\.?0+$",""));
         }
@@ -325,9 +348,18 @@ public class MainActivity extends Activity {
         calculator.addView(actions,top(10));
         Button clearAll=actionButton("Clear all");
         calculator.addView(clearAll,top(6));
+        useAndroidPercentButton=actionButton("Use this as Android %");
+        calculator.addView(useAndroidPercentButton,top(6));
+        androidPercentStatus=text("",12);
+        androidPercentStatus.setTextColor(0xFF9AA0AA);
+        calculator.addView(androidPercentStatus,top(3));
+        boolean usingAppPercent=getSharedPreferences(PREFS,0).getBoolean(KEY_USE_ANDROID_PERCENT,false);
+        useAndroidPercentButton.setText(usingAppPercent?"Stop using app percentage":"Use this as Android %");
+        if(usingAppPercent)androidPercentStatus.setText("Syncing Android battery level with My Battery.");
         saveStart.setOnClickListener(v->startCalculatorFromInputs());
         stopMeasurement.setOnClickListener(v->stopMeasurement());
         clearAll.setOnClickListener(v->clearAllMeasurementData());
+        useAndroidPercentButton.setOnClickListener(v->toggleAndroidPercentage());
         r.addView(calculator,top(12));
         return r;
     }
@@ -514,8 +546,11 @@ public class MainActivity extends Activity {
     private void updateMyBatteryEstimate(){
         try{
             BatteryReader.Reading reading=BatteryReader.read(this);
-            boolean backgroundRecording=getSharedPreferences(PREFS,0).getBoolean("notification_enabled",false);
-            updateCalculatedLevel(backgroundRecording
+            android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
+            boolean serviceActive=prefs.getBoolean("notification_enabled",false)
+                    ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                    ||BatteryPercentCalculator.isRunning(this);
+            updateCalculatedLevel(serviceActive
                     ?BatteryPercentCalculator.current(this)
                     :BatteryPercentCalculator.sample(this,reading));
         }catch(Throwable ignored){
@@ -559,8 +594,13 @@ public class MainActivity extends Activity {
                 Toast.makeText(this,"Starting charge must be between 0 and the capacity.",Toast.LENGTH_SHORT).show();
                 return;
             }
-            updateCalculatedLevel(BatteryPercentCalculator.startEstimate(
-                    this,capacity,starting,BatteryReader.read(this)));
+            BatteryPercentCalculator.Estimate estimate=BatteryPercentCalculator.startEstimate(
+                    this,capacity,starting,BatteryReader.read(this));
+            updateCalculatedLevel(estimate);
+            if(estimate.isAvailable()&&estimate.running){
+                startNotificationService();
+                requestBatteryOptimizationExemption();
+            }
         }catch(NumberFormatException e){
             Toast.makeText(this,"Enter valid numeric mAh values.",Toast.LENGTH_SHORT).show();
         }
@@ -568,25 +608,104 @@ public class MainActivity extends Activity {
 
     private void stopMeasurement(){
         BatteryPercentCalculator.stopMeasurement(this);
-        boolean wasRecording=notificationSwitch!=null&&notificationSwitch.isChecked();
-        if(wasRecording){
-            notificationSwitch.setChecked(false);
-        }else{
-            getSharedPreferences(PREFS,0).edit().putBoolean("notification_enabled",false).apply();
-            SessionStore.finish(this);
-            stopService(new Intent(this,BatteryNotificationService.class));
-        }
         updateCalculatedLevel(BatteryPercentCalculator.current(this));
+        disableAndroidPercentage("Measurement stopped; restoring Android battery level.");
     }
 
     private void clearAllMeasurementData(){
-        stopMeasurement();
-        SessionStore.clear(this);
+        // My Battery owns only its estimator values. Session history and background recording
+        // are intentionally not touched by this button.
         BatteryPercentCalculator.clearAll(this);
         if(customCapacityInput!=null)customCapacityInput.setText("0");
         if(startingChargeInput!=null)startingChargeInput.setText("0");
         updateCalculatedLevel(BatteryPercentCalculator.current(this));
-        if(historyView!=null&&historyView.getVisibility()==View.VISIBLE)refreshHistory();
+        disableAndroidPercentage("My Battery values cleared; restoring Android battery level.");
+    }
+
+    private void toggleAndroidPercentage(){
+        android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
+        if(prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)){
+            disableAndroidPercentage("Restoring the real Android battery level.");
+            return;
+        }
+        BatteryPercentCalculator.Estimate estimate=BatteryPercentCalculator.current(this);
+        if(estimate==null||!estimate.isAvailable()||!estimate.running){
+            Toast.makeText(this,"Start My Battery measurement first.",Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if(useAndroidPercentButton!=null)useAndroidPercentButton.setEnabled(false);
+        if(androidPercentStatus!=null)androidPercentStatus.setText("Applying calculated percentage with root…");
+        final int percent=estimate.percent;
+        new Thread(()->{
+            BatteryPercentOverride.Result result=BatteryPercentOverride.set(percent);
+            runOnUiThread(()->{
+                if(result.success){
+                    getSharedPreferences(PREFS,0).edit()
+                            .putBoolean(KEY_USE_ANDROID_PERCENT,true)
+                            .putBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                            .putInt(KEY_LAST_ANDROID_PERCENT,percent)
+                            .apply();
+                    if(useAndroidPercentButton!=null)useAndroidPercentButton.setText("Stop using app percentage");
+                    if(androidPercentStatus!=null)androidPercentStatus.setText("Android battery level: "+percent+"%");
+                    startNotificationService();
+                    requestBatteryOptimizationExemption();
+                }else if(androidPercentStatus!=null){
+                    androidPercentStatus.setText(result.message);
+                }
+                if(useAndroidPercentButton!=null)useAndroidPercentButton.setEnabled(true);
+            });
+        }).start();
+    }
+
+    private void disableAndroidPercentage(String message){
+        android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
+        boolean hadOverride=prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                ||prefs.contains(KEY_LAST_ANDROID_PERCENT);
+        if(!hadOverride){
+            if(useAndroidPercentButton!=null)useAndroidPercentButton.setText("Use this as Android %");
+            if(androidPercentStatus!=null)androidPercentStatus.setText("");
+            return;
+        }
+        prefs.edit().putBoolean(KEY_USE_ANDROID_PERCENT,false)
+                .putBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,true).apply();
+        if(useAndroidPercentButton!=null)useAndroidPercentButton.setText("Use this as Android %");
+        if(androidPercentStatus!=null)androidPercentStatus.setText(message);
+        startNotificationService();
+        if(useAndroidPercentButton!=null)useAndroidPercentButton.setEnabled(false);
+        new Thread(()->{
+            BatteryPercentOverride.Result result=BatteryPercentOverride.reset();
+            runOnUiThread(()->{
+                if(result.success){
+                    getSharedPreferences(PREFS,0).edit()
+                            .putBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                            .remove(KEY_LAST_ANDROID_PERCENT).apply();
+                    if(androidPercentStatus!=null)androidPercentStatus.setText("Android battery level restored.");
+                    if(!getSharedPreferences(PREFS,0).getBoolean("notification_enabled",false)
+                            &&!BatteryPercentCalculator.isRunning(this)){
+                        stopService(new Intent(this,BatteryNotificationService.class));
+                    }
+                }else if(androidPercentStatus!=null){
+                    androidPercentStatus.setText("Root reset pending; background recovery will retry. "+result.message);
+                }
+                if(useAndroidPercentButton!=null)useAndroidPercentButton.setEnabled(true);
+            });
+        }).start();
+    }
+
+    private void requestBatteryOptimizationExemption(){
+        if(Build.VERSION.SDK_INT<Build.VERSION_CODES.M)return;
+        try{
+            PowerManager manager=(PowerManager)getSystemService(POWER_SERVICE);
+            if(manager!=null&&!manager.isIgnoringBatteryOptimizations(getPackageName())){
+                Intent request=new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:"+getPackageName()));
+                startActivity(request);
+            }
+        }catch(Exception ignored){
+            try{startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+            catch(Exception ignoredAgain){}
+        }
     }
 
     private long currentRecordingIntervalMs(){
