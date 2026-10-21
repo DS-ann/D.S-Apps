@@ -488,6 +488,8 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, String> clockDateGeometrySignatures =
             new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<TextView, Integer> clockPositionStyleSignatures =
+            new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
     private View clockWidgetResizeHandle;
@@ -2880,7 +2882,7 @@ public class MainActivity extends Activity {
         TextView marker = null;
         row.addView(group, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114),
-                Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+                clockGravity() | Gravity.CENTER_VERTICAL));
         panel.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, LauncherUiUtils.dp(this, 114)));
 
@@ -7257,9 +7259,9 @@ public class MainActivity extends Activity {
         int restorePage = Math.max(0, Math.min(1, currentPage));
         for (int page = 0; page < clockPanelsByPage.length; page++) {
             activateClockForPage(page);
-            int configuredDateSize = Math.max(8, Math.min(24,
+            int configuredDateSize = Math.max(8, Math.min(16,
                     prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15)));
-            int configuredPmSize = Math.max(8, Math.min(24,
+            int configuredPmSize = Math.max(8, Math.min(20,
                     prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, activeClockPage), 14)));
             boolean iconArtworkActive = isClockIconArtworkActive();
             android.text.SpannableStringBuilder dateLine =
@@ -7279,7 +7281,11 @@ public class MainActivity extends Activity {
                     dateLine.setSpan(new android.text.style.ForegroundColorSpan(CLOCK_DIGIT_SILVER),
                             0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
-                float periodScale = configuredPmSize / (float) configuredDateSize;
+                // Date sizes are in sp; AM/PM sizes are in dp. Convert both to pixel
+                // size before deriving the relative span so AM/PM remains a true dp size.
+                android.util.DisplayMetrics textMetrics = getResources().getDisplayMetrics();
+                float periodScale = (configuredPmSize * textMetrics.density)
+                        / Math.max(0.1f, configuredDateSize * textMetrics.scaledDensity);
                 dateLine.setSpan(new android.text.style.RelativeSizeSpan(periodScale),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
@@ -10661,27 +10667,27 @@ public class MainActivity extends Activity {
 
         addSection(content, "Clock text sizes");
         addSideBySideSliderPair(content,
-                "Date size — Screen 1", 8, 24,
-                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 0), 15))),
+                "Date size — Screen 1", 8, 16,
+                Math.max(8, Math.min(16, prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 0), 15))),
                 " sp", value -> {
                     prefs.edit().putInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 0), value).apply();
                     refreshClockTypographyAndGeometry();
                 },
                 "Date size — Screen 2",
-                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 1), 15))),
+                Math.max(8, Math.min(16, prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 1), 15))),
                 value -> {
                     prefs.edit().putInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, 1), value).apply();
                     refreshClockTypographyAndGeometry();
                 });
         addSideBySideSliderPair(content,
-                "AM/PM size — Screen 1", 8, 24,
-                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 0), 14))),
-                " sp", value -> {
+                "AM/PM size — Screen 1", 8, 20,
+                Math.max(8, Math.min(20, prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 0), 14))),
+                " dp", value -> {
                     prefs.edit().putInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 0), value).apply();
                     refreshClockTypographyAndGeometry();
                 },
                 "AM/PM size — Screen 2",
-                Math.max(8, Math.min(24, prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 1), 14))),
+                Math.max(8, Math.min(20, prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 1), 14))),
                 value -> {
                     prefs.edit().putInt(clockPrefKey(KEY_CLOCK_PM_SIZE, 1), value).apply();
                     refreshClockTypographyAndGeometry();
@@ -10992,9 +10998,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int measureClockDateLineWidth(String text, int dateSizeSp, int pmSizeSp) {
+    private int measureClockDateLineWidth(String text, int dateSizeSp, int pmSizeDp) {
         if (dateText == null || text == null || text.isEmpty()) return 1;
         float scaledDensity = Math.max(0.1f, getResources().getDisplayMetrics().scaledDensity);
+        float density = Math.max(0.1f, getResources().getDisplayMetrics().density);
         android.graphics.Paint datePaint = new android.graphics.Paint(dateText.getPaint());
         datePaint.setTypeface(Typeface.create(clockDateFontFamily(), Typeface.BOLD));
         datePaint.setTextSize(dateSizeSp * scaledDensity);
@@ -11006,7 +11013,7 @@ public class MainActivity extends Activity {
             if (text.startsWith(prefix)) {
                 android.graphics.Paint pmPaint = new android.graphics.Paint(datePaint);
                 pmPaint.setTypeface(Typeface.create(clockPmFontFamily(), Typeface.BOLD_ITALIC));
-                pmPaint.setTextSize(pmSizeSp * scaledDensity);
+                pmPaint.setTextSize(pmSizeDp * density);
                 width = pmPaint.measureText(period)
                         + datePaint.measureText(", ")
                         + datePaint.measureText(text.substring(prefix.length()));
@@ -11027,7 +11034,7 @@ public class MainActivity extends Activity {
         int dateSizedChars = Math.max(0, text.length() - periodChars);
         width += tracking * dateSizeSp * scaledDensity * Math.max(0, dateSizedChars - 1);
         if (periodChars > 1) {
-            width += tracking * pmSizeSp * scaledDensity * (periodChars - 1);
+            width += tracking * pmSizeDp * density * (periodChars - 1);
         }
         return Math.max(1, (int) Math.ceil(width));
     }
@@ -11037,24 +11044,38 @@ public class MainActivity extends Activity {
         final LinearLayout targetPanel = clockPanel;
         final int targetPage = Math.max(0, Math.min(1, activeClockPage));
         final int geometryGeneration = ++clockLayoutGenerationByPage[targetPage];
-        final int configuredDateSize = Math.max(8, Math.min(24,
+        final int configuredDateSize = Math.max(8, Math.min(16,
                 prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, targetPage), 15)));
-        final int configuredPmSize = Math.max(8, Math.min(24,
+        final int configuredPmSize = Math.max(8, Math.min(20,
                 prefs.getInt(clockPrefKey(KEY_CLOCK_PM_SIZE, targetPage), 14)));
+        final int selectedClockStyle = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+        Integer previousPositionStyle = clockText == null ? null
+                : clockPositionStyleSignatures.get(clockText);
+        final boolean clockStyleChanged = previousPositionStyle != null
+                && previousPositionStyle.intValue() != selectedClockStyle;
+        // Date geometry changes only when its own size/typeface changes. A clock-style
+        // switch must not trigger the date-size anchor correction: Neon Circuit centers
+        // its glyphs within the group and would otherwise inherit a stale horizontal shift.
         final String dateGeometrySignature = configuredDateSize + ":" + configuredPmSize + ":"
-                + clockDateFontFamily() + ":" + clockPmFontFamily() + ":"
-                + prefs.getInt(KEY_CLOCK_STYLE, 0);
+                + clockDateFontFamily() + ":" + clockPmFontFamily();
         final String previousDateGeometrySignature = dateText == null ? null
                 : clockDateGeometrySignatures.get(dateText);
         final FrameLayout groupAtGeometryStart = clockGroupsByPage[targetPage] != null
                 ? clockGroupsByPage[targetPage] : clockGroup;
         final int[] previousClockGroupLocation = new int[2];
         final boolean preserveTypographyGroupScreenX =
-                !(clockText instanceof SevenSegmentClockTextView
-                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5)
+                !(clockText instanceof SevenSegmentClockTextView && selectedClockStyle == 5)
+                && !clockStyleChanged
                 && previousDateGeometrySignature != null
                 && !previousDateGeometrySignature.equals(dateGeometrySignature)
                 && groupAtGeometryStart != null && groupAtGeometryStart.getWidth() > 0;
+        if (clockText != null) {
+            clockPositionStyleSignatures.put(clockText, selectedClockStyle);
+        }
+        if (clockStyleChanged && groupAtGeometryStart != null) {
+            // Clear any correction from the previous preset before laying out the new one.
+            groupAtGeometryStart.setTranslationX(0f);
+        }
         if (preserveTypographyGroupScreenX) {
             groupAtGeometryStart.getLocationOnScreen(previousClockGroupLocation);
         }
@@ -11427,7 +11448,7 @@ public class MainActivity extends Activity {
             }
             // Use the same date size for every clock style. Counter-scale it so
             // panel resizing does not change the date's visual size.
-            dateText.setTextSize(Math.max(8, Math.min(24,
+            dateText.setTextSize(Math.max(8, Math.min(16,
                     prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, activeClockPage), 15))));
             // Only counter-scale horizontally for the panel's width transform.
             // The panel no longer scales vertically, so leave Y at 1 to preserve
@@ -11443,13 +11464,13 @@ public class MainActivity extends Activity {
             amPmText.setTextColor(clockText.getCurrentTextColor());
             amPmText.setTypeface(Typeface.create(clockPmFontFamily(), Typeface.BOLD));
             // Keep the marker's font size independent of workspace resizing.
-            // 13.5sp is 50% taller than the previous 9sp setting.
-            amPmText.setTextSize(configuredPmSize);
+            // The configured AM/PM size is measured in dp.
+            amPmText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, configuredPmSize);
             ViewGroup.LayoutParams markerRaw = amPmText.getLayoutParams();
             if (markerRaw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams markerParams = (FrameLayout.LayoutParams) markerRaw;
                 // Reserve enough width for the enlarged bold "AM"/"PM" label;
-                // its 13.5sp type remains 50% taller than the original 9sp marker.
+                // its configured dp size is independent of the date's sp size.
                 markerParams.width = LauncherUiUtils.dp(this, 32);
                 markerParams.height = LauncherUiUtils.dp(this, 20);
                 // Center the marker horizontally and vertically in the clock
