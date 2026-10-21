@@ -2832,25 +2832,62 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Finds the home-grid slot with the greatest intersection with the drag boundary.
-     * A slot is returned only when at least half of that grid cell is covered by the boundary.
+     * Finds the legal grid slot with the greatest overlap of the dragged cell.
+     * At least half of the dragged-cell area must enter the slot. Exact 50% ties
+     * follow the drag direction, so drops behave consistently from every edge.
      */
     private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
             int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
-            int columns, int rows, int cellWidth, int cellHeight) {
+            int columns, int rows, int cellWidth, int cellHeight,
+            int horizontalDirection, int verticalDirection) {
         if (pageWidth <= 0 || pageHeight <= 0 || columns <= 0 || rows <= 0
                 || cellWidth <= 0 || cellHeight <= 0) return null;
 
-        // Use the dragged object's center to resolve all four edges identically.
-        // A 60% overlap means its center is already inside the intended cell; ties
-        // at exactly 50% go to the cell on the right/bottom consistently.
-        int centerX = boundaryLeft + Math.max(1, boundaryWidth) / 2;
-        int centerY = boundaryTop + Math.max(1, boundaryHeight) / 2;
-        int column = Math.max(0, Math.min(columns - 1, centerX / cellWidth));
-        int topInset = homeGridRowTop(0, rows, pageHeight, cellHeight);
-        int row = (centerY - topInset) / cellHeight;
-        row = Math.max(0, Math.min(rows - 1, row));
-        return new int[]{column, row};
+        int boundaryRight = boundaryLeft + Math.max(1, boundaryWidth);
+        int boundaryBottom = boundaryTop + Math.max(1, boundaryHeight);
+        long boundaryArea = (long) Math.max(1, boundaryWidth)
+                * Math.max(1, boundaryHeight);
+        long bestOverlapArea = 0L;
+        int bestColumn = -1;
+        int bestRow = -1;
+        int bestDirectionScore = Integer.MIN_VALUE;
+
+        // Test the actual legal grid rectangles, not a center point. Requiring at
+        // least 50% of the dragged cell to lie in a slot makes the threshold equal
+        // from left, right, top, and bottom, including when rows are bottom-aligned.
+        for (int row = 0; row < rows; row++) {
+            int gridTop = homeGridRowTop(row, rows, pageHeight, cellHeight);
+            int gridBottom = Math.min(pageHeight, gridTop + cellHeight);
+            for (int col = 0; col < columns; col++) {
+                int gridLeft = col * cellWidth;
+                int gridRight = Math.min(pageWidth, gridLeft + cellWidth);
+                if (gridRight <= gridLeft || gridBottom <= gridTop) continue;
+                int overlapWidth = Math.max(0,
+                        Math.min(boundaryRight, gridRight) - Math.max(boundaryLeft, gridLeft));
+                int overlapHeight = Math.max(0,
+                        Math.min(boundaryBottom, gridBottom) - Math.max(boundaryTop, gridTop));
+                long overlapArea = (long) overlapWidth * overlapHeight;
+                if (overlapArea <= 0L || overlapArea * 2L < boundaryArea) continue;
+
+                int directionScore = (horizontalDirection > 0 ? col
+                        : horizontalDirection < 0 ? -col : 0)
+                        + (verticalDirection > 0 ? row
+                        : verticalDirection < 0 ? -row : 0);
+                boolean better = overlapArea > bestOverlapArea;
+                if (overlapArea == bestOverlapArea) {
+                    better = directionScore > bestDirectionScore
+                            || (directionScore == bestDirectionScore
+                                && (row > bestRow || (row == bestRow && col > bestColumn)));
+                }
+                if (better) {
+                    bestOverlapArea = overlapArea;
+                    bestColumn = col;
+                    bestRow = row;
+                    bestDirectionScore = directionScore;
+                }
+            }
+        }
+        return bestColumn < 0 ? null : new int[]{bestColumn, bestRow};
     }
 
     private String clockPrefKey(String key, int page) {
@@ -3485,9 +3522,9 @@ public class MainActivity extends Activity {
             int overlapHeight = Math.max(0, Math.min(boundaryBottom, gridBottom)
                     - Math.max(boundaryTop, gridTop));
             long overlapArea = (long) overlapWidth * overlapHeight;
-            long gridCellArea = (long) Math.max(1, gridRight - gridLeft)
-                    * Math.max(1, gridBottom - gridTop);
-            if (gridCellArea > 0L && overlapArea * 2L >= gridCellArea) {
+            long boundaryArea = (long) Math.max(1, boundaryRight - boundaryLeft)
+                    * Math.max(1, boundaryBottom - boundaryTop);
+            if (boundaryArea > 0L && overlapArea * 2L >= boundaryArea) {
                 return appGroupId(child);
             }
         }
@@ -6332,7 +6369,7 @@ public class MainActivity extends Activity {
                     // jump vertically when the drag is committed and the page is rebuilt.
                     int targetHeightForGrid = Math.max(1, targetPage.getHeight() > 0
                             ? targetPage.getHeight() : pageViewport.getHeight());
-                    int rows = Math.max(1, targetHeightForGrid / slotHeight);
+                    int rows = homeGridRowsForHeight(targetHeightForGrid, slotHeight);
                     // The dragged cell stays attached to its source page until ACTION_UP.
                     // Its layout margins therefore are not reliable destination coordinates.
                     // Map the release point to the visible viewport, where the destination
@@ -6345,7 +6382,7 @@ public class MainActivity extends Activity {
                     pageViewport.getLocationOnScreen(viewportLocation);
                     int cellWidth = Math.max(1, targetWidth / columns);
                     int cellHeight = slotHeight;
-                    rows = Math.max(1, Math.min(rows, targetHeight / cellHeight));
+                    rows = homeGridRowsForHeight(targetHeight, cellHeight);
 
                     // Use the actual dragged cell boundary, matching the rectangle that follows
                     // the finger during MOVE. Do not use the artwork glyph's smaller visual bounds.
@@ -6360,6 +6397,9 @@ public class MainActivity extends Activity {
                     int boundaryLeft = Math.max(0, Math.min(
                             Math.max(0, targetWidth - dragBoundaryWidth),
                             Math.round(desiredBoundaryLeft)));
+                    // Keep the true release rectangle. Clamping it to the first/last
+                    // grid row would artificially snap drops made outside the grid into
+                    // a legal cell and bypass the 50% overlap threshold.
                     int boundaryTop = Math.max(0, Math.min(
                             Math.max(0, targetHeight - dragBoundaryHeight),
                             Math.round(desiredBoundaryTop)));
@@ -6367,20 +6407,30 @@ public class MainActivity extends Activity {
                     // Generic placement follows the greatest-overlap grid cell; app-group drops
                     // are detected separately against the actual target grid cell, so an adjacent
                     // cell cannot steal a qualifying 50% group drop.
+                    int horizontalDirection = event.getRawX() > iconTouchRawX ? 1
+                            : event.getRawX() < iconTouchRawX ? -1 : 0;
+                    int verticalDirection = event.getRawY() > iconTouchRawY ? 1
+                            : event.getRawY() < iconTouchRawY ? -1 : 0;
                     int[] majorityOverlapSlot = findHomeGridSlotForDragBoundary(
                             boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
-                            targetWidth, targetHeight, columns, rows, cellWidth, cellHeight);
+                            targetWidth, targetHeight, columns, rows, cellWidth, cellHeight,
+                            horizontalDirection, verticalDirection);
                     boolean boundaryHasMajorityCell = majorityOverlapSlot != null;
                     int targetCol = boundaryHasMajorityCell ? majorityOverlapSlot[0]
                             : Math.max(0, Math.min(columns - 1,
                                     Math.round(boundaryLeft / (float) cellWidth)));
                     int targetRow = boundaryHasMajorityCell ? majorityOverlapSlot[1]
                             : homeGridRowFromTop(boundaryTop, rows, targetHeight, cellHeight);
-                    String targetGroupId = boundaryHasMajorityCell
-                            ? findAppGroupAtGridSlot(targetPage, targetCol, targetRow,
-                                    cellWidth, cellHeight) : null;
-                    if (targetGroupId != null) {
-                        String groupLabel = getAppGroupLabel(targetGroupId);
+                    String targetGroupId = findAppGroupAtDragBoundary(targetPage,
+                            boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
+                            cellWidth, cellHeight);
+                    if (targetGroupId == null && boundaryHasMajorityCell) {
+                        targetGroupId = findAppGroupAtGridSlot(
+                                targetPage, targetCol, targetRow, cellWidth, cellHeight);
+                    }
+                    final String dropTargetGroupId = targetGroupId;
+                    if (dropTargetGroupId != null) {
+                        String groupLabel = getAppGroupLabel(dropTargetGroupId);
                         ResolveInfo draggedApp = findApp(packageName);
                         String appLabel = draggedApp == null ? packageName
                                 : String.valueOf(draggedApp.loadLabel(packageManager));
@@ -6405,7 +6455,7 @@ public class MainActivity extends Activity {
                         iconDragPageIndex = -1;
                         iconOriginalPageIndex = -1;
                         iconEdgeLatch = 0;
-                        if (getAppGroupMembers(targetGroupId).contains(packageName)) {
+                        if (getAppGroupMembers(dropTargetGroupId).contains(packageName)) {
                             Toast.makeText(MainActivity.this,
                                     "This app is already in the group.", Toast.LENGTH_SHORT).show();
                             return true;
@@ -6415,7 +6465,7 @@ public class MainActivity extends Activity {
                                 .setMessage("Add " + appLabel + " to this app group?")
                                 .setNegativeButton("Cancel", null)
                                 .setPositiveButton("Add", (groupDialog, button) ->
-                                        moveHomeAppIntoGroup(targetGroupId, packageName))
+                                        moveHomeAppIntoGroup(dropTargetGroupId, packageName))
                                 .show();
                         return true;
                     }
@@ -6463,7 +6513,8 @@ public class MainActivity extends Activity {
                     }
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
                     int sourceCellHeight = slotHeight;
-                    int sourceRows = Math.max(1, sourceView.getHeight() / sourceCellHeight);
+                    int sourceRows = homeGridRowsForHeight(
+                            sourceView.getHeight(), sourceCellHeight);
                     int sourceCol = Math.max(0, Math.min(columns - 1,
                             Math.round(iconOriginalLeft / (float) sourceCellWidth)));
                     int sourceRow = homeGridRowFromTop(
@@ -6516,7 +6567,6 @@ public class MainActivity extends Activity {
                     // Commit against the exact snapped release slot, not the last
                     // intermediate pointer frame. This prevents a final grid snap from
                     // creating a collision that only the slow post-render resolver would see.
-                    boolean hadLiveDisplacementPlan;
                     FrameLayout.LayoutParams finalIconParams =
                             new FrameLayout.LayoutParams(cellWidth, cellHeight,
                                     Gravity.TOP | Gravity.LEFT);
@@ -6576,14 +6626,38 @@ public class MainActivity extends Activity {
                         // solely its temporary destination-page proxy.
                         updateLiveDisplacements(targetPage, view);
                     }
-                    hadLiveDisplacementPlan = !liveDisplacedItems.isEmpty();
                     finishWorkspaceTransferDrag(view, true);
                     int committedPage = destinationPage;
-                    // Save the intended slot first. If the final visual collision check
-                    // must move this item, its corrected slot is persisted afterward.
+                    boolean displacementAccepted = finishLiveDisplacements(true, view);
+                    if (!displacementAccepted) {
+                        // Do not persist a drop after the live displacement planner has
+                        // rejected its transaction. In particular, undo an app/app swap
+                        // before rebuilding, or the rejected destination can be reflowed
+                        // into a neighbouring cell and appear to have ignored the drop.
+                        saveIconSlot(packageName, sourceCol, sourceRow, columns);
+                        android.content.SharedPreferences.Editor restoreSlots = prefs.edit()
+                                .putInt(KEY_ICON_PAGE + packageName, sourcePage);
+                        if (otherPackage != null) {
+                            saveIconSlot(otherPackage, targetCol, targetRow, columns);
+                            restoreSlots.putInt(KEY_ICON_PAGE + otherPackage, destinationPage);
+                        }
+                        restoreSlots.apply();
+                        currentPage = sourcePage;
+                        restoreIconDragPageVisuals();
+                        setWorkspaceGridVisible(false, null);
+                        iconDragging = false;
+                        iconDragArmed = false;
+                        activeDragView = null;
+                        activeDragPackage = null;
+                        iconDragPageIndex = -1;
+                        iconOriginalPageIndex = -1;
+                        iconEdgeLatch = 0;
+                        renderHomePages(false);
+                        showPage(sourcePage, false);
+                        return true;
+                    }
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
-                    finishLiveDisplacements(true, view);
                     ensurePageExists(committedPage);
                     currentPage = committedPage;
                     restoreIconDragPageVisuals();
@@ -10060,7 +10134,12 @@ public class MainActivity extends Activity {
         if (isAppIconCollisionParticipant(view) && isAppIconCollisionParticipant(other)) {
             return appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3]);
         }
-        return collisionRect(view, geometry);
+        // For mixed interactions, an app owns its full layout cell even when the
+        // icon artwork and label leave transparent padding inside that cell. This is
+        // important for the clock/widget collision planner, which must not pass through
+        // an app's invisible placement area.
+        return workspaceLayoutCollisionRect(view, geometry[0], geometry[1],
+                geometry[2], geometry[3]);
     }
 
     private android.graphics.Rect collisionRectAtForInteraction(
@@ -10068,7 +10147,16 @@ public class MainActivity extends Activity {
         if (isAppIconCollisionParticipant(view) && isAppIconCollisionParticipant(other)) {
             return appIconVisualRectAt(view, x, y, width, height);
         }
-        return collisionRectAt(view, x, y, width, height);
+        return workspaceLayoutCollisionRect(view, x, y, width, height);
+    }
+
+    private android.graphics.Rect workspaceLayoutCollisionRect(
+            View view, int x, int y, int width, int height) {
+        int margin = workspaceCollisionMargin(view);
+        android.graphics.Rect bounds = new android.graphics.Rect(
+                x, y, x + Math.max(1, width), y + Math.max(1, height));
+        if (margin != 0) bounds.inset(-margin, -margin);
+        return bounds;
     }
 
     private boolean overlapsWithGap(android.graphics.Rect a, android.graphics.Rect b, int gap) {
