@@ -3728,6 +3728,8 @@ public class MainActivity extends Activity {
         scroll.setClipChildren(false);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setClipChildren(false);
+        rows.setClipToPadding(false);
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int miniIconPx = Math.max(LauncherUiUtils.dp(this, 18),
                 Math.round(LauncherUiUtils.dp(this, iconSizeDp) * 0.8f));
@@ -3741,6 +3743,8 @@ public class MainActivity extends Activity {
                 row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                row.setClipChildren(false);
+                row.setClipToPadding(false);
                 rows.addView(row, new LinearLayout.LayoutParams(-1, -2));
             }
             LinearLayout item = new LinearLayout(this);
@@ -4014,8 +4018,8 @@ public class MainActivity extends Activity {
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 String reorderTargetPackage = null;
                 if (action == MotionEvent.ACTION_UP && memberDragging[0] && !draggingOut[0]) {
-                    View dropTarget = findViewAt(popupPanel,
-                            (int) event.getRawX(), (int) event.getRawY());
+                    View dropTarget = findViewAtExcluding(popupPanel,
+                            (int) event.getRawX(), (int) event.getRawY(), memberView);
                     while (dropTarget != null && dropTarget != popupPanel) {
                         Object tag = dropTarget.getTag();
                         if (tag instanceof String
@@ -8243,6 +8247,24 @@ public class MainActivity extends Activity {
                 handler.removeCallbacks(widgetRestoreRetry);
             }
         });
+    }
+
+    private View findViewAtExcluding(View view, int rawX, int rawY, View excluded) {
+        if (view == null || view == excluded || view.getVisibility() != View.VISIBLE) return null;
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        int localX = rawX - location[0];
+        int localY = rawY - location[1];
+        if (localX < 0 || localY < 0 || localX >= view.getWidth()
+                || localY >= view.getHeight()) return null;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
+                View found = findViewAtExcluding(group.getChildAt(i), rawX, rawY, excluded);
+                if (found != null) return found;
+            }
+        }
+        return view;
     }
 
     private String touchStartedOnAppGroup(float rawX, float rawY) {
