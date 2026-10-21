@@ -2848,7 +2848,7 @@ public class MainActivity extends Activity {
         int centerY = boundaryTop + Math.max(1, boundaryHeight) / 2;
         int column = Math.max(0, Math.min(columns - 1, centerX / cellWidth));
         int topInset = homeGridRowTop(0, rows, pageHeight, cellHeight);
-        int row = Math.floorDiv(centerY - topInset, cellHeight);
+        int row = (centerY - topInset) / cellHeight;
         row = Math.max(0, Math.min(rows - 1, row));
         return new int[]{column, row};
     }
