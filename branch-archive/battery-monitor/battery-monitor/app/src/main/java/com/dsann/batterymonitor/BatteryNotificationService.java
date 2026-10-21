@@ -32,7 +32,7 @@ public class BatteryNotificationService extends Service {
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification("Reading battery...", 0.0, 0, BatteryPercentCalculator.current(this)));
         updateNotification();
-        handler.postDelayed(updater, getSamplingInterval());
+        handler.postDelayed(updater, CALCULATOR_INTERVAL_MS);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {

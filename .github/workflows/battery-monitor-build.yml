@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Restore deduplicated source files
         run: python3 .github/scripts/restore_archive_duplicates.py --branch 'battery-monitor'
 

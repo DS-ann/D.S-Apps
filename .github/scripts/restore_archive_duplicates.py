@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -28,6 +29,21 @@ def apply_mode(path: Path, mode: str) -> None:
     if not re.fullmatch(r"100[0-7]{3}", mode):
         raise ValueError(f"Unsupported Git file mode: {mode!r}")
     os.chmod(path, int(mode[-3:], 8))
+
+def historical_blob(expected_sha: str):
+    """Read an archived duplicate from Git history when its canonical path changed."""
+    result = subprocess.run(
+        ["git", "cat-file", "blob", expected_sha],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    data = result.stdout
+    actual = hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
+    return data if actual == expected_sha else None
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -53,13 +69,25 @@ def main() -> int:
         target = safe_path(target_rel)
         if not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
             raise ValueError(f"{manifest}:{line_no}: invalid Git blob SHA")
-        if not target.is_file() or blob_sha(target) != expected_sha:
-            raise ValueError(f"{manifest}:{line_no}: canonical content missing or corrupt: {target_rel}")
-        rows.append((status, expected_sha, source, target, mode, source_rel, line_no))
-    for status, expected_sha, source, target, mode, source_rel, line_no in rows:
+        target_matches = target.is_file() and blob_sha(target) == expected_sha
+        recovered_blob = None
+        if not target_matches:
+            # Canonical paths can evolve after an archive is created. For DUPLICATE
+            # entries, recover the immutable expected blob from repository history
+            # rather than copying newer code into the archived branch.
+            if status == "DUPLICATE":
+                recovered_blob = historical_blob(expected_sha)
+            if recovered_blob is None:
+                raise ValueError(f"{manifest}:{line_no}: canonical content missing or corrupt and historical blob unavailable: {target_rel}")
+        rows.append((status, expected_sha, source, target, mode, source_rel, line_no,
+                     target_matches, recovered_blob))
+    for status, expected_sha, source, target, mode, source_rel, line_no, target_matches, recovered_blob in rows:
         if status == "DUPLICATE" and not source.exists():
             source.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(target, source)
+            if target_matches:
+                shutil.copyfile(target, source)
+            else:
+                source.write_bytes(recovered_blob)
         if not source.is_file() or blob_sha(source) != expected_sha:
             raise ValueError(f"{manifest}:{line_no}: source content failed SHA verification: {source_rel}")
         apply_mode(source, mode)
