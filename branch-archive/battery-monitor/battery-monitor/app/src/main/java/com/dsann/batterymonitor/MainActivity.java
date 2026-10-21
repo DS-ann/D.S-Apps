@@ -125,6 +125,7 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences initialPrefs=getSharedPreferences(PREFS,0);
         if (notificationSwitch.isChecked()
                 || initialPrefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                || initialPrefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
                 || BatteryPercentCalculator.isRunning(this)) {
             startNotificationService();
         }
