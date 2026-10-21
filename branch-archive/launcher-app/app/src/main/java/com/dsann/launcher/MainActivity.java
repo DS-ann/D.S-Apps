@@ -648,6 +648,12 @@ public class MainActivity extends Activity {
     private View activeDragView;
     private String activeDragPackage;
     private String activeAppGroupMoveModeId;
+    private boolean gestureStartedOnAppGroupMoveMode;
+    private String activeAppGroupMemberMoveModeId;
+    private String activeAppGroupMemberMoveModePackage;
+    private View activeAppGroupMemberMoveModeView;
+    private boolean appGroupCreationPending;
+    private long lastAppGroupCreationUptime;
     private View workspaceTransferItem;
     private FrameLayout workspaceTransferSourcePage;
     private View workspaceTransferProxy;
@@ -1206,6 +1212,10 @@ public class MainActivity extends Activity {
                     && touchStartedOnDrawerGrid(event.getRawX(), event.getRawY());
             gestureStartedOnDrawerGrid = touchOnVisibleDrawerGrid && drawerOpen;
             drawerAtTopOnGestureDown = !drawerOpen || isDrawerAtTop();
+            clearAppGroupMoveModeIfTouchOutside(event.getRawX(), event.getRawY());
+            String touchedGroupId = touchStartedOnAppGroup(event.getRawX(), event.getRawY());
+            gestureStartedOnAppGroupMoveMode = touchedGroupId != null
+                    && touchedGroupId.equals(activeAppGroupMoveModeId);
             gestureStartedOnAppCell = touchStartedOnAppCell(event.getRawX(), event.getRawY());
             gestureStartedOnWidget = touchStartedOnWidget(event.getRawX(), event.getRawY());
             gestureStartedOnContactShortcut = touchStartedOnContactShortcut(event.getRawX(), event.getRawY());
@@ -1510,8 +1520,9 @@ public class MainActivity extends Activity {
             boolean heldItemGesture = ((gestureStartedOnAppCell || gestureStartedOnWidget)
                     && gestureDuration > 450L)
                     || (gestureStartedOnContactShortcut && gestureDuration >= 1000L);
-            boolean itemManipulation = gestureStartedOnClock || gestureStartedOnResizeHandle || iconDragArmed || iconDragging
-                    || heldItemGesture;
+            boolean itemManipulation = gestureStartedOnClock || gestureStartedOnResizeHandle
+                    || iconDragArmed || iconDragging || heldItemGesture
+                    || gestureStartedOnAppGroupMoveMode;
             if (!drawerOpen && !itemManipulation
                     && !pageTransitionBusyAtDown && !pageTransitionBusy
                     && !verticalSwipeClaimed && verticalSwipe) {
@@ -1562,7 +1573,7 @@ public class MainActivity extends Activity {
                     // classification must not pause its progress midway through the gesture.
                     && (pageSwipeActive || (!gestureStartedOnClock
                         && !gestureStartedOnResizeHandle && !iconDragArmed && !iconDragging
-                        && !heldItemGesture
+                        && !gestureStartedOnAppGroupMoveMode && !heldItemGesture
                         && Math.abs(dx) > LauncherUiUtils.dp(this, 12)
                         // Permit diagonal swipes; once claimed, the gesture remains owned
                         // by the page transition regardless of later finger angle.
@@ -1761,7 +1772,7 @@ public class MainActivity extends Activity {
             }
             long releaseGestureDuration = event.getEventTime() - event.getDownTime();
             boolean itemManipulationOnRelease = gestureStartedOnClock || gestureStartedOnResizeHandle
-                    || iconDragArmed || iconDragging
+                    || iconDragArmed || iconDragging || gestureStartedOnAppGroupMoveMode
                     || ((gestureStartedOnAppCell || gestureStartedOnWidget)
                         && releaseGestureDuration > 450L)
                     || (gestureStartedOnContactShortcut && releaseGestureDuration >= 1000L);
@@ -2827,8 +2838,8 @@ public class MainActivity extends Activity {
     private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
             int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
             int columns, int rows, int cellWidth, int cellHeight) {
-        long boundaryArea = (long) Math.max(1, boundaryWidth) * Math.max(1, boundaryHeight);
         long bestOverlapArea = 0L;
+        long bestGridCellArea = 0L;
         int bestColumn = -1;
         int bestRow = -1;
         int boundaryRight = boundaryLeft + Math.max(1, boundaryWidth);
@@ -2849,12 +2860,15 @@ public class MainActivity extends Activity {
                 long overlapArea = (long) overlapWidth * overlapHeight;
                 if (overlapArea > bestOverlapArea) {
                     bestOverlapArea = overlapArea;
+                    bestGridCellArea = (long) Math.max(1, cellRight - cellLeft)
+                            * Math.max(1, cellBottom - cellTop);
                     bestColumn = column;
                     bestRow = row;
                 }
             }
         }
-        return bestColumn >= 0 && bestOverlapArea * 2L >= boundaryArea
+        return bestColumn >= 0 && bestGridCellArea > 0L
+                && bestOverlapArea * 2L >= bestGridCellArea
                 ? new int[]{bestColumn, bestRow} : null;
     }
 
@@ -3088,8 +3102,14 @@ public class MainActivity extends Activity {
 
     private void saveAppGroupIds(List<String> ids) {
         if (prefs == null) return;
+        ArrayList<String> unique = new ArrayList<String>();
+        if (ids != null) {
+            for (String id : ids) {
+                if (id != null && !id.trim().isEmpty() && !unique.contains(id)) unique.add(id);
+            }
+        }
         prefs.edit().putString(KEY_APP_GROUP_IDS,
-                android.text.TextUtils.join("\n", ids)).apply();
+                android.text.TextUtils.join("\n", unique)).apply();
     }
 
     private ArrayList<String> getAppGroupMembers(String id) {
@@ -3379,50 +3399,66 @@ public class MainActivity extends Activity {
     }
 
     private void createAppGroup() {
+        if (appGroupCreationPending) return;
         if (pageViewport == null || pageViewport.getWidth() <= 0
                 || pageViewport.getHeight() <= 0 || pagesStrip == null) {
-            if (root != null) root.post(this::createAppGroup);
+            appGroupCreationPending = true;
+            Runnable retry = () -> {
+                appGroupCreationPending = false;
+                createAppGroup();
+            };
+            if (pageViewport != null) pageViewport.post(retry);
+            else if (root != null) root.post(retry);
+            else appGroupCreationPending = false;
             return;
         }
-        int desiredPage = Math.max(0, Math.min(1, currentPage));
-        int chosenPage = -1;
-        int[] slot = null;
-        for (int attempt = 0; attempt < 2; attempt++) {
-            int pageIndex = (desiredPage + attempt) % 2;
-            if (pageIndex >= pagesStrip.getChildCount()
-                    || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) continue;
-            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
-            slot = findFreeAppGroupSlot(page, null);
-            if (slot != null) {
-                chosenPage = pageIndex;
-                break;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastAppGroupCreationUptime < 500L) return;
+        lastAppGroupCreationUptime = now;
+        appGroupCreationPending = true;
+        try {
+            int desiredPage = Math.max(0, Math.min(1, currentPage));
+            int chosenPage = -1;
+            int[] slot = null;
+            for (int attempt = 0; attempt < 2; attempt++) {
+                int pageIndex = (desiredPage + attempt) % 2;
+                if (pageIndex >= pagesStrip.getChildCount()
+                        || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) continue;
+                FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+                slot = findFreeAppGroupSlot(page, null);
+                if (slot != null) {
+                    chosenPage = pageIndex;
+                    break;
+                }
             }
+            if (chosenPage < 0 || slot == null) {
+                Toast.makeText(this, "Both home screens are full. Move an item first.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            String id = "g" + java.util.UUID.randomUUID().toString().replace("-", "");
+            ArrayList<String> ids = getAppGroupIds();
+            if (!ids.contains(id)) ids.add(id);
+            int columns = Math.max(1, getHomeColumns());
+            int height = Math.max(1, ((View) pagesStrip.getChildAt(chosenPage)).getHeight());
+            int cellHeight = LauncherUiUtils.dp(this,
+                    homeCellHeightDp(Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)))));
+            int rows = homeGridRowsForHeight(height, cellHeight);
+            prefs.edit()
+                    .putInt(appGroupKey("page", id), chosenPage)
+                    .putFloat(appGroupKey("x", id), slot[0] / (float) Math.max(1, columns - 1))
+                    .putFloat(appGroupKey("y", id), slot[1] / (float) Math.max(1, rows - 1))
+                    .putString(appGroupKey("label", id), "App Group")
+                    .putString(appGroupKey("members", id), "")
+                    .apply();
+            saveAppGroupIds(ids);
+            currentPage = chosenPage;
+            renderHomePages(false);
+            showPage(chosenPage, false);
+            Toast.makeText(this, "App group added", Toast.LENGTH_SHORT).show();
+        } finally {
+            appGroupCreationPending = false;
         }
-        if (chosenPage < 0 || slot == null) {
-            Toast.makeText(this, "Both home screens are full. Move an item first.",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        String id = "g" + java.util.UUID.randomUUID().toString().replace("-", "");
-        ArrayList<String> ids = getAppGroupIds();
-        ids.add(id);
-        int columns = Math.max(1, getHomeColumns());
-        int height = Math.max(1, ((View) pagesStrip.getChildAt(chosenPage)).getHeight());
-        int cellHeight = LauncherUiUtils.dp(this,
-                homeCellHeightDp(Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)))));
-        int rows = homeGridRowsForHeight(height, cellHeight);
-        prefs.edit()
-                .putInt(appGroupKey("page", id), chosenPage)
-                .putFloat(appGroupKey("x", id), slot[0] / (float) Math.max(1, columns - 1))
-                .putFloat(appGroupKey("y", id), slot[1] / (float) Math.max(1, rows - 1))
-                .putString(appGroupKey("label", id), "App Group")
-                .putString(appGroupKey("members", id), "")
-                .apply();
-        saveAppGroupIds(ids);
-        currentPage = chosenPage;
-        renderHomePages(false);
-        showPage(chosenPage, false);
-        Toast.makeText(this, "App group added", Toast.LENGTH_SHORT).show();
     }
 
     private String findAppGroupAtGridSlot(FrameLayout page, int col, int row,
@@ -3446,13 +3482,14 @@ public class MainActivity extends Activity {
     private void moveHomeAppIntoGroup(String groupId, String packageName) {
         if (groupId == null || packageName == null || findApp(packageName) == null) return;
         ArrayList<String> members = getAppGroupMembers(groupId);
-        if (!members.contains(packageName)) members.add(packageName);
-        saveAppGroupMembers(groupId, members);
-        if (homePackages.remove(packageName)) {
-            prefs.edit().remove(KEY_ICON_X + packageName).remove(KEY_ICON_Y + packageName)
-                    .remove(KEY_ICON_PAGE + packageName).apply();
-            persistHomeApps();
+        if (members.contains(packageName)) {
+            Toast.makeText(this, "This app is already in the group.", Toast.LENGTH_SHORT).show();
+            return;
         }
+        members.add(packageName);
+        saveAppGroupMembers(groupId, members);
+        // A group is a secondary collection; the standalone Home icon and its saved
+        // coordinates remain untouched when membership is added.
         renderHomePages(false);
         Toast.makeText(this, "Added to " + getAppGroupLabel(groupId), Toast.LENGTH_SHORT).show();
     }
@@ -3461,22 +3498,17 @@ public class MainActivity extends Activity {
         if (groupId == null || packageNames == null) return;
         ArrayList<String> members = getAppGroupMembers(groupId);
         boolean changed = false;
-        SharedPreferences.Editor edit = prefs.edit();
         for (String packageName : packageNames) {
-            if (packageName == null || packageName.isEmpty() || findApp(packageName) == null) continue;
-            if (!members.contains(packageName)) {
-                members.add(packageName);
-                changed = true;
-            }
-            if (homePackages.remove(packageName)) {
-                edit.remove(KEY_ICON_X + packageName).remove(KEY_ICON_Y + packageName)
-                        .remove(KEY_ICON_PAGE + packageName);
-            }
+            if (packageName == null || packageName.trim().isEmpty()
+                    || findApp(packageName) == null || members.contains(packageName)) continue;
+            members.add(packageName);
+            changed = true;
         }
-        if (!changed && packageNames.isEmpty()) return;
-        edit.apply();
+        if (!changed) {
+            Toast.makeText(this, "Those apps are already in this group.", Toast.LENGTH_SHORT).show();
+            return;
+        }
         saveAppGroupMembers(groupId, members);
-        persistHomeApps();
         renderHomePages(false);
     }
 
@@ -3784,6 +3816,27 @@ public class MainActivity extends Activity {
         }
     }
 
+    private GradientDrawable appGroupMoveHighlight() {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(Color.argb(92, 25, 105, 210));
+        d.setCornerRadius(LauncherUiUtils.dp(this, 14));
+        d.setStroke(LauncherUiUtils.dp(this, 2), Color.rgb(84, 176, 255));
+        return d;
+    }
+
+    private void setAppGroupMoveModeVisual(View cell, boolean active) {
+        if (cell == null) return;
+        if (active) {
+            cell.setBackground(appGroupMoveHighlight());
+            if (Build.VERSION.SDK_INT >= 21) cell.setElevation(LauncherUiUtils.dp(this, 8));
+        } else {
+            cell.setBackground(null);
+            if (Build.VERSION.SDK_INT >= 21) cell.setElevation(0f);
+            cell.setAlpha(1f);
+        }
+        cell.invalidate();
+    }
+
     private void installAppGroupTouch(View cell, String groupId) {
         final android.os.Handler groupHandler = new android.os.Handler(
                 android.os.Looper.getMainLooper());
@@ -3802,6 +3855,7 @@ public class MainActivity extends Activity {
             armed[0] = true;
             activeAppGroupMoveModeId = groupId;
             setWorkspaceGridVisible(true, cell);
+            setAppGroupMoveModeVisual(cell, true);
             LauncherUiUtils.startScaleHint(cell, 1.08f);
         };
         final Runnable showOptions = () -> {
@@ -3809,6 +3863,7 @@ public class MainActivity extends Activity {
                 optionsShown[0] = true;
                 activeAppGroupMoveModeId = null;
                 LauncherUiUtils.stopMoveHint(cell);
+                setAppGroupMoveModeVisual(cell, false);
                 setWorkspaceGridVisible(false, null);
                 showAppGroupOptions(groupId);
             }
@@ -4003,6 +4058,7 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(false, null);
                     refreshWorkspaceGrid();
                     activeAppGroupMoveModeId = null;
+                    setAppGroupMoveModeVisual(cell, false);
                     renderHomePages(false);
                     return true;
                 }
@@ -4010,10 +4066,12 @@ public class MainActivity extends Activity {
                 if (!optionsShown[0] && !movedTooEarly[0]) {
                     if (armed[0]) {
                         activeAppGroupMoveModeId = groupId;
+                        setAppGroupMoveModeVisual(cell, true);
                         Toast.makeText(MainActivity.this,
                                 "Move mode active. Touch and drag this group to move it.",
                                 Toast.LENGTH_SHORT).show();
                     } else {
+                        setAppGroupMoveModeVisual(cell, false);
                         openAppGroup(groupId);
                     }
                 }
@@ -6007,6 +6065,11 @@ public class MainActivity extends Activity {
                         iconDragPageIndex = -1;
                         iconOriginalPageIndex = -1;
                         iconEdgeLatch = 0;
+                        if (getAppGroupMembers(targetGroupId).contains(packageName)) {
+                            Toast.makeText(MainActivity.this,
+                                    "This app is already in the group.", Toast.LENGTH_SHORT).show();
+                            return true;
+                        }
                         new android.app.AlertDialog.Builder(MainActivity.this)
                                 .setTitle("Add to " + groupLabel)
                                 .setMessage("Add " + appLabel + " to this app group?")
@@ -7902,10 +7965,45 @@ public class MainActivity extends Activity {
         });
     }
 
+    private String touchStartedOnAppGroup(float rawX, float rawY) {
+        View target = findViewAt(root, (int) rawX, (int) rawY);
+        while (target != null) {
+            if (isAppGroupItem(target)) return appGroupId(target);
+            if (target == root) break;
+            android.view.ViewParent parent = target.getParent();
+            target = parent instanceof View ? (View) parent : null;
+        }
+        return null;
+    }
+
+    private void clearAppGroupMoveModeIfTouchOutside(float rawX, float rawY) {
+        if (activeAppGroupMoveModeId == null) return;
+        String touchedGroup = touchStartedOnAppGroup(rawX, rawY);
+        if (activeAppGroupMoveModeId.equals(touchedGroup)) return;
+        String previousId = activeAppGroupMoveModeId;
+        activeAppGroupMoveModeId = null;
+        setWorkspaceGridVisible(false, null);
+        if (pagesStrip == null) return;
+        for (int p = 0; p < pagesStrip.getChildCount(); p++) {
+            View pageView = pagesStrip.getChildAt(p);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                if (isAppGroupItem(child) && previousId.equals(appGroupId(child))) {
+                    LauncherUiUtils.stopMoveHint(child);
+                    setAppGroupMoveModeVisual(child, false);
+                    break;
+                }
+            }
+        }
+    }
+
     private boolean touchStartedOnAppCell(float rawX, float rawY) {
         View target = findViewAt(root, (int) rawX, (int) rawY);
         while (target != null) {
             if ("launcher_app_cell".equals(target.getTag())
+                    || isAppGroupItem(target)
                     || (target.getTag() instanceof String && (((String) target.getTag()).startsWith("launcher_app:")
                     || ((String) target.getTag()).startsWith("launcher_widget:")
                     || ((String) target.getTag()).startsWith("launcher_widget_content:")))) return true;
