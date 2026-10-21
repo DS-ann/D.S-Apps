@@ -952,7 +952,7 @@ public class MainActivity extends Activity {
                         homeScreen, drawerScreen, getDrawerTransition(), drawerOpen);
                 if (wasOpening) {
                     LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
-                            () -> drawerOpen = false, getDrawerTransition(), progress);
+                            () -> { drawerOpen = false; scheduleDrawerSnapshotRefreshAfterHomeTransition(); }, getDrawerTransition(), progress);
                 } else {
                     refreshDrawerIconAppearances();
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
@@ -5320,8 +5320,18 @@ public class MainActivity extends Activity {
     }
 
     private void showHome() {
-        LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen, () -> drawerOpen = false,
+        LauncherScreenTransitions.showHome(this, homeScreen, drawerScreen,
+                () -> { drawerOpen = false; scheduleDrawerSnapshotRefreshAfterHomeTransition(); },
                 getDrawerTransition());
+    }
+
+    /** Rebuild the durable drawer viewport after a close transition returns control to Home. */
+    private void scheduleDrawerSnapshotRefreshAfterHomeTransition() {
+        handler.postDelayed(() -> {
+            if (isFinishing() || drawerOpen || homeScreen == null
+                    || homeScreen.getVisibility() != View.VISIBLE) return;
+            scheduleDrawerSnapshotRefresh();
+        }, 500L);
     }
 
     /**
@@ -5389,6 +5399,7 @@ public class MainActivity extends Activity {
         }
         if (clockWidgetEditing) exitClockWidgetEditMode();
         dismissShortcutEditMode();
+        scheduleDrawerSnapshotRefreshAfterHomeTransition();
     }
 
     private boolean isDrawerCachePreference(String key) {
