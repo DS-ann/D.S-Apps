@@ -647,6 +647,7 @@ public class MainActivity extends Activity {
     };
     private View activeDragView;
     private String activeDragPackage;
+    private String activeAppGroupMoveModeId;
     private View workspaceTransferItem;
     private FrameLayout workspaceTransferSourcePage;
     private View workspaceTransferProxy;
@@ -3744,7 +3745,7 @@ public class MainActivity extends Activity {
                 row.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
             }
         }
-        scroll.addView(rows, new android.widget.ScrollView.LayoutParams(-1, -2));
+        scroll.addView(rows, new FrameLayout.LayoutParams(-1, -2));
         int targetRowHeight = miniIconPx
                 + LauncherUiUtils.dp(this, Math.max(11, Math.round(homeLabelHeightDp() * 0.8f)))
                 + LauncherUiUtils.dp(this, 18);
@@ -11727,7 +11728,11 @@ public class MainActivity extends Activity {
         addSettingRow(content, "▣", "Add an app group",
                 "Create a round group icon for apps on this home screen", () -> {
             dialog.dismiss();
-            createAppGroup();
+            if (pageViewport != null && pageViewport.getWidth() <= 0) {
+                pageViewport.post(this::createAppGroup);
+            } else {
+                createAppGroup();
+            }
         });
 
         addSection(content, "Clocks");
