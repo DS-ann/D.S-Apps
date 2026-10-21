@@ -2467,7 +2467,8 @@ public class MainActivity extends Activity {
             this.page = page;
             // Use a quiet filled placement marker, not a full grid of heavy lines.
             gridPaint.setStyle(Paint.Style.FILL);
-            gridPaint.setColor(Color.argb(34, 120, 165, 255));
+            // More visible while moving, while remaining translucent over wallpaper.
+            gridPaint.setColor(Color.argb(72, 120, 165, 255));
         }
         void configure(int cw, int ch) {
             int nextW = Math.max(1, cw);
@@ -2769,6 +2770,44 @@ public class MainActivity extends Activity {
                 ? Math.max(0, pageHeightPx - rows * cellHeight - homeGridBottomGapPx()) : 0;
         return Math.max(0, Math.min(rows - 1,
                 Math.round((topPx - topInset) / (float) cellHeight)));
+    }
+
+    /**
+     * Finds the home-grid slot with the greatest intersection with the drag boundary.
+     * A slot is returned only when it contains at least 50% of that boundary's area.
+     */
+    private int[] findHomeGridSlotForDragBoundary(int boundaryLeft, int boundaryTop,
+            int boundaryWidth, int boundaryHeight, int pageWidth, int pageHeight,
+            int columns, int rows, int cellWidth, int cellHeight) {
+        long boundaryArea = (long) Math.max(1, boundaryWidth) * Math.max(1, boundaryHeight);
+        long bestOverlapArea = 0L;
+        int bestColumn = -1;
+        int bestRow = -1;
+        int boundaryRight = boundaryLeft + Math.max(1, boundaryWidth);
+        int boundaryBottom = boundaryTop + Math.max(1, boundaryHeight);
+
+        for (int row = 0; row < Math.max(1, rows); row++) {
+            int cellTop = homeGridRowTop(row, rows, pageHeight, cellHeight);
+            int cellBottom = Math.min(pageHeight, cellTop + cellHeight);
+            int overlapHeight = Math.max(0,
+                    Math.min(boundaryBottom, cellBottom) - Math.max(boundaryTop, cellTop));
+            if (overlapHeight <= 0) continue;
+            for (int column = 0; column < Math.max(1, columns); column++) {
+                int cellLeft = column * cellWidth;
+                int cellRight = Math.min(pageWidth, cellLeft + cellWidth);
+                int overlapWidth = Math.max(0,
+                        Math.min(boundaryRight, cellRight) - Math.max(boundaryLeft, cellLeft));
+                if (overlapWidth <= 0) continue;
+                long overlapArea = (long) overlapWidth * overlapHeight;
+                if (overlapArea > bestOverlapArea) {
+                    bestOverlapArea = overlapArea;
+                    bestColumn = column;
+                    bestRow = row;
+                }
+            }
+        }
+        return bestColumn >= 0 && bestOverlapArea * 2L >= boundaryArea
+                ? new int[]{bestColumn, bestRow} : null;
     }
 
     private String clockPrefKey(String key, int page) {
@@ -4819,13 +4858,35 @@ public class MainActivity extends Activity {
                     int cellWidth = Math.max(1, targetWidth / columns);
                     int cellHeight = slotHeight;
                     rows = Math.max(1, Math.min(rows, targetHeight / cellHeight));
-                    float desiredLeft = event.getRawX() - viewportLocation[0] - cellWidth / 2f;
-                    int targetCol = Math.max(0, Math.min(columns - 1,
-                            Math.round(desiredLeft / cellWidth)));
-                    float desiredTop = event.getRawY()
+
+                    // Use the actual dragged cell boundary, matching the rectangle that follows
+                    // the finger during MOVE. Do not use the artwork glyph's smaller visual bounds.
+                    int dragBoundaryWidth = Math.max(1,
+                            view.getWidth() > 0 ? view.getWidth() : cellWidth);
+                    int dragBoundaryHeight = Math.max(1,
+                            view.getHeight() > 0 ? view.getHeight() : cellHeight);
+                    float desiredBoundaryLeft = event.getRawX() - viewportLocation[0]
+                            - dragBoundaryWidth / 2f;
+                    float desiredBoundaryTop = event.getRawY()
                             - viewportLocation[1] - iconDragFingerOffsetY;
-                    int targetRow = homeGridRowFromTop(
-                            desiredTop, rows, targetHeight, cellHeight);
+                    int boundaryLeft = Math.max(0, Math.min(
+                            Math.max(0, targetWidth - dragBoundaryWidth),
+                            Math.round(desiredBoundaryLeft)));
+                    int boundaryTop = Math.max(0, Math.min(
+                            Math.max(0, targetHeight - dragBoundaryHeight),
+                            Math.round(desiredBoundaryTop)));
+
+                    // A slot qualifies only when at least half of the drag-boundary area overlaps
+                    // it. This makes release placement follow the same visible movement boundary.
+                    int[] majorityOverlapSlot = findHomeGridSlotForDragBoundary(
+                            boundaryLeft, boundaryTop, dragBoundaryWidth, dragBoundaryHeight,
+                            targetWidth, targetHeight, columns, rows, cellWidth, cellHeight);
+                    boolean boundaryHasMajorityCell = majorityOverlapSlot != null;
+                    int targetCol = boundaryHasMajorityCell ? majorityOverlapSlot[0]
+                            : Math.max(0, Math.min(columns - 1,
+                                    Math.round(boundaryLeft / (float) cellWidth)));
+                    int targetRow = boundaryHasMajorityCell ? majorityOverlapSlot[1]
+                            : homeGridRowFromTop(boundaryTop, rows, targetHeight, cellHeight);
                     int proposedIconLeft = targetCol * cellWidth;
                     int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
                     FrameLayout.LayoutParams snappedCandidate =
@@ -4835,9 +4896,9 @@ public class MainActivity extends Activity {
                     view.setTranslationX(0f);
                     view.setTranslationY(0f);
                     view.setLayoutParams(snappedCandidate);
-                    updateLiveDisplacements(targetPage, view);
-                    if (!canPlaceWorkspaceItem(targetPage, view, proposedIconLeft,
-                            proposedIconTop, cellWidth, cellHeight)) {
+                    if (boundaryHasMajorityCell) updateLiveDisplacements(targetPage, view);
+                    if (!boundaryHasMajorityCell || !canPlaceWorkspaceItem(targetPage, view,
+                            proposedIconLeft, proposedIconTop, cellWidth, cellHeight)) {
                         FrameLayout.LayoutParams rollbackParams =
                                 (FrameLayout.LayoutParams) view.getLayoutParams();
                         rollbackParams.leftMargin = iconOriginalLeft;
@@ -4859,7 +4920,13 @@ public class MainActivity extends Activity {
                         iconDragPageIndex = -1;
                         iconOriginalPageIndex = -1;
                         iconEdgeLatch = 0;
-                        showWorkspaceOverlapRejected();
+                        if (boundaryHasMajorityCell) {
+                            showWorkspaceOverlapRejected();
+                        } else {
+                            Toast.makeText(this,
+                                    "Move at least half of the drag boundary into a grid cell.",
+                                    Toast.LENGTH_SHORT).show();
+                        }
                         return true;
                     }
                     int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
