@@ -14,8 +14,8 @@ final class LauncherMotion {
     private static final String PREFS = "ds_launcher_prefs";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final int DEFAULT_SPEED_PERCENT = 100;
-    private static final int MIN_SPEED_PERCENT = 40;
-    private static final int MAX_SPEED_PERCENT = 200;
+    private static final int MIN_SPEED_PERCENT = 20;
+    private static final int MAX_SPEED_PERCENT = 300;
 
     private LauncherMotion() {}
 
@@ -40,6 +40,6 @@ final class LauncherMotion {
     static long duration(Context context, long baseMillis) {
         int speed = speedPercent(context);
         long scaled = Math.round(Math.max(0L, baseMillis) * (100f / speed));
-        return Math.max(40L, scaled);
+        return Math.max(20L, scaled);
     }
 }
