@@ -390,6 +390,12 @@ public class MainActivity extends Activity {
 
         @Override public void draw(Canvas canvas, CharSequence text, int start, int end,
                 float x, int top, int y, int bottom, Paint paint) {
+            // Outline strokes may extend beyond the font glyph and span advance.
+            // Clip the whole renderer to this span's allocated bounds so clock borders
+            // cannot spill into neighbouring app/widget layout.
+            int spanCanvasSave = canvas.save();
+            float spanWidth = Math.max(1f, paint.measureText(text, start, end));
+            canvas.clipRect(x, top, x + spanWidth, bottom);
             int oldColor = paint.getColor();
             Paint.Style oldStyle = paint.getStyle();
             float oldStrokeWidth = paint.getStrokeWidth();
@@ -478,6 +484,7 @@ public class MainActivity extends Activity {
                 paint.setFakeBoldText(oldFakeBold);
                 paint.setShader(oldShader);
                 paint.setXfermode(oldXfermode);
+                canvas.restoreToCount(spanCanvasSave);
             }
         }
     }
@@ -9630,8 +9637,7 @@ public class MainActivity extends Activity {
     private boolean tryShiftHomeIconCohort(FrameLayout page, View movingView, View seed,
             int preferredX, int preferredY) {
         if (page == null || movingView == null || seed == null
-                || !isHomeGridIcon(movingView) || !isHomeGridIcon(seed)
-                || liveDisplacedItems.containsKey(seed)
+                || !isHomeGridDragMover(movingView) || !isHomeGridIcon(seed)
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
 
         int columns = homeGridColumnsForItem(seed);
@@ -9701,11 +9707,10 @@ public class MainActivity extends Activity {
             // avoids unexpectedly dragging unrelated apps from adjacent rows.
             for (int memberIndex = 0; memberIndex < cohort.size() && !blocked; memberIndex++) {
                 View member = cohort.get(memberIndex);
-                if (liveDisplacedItems.containsKey(member)
-                        || appDisplacementAnimatorByView.containsKey(member)) {
-                    blocked = true;
-                    break;
-                }
+                // A cohort can be re-targeted while its previous synchronized
+                // displacement animation is in flight. Its layout margins already
+                // represent the reserved grid slot, so use that slot and replace the
+                // destination as a group instead of falling back to single-item pushes.
                 int[] originSlot = slots.get(member);
                 int targetCol = originSlot[0] + dxCells;
                 int targetRow = originSlot[1] + dyCells;
@@ -9777,8 +9782,11 @@ public class MainActivity extends Activity {
                     boolean sameLane = sameGridFamily && (dxCells != 0
                             ? blockerSlot != null && blockerSlot[1] == originSlot[1]
                             : blockerSlot != null && blockerSlot[0] == originSlot[0]);
-                    if (!sameLane || liveDisplacedItems.containsKey(blocker)
-                            || appDisplacementAnimatorByView.containsKey(blocker)) {
+                    // Existing cohort members may already have a reserved grid
+                    // destination or a running synchronized animator. They still belong
+                    // to the same row/column and must be re-targeted together when the
+                    // dragged item advances into the next reserved slot.
+                    if (!sameLane) {
                         blocked = true;
                         break;
                     }
@@ -9804,8 +9812,10 @@ public class MainActivity extends Activity {
                         member, originSlot[0] + dxCells, cellWidth, originGeometry[2]);
                 int targetY = homeGridIconTopAt(
                         page, member, originSlot[1] + dyCells, rows, cellHeight);
-                liveDisplacedItems.put(member,
-                        new int[]{originGeometry[0], originGeometry[1]});
+                if (!liveDisplacedItems.containsKey(member)) {
+                    liveDisplacedItems.put(member,
+                            new int[]{originGeometry[0], originGeometry[1]});
+                }
                 liveDisplacementTargets.put(member, new int[]{targetX, targetY});
                 liveDragGeometryCache.remove(member);
                 animateDisplacedItemTo(member, targetX, targetY);
@@ -9944,6 +9954,12 @@ public class MainActivity extends Activity {
     private boolean isHomeGridIcon(View view) {
         return isWorkspaceAppIcon(view) || isWorkspaceContactShortcut(view)
                 || isAppGroupItem(view);
+    }
+
+    private boolean isHomeGridDragMover(View view) {
+        return isHomeGridIcon(view)
+                || (view != null && "workspace_transfer_proxy".equals(view.getTag())
+                    && isHomeGridIcon(workspaceTransferItem));
     }
 
     private int homeGridColumnsForItem(View item) {
@@ -10656,7 +10672,8 @@ public class MainActivity extends Activity {
                 }
             }
 
-            if (!alreadyDisplaced && isHomeGridIcon(movingView)
+            if ((!alreadyDisplaced || targetCollides)
+                    && isHomeGridDragMover(movingView)
                     && isHomeGridIcon(other)
                     && tryShiftHomeIconCohort(page, movingView, other, bestX, bestY)) {
                 continue;
@@ -10783,29 +10800,11 @@ public class MainActivity extends Activity {
             return false;
         }
 
-        // Never pull an app icon away from the finger mid-gesture. A neighbour may
-        // still be travelling toward a reserved slot, or the live planner may need
-        // another frame to resolve a push chain. Keep the icon responsive and mark
-        // the unresolved overlap so the final drop can still be rejected safely.
-        if (isWorkspaceAppIcon(movingView)) return true;
-
-        int[] safe = liveDragLastSafeGeometry.get(movingView);
-        if (safe == null) return true;
-        if (isClockWorkspaceItem(movingView)) {
-            setClockVisualPosition(movingView, safe[0], safe[1], false);
-        } else if (movingView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
-            FrameLayout.LayoutParams lp =
-                    (FrameLayout.LayoutParams) movingView.getLayoutParams();
-            float sx = Math.max(0.01f, movingView.getScaleX());
-            float sy = Math.max(0.01f, movingView.getScaleY());
-            lp.leftMargin = safe[0]
-                    - Math.round(movingView.getPivotX() * (1f - sx));
-            lp.topMargin = safe[1]
-                    - Math.round(movingView.getPivotY() * (1f - sy));
-            movingView.setTranslationX(0f);
-            movingView.setTranslationY(0f);
-            movingView.setLayoutParams(lp);
-        }
+        // Do not rewind the active drag owner during MOVE. Widgets and clocks used
+        // to snap back to the last safe rectangle whenever a neighbour's displacement
+        // animation had not finished yet, which made movement appear frozen. Keep the
+        // finger-following geometry intact and reject only if the overlap is unresolved
+        // when the transaction is finalized.
         return true;
     }
     /**
