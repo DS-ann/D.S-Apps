@@ -2694,7 +2694,11 @@ public class MainActivity extends Activity {
     }
 
     private int clockDateFillColor() {
-        int position = prefs == null ? 0 : Math.max(0, Math.min(1000,
+        if (prefs == null || !prefs.contains(KEY_CLOCK_DATE_FILL_COLOR_POSITION)) {
+            // Keep the existing default date fill until the user selects a new colour.
+            return Color.rgb(238, 240, 244);
+        }
+        int position = Math.max(0, Math.min(1000,
                 prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, 0)));
         return LauncherIconDrawable.spectrumColorForPosition(position);
     }
@@ -7202,7 +7206,6 @@ public class MainActivity extends Activity {
         float displayPhase = live ? phase : 0f;
         boolean digitGradient = prefs != null
                 && prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false);
-        boolean useWhiteGradientInnerBorder = digitGradient;
         float borderDensity = getResources().getDisplayMetrics().density;
         // Date/AM-PM outlines are drawn by ClockTextOutlineSpan so the black inner contour
         // stays above the fill in every mode without a second renderer contour over it.
@@ -7522,7 +7525,7 @@ public class MainActivity extends Activity {
                     || previousDateGradient.booleanValue() != useDateGradient;
             String dateAppearanceKey = configuredDateSize + ":" + configuredPmSize + ":"
                     + useDateGradient + ":" + isClockIconArtworkActive() + ":"
-                    + prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, 0) + ":"
+                    + prefs.getInt(KEY_CLOCK_DATE_FILL_COLOR_POSITION, -1) + ":"
                     + clockDateFontFamily() + ":" + clockPmFontFamily();
             String previousDateAppearance = dateTextAppearanceApplied.get(dateText);
             if (!dateLine.toString().contentEquals(dateText.getText())
