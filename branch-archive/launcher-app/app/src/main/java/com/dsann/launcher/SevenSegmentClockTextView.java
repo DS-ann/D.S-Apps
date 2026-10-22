@@ -627,7 +627,7 @@ public final class SevenSegmentClockTextView extends TextView {
                     float y = baseline + api23NativeOutlinePaint.baselineShift;
                     api23NativeGlyphPath.reset();
                     api23NativeOutlinePaint.getTextPath(
-                            value, index, index + 1, x, y, api23NativeGlyphPath);
+                            value.toString(), index, index + 1, x, y, api23NativeGlyphPath);
                     if (api23NativeGlyphPath.isEmpty()) continue;
 
                     hasGlyph = true;
