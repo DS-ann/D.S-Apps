@@ -6309,6 +6309,8 @@ public class MainActivity extends Activity {
                                         .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
                                                 slot[1] / (float) Math.max(1, shortcutRows - 1))
                                         .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
+                                        .remove("workspace_icon_center_x_shortcut_" + shortcutId)
+                                        .remove("workspace_icon_center_y_shortcut_" + shortcutId)
                                         .putInt(shortcutPrefKey(KEY_SHORTCUT_WIDTH_DP, shortcutId),
                                                 Math.max(1, Math.round(finalShortcutLp.width / density)))
                                         .putInt(shortcutPrefKey(KEY_SHORTCUT_HEIGHT_DP, shortcutId),
@@ -14277,6 +14279,12 @@ public class MainActivity extends Activity {
     }
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
+        // A committed move becomes a new placement, so discard the old resize anchor.
+        // The next resize will capture the item's newly chosen visual center.
+        prefs.edit()
+                .remove("workspace_icon_center_x_app_" + packageName)
+                .remove("workspace_icon_center_y_app_" + packageName)
+                .apply();
         int slotHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int usableHeight = pageViewport != null && pageViewport.getHeight() > 0
