@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
     private static final long DEFAULT_RECORDING_INTERVAL_MS=1000L;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private TextView voltage,current;
-    private TextView calculatedPercent,calculatedMah,myBatteryCurrentLabel,androidPercentStatus;
+    private TextView calculatedPercent,calculatedMah,myBatteryCurrentLabel,myBatteryRateLabel,androidPercentStatus;
     private EditText customCapacityInput,startingChargeInput;
     private Button useAndroidPercentButton;
     private Switch notificationSwitch;
@@ -311,6 +311,9 @@ public class MainActivity extends Activity {
         myBatteryCurrentLabel=text("Current: N/A",12);
         myBatteryCurrentLabel.setTextColor(0xFF9AA0AA);
         calculator.addView(myBatteryCurrentLabel,top(1));
+        myBatteryRateLabel=text("Charging rate: -- mAh/h\nDischarging rate: -- mAh/h",12);
+        myBatteryRateLabel.setTextColor(0xFF9AA0AA);
+        calculator.addView(myBatteryRateLabel,top(3));
         calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
         calculatedMah.setTextColor(0xFFD2D8E0);
         calculator.addView(calculatedMah,top(2));
@@ -554,6 +557,7 @@ public class MainActivity extends Activity {
         try{
             BatteryReader.Reading reading=BatteryReader.read(this);
             if(myBatteryCurrentLabel!=null)myBatteryCurrentLabel.setText("Current: "+reading.currentText());
+            updateBatteryRates(reading);
             android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
             boolean serviceActive=prefs.getBoolean("notification_enabled",false)
                     ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
@@ -564,8 +568,28 @@ public class MainActivity extends Activity {
                     :BatteryPercentCalculator.sample(this,reading));
         }catch(Throwable ignored){
             if(myBatteryCurrentLabel!=null)myBatteryCurrentLabel.setText("Current: N/A");
+            updateBatteryRates(null);
             updateCalculatedLevel(BatteryPercentCalculator.current(this));
         }
+    }
+
+    private void updateBatteryRates(BatteryReader.Reading reading){
+        if(myBatteryRateLabel==null)return;
+        String chargingRate="--";
+        String dischargingRate="--";
+        if(reading!=null&&reading.currentUa!=Long.MIN_VALUE){
+            double rate=Math.abs((double)reading.currentUa)/1000.0;
+            BatteryReader.PowerState state=BatteryReader.getPowerState(this);
+            if(state==BatteryReader.PowerState.CHARGING){
+                chargingRate=String.format(java.util.Locale.US,"%.1f",rate);
+            }else if(state==BatteryReader.PowerState.DISCHARGING){
+                dischargingRate=String.format(java.util.Locale.US,"%.1f",rate);
+            }else if(state==BatteryReader.PowerState.FULL){
+                chargingRate="0.0";
+            }
+        }
+        myBatteryRateLabel.setText("Charging rate: "+chargingRate+" mAh/h\n"
+                +"Discharging rate: "+dischargingRate+" mAh/h");
     }
 
     private void updateCalculatedLevel(BatteryPercentCalculator.Estimate estimate){

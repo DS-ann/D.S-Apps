@@ -22,6 +22,8 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BatteryNotificationService extends Service {
     private static final int NOTIFICATION_ID = 1001;
@@ -54,19 +56,28 @@ public class BatteryNotificationService extends Service {
     private long lastRootCommandMs;
     private int lastAttemptedPowerStatus = -1;
     private int lastAttemptedPowerSource = -1;
-    private boolean rootCommandInFlight;
-    private final ExecutorService rootExecutor=Executors.newSingleThreadExecutor();
+    private volatile boolean rootCommandInFlight;
+    private final ExecutorService rootExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService samplingExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean sampleInFlight = new AtomicBoolean(false);
+    private volatile BatteryReader.Reading latestReading =
+            new BatteryReader.Reading(Long.MIN_VALUE, Long.MIN_VALUE);
+    private volatile long latestReadingAtMs;
     private PowerManager.WakeLock wakeLock;
 
     private final Runnable updater = new Runnable() {
         @Override public void run() {
             try {
-                updateNotification();
+                if (shouldRunService()) {
+                    requestSampleUpdate();
+                    publishNotification();
+                } else {
+                    stopSelf();
+                }
             } catch (Throwable ignored) {
-                // Preserve the persistent loop after transient sensor/root/preferences errors.
+                // A failed sample must not cancel the notification refresh loop.
             } finally {
                 if (shouldRunService()) handler.postDelayed(this, getNextSamplingInterval());
-                else stopSelf();
             }
         }
     };
@@ -77,7 +88,8 @@ public class BatteryNotificationService extends Service {
         startForeground(NOTIFICATION_ID,
                 buildNotification("--", 0.0, 0L, BatteryPercentCalculator.current(this)));
         acquireCpuLock();
-        updateNotification();
+        requestSampleUpdate();
+        publishNotification();
         if (shouldRunService()) handler.postDelayed(updater, getNextSamplingInterval());
         else stopSelf();
     }
@@ -141,7 +153,28 @@ public class BatteryNotificationService extends Service {
         return recording ? getSamplingInterval() : getMyBatterySamplingInterval();
     }
 
-    private void updateNotification() {
+    /**
+     * Keep sensor/root operations off the main thread. A blocked or slow sysfs/root operation
+     * must not stop the foreground notification's refresh timer.
+     */
+    private void requestSampleUpdate() {
+        if (!sampleInFlight.compareAndSet(false, true)) return;
+        try {
+            samplingExecutor.execute(() -> {
+                try {
+                    sampleAndSyncData();
+                } catch (Throwable ignored) {
+                    // Keep last good sensor reading; the independent notifier remains live.
+                } finally {
+                    sampleInFlight.set(false);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            sampleInFlight.set(false);
+        }
+    }
+
+    private void sampleAndSyncData() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         long now = System.currentTimeMillis();
 
@@ -157,6 +190,10 @@ public class BatteryNotificationService extends Service {
                 && !settings.getBoolean(KEY_RESET_PENDING, false) && !estimating) return;
 
         BatteryReader.Reading reading = BatteryReader.read(this);
+        latestReading = reading;
+        latestReadingAtMs = System.currentTimeMillis();
+        now = latestReadingAtMs;
+
         BatteryPercentCalculator.Estimate estimate = BatteryPercentCalculator.current(this);
         long myBatteryInterval = getMyBatterySamplingInterval();
         if (lastCalculatorSampleMs == 0L || now < lastCalculatorSampleMs
@@ -185,18 +222,46 @@ public class BatteryNotificationService extends Service {
             SessionStore.sample(this, reading);
             lastHistorySampleMs = now;
         }
+    }
 
+    /**
+     * Publish the latest cached sensor reading independently of the sensor/root worker.
+     * Android's own level/status and screen-on duration continue refreshing if a read stalls.
+     */
+    private void publishNotification() {
+        android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
+        boolean recordingEnabled = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
+        boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
+        boolean resetPending = settings.getBoolean(KEY_RESET_PENDING, false);
+        boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_CALCULATOR_RUNNING, false);
+        if (!recordingEnabled && !usePercent && !resetPending && !estimating) return;
+
+        long now = System.currentTimeMillis();
+        long myBatteryInterval = getMyBatterySamplingInterval();
+        long sessionInterval = getSamplingInterval();
         long notifyEvery = Math.max(NOTIFICATION_MIN_REFRESH_MS,
                 Math.min(1000L, recordingEnabled ? sessionInterval : myBatteryInterval));
-        if (now - lastNotificationUpdateMs >= notifyEvery || lastNotificationUpdateMs == 0L) {
-            NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (manager != null) {
-                manager.notify(NOTIFICATION_ID,
-                        buildNotification(reading.compact(), SessionStore.getActiveMah(this),
-                                SessionStore.getActiveScreenOnMs(this), BatteryPercentCalculator.current(this)));
-            }
-            lastNotificationUpdateMs = now;
+        if (now - lastNotificationUpdateMs < notifyEvery && lastNotificationUpdateMs != 0L) return;
+
+        BatteryReader.Reading reading = latestReading;
+        String liveText = reading.compact();
+        long readingAge = latestReadingAtMs == 0L ? Long.MAX_VALUE : now - latestReadingAtMs;
+        if (latestReadingAtMs > 0L && readingAge > Math.max(5000L, myBatteryInterval * 4L)) {
+            liveText = "Sensor reading delayed • " + liveText;
+        } else if (latestReadingAtMs == 0L) {
+            liveText = "Reading battery data…";
         }
+
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID,
+                    buildNotification(liveText, SessionStore.getActiveMah(this),
+                            SessionStore.getActiveScreenOnMs(this),
+                            BatteryPercentCalculator.current(this)));
+        }
+        lastNotificationUpdateMs = now;
     }
 
     private void applyCalculatedAndroidPercentage(BatteryPercentCalculator.Estimate estimate, long now) {
@@ -385,6 +450,7 @@ public class BatteryNotificationService extends Service {
         }
         if (shouldRunService()) scheduleRecovery();
         rootExecutor.shutdown();
+        samplingExecutor.shutdownNow();
         stopForeground(true);
         super.onDestroy();
     }

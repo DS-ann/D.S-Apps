@@ -5,6 +5,10 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A lazily opened, process-wide root shell shared by battery reading and Android percentage
@@ -13,6 +17,8 @@ import java.io.OutputStreamWriter;
 final class RootShell {
     private static final Object LOCK = new Object();
     private static final String READY_MARKER = "__BATTERYPULSE_ROOT_READY__";
+    private static final long READY_TIMEOUT_MS = 8000L;
+    private static final long COMMAND_TIMEOUT_MS = 4000L;
 
     private static Process process;
     private static BufferedWriter input;
@@ -38,22 +44,43 @@ final class RootShell {
                 input.newLine();
                 input.flush();
 
-                StringBuilder result = new StringBuilder();
-                String line;
-                while ((line = output.readLine()) != null) {
-                    if (line.startsWith(marker)) {
-                        int exitCode;
-                        try {
-                            exitCode = Integer.parseInt(line.substring(marker.length()).trim());
-                        } catch (NumberFormatException badStatus) {
-                            throw new IOException("Invalid root command status.");
+                final BufferedReader reader = output;
+                FutureTask<CommandResult> task = new FutureTask<>(() -> {
+                    StringBuilder result = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith(marker)) {
+                            int exitCode;
+                            try {
+                                exitCode = Integer.parseInt(line.substring(marker.length()).trim());
+                            } catch (NumberFormatException badStatus) {
+                                throw new IOException("Invalid root command status.");
+                            }
+                            return new CommandResult(exitCode == 0, result.toString(), exitCode);
                         }
-                        return new CommandResult(exitCode == 0, result.toString(), exitCode);
+                        if (result.length() > 0) result.append('\n');
+                        result.append(line);
                     }
-                    if (result.length() > 0) result.append('\n');
-                    result.append(line);
+                    throw new IOException("Root shell closed before completing the command.");
+                });
+                Thread readerThread = new Thread(task, "BatteryPulse-RootCommand");
+                readerThread.setDaemon(true);
+                readerThread.start();
+                try {
+                    return task.get(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException timeout) {
+                    task.cancel(true);
+                    throw new IOException("Root command timed out after "
+                            + COMMAND_TIMEOUT_MS + " ms.", timeout);
+                } catch (ExecutionException failed) {
+                    Throwable cause = failed.getCause();
+                    throw new IOException(cause == null ? "Root command failed."
+                            : String.valueOf(cause.getMessage()), cause);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    task.cancel(true);
+                    throw new IOException("Root command interrupted.", interrupted);
                 }
-                throw new IOException("Root shell closed before completing the command.");
             } catch (Exception error) {
                 closeLocked();
                 String message = error.getMessage();
@@ -79,11 +106,26 @@ final class RootShell {
         input.newLine();
         input.flush();
 
-        String line;
-        while ((line = output.readLine()) != null) {
-            if (READY_MARKER.equals(line.trim())) return;
+        final BufferedReader reader = output;
+        FutureTask<String> task = new FutureTask<>(reader::readLine);
+        Thread readerThread = new Thread(task, "BatteryPulse-RootStartup");
+        readerThread.setDaemon(true);
+        readerThread.start();
+        try {
+            String line = task.get(READY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (READY_MARKER.equals(line == null ? "" : line.trim())) return;
+            throw new IOException("Unable to open an authorized root shell.");
+        } catch (TimeoutException timeout) {
+            task.cancel(true);
+            throw new IOException("Root shell startup timed out.", timeout);
+        } catch (ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            throw new IOException("Unable to read root shell startup marker.", cause);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            task.cancel(true);
+            throw new IOException("Root shell startup interrupted.", interrupted);
         }
-        throw new IOException("Unable to open an authorized root shell.");
     }
 
     private static boolean isAliveLocked() {
@@ -97,12 +139,10 @@ final class RootShell {
     }
 
     private static void closeLocked() {
+        // Destroy first: closing a BufferedReader while another thread is blocked inside
+        // readLine() can itself wait on the reader lock.
         try {
-            if (input != null) {
-                input.write("exit");
-                input.newLine();
-                input.flush();
-            }
+            if (process != null) process.destroy();
         } catch (Exception ignored) {
         }
         try {
@@ -111,10 +151,6 @@ final class RootShell {
         }
         try {
             if (output != null) output.close();
-        } catch (Exception ignored) {
-        }
-        try {
-            if (process != null) process.destroy();
         } catch (Exception ignored) {
         }
         input = null;
