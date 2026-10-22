@@ -2474,8 +2474,8 @@ public class MainActivity extends Activity {
                 final int targetRight = right;
                 final int targetBottom = bottom;
                 final int targetHeight = Math.max(1, targetBottom - targetTop);
-                final int targetRowHeight = Math.max(1,
-                        targetHeight - clockWidgetStartNonRowHeight);
+                // targetRowHeight was derived from the validated candidate above and is
+                // reused here to keep the date-line allowance identical for this frame.
                 final int naturalRowHeightForResize = LauncherUiUtils.dp(this, 114);
                 boolean sevenSegmentResize = clockTextsByPage[resizePage]
                         instanceof SevenSegmentClockTextView
