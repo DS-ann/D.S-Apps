@@ -165,9 +165,14 @@ final class HomePageController {
             int fallbackHeight = Math.max(LauncherUiUtils.dp(activity, 360),
                     activity.getResources().getDisplayMetrics().heightPixels
                             - LauncherUiUtils.dp(activity, 260));
-            int pageHeight = host.getPageViewport() != null
-                    && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
-                    ? host.getPageViewport().getHeight() : fallbackHeight;
+            // Use the actual page dimensions whenever available. The post-layout
+            // correction below also uses page.getHeight(); mixing viewport and page
+            // heights reinterprets normalized Y positions as different grid rows.
+            int pageHeight = page.getHeight() > LauncherUiUtils.dp(activity, 100)
+                    ? page.getHeight()
+                    : (host.getPageViewport() != null
+                            && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
+                                    ? host.getPageViewport().getHeight() : fallbackHeight);
             int configuredIconSize = prefs.getInt(iconSizeKey, 48);
             // Use the same label-aware slot height as dragging, snapping, capacity,
             // and collision checks. Added label height extends only below the icon.
@@ -192,7 +197,9 @@ final class HomePageController {
                 if (app == null) continue;
                 View cell = homeAdapter.getViewForApp(app, null, page);
                 cell.setTag("launcher_app:" + packageName);
-                int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1), pageWidth / columns);
+                int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
+                int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
+                        actualPageWidth / columns);
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
