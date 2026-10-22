@@ -385,17 +385,8 @@ public class BatteryNotificationService extends Service {
         if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
             capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
         }
-        if(reading==null||reading.currentUa==Long.MIN_VALUE
-                ||Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)
-                ||capacityMah<100.0||capacityMah>100000.0){
-            return powerState==BatteryReader.PowerState.FULL?"0.00%/h":"--%/h";
-        }
-        if(powerState==BatteryReader.PowerState.FULL)return "0.00%/h";
-        if(powerState!=BatteryReader.PowerState.CHARGING
-                &&powerState!=BatteryReader.PowerState.DISCHARGING
-                &&powerState!=BatteryReader.PowerState.NOT_CHARGING)return "--%/h";
-        double rate=Math.abs((double)reading.currentUa)/1000.0
-                *100.0/capacityMah;
+        double rate=BatteryRateAverager.ratePerHour(reading,powerState,capacityMah);
+        if(Double.isNaN(rate)||Double.isInfinite(rate))return "--%/h";
         return String.format(java.util.Locale.US,"%.2f%%/h",rate);
     }
 

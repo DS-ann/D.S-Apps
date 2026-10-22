@@ -369,6 +369,9 @@ public class MainActivity extends Activity {
         myBatteryRateLabel=text("Charging rate: --%/h\nDischarging rate: --%/h",12);
         myBatteryRateLabel.setTextColor(0xFF9AA0AA);
         calculator.addView(myBatteryRateLabel,top(3));
+        TextView rateAverageHint=text("1-minute average • updated every minute",11);
+        rateAverageHint.setTextColor(0xFF7F8B9B);
+        calculator.addView(rateAverageHint,top(2));
         calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
         calculatedMah.setTextColor(0xFFD2D8E0);
         calculator.addView(calculatedMah,top(2));
@@ -760,18 +763,15 @@ public class MainActivity extends Activity {
         if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
             capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
         }
-        if(reading!=null&&reading.currentUa!=Long.MIN_VALUE
-                &&!Double.isNaN(capacityMah)&&!Double.isInfinite(capacityMah)
-                &&capacityMah>=100.0&&capacityMah<=100000.0){
-            double rate=Math.abs((double)reading.currentUa)/1000.0
-                    *100.0/capacityMah;
-            if(state==BatteryReader.PowerState.CHARGING){
+        double rate=BatteryRateAverager.ratePerHour(reading,state,capacityMah);
+        if(state==BatteryReader.PowerState.CHARGING){
+            if(!Double.isNaN(rate)&&!Double.isInfinite(rate)){
                 chargingRate=String.format(java.util.Locale.US,"%.2f",rate);
-            }else if(state==BatteryReader.PowerState.DISCHARGING
-                    ||state==BatteryReader.PowerState.NOT_CHARGING){
+            }
+        }else if(state==BatteryReader.PowerState.DISCHARGING
+                ||state==BatteryReader.PowerState.NOT_CHARGING){
+            if(!Double.isNaN(rate)&&!Double.isInfinite(rate)){
                 dischargingRate=String.format(java.util.Locale.US,"%.2f",rate);
-            }else if(state==BatteryReader.PowerState.FULL){
-                chargingRate="0.00";
             }
         }else if(state==BatteryReader.PowerState.FULL){
             chargingRate="0.00";
