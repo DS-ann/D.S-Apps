@@ -279,6 +279,10 @@ public class MainActivity extends Activity {
     private final TextView[] dateTextsByPage = new TextView[2];
     private final FrameLayout[] clockRowsByPage = new FrameLayout[2];
     private final FrameLayout[] clockGroupsByPage = new FrameLayout[2];
+    // Package/style refreshes may rebuild geometry but must preserve clock placement.
+    private final boolean[] preserveClockPositionAfterPackageRefresh = new boolean[2];
+    private final float[] packageRefreshClockTranslationX = new float[2];
+    private final float[] packageRefreshClockTranslationY = new float[2];
     private int activeClockPage = 0;
     // Each clock panel has its own drawable; remember the last applied five-minute colour phase.
     private int lastClockPanelColorPhase = -1;
@@ -821,7 +825,12 @@ public class MainActivity extends Activity {
                 forceClockTextRefresh = true;
                 updateClock();
                 for (int page = 0; page < clockPanelsByPage.length; page++) {
-                    if (clockPanelsByPage[page] == null) continue;
+                    LinearLayout targetPanel = clockPanelsByPage[page];
+                    if (targetPanel == null) continue;
+                    // Package updates rebuild text/layout, not the widget's workspace position.
+                    packageRefreshClockTranslationX[page] = targetPanel.getTranslationX();
+                    packageRefreshClockTranslationY[page] = targetPanel.getTranslationY();
+                    preserveClockPositionAfterPackageRefresh[page] = true;
                     activateClockForPage(page);
                     applyClockPositionAndSize();
                     applyClockPanelColor(false);
@@ -3986,6 +3995,7 @@ public class MainActivity extends Activity {
         // Match the expanded panel's 24dp corner radius at the icon's starting scale.
         // Keeping the same rounded-square silhouette avoids an oval-to-square morph.
         logoBackground.setCornerRadius(Math.max(1f, iconSizePx * 0.08f));
+        logoBackground.setStroke(Math.max(1, LauncherUiUtils.dp(this, 1)), Color.BLACK);
         logo.setBackground(logoBackground);
         logo.setClipChildren(true);
         logo.setClipToPadding(true);
@@ -4581,6 +4591,9 @@ public class MainActivity extends Activity {
         final float[] morphProgress = new float[]{0f};
         final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
+        final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
+        final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
+        final Runnable[] deferredMemberIconApply = new Runnable[1];
         final android.view.ViewOutlineProvider morphOutlineProvider =
                 new android.view.ViewOutlineProvider() {
             @Override public void getOutline(View view, android.graphics.Outline outline) {
@@ -4641,8 +4654,10 @@ public class MainActivity extends Activity {
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         panel.setClickable(true);
         panel.setOnClickListener(v -> { /* Consume blank-panel taps; only outside taps close. */ });
-        panel.setClipChildren(false);
-        panel.setClipToPadding(false);
+        // Keep app rows inside the rounded card. Their ScrollView is a separate
+        // viewport below the fixed name/divider header.
+        panel.setClipChildren(true);
+        panel.setClipToPadding(true);
 
         TextView title = new TextView(this);
         title.setText(getAppGroupLabel(groupId));
@@ -4664,6 +4679,7 @@ public class MainActivity extends Activity {
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(false);
         scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         // The separator stays fixed while the app rows scroll underneath it. Clip the
         // scrolling viewport and content so child icons/labels cannot paint over the line.
         scroll.setClipToPadding(true);
@@ -4700,7 +4716,9 @@ public class MainActivity extends Activity {
             item.setScaleY(1f);
             ImageView icon = new ImageView(this);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            icon.setImageDrawable(createAppGroupMemberDrawable(app));
+            // Artwork is loaded off the UI thread so the opening motion starts immediately.
+            pendingMemberApps.add(app);
+            pendingMemberIconViews.add(icon);
             item.addView(icon, new LinearLayout.LayoutParams(miniIconPx, miniIconPx));
             TextView label = new TextView(this);
             label.setText(String.valueOf(app.loadLabel(packageManager)));
@@ -4743,6 +4761,44 @@ public class MainActivity extends Activity {
                         getResources().getDisplayMetrics().heightPixels * 2 / 3),
                 Math.max(LauncherUiUtils.dp(this, 120), targetRowHeight * 2));
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
+
+        // PackageManager artwork and custom icon effects can be costly in large groups.
+        // Prepare artwork in parallel with dialog/window layout; apply it before animation
+        // when ready, or after the opening transition so icon updates cannot stall motion.
+        if (!pendingMemberApps.isEmpty()) {
+            final ResolveInfo[] appsToLoad = pendingMemberApps.toArray(new ResolveInfo[0]);
+            final ImageView[] iconTargets = pendingMemberIconViews.toArray(new ImageView[0]);
+            Thread iconLoader = new Thread(() -> {
+                final Drawable[] loaded = new Drawable[appsToLoad.length];
+                for (int i = 0; i < appsToLoad.length; i++) {
+                    try {
+                        loaded[i] = createAppGroupMemberDrawable(appsToLoad[i]);
+                    } catch (RuntimeException ignored) {
+                        loaded[i] = null;
+                    }
+                }
+                handler.post(() -> {
+                    if (!dialog.isShowing()) return;
+                    Runnable applyLoadedIcons = () -> {
+                        if (!dialog.isShowing()) return;
+                        for (int i = 0; i < loaded.length; i++) {
+                            ImageView target = iconTargets[i];
+                            if (target != null && target.getParent() != null) {
+                                target.setImageDrawable(loaded[i]);
+                            }
+                        }
+                    };
+                    android.animation.ValueAnimator running = morphAnimator[0];
+                    if (running != null && running.isRunning()) {
+                        deferredMemberIconApply[0] = applyLoadedIcons;
+                    } else {
+                        applyLoadedIcons.run();
+                    }
+                });
+            }, "LauncherAppGroupIcons");
+            iconLoader.setDaemon(true);
+            iconLoader.start();
+        }
 
         final int panelWidthLimit = Math.max(LauncherUiUtils.dp(this, 240),
                 Math.min(getResources().getDisplayMetrics().widthPixels
@@ -4980,66 +5036,15 @@ public class MainActivity extends Activity {
             morphProgress[0] = 0f;
             dimLayer.setAlpha(0f);
 
-            android.graphics.Bitmap iconSnapshot = null;
-            if (openingGroupIcon != null && openingGroupIcon.getWidth() > 0
-                    && openingGroupIcon.getHeight() > 0) {
-                try {
-                    // Rasterize at 2x so the source artwork remains clean while it grows.
-                    int snapshotWidth = openingGroupIcon.getWidth();
-                    int snapshotHeight = openingGroupIcon.getHeight();
-                    iconSnapshot = android.graphics.Bitmap.createBitmap(
-                            snapshotWidth * 2, snapshotHeight * 2,
-                            android.graphics.Bitmap.Config.ARGB_8888);
-                    android.graphics.Canvas snapshotCanvas = new android.graphics.Canvas(iconSnapshot);
-                    snapshotCanvas.scale(2f, 2f);
-                    openingGroupIcon.draw(snapshotCanvas);
-                } catch (RuntimeException snapshotError) {
-                    if (iconSnapshot != null && !iconSnapshot.isRecycled()) iconSnapshot.recycle();
-                    iconSnapshot = null;
-                }
-            }
-            if (iconSnapshot != null) {
-                android.widget.ImageView snapshot = new android.widget.ImageView(this);
-                snapshot.setImageBitmap(iconSnapshot);
-                snapshot.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
-                snapshot.setClickable(false);
-                snapshot.setFocusable(false);
-                snapshot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                // Keep the image view at the real icon bounds. Its independent scale
-                // and translation then expand the actual rounded icon into the panel,
-                // instead of stretching it over the panel before scaling it down.
-                FrameLayout.LayoutParams snapshotParams = new FrameLayout.LayoutParams(
-                        iconW, iconH, Gravity.TOP | Gravity.LEFT);
-                snapshotParams.leftMargin = iconX - iconW / 2;
-                snapshotParams.topMargin = iconY - iconH / 2;
-                overlay.addView(snapshot, snapshotParams);
-                snapshot.setPivotX(iconW * 0.5f);
-                snapshot.setPivotY(iconH * 0.5f);
-                snapshot.setScaleX(1f);
-                snapshot.setScaleY(1f);
-                snapshot.setTranslationX(0f);
-                snapshot.setTranslationY(0f);
-                snapshot.bringToFront();
-                morphSnapshotRef[0] = snapshot;
-                // Fade/scale the source icon uniformly; stretching it to the taller
-                // popup shape made the logo itself appear oval before disappearing.
-                float snapshotScale = Math.min(
-                        lp.width / (float) Math.max(1, iconW),
-                        lp.height / (float) Math.max(1, iconH));
-                iconScale[2] = snapshotScale;
-                iconScale[3] = snapshotScale;
-                if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
-            }
+            // Hide the launcher cell while the single rounded card surface expands.
+            // Avoid per-tap bitmap rasterization and a second animated layer.
+            if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
 
             // Prewarm the static popup surface before its first visible frame. On older
             // GPUs a lazy hardware-layer allocation at animation start caused a visible
             // pause, making the icon-to-panel morph appear as separate steps.
             panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             if (panel.getWidth() > 0 && panel.getHeight() > 0) panel.buildLayer();
-            android.widget.ImageView preparedSnapshot = morphSnapshotRef[0];
-            if (preparedSnapshot != null && preparedSnapshot.getWidth() > 0
-                    && preparedSnapshot.getHeight() > 0) preparedSnapshot.buildLayer();
 
             final long duration = animationDuration(240L);
             android.animation.ValueAnimator transition =
@@ -5088,6 +5093,9 @@ public class MainActivity extends Activity {
                         snapshot.setVisibility(View.VISIBLE);
                     }
                     panel.invalidateOutline();
+                    Runnable deferredIcons = deferredMemberIconApply[0];
+                    deferredMemberIconApply[0] = null;
+                    if (deferredIcons != null) deferredIcons.run();
                 }
             });
             morphAnimator[0] = transition;
@@ -15080,6 +15088,15 @@ public class MainActivity extends Activity {
         if (clockPanel == null || clockText == null) return;
         final LinearLayout targetPanel = clockPanel;
         final int targetPage = Math.max(0, Math.min(1, activeClockPage));
+        final boolean preservePackageRefreshPosition =
+                preserveClockPositionAfterPackageRefresh[targetPage];
+        final float panelTranslationAtStartX = targetPanel.getTranslationX();
+        final float panelTranslationAtStartY = targetPanel.getTranslationY();
+        final float preservedPanelTranslationX = preservePackageRefreshPosition
+                ? packageRefreshClockTranslationX[targetPage] : panelTranslationAtStartX;
+        final float preservedPanelTranslationY = preservePackageRefreshPosition
+                ? packageRefreshClockTranslationY[targetPage] : panelTranslationAtStartY;
+        preserveClockPositionAfterPackageRefresh[targetPage] = false;
         // A live drag/resize owns the panel transform until UP/CANCEL. A normal
         // typography/layout pass here would reset its scale/pivot and make the clock
         // jump away from the anchored edge while the user is resizing it.
@@ -15109,6 +15126,8 @@ public class MainActivity extends Activity {
                 ? clockGroupsByPage[targetPage] : clockGroup;
         final int[] previousClockPanelGeometry = targetPanel.getWidth() > 0
                 ? itemGeometry(targetPanel) : new int[]{0, 0, 0, 0};
+        final boolean preservePanelPosition = preservePackageRefreshPosition
+                || (clockStyleChanged && previousClockPanelGeometry[2] > 0);
         final boolean preserveTypographyPanelCenterX =
                 !(clockText instanceof SevenSegmentClockTextView && selectedClockStyle == 5)
                 && !clockStyleChanged
@@ -15360,16 +15379,23 @@ public class MainActivity extends Activity {
                 updateClockResizeHandles();
                 return;
             }
-            float targetTranslationX = targetPanel.getTranslationX();
-            float[] bounded = clampClockTranslation(targetPanel,
-                    targetTranslationX, targetPanel.getTranslationY());
-            setClampedClockTranslationForPanel(
-                    targetPanel, targetPage, bounded[0], bounded[1], true);
+            if (preservePanelPosition) {
+                // A style or package refresh rebuilds content, not workspace placement.
+                targetPanel.setTranslationX(preservedPanelTranslationX);
+                targetPanel.setTranslationY(preservedPanelTranslationY);
+            } else {
+                float targetTranslationX = targetPanel.getTranslationX();
+                float[] bounded = clampClockTranslation(targetPanel,
+                        targetTranslationX, targetPanel.getTranslationY());
+                setClampedClockTranslationForPanel(
+                        targetPanel, targetPage, bounded[0], bounded[1], true);
+            }
 
             // If date typography changes the panel width, keep its visual center fixed.
             // The clock group is centered inside that panel, so the colon stays centered
             // without using date size or font metrics to calculate its horizontal offset.
-            if (preserveTypographyPanelCenterX && targetPanel.getParent() != null) {
+            if (!preservePanelPosition && preserveTypographyPanelCenterX
+                    && targetPanel.getParent() != null) {
                 int[] currentClockPanelGeometry = itemGeometry(targetPanel);
                 float previousCenterX = previousClockPanelGeometry[0]
                         + previousClockPanelGeometry[2] / 2f;
@@ -15399,9 +15425,9 @@ public class MainActivity extends Activity {
                     && clockWidgetEditing && clockResizeEdge != 0;
             boolean anotherDragOwnsPage = pendingLiveDisplacementPage == targetPanel.getParent()
                     && pendingLiveDisplacementMover != null;
-            if (!activeClockResize && !anotherDragOwnsPage && !clockStyleChanged) {
-                // A style switch preserves the existing footprint; don't run collision
-                // relocation for that transaction and unexpectedly move the clock away.
+            if (!activeClockResize && !anotherDragOwnsPage && !preservePanelPosition) {
+                // Collision relocation is reserved for ordinary layout changes, not a
+                // style switch or package refresh that must preserve the chosen position.
                 moveClockToNearestFreePosition(targetPanel);
             }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
