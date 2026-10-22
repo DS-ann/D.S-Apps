@@ -1691,6 +1691,9 @@ public class MainActivity extends Activity {
                         && clockPanel.getParent() instanceof FrameLayout) {
                     finishLiveDisplacements(false, clockPanel);
                 }
+                clockDragDisplacementPreviewActive = false;
+                clockDragLastDisplacementX = Integer.MIN_VALUE;
+                clockDragLastDisplacementY = Integer.MIN_VALUE;
                 clockWidgetDragging = false;
                 if (!keepEditorOpen) {
                     clockWidgetMoving = false;
@@ -1778,8 +1781,17 @@ public class MainActivity extends Activity {
                 boolean acceptedClockMove = true;
                 if (clockWidgetDragging && clockPanel != null
                         && clockPanel.getParent() instanceof FrameLayout) {
+                    // Flush the latest collision plan before commit even when the final
+                    // movement was smaller than the per-frame planning threshold.
+                    if (clockDragDisplacementPreviewActive) {
+                        scheduleLiveDisplacementUpdate(
+                                (FrameLayout) clockPanel.getParent(), clockPanel);
+                    }
                     acceptedClockMove = finishLiveDisplacements(true, clockPanel);
                 }
+                clockDragDisplacementPreviewActive = false;
+                clockDragLastDisplacementX = Integer.MIN_VALUE;
+                clockDragLastDisplacementY = Integer.MIN_VALUE;
                 if (!acceptedClockMove && clockPanel != null) {
                     boolean restoredLastSafe = false;
                     if (lastSafeClockGeometry != null
@@ -1997,6 +2009,11 @@ public class MainActivity extends Activity {
     private boolean clockDragFramePending = false;
     private float clockDragPendingRawX;
     private float clockDragPendingRawY;
+    // Full collision planning is expensive on older devices. Only invoke it while the
+    // clock actually touches another workspace item, and throttle replans by distance.
+    private boolean clockDragDisplacementPreviewActive = false;
+    private int clockDragLastDisplacementX = Integer.MIN_VALUE;
+    private int clockDragLastDisplacementY = Integer.MIN_VALUE;
     private final Runnable clockDragFrame = () -> {
         clockDragFramePending = false;
         applyClockDragMove(clockDragPendingRawX, clockDragPendingRawY);
@@ -2053,15 +2070,76 @@ public class MainActivity extends Activity {
             int[] safeGeometry = itemGeometry(movingPanel);
             liveDragLastSafeGeometry.put(movingPanel,
                     new int[]{safeGeometry[0], safeGeometry[1]});
+            clockDragDisplacementPreviewActive = false;
+            clockDragLastDisplacementX = Integer.MIN_VALUE;
+            clockDragLastDisplacementY = Integer.MIN_VALUE;
         }
         clockWidgetDragging = true;
         if (moveReady) handler.removeCallbacks(clockWidgetEditLongPress);
         setClampedClockTranslationForPanel(movingPanel, movingPage,
                 clockWidgetStartX + moveX, clockWidgetStartY + moveY, false);
-        scheduleClockResizeHandlesUpdate();
         if (firstMoveFrame) setWorkspaceGridVisible(true, movingPanel);
         if (movingPanel.getParent() instanceof FrameLayout) {
-            scheduleLiveDisplacementUpdate((FrameLayout) movingPanel.getParent(), movingPanel);
+            FrameLayout page = (FrameLayout) movingPanel.getParent();
+            int[] geometry = itemGeometry(movingPanel);
+            boolean overlapping = clockDragOverlapsWorkspaceItems(page, movingPanel, geometry);
+            // Every collision-free position becomes a safe rollback point. If the
+            // collision resolver cannot move a neighbour, the clock now stops at the
+            // nearest actual obstruction instead of snapping back to the drag origin.
+            if (!overlapping) {
+                liveDragLastSafeGeometry.put(movingPanel,
+                        new int[]{geometry[0], geometry[1]});
+            }
+            updateClockDragDisplacementPreview(page, movingPanel, geometry, overlapping);
+        }
+        // The grips are hidden in move-ready mode; only reposition them when edit mode
+        // is active, avoiding four root-overlay updates on every ordinary drag frame.
+        if (clockWidgetEditing) scheduleClockResizeHandlesUpdate();
+    }
+
+    private boolean clockDragOverlapsWorkspaceItems(
+            FrameLayout page, View movingPanel, int[] movingGeometry) {
+        if (page == null || movingPanel == null || movingGeometry == null) return false;
+        android.graphics.Rect movingBounds = collisionRectForInteraction(
+                movingPanel, movingGeometry, null);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingPanel || other == workspaceTransferProxy
+                    || other.getVisibility() != View.VISIBLE || !isWorkspaceItem(other)) continue;
+            int[] geometry = itemGeometry(other);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            android.graphics.Rect current = collisionRectForInteraction(other, geometry, movingPanel);
+            if (android.graphics.Rect.intersects(movingBounds, current)) return true;
+            int[] target = liveDisplacementTargets.get(other);
+            if (target != null) {
+                android.graphics.Rect reserved = collisionRectAtForInteraction(
+                        other, target[0], target[1], geometry[2], geometry[3], movingPanel);
+                if (android.graphics.Rect.intersects(movingBounds, reserved)) return true;
+            }
+        }
+        return false;
+    }
+
+    private void updateClockDragDisplacementPreview(
+            FrameLayout page, View movingPanel, int[] geometry, boolean overlapping) {
+        if (page == null || movingPanel == null || geometry == null) return;
+        int threshold = LauncherUiUtils.dp(this, 12);
+        boolean movedEnough = clockDragLastDisplacementX == Integer.MIN_VALUE
+                || Math.abs(geometry[0] - clockDragLastDisplacementX) >= threshold
+                || Math.abs(geometry[1] - clockDragLastDisplacementY) >= threshold;
+        if (overlapping) {
+            if (!clockDragDisplacementPreviewActive || movedEnough) {
+                scheduleLiveDisplacementUpdate(page, movingPanel);
+                clockDragLastDisplacementX = geometry[0];
+                clockDragLastDisplacementY = geometry[1];
+            }
+            clockDragDisplacementPreviewActive = true;
+        } else if (clockDragDisplacementPreviewActive) {
+            // One final pass reverses any temporary neighbour movement.
+            scheduleLiveDisplacementUpdate(page, movingPanel);
+            clockDragDisplacementPreviewActive = false;
+            clockDragLastDisplacementX = geometry[0];
+            clockDragLastDisplacementY = geometry[1];
         }
     }
 
