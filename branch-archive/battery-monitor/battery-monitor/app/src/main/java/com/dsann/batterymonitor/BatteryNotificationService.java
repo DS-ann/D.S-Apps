@@ -193,24 +193,28 @@ public class BatteryNotificationService extends Service {
     private boolean shouldUseDozeSamplingMode() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
         PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
-        if (manager == null) return false;
+        if (manager == null || manager.isInteractive()) return false;
 
-        // Enter the reduced sampling mode only when Android confirms Doze.
-        if (manager.isDeviceIdleMode()) return true;
-
-        // isDeviceIdleMode() is temporarily false during Doze maintenance windows.
-        // If this service already entered Doze sampling, stay low-power through those
-        // windows instead of reacquiring a continuous CPU wake lock.
-        if (!dozeSamplingMode || manager.isInteractive()) return false;
-
+        boolean pluggedIn;
         try {
             Intent battery = registerReceiver(null,
                     new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-            return battery != null
-                    && battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) == 0;
+            if (battery == null) return false;
+            pluggedIn = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
         } catch (Throwable ignored) {
             return false;
         }
+        // Screen-on or connected-to-power always restores ordinary monitoring.
+        if (pluggedIn) return false;
+
+        // Enter reduced sampling only after Android confirms active Doze.
+        if (manager.isDeviceIdleMode()) return true;
+
+        // Android reports isDeviceIdleMode() as false during maintenance windows.
+        // If Doze sampling has already begun and the device remains screen-off/unplugged,
+        // keep the low-power schedule through that window rather than taking a continuous
+        // wake lock for the brief period when Android lifts idle restrictions.
+        return dozeSamplingMode;
     }
 
     private void handlePowerStateChanged() {
