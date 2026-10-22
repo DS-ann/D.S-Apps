@@ -12102,27 +12102,28 @@ remove manage group action        final int panelWidthLimit = Math.max(LauncherU
     private android.graphics.Rect settleClockResizeBounds(FrameLayout page, View clock,
             android.graphics.Rect requested, int edge, int minWidth, int minHeight) {
         android.graphics.Rect candidate = new android.graphics.Rect(requested);
-        if (canPlaceWorkspaceItem(page, clock, candidate)) return candidate;
+        if (canApplyClockResizeCandidate(page, clock, candidate, edge)) return candidate;
         int maxSteps = edge == 1 || edge == 2
                 ? Math.max(0, candidate.width() - minWidth)
                 : Math.max(0, candidate.height() - minHeight);
         if (maxSteps <= 0) return candidate;
 
         // Shrinking toward the fixed opposite edge is monotonic for this resize axis.
-        // Test the minimum first; if even that rectangle is blocked, reject this frame.
+        // Check only the newly occupied strip, not the clock's already-existing area.
+        // Otherwise a single pre-existing overlap makes even the minimum fail and the
+        // resizer appears to hit an invisible wall.
         android.graphics.Rect minimum = resizeBoundsAfterRetreat(requested, edge, maxSteps,
                 minWidth, minHeight);
-        if (!canPlaceWorkspaceItem(page, clock, minimum)) return candidate;
+        if (!canApplyClockResizeCandidate(page, clock, minimum, edge)) return candidate;
 
-        // Find the smallest retreat that becomes legal. Linear 1px scans were doing
-        // hundreds or thousands of full child-bound/collision checks on every MOVE.
+        // Find the smallest retreat that makes the added strip legal.
         int low = 1;
         int high = maxSteps;
         while (low < high) {
             int middle = low + (high - low) / 2;
             android.graphics.Rect trial = resizeBoundsAfterRetreat(requested, edge, middle,
                     minWidth, minHeight);
-            if (canPlaceWorkspaceItem(page, clock, trial)) high = middle;
+            if (canApplyClockResizeCandidate(page, clock, trial, edge)) high = middle;
             else low = middle + 1;
         }
         return resizeBoundsAfterRetreat(requested, edge, low, minWidth, minHeight);
