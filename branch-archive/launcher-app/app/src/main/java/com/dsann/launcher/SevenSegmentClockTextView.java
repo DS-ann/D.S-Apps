@@ -636,22 +636,12 @@ public final class SevenSegmentClockTextView extends TextView {
                 api23NativeOutlinePaint.setStrokeCap(Paint.Cap.ROUND);
                 api23NativeOutlinePaint.clearShadowLayer();
 
-                api23NativeGlyphMask.reset();
-                boolean hasInnerContour = api23NativeOutlinePaint.getFillPath(
-                        api23NativeGlyphPath, api23NativeGlyphMask);
-                if (hasInnerContour) {
-                    hasInnerContour = api23NativeGlyphMask.op(
-                            api23NativeGlyphPath, android.graphics.Path.Op.INTERSECT);
-                }
-                if (hasInnerContour) {
-                    api23NativeMaskPaint.set(api23NativeOutlinePaint);
-                    api23NativeMaskPaint.setStyle(Paint.Style.FILL);
-                    api23NativeMaskPaint.setStrokeWidth(0f);
-                    api23NativeMaskPaint.setColor(Color.WHITE);
-                    api23NativeMaskPaint.setShader(null);
-                    api23NativeMaskPaint.setXfermode(null);
-                    api23NativeMaskPaint.clearShadowLayer();
-                    canvas.drawPath(api23NativeGlyphMask, api23NativeMaskPaint);
+                int whiteContourSave = canvas.save();
+                try {
+                    canvas.clipPath(api23NativeGlyphPath);
+                    canvas.drawText(value, index, index + 1, x, y, api23NativeOutlinePaint);
+                } finally {
+                    canvas.restoreToCount(whiteContourSave);
                 }
 
                 if (drawSecondaryBorder && secondaryInnerBorderEnabled
@@ -666,17 +656,13 @@ public final class SevenSegmentClockTextView extends TextView {
                     api23NativeSecondaryPaint.setStrokeCap(Paint.Cap.ROUND);
                     api23NativeSecondaryPaint.clearShadowLayer();
 
-                    api23NativeGlyphMask.reset();
-                    boolean hasSecondaryContour = api23NativeSecondaryPaint.getFillPath(
-                            api23NativeGlyphPath, api23NativeGlyphMask);
-                    if (hasSecondaryContour) {
-                        hasSecondaryContour = api23NativeGlyphMask.op(
-                                api23NativeGlyphPath, android.graphics.Path.Op.INTERSECT);
-                    }
-                    if (hasSecondaryContour) {
-                        api23NativeSecondaryPaint.setStyle(Paint.Style.FILL);
-                        api23NativeSecondaryPaint.setStrokeWidth(0f);
-                        canvas.drawPath(api23NativeGlyphMask, api23NativeSecondaryPaint);
+                    int secondaryContourSave = canvas.save();
+                    try {
+                        canvas.clipPath(api23NativeGlyphPath);
+                        canvas.drawText(value, index, index + 1, x, y,
+                                api23NativeSecondaryPaint);
+                    } finally {
+                        canvas.restoreToCount(secondaryContourSave);
                     }
                 }
             }
