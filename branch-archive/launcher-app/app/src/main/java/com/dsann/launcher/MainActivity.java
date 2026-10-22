@@ -1957,12 +1957,17 @@ public class MainActivity extends Activity {
         // misclassify a touch on the visible clock as a workspace gesture.
         if (clockPanel != null && clockPanel.getVisibility() == View.VISIBLE
                 && clockPanel.getWidth() > 0 && clockPanel.getHeight() > 0) {
-            int[] location = new int[2];
-            clockPanel.getLocationOnScreen(location);
-            float visualWidth = clockPanel.getWidth() * Math.max(0.01f, clockPanel.getScaleX());
-            float visualHeight = clockPanel.getHeight() * Math.max(0.01f, clockPanel.getScaleY());
-            if (rawX >= location[0] && rawX < location[0] + visualWidth
-                    && rawY >= location[1] && rawY < location[1] + visualHeight) return true;
+            View page = clockPanel.getParent() instanceof View ? (View) clockPanel.getParent() : null;
+            if (page != null) {
+                int[] geometry = itemGeometry(clockPanel);
+                android.graphics.Rect rendered = clockVisualBoundsAt(clockPanel,
+                        geometry[0], geometry[1], geometry[2], geometry[3]);
+                int[] pageLocation = new int[2];
+                page.getLocationOnScreen(pageLocation);
+                rendered.offset(pageLocation[0], pageLocation[1]);
+                if (rawX >= rendered.left && rawX < rendered.right
+                        && rawY >= rendered.top && rawY < rendered.bottom) return true;
+            }
         }
         for (View grip : clockEdgeHandles) {
             if (grip == null || grip.getVisibility() != View.VISIBLE) continue;
@@ -9667,14 +9672,9 @@ public class MainActivity extends Activity {
                     }
                     hourStart++;
                     int hourDigitCount = hourEnd - hourStart + 1;
-                    int styleForSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
-                    boolean tightenHourMinuteGroups = hourDigitCount >= 2
-                            && !sevenSegmentClock && styleForSpacing != 2;
-                    float renderScaleX = Math.max(0.25f,
-                            Math.abs(clockText.getScaleX())
-                                    * Math.abs(clockPanel == null ? 1f : clockPanel.getScaleX()));
-                    float halfGroupTightenPx = tightenHourMinuteGroups
-                            ? LauncherUiUtils.dp(this, 7.5f) / renderScaleX : 0f;
+                    // Keep the native span advances for the hour/minute groups.
+                    // The previous 15dp inward shift compressed their clearance too far
+                    // on newer Android releases. The colon keeps its compact own advance.
                     float innerWhiteBorderPx = LauncherUiUtils.dp(this, 1f);
                     for (int digitAt = 0; digitAt < displayClock.length(); digitAt++) {
                         if (Character.digit(displayClock.charAt(digitAt), 10) < 0) continue;
@@ -9682,14 +9682,6 @@ public class MainActivity extends Activity {
                         float gap = digitAt == minuteFirst && hasMinutePair
                                 ? tightenedDigitGap : 0f;
                         float glyphOffsetX = 0f;
-                        if (tightenHourMinuteGroups) {
-                            if (digitAt >= hourStart && digitAt <= hourEnd) {
-                                glyphOffsetX = halfGroupTightenPx;
-                            } else if (digitAt >= minuteFirst && hasMinutePair
-                                    && digitAt <= minuteFirst + 1) {
-                                glyphOffsetX = -halfGroupTightenPx;
-                            }
-                        }
                         displayClock.setSpan(new TightDigitSpan(
                                         moveFirstHourDigitRight, gap, glyphOffsetX,
                                         useWhiteDigitInnerBorder, innerWhiteBorderPx),
@@ -11288,11 +11280,81 @@ public class MainActivity extends Activity {
         return workspaceLayoutCollisionRect(view, x, y, width, height);
     }
 
+    /**
+     * Map a descendant's rendered rectangle into the clock panel's local coordinates,
+     * accounting for every child's scale, pivot and translation. Clock digits are
+     * intentionally drawn taller than their TextView row, and the date sits below the
+     * fixed-height panel; ordinary panel-only collision bounds therefore miss visible ink.
+     */
+    private android.graphics.RectF clockDescendantBoundsInPanel(View panel, View descendant) {
+        if (panel == null || descendant == null
+                || descendant.getWidth() <= 0 || descendant.getHeight() <= 0) return null;
+        android.graphics.RectF bounds = new android.graphics.RectF(
+                0f, 0f, descendant.getWidth(), descendant.getHeight());
+        View current = descendant;
+        while (current != panel) {
+            android.view.ViewParent rawParent = current.getParent();
+            if (!(rawParent instanceof View)) return null;
+            View parent = (View) rawParent;
+            float sx = current.getScaleX();
+            float sy = current.getScaleY();
+            float left = current.getLeft() - parent.getScrollX()
+                    + current.getTranslationX() + current.getPivotX() * (1f - sx);
+            float top = current.getTop() - parent.getScrollY()
+                    + current.getTranslationY() + current.getPivotY() * (1f - sy);
+            bounds.set(left + bounds.left * sx, top + bounds.top * sy,
+                    left + bounds.right * sx, top + bounds.bottom * sy);
+            current = parent;
+        }
+        return bounds;
+    }
+
+    /**
+     * Get the full visible workspace footprint for a typography clock at the supplied
+     * panel rectangle. The panel rectangle is already in page coordinates; descendant
+     * ink is mapped through the panel's current/proposed scale. Seven-segment clocks
+     * deliberately retain their established panel-only geometry.
+     */
+    private android.graphics.Rect clockVisualBoundsAt(
+            View panel, int x, int y, int width, int height) {
+        android.graphics.Rect bounds = new android.graphics.Rect(
+                x, y, x + Math.max(1, width), y + Math.max(1, height));
+        if (!isClockWorkspaceItem(panel)
+                || (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5)) return bounds;
+
+        int page = panel == clockPanelsByPage[0] ? 0
+                : (panel == clockPanelsByPage[1] ? 1 : -1);
+        if (page < 0) return bounds;
+        float panelScaleX = panel.getWidth() > 0
+                ? Math.max(0.01f, width / (float) panel.getWidth())
+                : Math.max(0.01f, Math.abs(panel.getScaleX()));
+        float panelScaleY = panel.getHeight() > 0
+                ? Math.max(0.01f, height / (float) panel.getHeight())
+                : Math.max(0.01f, Math.abs(panel.getScaleY()));
+
+        View[] renderedChildren = new View[] {
+                clockTextsByPage[page], amPmTextsByPage[page], dateTextsByPage[page]
+        };
+        for (View child : renderedChildren) {
+            if (child == null || child.getVisibility() != View.VISIBLE) continue;
+            android.graphics.RectF local = clockDescendantBoundsInPanel(panel, child);
+            if (local == null) continue;
+            int childLeft = x + (int) Math.floor(local.left * panelScaleX);
+            int childTop = y + (int) Math.floor(local.top * panelScaleY);
+            int childRight = x + (int) Math.ceil(local.right * panelScaleX);
+            int childBottom = y + (int) Math.ceil(local.bottom * panelScaleY);
+            bounds.union(childLeft, childTop, childRight, childBottom);
+        }
+        return bounds;
+    }
+
     private android.graphics.Rect workspaceLayoutCollisionRect(
             View view, int x, int y, int width, int height) {
         int margin = workspaceCollisionMargin(view);
-        android.graphics.Rect bounds = new android.graphics.Rect(
-                x, y, x + Math.max(1, width), y + Math.max(1, height));
+        android.graphics.Rect bounds = isClockWorkspaceItem(view)
+                ? clockVisualBoundsAt(view, x, y, width, height)
+                : new android.graphics.Rect(
+                        x, y, x + Math.max(1, width), y + Math.max(1, height));
         if (margin != 0) bounds.inset(-margin, -margin);
         return bounds;
     }
@@ -11340,7 +11402,14 @@ public class MainActivity extends Activity {
                 || candidateBounds.right > page.getWidth()
                 || candidateBounds.bottom > page.getHeight()) return false;
         int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
-        android.graphics.Rect protectedCandidate = new android.graphics.Rect(candidateBounds);
+        android.graphics.Rect actualCandidate = isClockWorkspaceItem(movingView)
+                ? clockVisualBoundsAt(movingView, candidateBounds.left, candidateBounds.top,
+                        candidateBounds.width(), candidateBounds.height())
+                : new android.graphics.Rect(candidateBounds);
+        if (actualCandidate.left < 0 || actualCandidate.top < 0
+                || actualCandidate.right > page.getWidth()
+                || actualCandidate.bottom > page.getHeight()) return false;
+        android.graphics.Rect protectedCandidate = new android.graphics.Rect(actualCandidate);
         protectedCandidate.inset(-gap, -gap);
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
@@ -11488,6 +11557,30 @@ public class MainActivity extends Activity {
                 + panel.getPivotX() * (1f - scaleX);
         float visualTop = panel.getTop() + translationY
                 + panel.getPivotY() * (1f - scaleY);
+        if (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) != 5
+                && isClockWorkspaceItem(panel)) {
+            android.graphics.Rect footprint = clockVisualBoundsAt(panel,
+                    Math.round(visualLeft), Math.round(visualTop),
+                    Math.max(1, Math.round(visualWidth)),
+                    Math.max(1, Math.round(visualHeight)));
+            float correctionX = 0f;
+            float correctionY = 0f;
+            if (footprint.width() <= parentWidth) {
+                if (footprint.left < 0) correctionX = -footprint.left;
+                else if (footprint.right > parentWidth) correctionX = parentWidth - footprint.right;
+            } else {
+                correctionX = (parentWidth - footprint.width()) * 0.5f - footprint.left;
+            }
+            if (footprint.height() <= parentHeight) {
+                if (footprint.top < 0) correctionY = -footprint.top;
+                else if (footprint.bottom > parentHeight) correctionY = parentHeight - footprint.bottom;
+            } else {
+                correctionY = -footprint.top;
+            }
+            translationX += correctionX;
+            translationY += correctionY;
+            return new float[]{translationX, translationY};
+        }
         float maxVisualLeft = Math.max(0f, parentWidth - visualWidth);
         float maxVisualTop = Math.max(0f, parentHeight - visualHeight);
         float boundedLeft = Math.max(0f, Math.min(maxVisualLeft, visualLeft));
@@ -14788,6 +14881,41 @@ public class MainActivity extends Activity {
             amPmText.setTranslationY(0f);
         }
         clockText.invalidate();
+        if (!sevenSegment) {
+            final TextView colonSyncTarget = clockText;
+            targetPanel.postOnAnimation(() -> {
+                if (targetPanel.getParent() == null
+                        || geometryGeneration != clockLayoutGenerationByPage[targetPage]
+                        || targetPanel != clockPanelsByPage[targetPage]
+                        || colonSyncTarget != clockTextsByPage[targetPage]) return;
+                colonSyncTarget.postOnAnimation(() -> {
+                    if (targetPanel.getParent() == null
+                            || geometryGeneration != clockLayoutGenerationByPage[targetPage]
+                            || targetPanel != clockPanelsByPage[targetPage]
+                            || colonSyncTarget != clockTextsByPage[targetPage]) return;
+                    int restorePage = Math.max(0, Math.min(1, activeClockPage));
+                    activateClockForPage(targetPage);
+                    syncClockColonVerticalCenter();
+                    syncNativeClockColonVerticalCenter();
+                    updateClockDigitHorizontalOffset();
+                    activateClockForPage(restorePage);
+                    // API 23's native baseline span may request another layout; settle it
+                    // once more after that layout, rather than leaving the post-resize shift.
+                    colonSyncTarget.postOnAnimation(() -> {
+                        if (targetPanel.getParent() == null
+                                || geometryGeneration != clockLayoutGenerationByPage[targetPage]
+                                || targetPanel != clockPanelsByPage[targetPage]
+                                || colonSyncTarget != clockTextsByPage[targetPage]) return;
+                        int finalRestorePage = Math.max(0, Math.min(1, activeClockPage));
+                        activateClockForPage(targetPage);
+                        syncClockColonVerticalCenter();
+                        syncNativeClockColonVerticalCenter();
+                        updateClockDigitHorizontalOffset();
+                        activateClockForPage(finalRestorePage);
+                    });
+                });
+            });
+        }
     }
 
 // Replacement span for non-seven-segment clocks: keep the colon's two dots
@@ -14839,30 +14967,33 @@ public class MainActivity extends Activity {
     private static void drawClockGlyphInnerWhiteBorder(Canvas canvas, CharSequence text,
             int start, int end, float x, int top, int y, int bottom, Paint sourcePaint,
             float innerWhiteBorderPx) {
-        float textWidth = Math.max(1f, sourcePaint.measureText(text, start, end));
-        float margin = Math.max(2f, innerWhiteBorderPx * 2f);
-        int contourLayer = canvas.saveLayer(x - margin, top - margin,
-                x + textWidth + margin, bottom + margin, null);
-        try {
-            Paint contour = new Paint(sourcePaint);
-            contour.setShader(null);
-            contour.setXfermode(null);
-            contour.setColor(Color.WHITE);
-            contour.setStyle(Paint.Style.STROKE);
-            contour.setStrokeWidth(innerWhiteBorderPx * 2f);
-            contour.setStrokeJoin(Paint.Join.ROUND);
-            contour.setStrokeCap(Paint.Cap.ROUND);
-            canvas.drawText(text, start, end, x, y, contour);
+        if (innerWhiteBorderPx <= 0f) return;
+        // Use the glyph's actual outline as a clip. This avoids Android 6 losing the
+        // inward white contour during saveLayer/DST_IN compositing after a package update.
+        android.graphics.Path glyphPath = new android.graphics.Path();
+        Paint pathPaint = new Paint(sourcePaint);
+        pathPaint.setStyle(Paint.Style.FILL);
+        pathPaint.setShader(null);
+        pathPaint.setXfermode(null);
+        pathPaint.clearShadowLayer();
+        pathPaint.getTextPath(text.toString(), start, end, x, y, glyphPath);
+        if (glyphPath.isEmpty()) return;
 
-            // Mask the centered stroke to the actual glyph fill. This leaves a thin
-            // white contour inside the letter edge without modifying its gradient fill.
-            contour.setStyle(Paint.Style.FILL);
-            contour.setStrokeWidth(0f);
-            contour.setXfermode(new android.graphics.PorterDuffXfermode(
-                    android.graphics.PorterDuff.Mode.DST_IN));
+        Paint contour = new Paint(sourcePaint);
+        contour.setShader(null);
+        contour.setXfermode(null);
+        contour.setColor(Color.WHITE);
+        contour.setStyle(Paint.Style.STROKE);
+        contour.setStrokeWidth(innerWhiteBorderPx * 2f);
+        contour.setStrokeJoin(Paint.Join.ROUND);
+        contour.setStrokeCap(Paint.Cap.ROUND);
+        contour.clearShadowLayer();
+        int save = canvas.save();
+        try {
+            canvas.clipPath(glyphPath);
             canvas.drawText(text, start, end, x, y, contour);
         } finally {
-            canvas.restoreToCount(contourLayer);
+            canvas.restoreToCount(save);
         }
     }
 
@@ -14982,31 +15113,29 @@ public class MainActivity extends Activity {
             canvas.drawCircle(centerX, centerY + gap, radius, dots);
 
             if (!drawWhiteInnerBorder || innerWhiteBorderPx <= 0f) return;
-            float margin = innerWhiteBorderPx * 2f;
-            int contourLayer = canvas.saveLayer(centerX - radius - margin,
-                    centerY - gap - radius - margin,
-                    centerX + radius + margin,
-                    centerY + gap + radius + margin, null);
+            // Clip the white stroke to the two filled dots directly; avoid DST_IN layers
+            // which are unreliable on Android 6's native-text fallback.
+            android.graphics.Path dotMask = new android.graphics.Path();
+            dotMask.addCircle(centerX, centerY - gap, radius,
+                    android.graphics.Path.Direction.CW);
+            dotMask.addCircle(centerX, centerY + gap, radius,
+                    android.graphics.Path.Direction.CW);
+            Paint contour = new Paint(paint);
+            contour.setShader(null);
+            contour.setXfermode(null);
+            contour.setColor(Color.WHITE);
+            contour.setStyle(Paint.Style.STROKE);
+            contour.setStrokeWidth(innerWhiteBorderPx * 2f);
+            contour.setStrokeJoin(Paint.Join.ROUND);
+            contour.setStrokeCap(Paint.Cap.ROUND);
+            contour.clearShadowLayer();
+            int save = canvas.save();
             try {
-                Paint contour = new Paint(paint);
-                contour.setShader(null);
-                contour.setXfermode(null);
-                contour.setColor(Color.WHITE);
-                contour.setStyle(Paint.Style.STROKE);
-                contour.setStrokeWidth(innerWhiteBorderPx * 2f);
-                contour.setStrokeJoin(Paint.Join.ROUND);
-                contour.setStrokeCap(Paint.Cap.ROUND);
-                canvas.drawCircle(centerX, centerY - gap, radius, contour);
-                canvas.drawCircle(centerX, centerY + gap, radius, contour);
-
-                contour.setStyle(Paint.Style.FILL);
-                contour.setStrokeWidth(0f);
-                contour.setXfermode(new android.graphics.PorterDuffXfermode(
-                        android.graphics.PorterDuff.Mode.DST_IN));
+                canvas.clipPath(dotMask);
                 canvas.drawCircle(centerX, centerY - gap, radius, contour);
                 canvas.drawCircle(centerX, centerY + gap, radius, contour);
             } finally {
-                canvas.restoreToCount(contourLayer);
+                canvas.restoreToCount(save);
             }
         }
     }
