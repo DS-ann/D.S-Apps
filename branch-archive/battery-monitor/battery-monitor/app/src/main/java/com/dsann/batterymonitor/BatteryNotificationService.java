@@ -207,10 +207,13 @@ public class BatteryNotificationService extends Service {
         BatteryReader.PowerInfo powerInfo = BatteryReader.getPowerInfo(this);
         int status = powerInfo.androidStatus;
         int sourceMask = powerInfo.sourceMask();
+        int previousPercent = prefs.getInt(KEY_LAST_ANDROID_PERCENT, -1);
+        int previousStatus = prefs.getInt(KEY_LAST_ANDROID_POWER_STATUS, -1);
+        int previousSourceMask = prefs.getInt(KEY_LAST_ANDROID_POWER_SOURCE, -1);
 
-        boolean percentChanged = prefs.getInt(KEY_LAST_ANDROID_PERCENT, -1) != requested;
-        boolean powerStateChanged = prefs.getInt(KEY_LAST_ANDROID_POWER_STATUS, -1) != status
-                || prefs.getInt(KEY_LAST_ANDROID_POWER_SOURCE, -1) != sourceMask;
+        boolean percentChanged = previousPercent != requested;
+        boolean powerStateChanged = previousStatus != status
+                || previousSourceMask != sourceMask;
         if (!percentChanged && !powerStateChanged) return;
 
         // Percentage changes can be rate-limited, but a physical charge/unplug transition
@@ -226,7 +229,8 @@ public class BatteryNotificationService extends Service {
         lastAttemptedPowerSource = sourceMask;
         rootCommandInFlight = true;
         rootExecutor.execute(() -> {
-            BatteryPercentOverride.Result result = BatteryPercentOverride.set(requested, powerInfo);
+            BatteryPercentOverride.Result result = BatteryPercentOverride.set(
+                    requested, powerInfo, previousPercent, previousStatus, previousSourceMask);
             handler.post(() -> {
                 rootCommandInFlight = false;
                 android.content.SharedPreferences current = getSharedPreferences(PREFS, MODE_PRIVATE);
