@@ -13952,7 +13952,9 @@ public class MainActivity extends Activity {
         float baseline = layout.getLineBaseline(0);
         float glyphInkCenter = baseline + (inkBounds.top + inkBounds.bottom) * 0.5f;
         float lineCenter = (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
-        return Math.round(glyphInkCenter - lineCenter);
+        // TextLine draws the run at baseline + baselineShift. Invert the offset
+        // so a low native colon moves UP to the line midpoint, not farther down.
+        return Math.round(lineCenter - glyphInkCenter);
     }
 
     private float clockPresetLetterSpacing(int style) {
@@ -14176,8 +14178,29 @@ public class MainActivity extends Activity {
         // Measure the panel at its natural width, then scale the complete panel.
         // This keeps the background, digits, AM/PM marker, and date in one resize
         // operation instead of shrinking only the clock glyphs inside a fixed panel.
+        final float nonLedDigitScale = 1.12f;
+        String widthClockValue = clockText.getText() == null
+                ? "" : clockText.getText().toString();
+        int widthColonAt = widthClockValue.indexOf(':');
+        int widthHourDigits = 0;
+        for (int i = 0; widthColonAt >= 0 && i < widthColonAt; i++) {
+            if (Character.digit(widthClockValue.charAt(i), 10) >= 0) widthHourDigits++;
+        }
+        // Standard clocks draw 1.12x glyphs inside a group sized from unscaled Paint
+        // measurements. When the hour has two digits, reserve the scaled glyph width
+        // and positive tracking too; otherwise the first/last digits can be clipped
+        // against the panel edges. Keep Neon Circuit and seven-segment sizing unchanged.
+        final boolean reserveTwoDigitStandardWidth = !sevenSegment
+                && selectedClockStyle != 2 && widthHourDigits >= 2;
+        float measuredTrackingWidth = clockText.getTextSize()
+                * clockText.getLetterSpacing() * Math.max(0, widthClockValue.length() - 1);
+        final int twoDigitStandardWidthClearance = reserveTwoDigitStandardWidth
+                ? Math.max(0, (int) Math.ceil(naturalClockWidth * (nonLedDigitScale - 1f)
+                        + nonLedDigitScale * measuredTrackingWidth))
+                : 0;
         final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
+                + twoDigitStandardWidthClearance
                 + markerWidth + LauncherUiUtils.dp(this, 1) + ledGroupSpacing;
         // Keep the digit group's layout width independent from the date-line width.
         // Enlarging date/AM-PM text may widen the background, but must not move the digits.
@@ -14392,7 +14415,6 @@ public class MainActivity extends Activity {
         // Reduce the non-seven-segment glyph size by 20% from the previous
         // 1.4x setting, keeping the background dimensions unchanged.
         // The custom colon span remains vertically centered in the background.
-        final float nonLedDigitScale = 1.12f;
         // When Neon Circuit shows a two-digit hour, reduce the total clock-glyph
         // width by 20dp to leave clearance inside the unchanged background. Derive
         // the factor from the stable widest-digit measurement so the clock won't
@@ -14617,7 +14639,7 @@ public class MainActivity extends Activity {
     }
 
     private static final class ClockColonBaselineSpan
-            extends android.text.style.MetricAffectingSpan {
+            extends android.text.style.CharacterStyle {
         private final int shiftPx;
 
         ClockColonBaselineSpan(int shiftPx) {
@@ -14626,10 +14648,8 @@ public class MainActivity extends Activity {
 
         int getShiftPx() { return shiftPx; }
 
-        @Override public void updateMeasureState(android.text.TextPaint paint) {
-            paint.baselineShift += shiftPx;
-        }
-
+        // Drawing-only: changing font metrics on API 23 can re-layout the complete
+        // two-digit clock and move its baseline away from the line we're centering to.
         @Override public void updateDrawState(android.text.TextPaint paint) {
             paint.baselineShift += shiftPx;
         }
