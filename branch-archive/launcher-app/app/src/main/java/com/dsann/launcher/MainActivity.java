@@ -1585,14 +1585,17 @@ public class MainActivity extends Activity {
                     }
                     if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
                     else if (resizingEdge == 4) adjustY = targetTop - actual[1];
-                    setClampedClockTranslation(clockPanel.getTranslationX() + adjustX,
-                            clockPanel.getTranslationY() + adjustY, true);
-                    float[] bounded = clampClockTranslation(clockPanel,
-                            clockPanel.getTranslationX(), clockPanel.getTranslationY());
-                    setClampedClockTranslation(bounded[0], bounded[1], true);
-                    if (clockPanel.getParent() instanceof FrameLayout) {
-                        scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
-                    }
+                    // The proposed rectangle already passed page and collision checks.
+                    // Apply only the opposite-edge correction; re-clamping here can move
+                    // the entire clock after a valid resize and break the fixed-edge anchor.
+                    float correctedX = clockPanel.getTranslationX() + adjustX;
+                    float correctedY = clockPanel.getTranslationY() + adjustY;
+                    clockPanel.setTranslationX(correctedX);
+                    clockPanel.setTranslationY(correctedY);
+                    prefs.edit()
+                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), correctedX)
+                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), correctedY)
+                            .apply();
                     updateClockResizeHandles();
                 });
                 return true;
@@ -1818,14 +1821,30 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(clockWidgetEditLongPress);
             clockGestureLockedAtDown = false;
             if (clockWidgetMoving && !clockWidgetEditing) {
+                int[] rememberedSafeGeometry = clockPanel == null
+                        ? null : liveDragLastSafeGeometry.get(clockPanel);
+                final int[] lastSafeClockGeometry = rememberedSafeGeometry == null
+                        ? null : rememberedSafeGeometry.clone();
                 boolean acceptedClockMove = true;
                 if (clockWidgetDragging && clockPanel != null
                         && clockPanel.getParent() instanceof FrameLayout) {
                     acceptedClockMove = finishLiveDisplacements(true, clockPanel);
                 }
                 if (!acceptedClockMove && clockPanel != null) {
-                    clockPanel.setTranslationX(clockWidgetStartX);
-                    clockPanel.setTranslationY(clockWidgetStartY);
+                    boolean restoredLastSafe = false;
+                    if (lastSafeClockGeometry != null
+                            && clockPanel.getParent() instanceof FrameLayout) {
+                        FrameLayout page = (FrameLayout) clockPanel.getParent();
+                        setClockVisualPosition(clockPanel, lastSafeClockGeometry[0],
+                                lastSafeClockGeometry[1], true);
+                        int[] safeNow = itemGeometry(clockPanel);
+                        restoredLastSafe = canPlaceWorkspaceItem(page, clockPanel,
+                                new android.graphics.Rect(safeNow[0], safeNow[1],
+                                        safeNow[0] + safeNow[2], safeNow[1] + safeNow[3]));
+                    }
+                    if (!restoredLastSafe) {
+                        setClampedClockTranslation(clockWidgetStartX, clockWidgetStartY, true);
+                    }
                 }
                 clockWidgetDragging = false;
                 clockWidgetMoving = false;
@@ -2008,7 +2027,9 @@ public class MainActivity extends Activity {
      */
     private void finishClockResize(boolean cancelled) {
         if (clockResizeEdge == 0 || clockPanel == null) return;
-        ++clockResizeGeneration; // Invalidate delayed edge corrections from MOVE frames.
+        // On release, let the newest MOVE's queued edge-anchor correction finish after
+        // layout. Only cancellation invalidates that correction.
+        if (cancelled) ++clockResizeGeneration;
         clockResizeEdge = 0;
         clockWidgetDragging = false;
         handler.removeCallbacks(clockWidgetLongPress);
@@ -2033,21 +2054,42 @@ public class MainActivity extends Activity {
                     .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), clockPanel.getTranslationY())
                     .apply();
         }
-        // Re-clamp after the final breadth/length layout has been measured. During
-        // resizing the panel's measured dimensions can lag one frame behind the
-        // new layout params, so the live-drag clamp alone is not sufficient.
+        // The accepted resize rectangle is already page-bounded and collision-checked.
+        // Do not run the move-mode clamp or nearest-free relocation here: either can
+        // shift the complete clock after its opposite edge was anchored.
         final int finalGeometryGeneration = clockResizeGeneration;
-        setClampedClockTranslation(clockPanel.getTranslationX(), clockPanel.getTranslationY(), true);
-        clockPanel.post(() -> {
-            if (clockPanel == null || clockResizeGeneration != finalGeometryGeneration
-                    || clockResizeEdge != 0) return;
-            setClampedClockTranslation(clockPanel.getTranslationX(), clockPanel.getTranslationY(), true);
-            if (!cancelled) moveClockToNearestFreePosition(clockPanel);
-            updateClockResizeHandles();
-        });
-        if (clockPanel.getParent() instanceof FrameLayout) {
-            finishLiveDisplacements(!cancelled, clockPanel);
+        final LinearLayout finishedPanel = clockPanel;
+        final int finishedPage = activeClockPage;
+        if (!cancelled) {
+            prefs.edit()
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, finishedPage),
+                            finishedPanel.getTranslationX())
+                    .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, finishedPage),
+                            finishedPanel.getTranslationY())
+                    .apply();
         }
+        finishedPanel.post(() -> {
+            if (finishedPanel != clockPanelsByPage[finishedPage]
+                    || finishedPanel.getParent() == null
+                    || clockResizeGeneration != finalGeometryGeneration
+                    || clockResizeEdge != 0) return;
+            if (cancelled) {
+                setClampedClockTranslationForPanel(finishedPanel, finishedPage,
+                        finishedPanel.getTranslationX(), finishedPanel.getTranslationY(), true);
+            } else {
+                // The last MOVE's posted callback owns the edge correction; release only
+                // records its result and refreshes the grips without moving the widget.
+                prefs.edit()
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, finishedPage),
+                                finishedPanel.getTranslationX())
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, finishedPage),
+                                finishedPanel.getTranslationY())
+                        .apply();
+            }
+            if (clockPanel == finishedPanel && activeClockPage == finishedPage) {
+                updateClockResizeHandles();
+            }
+        });
         if (!cancelled && clockGeometryRejectedAtLastMove) showWorkspaceOverlapRejected();
         clockGeometryRejectedAtLastMove = false;
         setWorkspaceGridVisible(false, null);
@@ -11644,15 +11686,36 @@ public class MainActivity extends Activity {
         int maxSteps = edge == 1 || edge == 2
                 ? Math.max(0, candidate.width() - minWidth)
                 : Math.max(0, candidate.height() - minHeight);
-        for (int step = 1; step <= maxSteps; step++) {
-            android.graphics.Rect trial = new android.graphics.Rect(requested);
-            if (edge == 1) trial.left = Math.min(trial.right - minWidth, requested.left + step);
-            else if (edge == 2) trial.right = Math.max(trial.left + minWidth, requested.right - step);
-            else if (edge == 3) trial.top = Math.min(trial.bottom - minHeight, requested.top + step);
-            else if (edge == 4) trial.bottom = Math.max(trial.top + minHeight, requested.bottom - step);
-            if (canPlaceWorkspaceItem(page, clock, trial)) return trial;
+        if (maxSteps <= 0) return candidate;
+
+        // Shrinking toward the fixed opposite edge is monotonic for this resize axis.
+        // Test the minimum first; if even that rectangle is blocked, reject this frame.
+        android.graphics.Rect minimum = resizeBoundsAfterRetreat(requested, edge, maxSteps,
+                minWidth, minHeight);
+        if (!canPlaceWorkspaceItem(page, clock, minimum)) return candidate;
+
+        // Find the smallest retreat that becomes legal. Linear 1px scans were doing
+        // hundreds or thousands of full child-bound/collision checks on every MOVE.
+        int low = 1;
+        int high = maxSteps;
+        while (low < high) {
+            int middle = low + (high - low) / 2;
+            android.graphics.Rect trial = resizeBoundsAfterRetreat(requested, edge, middle,
+                    minWidth, minHeight);
+            if (canPlaceWorkspaceItem(page, clock, trial)) high = middle;
+            else low = middle + 1;
         }
-        return candidate;
+        return resizeBoundsAfterRetreat(requested, edge, low, minWidth, minHeight);
+    }
+
+    private android.graphics.Rect resizeBoundsAfterRetreat(android.graphics.Rect requested,
+            int edge, int retreat, int minWidth, int minHeight) {
+        android.graphics.Rect trial = new android.graphics.Rect(requested);
+        if (edge == 1) trial.left = Math.min(trial.right - minWidth, requested.left + retreat);
+        else if (edge == 2) trial.right = Math.max(trial.left + minWidth, requested.right - retreat);
+        else if (edge == 3) trial.top = Math.min(trial.bottom - minHeight, requested.top + retreat);
+        else if (edge == 4) trial.bottom = Math.max(trial.top + minHeight, requested.bottom - retreat);
+        return trial;
     }
 
     private void setClampedClockTranslation(float translationX, float translationY, boolean persist) {
@@ -14334,6 +14397,9 @@ public class MainActivity extends Activity {
         if (clockPanel == null || clockText == null) return;
         final LinearLayout targetPanel = clockPanel;
         final int targetPage = Math.max(0, Math.min(1, activeClockPage));
+        final boolean resizeTransactionOwnsGeometry = clockWidgetEditing
+                && clockWidgetDragging && clockResizeEdge != 0
+                && clockPanel == targetPanel && activeClockPage == targetPage;
         final int geometryGeneration = ++clockLayoutGenerationByPage[targetPage];
         final int configuredDateSize = Math.max(8, Math.min(16,
                 prefs.getInt(clockPrefKey(KEY_CLOCK_DATE_SIZE, targetPage), 15)));
@@ -14578,8 +14644,16 @@ public class MainActivity extends Activity {
             if (geometryGeneration != clockLayoutGenerationByPage[targetPage]
                     || targetPanel != clockPanelsByPage[targetPage]
                     || targetPanel.getParent() == null) return;
-            // While this exact panel is being resized, the resize transaction owns its
-            // position and anchors the opposite edge.
+            // A geometry pass created during a resize remains owned by that resize
+            // even if this callback runs after finger-up. Otherwise a late callback
+            // can clamp or relocate the panel after the edge-anchor correction.
+            if (resizeTransactionOwnsGeometry) {
+                if (activeClockPage == targetPage && clockPanel == targetPanel) {
+                    updateClockResizeHandles();
+                }
+                return;
+            }
+            // Also protect a normal geometry pass if a resize began before it executed.
             if (activeClockPage == targetPage && clockPanel == targetPanel
                     && clockWidgetEditing && clockWidgetDragging && clockResizeEdge != 0) {
                 updateClockResizeHandles();
