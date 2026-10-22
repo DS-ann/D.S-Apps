@@ -4387,7 +4387,7 @@ public class MainActivity extends Activity {
                 panel.setTranslationX(tx);
                 panel.setTranslationY(ty);
 
-                float contentFade = Math.max(0f, Math.min(1f, (progress - 0.10f) / 0.50f));
+                float contentFade = Math.max(0f, Math.min(1f, (progress - 0.32f) / 0.42f));
                 title.setAlpha(contentFade);
                 rows.setAlpha(contentFade);
                 manage.setAlpha(contentFade);
@@ -4399,7 +4399,7 @@ public class MainActivity extends Activity {
                     snapshot.setTranslationX(-morphStartTranslation[0] * progress);
                     snapshot.setTranslationY(-morphStartTranslation[1] * progress);
                     snapshot.setAlpha(1f - Math.max(0f,
-                            Math.min(1f, (progress - 0.30f) / 0.40f)));
+                            Math.min(1f, (progress - 0.18f) / 0.36f)));
                     
                 }
                 dimLayer.setAlpha(0.36f * progress);
@@ -4481,7 +4481,7 @@ public class MainActivity extends Activity {
                 snapshot.setTranslationX(-offsetX * progress);
                 snapshot.setTranslationY(-offsetY * progress);
                 snapshot.setAlpha(1f - Math.max(0f,
-                        Math.min(1f, (progress - 0.30f) / 0.40f)));
+                        Math.min(1f, (progress - 0.18f) / 0.36f)));
             }
             if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
             panel.invalidateOutline();
@@ -11486,6 +11486,123 @@ public class MainActivity extends Activity {
      * reserved bounds. The entry remains in the transaction so release can commit the
      * returned position and a renewed collision can push it away again.
      */
+    /**
+     * Restore a displaced row/column as one transaction. If several grid items were
+     * pushed by the same cell vector, returning them one at a time can let earlier items
+     * occupy later items' original slots and shuffle their visual order. Either every
+     * member of that lane can return safely, or none of them returns on this MOVE frame.
+     *
+     * @return true when this item belongs to a multi-item lane cohort, including when the
+     *         whole cohort must wait; false means the caller may use ordinary item restore.
+     */
+    private boolean tryRestoreDisplacedGridLaneTogether(FrameLayout page, View movingView,
+            int[] movingGeometry, java.util.List<View> candidates, View seed) {
+        if (page == null || movingView == null || movingGeometry == null || seed == null
+                || !isHomeGridIcon(seed) || seed.getParent() != page) return false;
+        int[] seedOriginal = liveDisplacedItems.get(seed);
+        int[] seedTarget = liveDisplacementTargets.get(seed);
+        if (seedOriginal == null || seedTarget == null) return false;
+        int shiftX = seedTarget[0] - seedOriginal[0];
+        int shiftY = seedTarget[1] - seedOriginal[1];
+        // Grid lanes translate along a single axis. Non-grid diagonal pushes keep their
+        // existing independent collision handling.
+        if ((shiftX == 0) == (shiftY == 0)) return false;
+        boolean shortcutLane = isWorkspaceContactShortcut(seed);
+
+        java.util.ArrayList<View> lane = new java.util.ArrayList<View>();
+        java.util.IdentityHashMap<View, Boolean> laneSet =
+                new java.util.IdentityHashMap<View, Boolean>();
+        lane.add(seed);
+        laneSet.put(seed, Boolean.TRUE);
+        for (View candidate : candidates) {
+            if (candidate == seed || candidate == movingView || candidate.getParent() != page
+                    || !isHomeGridIcon(candidate)
+                    || isWorkspaceContactShortcut(candidate) != shortcutLane) continue;
+            int[] original = liveDisplacedItems.get(candidate);
+            int[] target = liveDisplacementTargets.get(candidate);
+            if (original == null || target == null) continue;
+            if (target[0] - original[0] != shiftX
+                    || target[1] - original[1] != shiftY) continue;
+            boolean sameLane = shiftX != 0
+                    ? original[1] == seedOriginal[1]
+                    : original[0] == seedOriginal[0];
+            if (sameLane && !laneSet.containsKey(candidate)) {
+                lane.add(candidate);
+                laneSet.put(candidate, Boolean.TRUE);
+            }
+        }
+        if (lane.size() < 2) return false;
+
+        boolean canRestoreWholeLane = true;
+        for (View member : lane) {
+            int[] original = liveDisplacedItems.get(member);
+            int[] geometry = itemGeometry(member);
+            if (original == null || geometry[2] <= 0 || geometry[3] <= 0) {
+                canRestoreWholeLane = false;
+                break;
+            }
+            android.graphics.Rect originalBounds = collisionRectAtForInteraction(
+                    member, original[0], original[1], geometry[2], geometry[3], movingView);
+            if (originalBounds.left < 0 || originalBounds.top < 0
+                    || originalBounds.right > page.getWidth()
+                    || originalBounds.bottom > page.getHeight()
+                    || android.graphics.Rect.intersects(originalBounds,
+                            collisionRectForInteraction(movingView, movingGeometry, member))) {
+                canRestoreWholeLane = false;
+                break;
+            }
+
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View blocker = page.getChildAt(i);
+                if (blocker == member || blocker == movingView || laneSet.containsKey(blocker)
+                        || blocker.getVisibility() != View.VISIBLE
+                        || !isWorkspaceItem(blocker)) continue;
+                int[] blockerGeometry = itemGeometry(blocker);
+                if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
+                android.graphics.Rect currentBounds = collisionRectForInteraction(
+                        blocker, blockerGeometry, member);
+                if (android.graphics.Rect.intersects(originalBounds, currentBounds)) {
+                    canRestoreWholeLane = false;
+                    break;
+                }
+                int[] blockerTarget = liveDisplacementTargets.get(blocker);
+                if (blockerTarget != null) {
+                    android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
+                            blocker, blockerTarget[0], blockerTarget[1],
+                            blockerGeometry[2], blockerGeometry[3], member);
+                    if (android.graphics.Rect.intersects(originalBounds, reservedBounds)) {
+                        canRestoreWholeLane = false;
+                        break;
+                    }
+                }
+            }
+            if (!canRestoreWholeLane) break;
+        }
+
+        if (!canRestoreWholeLane) {
+            // Keep the group in its current shared displacement until every original
+            // slot is free; never allow a partial restore to reorder the row.
+            return true;
+        }
+
+        // Reserve all original positions before queuing any animation. Grid animation
+        // batching then gives the complete lane one shared translation vector.
+        for (View member : lane) {
+            int[] original = liveDisplacedItems.get(member);
+            liveDisplacementTargets.put(member, new int[]{original[0], original[1]});
+        }
+        for (View member : lane) {
+            int[] original = liveDisplacedItems.get(member);
+            animateDisplacedItemTo(member, original[0], original[1]);
+        }
+        return true;
+    }
+
+    /**
+     * Reverse temporary displacement as the finger moves back out of occupied space.
+     * Grid lanes are restored atomically; individual widgets and isolated icons retain
+     * the existing rectangle-based restore behavior.
+     */
     private void restoreDisplacedItemsWhenDragReverses(FrameLayout page, View movingView,
             android.graphics.Rect movingRect) {
         if (page == null || movingView == null || movingRect == null) return;
@@ -11498,6 +11615,9 @@ public class MainActivity extends Activity {
             int[] target = liveDisplacementTargets.get(displaced);
             if (original == null || target == null
                     || (target[0] == original[0] && target[1] == original[1])) continue;
+
+            if (tryRestoreDisplacedGridLaneTogether(
+                    page, movingView, movingGeometry, candidates, displaced)) continue;
 
             int[] geometry = itemGeometry(displaced);
             int width = Math.max(1, geometry[2]);
@@ -11537,8 +11657,6 @@ public class MainActivity extends Activity {
             }
             if (blocked) continue;
 
-            // Retargeting preserves the transaction record: if the finger moves forward
-            // again, this same neighbour can be pushed away from its original position.
             liveDisplacementTargets.put(displaced,
                     new int[]{original[0], original[1]});
             animateDisplacedItemTo(displaced, original[0], original[1]);
