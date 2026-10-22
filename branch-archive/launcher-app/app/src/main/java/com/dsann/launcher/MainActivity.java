@@ -11741,8 +11741,9 @@ public class MainActivity extends Activity {
         for (String key : prefs.getAll().keySet()) {
             if (!(key.startsWith(KEY_RESIZE_AUTO_SCALE_X_PREFIX)
                     || key.startsWith(KEY_RESIZE_AUTO_SCALE_Y_PREFIX))) continue;
-            String tag = key.substring(key.indexOf("workspace_resize_auto_scale_")
-                    + "workspace_resize_auto_scale_".length());
+            String tag = key.startsWith(KEY_RESIZE_AUTO_SCALE_X_PREFIX)
+                    ? key.substring(KEY_RESIZE_AUTO_SCALE_X_PREFIX.length())
+                    : key.substring(KEY_RESIZE_AUTO_SCALE_Y_PREFIX.length());
             if (tag.startsWith("launcher_app:")
                     || tag.startsWith(APP_GROUP_TAG_PREFIX)
                     || tag.startsWith("launcher_contact_shortcut:")) {
@@ -13498,6 +13499,23 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    private boolean overlapsAcceptedWorkspaceItemsAt(
+            View item, int x, int y, int width, int height,
+            java.util.ArrayList<View> acceptedViews) {
+        if (item == null || acceptedViews == null || acceptedViews.isEmpty()) return false;
+        for (View prior : acceptedViews) {
+            if (prior == null || prior == item) continue;
+            int[] priorGeometry = itemGeometry(prior);
+            if (priorGeometry[2] <= 0 || priorGeometry[3] <= 0) continue;
+            android.graphics.Rect candidate =
+                    collisionRectAtForInteraction(item, x, y, width, height, prior);
+            android.graphics.Rect obstacle =
+                    collisionRectForInteraction(prior, priorGeometry, item);
+            if (android.graphics.Rect.intersects(candidate, obstacle)) return true;
+        }
+        return false;
+    }
+
     private void resolveAllWorkspaceOverlaps(FrameLayout page, View priorityView) {
         resolveAllWorkspaceOverlaps(page, priorityView, false);
     }
@@ -13606,32 +13624,19 @@ public class MainActivity extends Activity {
                 currentOnLegalGridSlot = Math.abs(expectedX - g[0]) <= 1
                         && Math.abs(expectedY - g[1]) <= 1;
             }
-            if (currentInsidePage && currentOnLegalGridSlot) {
-                android.graphics.Rect currentCandidate = collisionRectAt(item, g[0], g[1], w, h);
-                boolean currentBlocked = false;
-                for (android.graphics.Rect prior : accepted) {
-                    if (android.graphics.Rect.intersects(currentCandidate, prior)) {
-                        currentBlocked = true;
-                        break;
-                    }
-                }
-                if (!currentBlocked) {
-                    accepted.add(currentCandidate);
-                    acceptedViews.add(item);
-                    continue;
-                }
+            if (currentInsidePage && currentOnLegalGridSlot
+                    && !overlapsAcceptedWorkspaceItemsAt(
+                            item, g[0], g[1], w, h, acceptedViews)) {
+                accepted.add(collisionRectAt(item, g[0], g[1], w, h));
+                acceptedViews.add(item);
+                continue;
             }
 
             int bestX = -1, bestY = -1;
             long bestDistance = Long.MAX_VALUE;
             for (Integer cy : ys) for (Integer cx : xs) {
                 int x = cx.intValue(), y = cy.intValue();
-                android.graphics.Rect candidate = collisionRectAt(item, x, y, w, h);
-                boolean blocked = false;
-                for (android.graphics.Rect a : accepted) {
-                    if (android.graphics.Rect.intersects(candidate, a)) { blocked = true; break; }
-                }
-                if (blocked) continue;
+                if (overlapsAcceptedWorkspaceItemsAt(item, x, y, w, h, acceptedViews)) continue;
                 long distance = Math.abs((long) x - g[0]) + Math.abs((long) y - g[1]);
                 if (distance < bestDistance) { bestDistance = distance; bestX = x; bestY = y; }
             }
@@ -13646,16 +13651,8 @@ public class MainActivity extends Activity {
                     int candidateY = Math.min(maxY, y);
                     for (int x = 0; x <= maxX; x += step) {
                         int candidateX = Math.min(maxX, x);
-                        android.graphics.Rect candidate = collisionRectAt(
-                                item, candidateX, candidateY, w, h);
-                        boolean blocked = false;
-                        for (android.graphics.Rect a : accepted) {
-                            if (android.graphics.Rect.intersects(candidate, a)) {
-                                blocked = true;
-                                break;
-                            }
-                        }
-                        if (!blocked) {
+                        if (!overlapsAcceptedWorkspaceItemsAt(
+                                item, candidateX, candidateY, w, h, acceptedViews)) {
                             long distance = Math.abs((long) candidateX - g[0])
                                     + Math.abs((long) candidateY - g[1]);
                             if (distance < bestDistance) {
@@ -13672,16 +13669,8 @@ public class MainActivity extends Activity {
                         {maxX, startY}, {startX, maxY}, {maxX, maxY}
                 };
                 for (int[] edge : edgeCandidates) {
-                    android.graphics.Rect candidate = collisionRectAt(
-                            item, edge[0], edge[1], w, h);
-                    boolean blocked = false;
-                    for (android.graphics.Rect a : accepted) {
-                        if (android.graphics.Rect.intersects(candidate, a)) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    if (!blocked) {
+                    if (!overlapsAcceptedWorkspaceItemsAt(
+                            item, edge[0], edge[1], w, h, acceptedViews)) {
                         long distance = Math.abs((long) edge[0] - g[0])
                                 + Math.abs((long) edge[1] - g[1]);
                         if (distance < bestDistance) {
@@ -13732,15 +13721,8 @@ public class MainActivity extends Activity {
                         int candidateY = Math.min(maxY, y);
                         for (int x = 0; x <= maxX + shrinkStep; x += shrinkStep) {
                             int candidateX = Math.min(maxX, x);
-                            android.graphics.Rect candidate = collisionRectAt(item, candidateX, candidateY, w, h);
-                            boolean blocked = false;
-                            for (android.graphics.Rect obstacle : accepted) {
-                                if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                    blocked = true;
-                                    break;
-                                }
-                            }
-                            if (!blocked) {
+                            if (!overlapsAcceptedWorkspaceItemsAt(
+                                    item, candidateX, candidateY, w, h, acceptedViews)) {
                                 bestX = candidateX;
                                 bestY = candidateY;
                                 break;
@@ -14807,7 +14789,7 @@ public class MainActivity extends Activity {
                     edit.putFloat(autoXKey, clampWorkspaceAutoScale(storedAutoX * selectedFactor))
                             .putFloat(autoYKey, clampWorkspaceAutoScale(storedAutoY * selectedFactor));
                     edit.apply();
-                    resizeRepairNeighbourIconShrinkCount += provisional.size() + 1;
+                    resizeRepairNeighbourIconShrinkCount += provisional.size();
                     return candidateSlot;
                 }
             }
