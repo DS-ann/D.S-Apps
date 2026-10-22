@@ -1,6 +1,8 @@
 package com.dsann.batterymonitor;
 
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.BatteryManager;
 import android.os.Build;
 
@@ -21,6 +23,70 @@ final class BatteryReader {
     private static RootReader rootReader;
 
     private BatteryReader() {}
+
+    enum PowerState {
+        CHARGING("Charging", true),
+        DISCHARGING("Discharging", false),
+        FULL("Fully charged", false),
+        NOT_CHARGING("Not charging", false),
+        UNKNOWN("Power state unavailable", false);
+
+        private final String notificationLabel;
+        private final boolean charging;
+
+        PowerState(String notificationLabel, boolean charging) {
+            this.notificationLabel = notificationLabel;
+            this.charging = charging;
+        }
+
+        String notificationLabel() {
+            return notificationLabel;
+        }
+
+        boolean isCharging() {
+            return charging;
+        }
+    }
+
+    /**
+     * Prefer the kernel's physical battery status. The Android battery broadcast can reflect
+     * the percentage override set through dumpsys, so it is only used as a fallback.
+     */
+    static PowerState getPowerState(Context context) {
+        PowerState physical = parsePowerState(
+                readTextSysfs("/sys/class/power_supply/battery/status"));
+        if (physical != PowerState.UNKNOWN) return physical;
+
+        Intent battery = context.registerReceiver(null,
+                new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery == null) return PowerState.UNKNOWN;
+
+        int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS,
+                BatteryManager.BATTERY_STATUS_UNKNOWN);
+        switch (status) {
+            case BatteryManager.BATTERY_STATUS_CHARGING:
+                return PowerState.CHARGING;
+            case BatteryManager.BATTERY_STATUS_DISCHARGING:
+                return PowerState.DISCHARGING;
+            case BatteryManager.BATTERY_STATUS_FULL:
+                return PowerState.FULL;
+            case BatteryManager.BATTERY_STATUS_NOT_CHARGING:
+                return PowerState.NOT_CHARGING;
+            default:
+                return battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+                        ? PowerState.CHARGING : PowerState.DISCHARGING;
+        }
+    }
+
+    private static PowerState parsePowerState(String status) {
+        if (status == null) return PowerState.UNKNOWN;
+        String value = status.trim();
+        if ("Charging".equalsIgnoreCase(value)) return PowerState.CHARGING;
+        if ("Discharging".equalsIgnoreCase(value)) return PowerState.DISCHARGING;
+        if ("Full".equalsIgnoreCase(value)) return PowerState.FULL;
+        if ("Not charging".equalsIgnoreCase(value)) return PowerState.NOT_CHARGING;
+        return PowerState.UNKNOWN;
+    }
 
     private static final long READ_CACHE_MS = 40L;
     private static Reading cachedReading;
@@ -116,6 +182,17 @@ final class BatteryReader {
         } catch (Exception e) {
             if (rootReader != null) rootReader.close();
             rootReader = null;
+            return null;
+        }
+    }
+
+    private static String readTextSysfs(String path) {
+        File f = new File(path);
+        if (!f.canRead()) return null;
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String value = br.readLine();
+            return value == null ? null : value.trim();
+        } catch (Exception ignored) {
             return null;
         }
     }
