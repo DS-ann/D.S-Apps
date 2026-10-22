@@ -597,7 +597,7 @@ public final class SevenSegmentClockTextView extends TextView {
             for (int index = start; index < end; index++) {
                 char ch = value.charAt(index);
                 if (Character.isWhitespace(ch) || Character.isSpaceChar(ch)
-                        || ch == '\\n' || ch == '\\r') continue;
+                        || ch == '\n' || ch == '\r') continue;
 
                 api23NativeOutlinePaint.set(getPaint());
                 api23NativeOutlinePaint.baselineShift = getPaint().baselineShift;
