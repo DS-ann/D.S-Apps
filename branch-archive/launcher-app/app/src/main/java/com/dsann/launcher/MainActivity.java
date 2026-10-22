@@ -11384,42 +11384,69 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Pair-aware collision bounds. Two home app cells collide only when their visible
-     * icon/label bounds overlap; the legacy safety margin still applies to mixed-type
-     * interactions such as an app icon with a widget or shortcut.
+     * Pair-aware collision bounds use actual app/shortcut/group artwork and label bounds
+     * for every interaction pair, not the much larger invisible cell assigned for layout.
+     * Widgets and other non-grid items continue to use their full visible container bounds.
      */
     private android.graphics.Rect collisionRectForInteraction(
             View view, int[] geometry, View other) {
-        if (isAppIconCollisionParticipant(view) && isAppIconCollisionParticipant(other)) {
+        if (isAppIconCollisionParticipant(view)) {
             return appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3]);
         }
-        // For mixed interactions, an app owns its full layout cell even when the
-        // icon artwork and label leave transparent padding inside that cell. This is
-        // important for the clock/widget collision planner, which must not pass through
-        // an app's invisible placement area.
         return workspaceLayoutCollisionRect(view, geometry[0], geometry[1],
                 geometry[2], geometry[3]);
     }
 
     private android.graphics.Rect collisionRectAtForInteraction(
             View view, int x, int y, int width, int height, View other) {
-        if (isAppIconCollisionParticipant(view) && isAppIconCollisionParticipant(other)) {
+        if (isAppIconCollisionParticipant(view)) {
             return appIconVisualRectAt(view, x, y, width, height);
         }
         return workspaceLayoutCollisionRect(view, x, y, width, height);
     }
 
     /**
-     * Map a descendant's rendered rectangle into the clock panel's local coordinates,
-     * accounting for every child's scale, pivot and translation. Clock digits are
-     * intentionally drawn taller than their TextView row, and the date sits below the
-     * fixed-height panel; ordinary panel-only collision bounds therefore miss visible ink.
+     * Map only a TextView's laid-out text lines into the clock panel's local coordinates.
+     * The TextView can be much wider/taller than its painted text; using its entire view
+     * rectangle created an invisible collision/clamping envelope that blocked clock drags
+     * and resize gestures long before the visible digits/date reached another item or edge.
      */
     private android.graphics.RectF clockDescendantBoundsInPanel(View panel, View descendant) {
         if (panel == null || descendant == null
                 || descendant.getWidth() <= 0 || descendant.getHeight() <= 0) return null;
-        android.graphics.RectF bounds = new android.graphics.RectF(
-                0f, 0f, descendant.getWidth(), descendant.getHeight());
+        android.graphics.RectF bounds = null;
+        if (descendant instanceof TextView) {
+            TextView textView = (TextView) descendant;
+            CharSequence value = textView.getText();
+            android.text.Layout textLayout = textView.getLayout();
+            if (value != null && value.length() > 0 && textLayout != null
+                    && textLayout.getLineCount() > 0) {
+                float originX = textView.getCompoundPaddingLeft() - textView.getScrollX();
+                float originY = textView.getExtendedPaddingTop() - textView.getScrollY();
+                for (int line = 0; line < textLayout.getLineCount(); line++) {
+                    float left = originX + textLayout.getLineLeft(line);
+                    float right = originX + textLayout.getLineRight(line);
+                    float top = originY + textLayout.getLineTop(line);
+                    float bottom = originY + textLayout.getLineBottom(line);
+                    if (right < left) {
+                        float swap = left;
+                        left = right;
+                        right = swap;
+                    }
+                    if (right - left < 1f || bottom <= top) continue;
+                    if (bounds == null) bounds = new android.graphics.RectF(
+                            left, top, right, bottom);
+                    else bounds.union(left, top, right, bottom);
+                }
+            }
+        }
+        // During initial layout, the TextView has not built its Layout yet. Keep a
+        // temporary fallback for that single frame; subsequent geometry updates use
+        // the line bounds and remove the inflated text-view rectangle.
+        if (bounds == null) {
+            bounds = new android.graphics.RectF(
+                    0f, 0f, descendant.getWidth(), descendant.getHeight());
+        }
         View current = descendant;
         while (current != panel) {
             android.view.ViewParent rawParent = current.getParent();
@@ -11514,8 +11541,7 @@ public class MainActivity extends Activity {
                     || !isWorkspaceItem(other) || other.getVisibility() != View.VISIBLE) continue;
             int[] otherGeometry = itemGeometry(other);
             if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
-            android.graphics.Rect obstacle = workspaceLayoutCollisionRect(other,
-                    otherGeometry[0], otherGeometry[1], otherGeometry[2], otherGeometry[3]);
+            android.graphics.Rect obstacle = collisionRect(other, otherGeometry);
             xs.add(Math.max(0, Math.min(maxX, obstacle.left - width - gap)));
             xs.add(Math.max(0, Math.min(maxX, obstacle.right + gap)));
             ys.add(Math.max(0, Math.min(maxY, obstacle.top - height - gap)));
@@ -11643,8 +11669,7 @@ public class MainActivity extends Activity {
                 int[] geometry = itemGeometry(other);
                 if (geometry[2] <= 0 || geometry[3] <= 0) continue;
 
-                android.graphics.Rect obstacle = workspaceLayoutCollisionRect(other,
-                        geometry[0], geometry[1], geometry[2], geometry[3]);
+                android.graphics.Rect obstacle = collisionRect(other, geometry);
                 changed |= constrainClockResizeAgainstObstacle(
                         bounds, obstacle, edge, minWidth, minHeight, gap);
                 int[] reserved = liveDisplacementTargets.get(other);
