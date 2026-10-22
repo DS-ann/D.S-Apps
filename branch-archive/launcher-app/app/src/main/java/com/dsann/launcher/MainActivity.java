@@ -9616,16 +9616,17 @@ public class MainActivity extends Activity {
             for (int i = 0; fallbackColonAt >= 0 && i < fallbackColonAt; i++) {
                 if (Character.digit(clockValue.charAt(i), 10) >= 0) fallbackHourDigits++;
             }
-            boolean api23TwoDigitTextFallback = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
-                    && !sevenSegmentClock && fallbackHourDigits >= 2;
+            boolean api23NativeTextPath = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                    && !sevenSegmentClock;
             int styleForClockSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
             float baseClockLetterSpacing = clockPresetLetterSpacing(styleForClockSpacing);
-            boolean api23CompactTwoDigitClock = api23TwoDigitTextFallback
+            boolean api23CompactNativeClock = api23NativeTextPath
                     && styleForClockSpacing != 2;
-            if (api23CompactTwoDigitClock) {
-                // API 23 keeps ordinary TextView text for the two-digit-hour fallback;
-                // compact its total advances by 15dp without introducing ReplacementSpans.
-                float advanceCount = Math.max(1f, clockValue.length() - 1f);
+            if (api23CompactNativeClock) {
+                // Keep the same total tracking compression for one- and two-digit hours.
+                // The figure-space on a one-digit hour reserves the second hour cell.
+                float advanceCount = Math.max(1f, clockValue.length()
+                        - (fallbackHourDigits >= 2 ? 1f : 0f));
                 float renderScaleX = Math.max(0.25f,
                         Math.abs(clockText.getScaleX())
                                 * Math.abs(clockPanel == null ? 1f : clockPanel.getScaleX()));
@@ -9646,8 +9647,12 @@ public class MainActivity extends Activity {
                     || isClockIconArtworkActive();
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
+            if (api23NativeTextPath && fallbackHourDigits == 1) {
+                // Keep the same two-cell hour geometry even though API 23 uses native text.
+                displayClock.insert(0, "\u2007");
+            }
             if (!sevenSegmentClock && !clockValue.isEmpty()
-                    && !api23TwoDigitTextFallback) {
+                    && !api23NativeTextPath) {
                 // Reserve a leading invisible '1' when the hour has one digit.
                 int firstDigit = -1;
                 for (int i = 0; i < clockValue.length(); i++) {
@@ -9726,7 +9731,7 @@ public class MainActivity extends Activity {
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
-            if (api23TwoDigitTextFallback) {
+            if (api23NativeTextPath) {
                 int nativeColonAt = displayClock.toString().indexOf(':');
                 if (nativeColonAt >= 0) {
                     boolean compactNativeColon = styleForClockSpacing != 2;
@@ -9741,12 +9746,12 @@ public class MainActivity extends Activity {
             boolean digitBorderModeChanged = previousDigitBorderMode == null
                     || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
             boolean missingDisplaySpans = false;
-            boolean staleApi23ReplacementSpans = false;
-            if (api23TwoDigitTextFallback) {
+            boolean staleApi23NativeTextSpans = false;
+            if (api23NativeTextPath) {
                 CharSequence existingText = clockText.getText();
                 if (existingText instanceof android.text.Spanned) {
                     android.text.Spanned oldSpanned = (android.text.Spanned) existingText;
-                    staleApi23ReplacementSpans =
+                    staleApi23NativeTextSpans =
                             oldSpanned.getSpans(0, oldSpanned.length(), TightDigitSpan.class).length > 0
                             || oldSpanned.getSpans(0, oldSpanned.length(),
                                     CenteredColonSpan.class).length > 0;
@@ -9758,7 +9763,7 @@ public class MainActivity extends Activity {
                                 || prefs.getInt(KEY_CLOCK_STYLE, 0) != 2;
                         int requiredShift = getNativeClockColonBaselineShift(
                                 oldSpanned.toString(), existingColonAt, compactNativeColon);
-                        staleApi23ReplacementSpans = staleApi23ReplacementSpans
+                        staleApi23NativeTextSpans = staleApi23NativeTextSpans
                                 || oldBaseline.length != 1
                                 || oldBaseline[0].getShiftPx() != requiredShift
                                 || oldBaseline[0].isCompact() != compactNativeColon;
@@ -9766,7 +9771,7 @@ public class MainActivity extends Activity {
                 }
             }
             int expectedColon = displayClock.toString().indexOf(':');
-            if (!sevenSegmentClock && !api23TwoDigitTextFallback
+            if (!sevenSegmentClock && !api23NativeTextPath
                     && !clockValue.isEmpty() && expectedColon >= 0) {
                 CharSequence existingText = clockText.getText();
                 if (!(existingText instanceof android.text.Spanned)) {
@@ -9786,8 +9791,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            if (forceTextRefresh || api23TwoDigitTextFallback
-                    || missingDisplaySpans || staleApi23ReplacementSpans
+            if (forceTextRefresh || missingDisplaySpans || staleApi23NativeTextSpans
                     || !displayClock.toString().contentEquals(clockText.getText())
                     || digitBorderModeChanged) {
                 // The seven-segment renderer owns its glyph geometry; standard styles
@@ -9796,18 +9800,17 @@ public class MainActivity extends Activity {
                     clockText.setText(displayClock, TextView.BufferType.NORMAL);
                     clockText.postInvalidateOnAnimation();
                 } else {
-                    // Keep replacement spans in a mutable buffer on API 23. This forces
-                    // the two-digit glyph/colon layout to be rebuilt after package updates.
+                    // Keep the standard clock text mutable so custom spans are retained
+                    // on releases that use the per-glyph renderer.
                     clockText.setText(displayClock, TextView.BufferType.SPANNABLE);
                     clockText.requestLayout();
                     clockText.invalidate();
                 }
                 clockDigitInnerBorderModeApplied.put(clockText, useWhiteDigitInnerBorder);
             }
-            // Android 6's two-digit-hour fallback uses native TextView glyphs rather
-            // than per-digit ReplacementSpans. Reassert the white inner contour after
-            // that text buffer is installed; only enable it for gradient/artwork modes.
-            if (api23TwoDigitTextFallback && useWhiteDigitInnerBorder
+            // Android 6 uses native TextView glyphs for every non-seven-segment hour width.
+            // Keep its white inner contour consistent across one- and two-digit hours.
+            if (api23NativeTextPath && useWhiteDigitInnerBorder
                     && clockText instanceof SevenSegmentClockTextView) {
                 ((SevenSegmentClockTextView) clockText).setContrastInnerBorderEnabled(
                         true, CLOCK_DIGIT_GRADIENT_COLORS,
@@ -9860,17 +9863,17 @@ public class MainActivity extends Activity {
         // can shrink and the clock shifts horizontally at a minute/day boundary.
         // Geometry is recalculated on creation, style changes, and explicit resize.
         applyClockColorEffects(clockColorPhase, true);
-        enforceApi23TwoDigitWhiteInnerBorder();
+        enforceApi23NativeClockInnerBorder();
         updateClockResizeHandles();
         applyBrandVisibility();
     }
 
     /**
-     * Android 6 uses native TextView glyphs for two-digit standard hours to avoid a
-     * ReplacementSpan rendering failure. Reassert the white inner contour after the
-     * general colour pass, but only for a two-digit hour with gradient/artwork matching.
+     * Android 6 uses native TextView glyphs for all non-seven-segment hours to avoid
+     * ReplacementSpan rendering failures. Keep its inner contour consistent regardless
+     * of hour digit count, and enable it only for gradient/artwork matching.
      */
-    private void enforceApi23TwoDigitWhiteInnerBorder() {
+    private void enforceApi23NativeClockInnerBorder() {
         if (Build.VERSION.SDK_INT != Build.VERSION_CODES.M) return;
         int restorePage = Math.max(0, Math.min(1, activeClockPage));
         float borderWidth = 2f * getResources().getDisplayMetrics().density;
@@ -9889,15 +9892,15 @@ public class MainActivity extends Activity {
             for (int i = 0; colonAt >= 0 && i < colonAt; i++) {
                 if (Character.digit(value.charAt(i), 10) >= 0) hourDigits++;
             }
-            boolean drawWhiteBorder = !sevenSegment && hourDigits >= 2 && colourEffectEnabled;
+            boolean drawWhiteBorder = !sevenSegment && hourDigits >= 1 && colourEffectEnabled;
             SevenSegmentClockTextView renderer = (SevenSegmentClockTextView) target;
             if (drawWhiteBorder) {
                 renderer.setDigitOnlyInnerBorder(false);
                 renderer.setContrastInnerBorderEnabled(true, CLOCK_DIGIT_GRADIENT_COLORS,
                         borderWidth, CLOCK_WHITE_BORDER_COLORS);
             } else if (!sevenSegment) {
-                // One-digit clocks use their own TightDigitSpan border. Do not let a
-                // previous two-digit fallback leave a second TextView-wide contour behind.
+                // Clear the TextView-wide contour whenever the unified native-border
+                // condition is not active, including when artwork/gradient is turned off.
                 renderer.setContrastInnerBorderEnabled(false, null, 0f, null);
             }
             renderer.invalidate();
@@ -14240,10 +14243,8 @@ public class MainActivity extends Activity {
                 }
             }
             float textScaleX = Math.max(0.01f, Math.abs(clockText.getScaleX()));
-            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M && !sevenSegment
-                    && hourDigits >= 2) {
-                targetX = 0f;
-            } else if (hourDigits == 1) {
+            if (hourDigits == 1 && !(Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                    && !sevenSegment)) {
                 // The invisible leading figure-space equalizes 9:xx and 10:xx widths.
                 // Shift by half that reserved cell so the *visible* one-digit clock is
                 // balanced, leaving the colon slightly left of the background midpoint.
