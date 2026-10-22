@@ -381,15 +381,21 @@ public class BatteryNotificationService extends Service {
     private String ratePerHourText(BatteryReader.Reading reading,
                                    BatteryPercentCalculator.Estimate estimate,
                                    BatteryReader.PowerState powerState){
+        double capacityMah=estimate==null?Double.NaN:estimate.capacityMah;
+        if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
+            capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
+        }
         if(reading==null||reading.currentUa==Long.MIN_VALUE
-                ||estimate==null||!estimate.isAvailable()||estimate.capacityMah<=0.0){
-            return "--%/h";
+                ||Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)
+                ||capacityMah<100.0||capacityMah>100000.0){
+            return powerState==BatteryReader.PowerState.FULL?"0.00%/h":"--%/h";
         }
         if(powerState==BatteryReader.PowerState.FULL)return "0.00%/h";
         if(powerState!=BatteryReader.PowerState.CHARGING
-                &&powerState!=BatteryReader.PowerState.DISCHARGING)return "--%/h";
+                &&powerState!=BatteryReader.PowerState.DISCHARGING
+                &&powerState!=BatteryReader.PowerState.NOT_CHARGING)return "--%/h";
         double rate=Math.abs((double)reading.currentUa)/1000.0
-                *100.0/estimate.capacityMah;
+                *100.0/capacityMah;
         return String.format(java.util.Locale.US,"%.2f%%/h",rate);
     }
 

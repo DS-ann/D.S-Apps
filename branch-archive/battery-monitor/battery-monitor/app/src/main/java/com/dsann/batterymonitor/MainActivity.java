@@ -501,6 +501,7 @@ public class MainActivity extends Activity {
         healthScroll.setVisibility(index==3?View.VISIBLE:View.GONE);
         selectTab(index);
         handler.removeCallbacks(historyUpdater);
+        if(index==1) updateMyBatteryEstimate();
         if(index==2){refreshHistory();handler.postDelayed(historyUpdater,10000);}
         else if(index==3) refreshHealth();
     }
@@ -755,17 +756,25 @@ public class MainActivity extends Activity {
         if(myBatteryRateLabel==null)return;
         String chargingRate="--";
         String dischargingRate="--";
+        double capacityMah=estimate==null?Double.NaN:estimate.capacityMah;
+        if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
+            capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
+        }
         if(reading!=null&&reading.currentUa!=Long.MIN_VALUE
-                &&estimate!=null&&estimate.isAvailable()&&estimate.capacityMah>0.0){
+                &&!Double.isNaN(capacityMah)&&!Double.isInfinite(capacityMah)
+                &&capacityMah>=100.0&&capacityMah<=100000.0){
             double rate=Math.abs((double)reading.currentUa)/1000.0
-                    *100.0/estimate.capacityMah;
+                    *100.0/capacityMah;
             if(state==BatteryReader.PowerState.CHARGING){
                 chargingRate=String.format(java.util.Locale.US,"%.2f",rate);
-            }else if(state==BatteryReader.PowerState.DISCHARGING){
+            }else if(state==BatteryReader.PowerState.DISCHARGING
+                    ||state==BatteryReader.PowerState.NOT_CHARGING){
                 dischargingRate=String.format(java.util.Locale.US,"%.2f",rate);
             }else if(state==BatteryReader.PowerState.FULL){
                 chargingRate="0.00";
             }
+        }else if(state==BatteryReader.PowerState.FULL){
+            chargingRate="0.00";
         }
         myBatteryRateLabel.setText("Charging rate: "+chargingRate+"%/h\n"
                 +"Discharging rate: "+dischargingRate+"%/h");
