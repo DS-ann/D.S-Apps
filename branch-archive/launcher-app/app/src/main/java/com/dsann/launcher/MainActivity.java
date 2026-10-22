@@ -99,6 +99,8 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_WIDGET_Y = "clock_widget_y";
     private static final String KEY_CLOCK_WIDGET_ENABLED = "clock_widget_enabled";
     private static final String KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX = "resize_auto_removed_clock_page_";
+    private static final String KEY_RESIZE_AUTO_SCALE_X_PREFIX = "workspace_resize_auto_scale_x_";
+    private static final String KEY_RESIZE_AUTO_SCALE_Y_PREFIX = "workspace_resize_auto_scale_y_";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
     private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
     private static final String KEY_SHOW_PAGE_INDICATOR = "show_page_indicator";
@@ -683,6 +685,14 @@ public class MainActivity extends Activity {
     private boolean appGroupRenderDeferred;
     // Defers generic overlap validation until resize-specific recovery completes.
     private boolean homeIconResizeRepairPending;
+    private int resizeRepairCollisionCount;
+    private int resizeRepairClockBackgroundCollisionCount;
+    private int resizeRepairSpecialShrinkCount;
+    private int resizeRepairNeighbourIconShrinkCount;
+    private int resizeRepairMovedCount;
+    private int resizeRepairRemovedWidgetCount;
+    private int resizeRepairRemovedClockCount;
+    private int resizeRepairGroupRepositionCount;
     private long lastAppGroupCreationUptime;
     private View workspaceTransferItem;
     private FrameLayout workspaceTransferSourcePage;
@@ -11672,14 +11682,18 @@ public class MainActivity extends Activity {
     private boolean isWorkspaceItem(View view) {
         if (view == null || !(view.getTag() instanceof String)) return false;
         String tag = (String) view.getTag();
-        // App cells are placement slots, not scalable widgets. Older versions
-        // persisted emergency scale values for them; clear those legacy values
-        // and keep the cell transform at 1 so its configured icon size is stable.
+        // App cells remain logical grid slots. Resize-only auto-shrink is stored
+        // separately so it can reduce neighbouring artwork/labels without corrupting
+        // slot coordinates or overriding deliberate widget resize state.
         if (!workspaceScaleRestored.containsKey(view)) {
             workspaceScaleRestored.put(view, Boolean.TRUE);
+            float autoX = clampWorkspaceAutoScale(
+                    getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(view, true), 1f));
+            float autoY = clampWorkspaceAutoScale(
+                    getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(view, false), 1f));
             if (tag.startsWith("launcher_app:")) {
-                view.setScaleX(1f);
-                view.setScaleY(1f);
+                view.setScaleX(autoX);
+                view.setScaleY(autoY);
                 if (prefs != null) {
                     prefs.edit().remove("workspace_scale_x_" + tag)
                             .remove("workspace_scale_y_" + tag)
@@ -11689,10 +11703,8 @@ public class MainActivity extends Activity {
             } else {
                 float sx = getFloatPreferenceCompat("workspace_scale_x_" + tag, 1f);
                 float sy = getFloatPreferenceCompat("workspace_scale_y_" + tag, 1f);
-                if (sx > 0f && sy > 0f && (sx < 0.999f || sy < 0.999f)) {
-                    view.setScaleX(sx);
-                    view.setScaleY(sy);
-                }
+                view.setScaleX((sx > 0f ? sx : 1f) * autoX);
+                view.setScaleY((sy > 0f ? sy : 1f) * autoY);
             }
         }
         // Include the clock in workspace displacement so widgets and shortcuts
@@ -11701,6 +11713,44 @@ public class MainActivity extends Activity {
                 || tag.startsWith(APP_GROUP_TAG_PREFIX)
                 || "launcher_contact_shortcut".equals(tag)
                 || "launcher_clock_widget".equals(tag);
+    }
+
+
+    private float clampWorkspaceAutoScale(float value) {
+        return Math.max(0.25f, Math.min(1f, value));
+    }
+
+    private String workspaceAutoShrinkScaleKey(View view, boolean horizontal) {
+        String tag = view == null ? "" : String.valueOf(view.getTag());
+        // Every contact shortcut uses the same view tag; suffix its stable ID so only
+        // the intended shortcut shrinks.
+        if (isWorkspaceContactShortcut(view)) {
+            String shortcutId = shortcutIdFromTile(view);
+            if (!shortcutId.isEmpty()) tag += ":" + shortcutId;
+        }
+        return (horizontal ? KEY_RESIZE_AUTO_SCALE_X_PREFIX
+                : KEY_RESIZE_AUTO_SCALE_Y_PREFIX) + tag;
+    }
+
+    /** Start each icon-size transaction with the configured artwork size, then persist
+     * only those neighbours which must yield space for the new size. */
+    private void clearAutoShrunkHomeGridItems() {
+        if (prefs == null) return;
+        SharedPreferences.Editor edit = prefs.edit();
+        boolean changed = false;
+        for (String key : prefs.getAll().keySet()) {
+            if (!(key.startsWith(KEY_RESIZE_AUTO_SCALE_X_PREFIX)
+                    || key.startsWith(KEY_RESIZE_AUTO_SCALE_Y_PREFIX))) continue;
+            String tag = key.substring(key.indexOf("workspace_resize_auto_scale_")
+                    + "workspace_resize_auto_scale_".length());
+            if (tag.startsWith("launcher_app:")
+                    || tag.startsWith(APP_GROUP_TAG_PREFIX)
+                    || tag.startsWith("launcher_contact_shortcut:")) {
+                edit.remove(key);
+                changed = true;
+            }
+        }
+        if (changed) edit.apply();
     }
 
     private int[] itemGeometry(View view) {
@@ -11991,22 +12041,33 @@ public class MainActivity extends Activity {
 
     private android.graphics.Rect collisionRect(View view, int[] geometry) {
         int margin = workspaceCollisionMargin(view);
-        android.graphics.Rect bounds = isHomeGridIcon(view)
-                ? appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3])
-                : new android.graphics.Rect(geometry[0], geometry[1],
-                        geometry[0] + geometry[2], geometry[1] + geometry[3]);
-        if (margin == 0) return bounds;
-        bounds.inset(-margin, -margin);
+        android.graphics.Rect bounds;
+        if (isClockWorkspaceItem(view)) {
+            // The translucent/gradient background is itself a collision surface; do not
+            // limit clock collisions to the painted digits or date text.
+            bounds = clockBackgroundCollisionBoundsAt(view, geometry[0], geometry[1],
+                    geometry[2], geometry[3]);
+        } else if (isHomeGridIcon(view)) {
+            bounds = appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3]);
+        } else {
+            bounds = new android.graphics.Rect(geometry[0], geometry[1],
+                    geometry[0] + geometry[2], geometry[1] + geometry[3]);
+        }
+        if (margin != 0) bounds.inset(-margin, -margin);
         return bounds;
     }
 
     private android.graphics.Rect collisionRectAt(View view, int x, int y, int width, int height) {
         int margin = workspaceCollisionMargin(view);
-        android.graphics.Rect bounds = isHomeGridIcon(view)
-                ? appIconVisualRectAt(view, x, y, width, height)
-                : new android.graphics.Rect(x, y, x + width, y + height);
-        if (margin == 0) return bounds;
-        bounds.inset(-margin, -margin);
+        android.graphics.Rect bounds;
+        if (isClockWorkspaceItem(view)) {
+            bounds = clockBackgroundCollisionBoundsAt(view, x, y, width, height);
+        } else if (isHomeGridIcon(view)) {
+            bounds = appIconVisualRectAt(view, x, y, width, height);
+        } else {
+            bounds = new android.graphics.Rect(x, y, x + width, y + height);
+        }
+        if (margin != 0) bounds.inset(-margin, -margin);
         return bounds;
     }
 
@@ -12017,6 +12078,17 @@ public class MainActivity extends Activity {
      */
     private android.graphics.Rect collisionRectForInteraction(
             View view, int[] geometry, View other) {
+        if (isClockWorkspaceItem(view)) {
+            return workspaceLayoutCollisionRect(view, geometry[0], geometry[1],
+                    geometry[2], geometry[3]);
+        }
+        // When a clock background touches a grid item, the entire grid layout slot
+        // participates. Other app/app and widget/app interactions keep their usual
+        // visible-artwork bounds to avoid false collisions from empty padding.
+        if (isClockWorkspaceItem(other) && isAppIconCollisionParticipant(view)) {
+            return new android.graphics.Rect(geometry[0], geometry[1],
+                    geometry[0] + geometry[2], geometry[1] + geometry[3]);
+        }
         if (isAppIconCollisionParticipant(view)) {
             return appIconVisualRectAt(view, geometry[0], geometry[1], geometry[2], geometry[3]);
         }
@@ -12026,6 +12098,13 @@ public class MainActivity extends Activity {
 
     private android.graphics.Rect collisionRectAtForInteraction(
             View view, int x, int y, int width, int height, View other) {
+        if (isClockWorkspaceItem(view)) {
+            return workspaceLayoutCollisionRect(view, x, y, width, height);
+        }
+        if (isClockWorkspaceItem(other) && isAppIconCollisionParticipant(view)) {
+            return new android.graphics.Rect(x, y, x + Math.max(1, width),
+                    y + Math.max(1, height));
+        }
         if (isAppIconCollisionParticipant(view)) {
             return appIconVisualRectAt(view, x, y, width, height);
         }
@@ -12093,19 +12172,23 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Get the full visible workspace footprint for a typography clock at the supplied
-     * panel rectangle. The panel rectangle is already in page coordinates; descendant
-     * ink is mapped through the panel's current/proposed scale. Seven-segment clocks
-     * deliberately retain their established panel-only geometry.
+     * Bounds of the actual clock panel background at a proposed page position. The
+     * background fills this panel, so its whole rectangle is tested against neighbouring
+     * layout slots, independently of where the digits/date ink happens to fall.
+     */
+    private android.graphics.Rect clockBackgroundCollisionBoundsAt(
+            View panel, int x, int y, int width, int height) {
+        return new android.graphics.Rect(
+                x, y, x + Math.max(1, width), y + Math.max(1, height));
+    }
+
+    /**
+     * Compatibility alias for the clock's complete panel/background footprint.
+     * Keep existing edge-resize callers on the same geometry as workspace collision checks.
      */
     private android.graphics.Rect clockVisualBoundsAt(
             View panel, int x, int y, int width, int height) {
-        // Workspace interaction bounds describe the widget/background itself. Unioning
-        // transformed text/date descendants creates an invisible rectangle that clamps
-        // dragging early, rejects valid edge resizes, and adds unnecessary geometry work.
-        // Panel width is measured to contain its rendered clock and date.
-        return new android.graphics.Rect(
-                x, y, x + Math.max(1, width), y + Math.max(1, height));
+        return clockBackgroundCollisionBoundsAt(panel, x, y, width, height);
     }
 
     /**
@@ -12176,7 +12259,7 @@ public class MainActivity extends Activity {
             View view, int x, int y, int width, int height) {
         int margin = workspaceCollisionMargin(view);
         android.graphics.Rect bounds = isClockWorkspaceItem(view)
-                ? clockVisualBoundsAt(view, x, y, width, height)
+                ? clockBackgroundCollisionBoundsAt(view, x, y, width, height)
                 : new android.graphics.Rect(
                         x, y, x + Math.max(1, width), y + Math.max(1, height));
         if (margin != 0) bounds.inset(-margin, -margin);
@@ -13384,26 +13467,33 @@ public class MainActivity extends Activity {
      */
     private boolean hasWorkspaceVisualOverlaps(FrameLayout page) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
-        java.util.ArrayList<android.graphics.Rect> visualBounds =
-                new java.util.ArrayList<android.graphics.Rect>();
+        java.util.ArrayList<View> priorItems = new java.util.ArrayList<View>();
         for (int i = 0; i < page.getChildCount(); i++) {
             View item = page.getChildAt(i);
             if (!isWorkspaceItem(item) || item.getVisibility() != View.VISIBLE) continue;
-            int[] g = itemGeometry(item);
-            if (g[2] <= 0 || g[3] <= 0) continue;
-            android.graphics.Rect bounds = isHomeGridIcon(item)
-                    ? appIconVisualRectAt(item, g[0], g[1], g[2], g[3])
-                    : new android.graphics.Rect(g[0], g[1], g[0] + g[2], g[1] + g[3]);
-            // Out-of-page content still needs the safety resolver even when it
-            // does not overlap another item.
+            int[] geometry = itemGeometry(item);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            android.graphics.Rect bounds = isClockWorkspaceItem(item)
+                    ? clockBackgroundCollisionBoundsAt(item, geometry[0], geometry[1],
+                            geometry[2], geometry[3])
+                    : (isHomeGridIcon(item)
+                            ? appIconVisualRectAt(item, geometry[0], geometry[1],
+                                    geometry[2], geometry[3])
+                            : new android.graphics.Rect(geometry[0], geometry[1],
+                                    geometry[0] + geometry[2], geometry[1] + geometry[3]));
             if (bounds.left < 0 || bounds.top < 0
                     || bounds.right > page.getWidth() || bounds.bottom > page.getHeight()) {
                 return true;
             }
-            for (android.graphics.Rect prior : visualBounds) {
-                if (android.graphics.Rect.intersects(prior, bounds)) return true;
+            for (View prior : priorItems) {
+                int[] priorGeometry = itemGeometry(prior);
+                android.graphics.Rect currentBounds =
+                        collisionRectForInteraction(item, geometry, prior);
+                android.graphics.Rect priorBounds =
+                        collisionRectForInteraction(prior, priorGeometry, item);
+                if (android.graphics.Rect.intersects(currentBounds, priorBounds)) return true;
             }
-            visualBounds.add(bounds);
+            priorItems.add(item);
         }
         return false;
     }
@@ -14202,6 +14292,14 @@ public class MainActivity extends Activity {
             homeIconResizeRepairPending = false;
             return;
         }
+        resizeRepairCollisionCount = 0;
+        resizeRepairClockBackgroundCollisionCount = 0;
+        resizeRepairSpecialShrinkCount = 0;
+        resizeRepairNeighbourIconShrinkCount = 0;
+        resizeRepairMovedCount = 0;
+        resizeRepairRemovedWidgetCount = 0;
+        resizeRepairRemovedClockCount = 0;
+        resizeRepairGroupRepositionCount = 0;
         pagesStrip.post(() -> {
             if (pagesStrip == null || isFinishing()) {
                 homeIconResizeRepairPending = false;
@@ -14230,10 +14328,47 @@ public class MainActivity extends Activity {
                         homeIconResizeRepairPending = false;
                         ensureShortcutLabelsNotClipped();
                         refreshWorkspaceGrid();
+                        showIconResizeRecoveryPrompt();
                     }
                 });
             }
         });
+    }
+
+
+    private void showIconResizeRecoveryPrompt() {
+        if (resizeRepairCollisionCount == 0 && resizeRepairGroupRepositionCount == 0) return;
+        StringBuilder message = new StringBuilder();
+        if (resizeRepairClockBackgroundCollisionCount > 0) {
+            message.append("Clock background collision detected. ");
+        } else if (resizeRepairCollisionCount > 0) {
+            message.append("Workspace overlap detected after icon resize. ");
+        }
+        if (resizeRepairSpecialShrinkCount > 0) {
+            message.append("Shrunk ").append(resizeRepairSpecialShrinkCount)
+                    .append(" clock/widget item(s). ");
+        }
+        if (resizeRepairNeighbourIconShrinkCount > 0) {
+            message.append("Shrunk ").append(resizeRepairNeighbourIconShrinkCount)
+                    .append(" nearby app/group/shortcut icon(s). ");
+        }
+        if (resizeRepairMovedCount > 0) {
+            message.append("Moved ").append(resizeRepairMovedCount)
+                    .append(" item(s) to clear space. ");
+        }
+        if (resizeRepairGroupRepositionCount > 0) {
+            message.append("Snapped ").append(resizeRepairGroupRepositionCount)
+                    .append(" app group(s) back to the grid. ");
+        }
+        if (resizeRepairRemovedWidgetCount > 0) {
+            message.append("Removed ").append(resizeRepairRemovedWidgetCount)
+                    .append(" widget(s) from Home because both screens had no safe space. ");
+        }
+        if (resizeRepairRemovedClockCount > 0) {
+            message.append("Hid ").append(resizeRepairRemovedClockCount)
+                    .append(" clock(s) because its page had no safe space; open Home Studio to restore it.");
+        }
+        Toast.makeText(this, message.toString().trim(), Toast.LENGTH_LONG).show();
     }
 
     private void snapAppGroupsToGridAfterIconResize(FrameLayout page) {
@@ -14305,7 +14440,12 @@ public class MainActivity extends Activity {
                             moved.leftMargin = free[0] * otherWidth;
                             moved.topMargin = homeGridRowTop(free[1], otherRows,
                                     other.getHeight(), otherCellHeight);
+                            moved.rightMargin = 0;
+                            moved.bottomMargin = 0;
+                            group.setTranslationX(0f);
+                            group.setTranslationY(0f);
                             other.addView(group, moved);
+                            resizeRepairGroupRepositionCount++;
                             String groupId = appGroupId(group);
                             if (groupId != null) {
                                 prefs.edit().putInt(appGroupKey("page", groupId), otherIndex)
@@ -14327,11 +14467,19 @@ public class MainActivity extends Activity {
                 row = bestRow;
             }
             occupied[row][col] = true;
+            boolean groupMoved = oldCol != col || oldRow != row
+                    || group.getTranslationX() != 0f || group.getTranslationY() != 0f;
+            lp.gravity = Gravity.TOP | Gravity.LEFT;
             lp.width = cellWidth;
             lp.height = cellHeight;
             lp.leftMargin = col * cellWidth;
             lp.topMargin = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            lp.rightMargin = 0;
+            lp.bottomMargin = 0;
+            group.setTranslationX(0f);
+            group.setTranslationY(0f);
             group.setLayoutParams(lp);
+            if (groupMoved) resizeRepairGroupRepositionCount++;
             String groupId = appGroupId(group);
             if (groupId != null) {
                 prefs.edit().putInt(appGroupKey("page", groupId), pageIndex)
@@ -14346,17 +14494,21 @@ public class MainActivity extends Activity {
 
     private boolean resizeItemFitsAtCurrentPosition(FrameLayout page, View moving) {
         if (page == null || moving == null || moving.getParent() != page) return false;
-        int[] g = itemGeometry(moving);
-        if (g[2] <= 0 || g[3] <= 0 || g[0] < 0 || g[1] < 0
-                || g[0] + g[2] > page.getWidth() || g[1] + g[3] > page.getHeight()) return false;
-        android.graphics.Rect candidate = collisionRect(moving, g);
+        int[] geometry = itemGeometry(moving);
+        if (geometry[2] <= 0 || geometry[3] <= 0 || geometry[0] < 0 || geometry[1] < 0
+                || geometry[0] + geometry[2] > page.getWidth()
+                || geometry[1] + geometry[3] > page.getHeight()) return false;
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
             if (other == moving || !isWorkspaceItem(other)
                     || other.getVisibility() != View.VISIBLE) continue;
             int[] otherGeometry = itemGeometry(other);
             if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
-            if (android.graphics.Rect.intersects(candidate, collisionRect(other, otherGeometry))) return false;
+            android.graphics.Rect candidate =
+                    collisionRectForInteraction(moving, geometry, other);
+            android.graphics.Rect obstacle =
+                    collisionRectForInteraction(other, otherGeometry, moving);
+            if (android.graphics.Rect.intersects(candidate, obstacle)) return false;
         }
         return true;
     }
@@ -14366,14 +14518,17 @@ public class MainActivity extends Activity {
         if (page == null || moving == null || width <= 0 || height <= 0
                 || x < 0 || y < 0 || x + width > page.getWidth()
                 || y + height > page.getHeight()) return false;
-        android.graphics.Rect candidate = collisionRectAt(moving, x, y, width, height);
         for (int i = 0; i < page.getChildCount(); i++) {
             View other = page.getChildAt(i);
             if (other == moving || !isWorkspaceItem(other)
                     || other.getVisibility() != View.VISIBLE) continue;
             int[] otherGeometry = itemGeometry(other);
             if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
-            if (android.graphics.Rect.intersects(candidate, collisionRect(other, otherGeometry))) return false;
+            android.graphics.Rect candidate =
+                    collisionRectAtForInteraction(moving, x, y, width, height, other);
+            android.graphics.Rect obstacle =
+                    collisionRectForInteraction(other, otherGeometry, moving);
+            if (android.graphics.Rect.intersects(candidate, obstacle)) return false;
         }
         return true;
     }
@@ -14447,6 +14602,7 @@ public class MainActivity extends Activity {
 
     private void placeResizeRecoveredItem(FrameLayout page, View item, int pageIndex, int x, int y) {
         int[] g = itemGeometry(item);
+        if (g[0] != x || g[1] != y) resizeRepairMovedCount++;
         if (isClockWorkspaceItem(item)) {
             setClockVisualPosition(item, x, y, true);
             return;
@@ -14525,6 +14681,7 @@ public class MainActivity extends Activity {
         widgetInteractionController.forgetWidgetContainer((FrameLayout) widget);
         WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
         try { widgetHost.deleteAppWidgetId(id); } catch (Exception ignored) {}
+        resizeRepairRemovedWidgetCount++;
     }
 
     private void removeResizeOverflowClock(FrameLayout page, View clock) {
@@ -14536,6 +14693,139 @@ public class MainActivity extends Activity {
         prefs.edit().putBoolean(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + pageIndex, true).apply();
         if (clock.getParent() instanceof ViewGroup) ((ViewGroup) clock.getParent()).removeView(clock);
         clock.setVisibility(View.GONE);
+        resizeRepairRemovedClockCount++;
+    }
+
+
+    private boolean hasClockBackgroundOverlapForResize(FrameLayout page, View item) {
+        if (page == null || item == null || item.getParent() != page) return false;
+        int[] itemGeometry = itemGeometry(item);
+        if (itemGeometry[2] <= 0 || itemGeometry[3] <= 0) return false;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == item || !isClockWorkspaceItem(other)
+                    || other.getVisibility() != View.VISIBLE) continue;
+            int[] clockGeometry = itemGeometry(other);
+            if (clockGeometry[2] <= 0 || clockGeometry[3] <= 0) continue;
+            android.graphics.Rect itemBounds =
+                    collisionRectForInteraction(item, itemGeometry, other);
+            android.graphics.Rect clockBounds =
+                    collisionRectForInteraction(other, clockGeometry, item);
+            if (android.graphics.Rect.intersects(itemBounds, clockBounds)) return true;
+        }
+        if (isClockWorkspaceItem(item)) {
+            android.graphics.Rect clockBounds = collisionRectForInteraction(
+                    item, itemGeometry, item);
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View other = page.getChildAt(i);
+                if (other == item || !isWorkspaceItem(other)
+                        || other.getVisibility() != View.VISIBLE) continue;
+                int[] otherGeometry = itemGeometry(other);
+                if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+                android.graphics.Rect otherBounds =
+                        collisionRectForInteraction(other, otherGeometry, item);
+                if (android.graphics.Rect.intersects(clockBounds, otherBounds)) return true;
+            }
+        }
+        return false;
+    }
+
+    private int[] shrinkGridIconsToCreateResizeSpace(FrameLayout searchPage, View protectedItem) {
+        if (searchPage == null || protectedItem == null || searchPage.getWidth() <= 0
+                || searchPage.getHeight() <= 0) return null;
+        final boolean itemAlreadyOnPage = protectedItem.getParent() == searchPage;
+        if (itemAlreadyOnPage && resizeItemFitsAtCurrentPosition(searchPage, protectedItem)) {
+            int[] g = itemGeometry(protectedItem);
+            return new int[]{g[0], g[1]};
+        }
+        int[] currentGeometry = itemGeometry(protectedItem);
+        int[] existingSlot = findResizeFreeGridPosition(searchPage, protectedItem);
+        if (existingSlot != null) return existingSlot;
+
+        java.util.ArrayList<View> candidates = new java.util.ArrayList<View>();
+        for (int i = 0; i < searchPage.getChildCount(); i++) {
+            View candidate = searchPage.getChildAt(i);
+            if (candidate == protectedItem || !isHomeGridIcon(candidate)
+                    || !isWorkspaceItem(candidate)
+                    || candidate.getVisibility() != View.VISIBLE) continue;
+            candidates.add(candidate);
+        }
+        java.util.Collections.sort(candidates, (a, b) -> {
+            int[] ga = itemGeometry(a);
+            int[] gb = itemGeometry(b);
+            long da = Math.abs((long) (ga[0] + ga[2] / 2)
+                    - (currentGeometry[0] + currentGeometry[2] / 2))
+                    + Math.abs((long) (ga[1] + ga[3] / 2)
+                    - (currentGeometry[1] + currentGeometry[3] / 2));
+            long db = Math.abs((long) (gb[0] + gb[2] / 2)
+                    - (currentGeometry[0] + currentGeometry[2] / 2))
+                    + Math.abs((long) (gb[1] + gb[3] / 2)
+                    - (currentGeometry[1] + currentGeometry[3] / 2));
+            return Long.compare(da, db);
+        });
+
+        // Keep a transaction of provisional scale changes. Commit only if they actually
+        // give the clock/widget a collision-free current position or a valid grid slot.
+        java.util.IdentityHashMap<View, float[]> provisional =
+                new java.util.IdentityHashMap<View, float[]>();
+        for (View candidate : candidates) {
+            float originalX = candidate.getScaleX();
+            float originalY = candidate.getScaleY();
+            String autoXKey = workspaceAutoShrinkScaleKey(candidate, true);
+            String autoYKey = workspaceAutoShrinkScaleKey(candidate, false);
+            float storedAutoX = clampWorkspaceAutoScale(
+                    getFloatPreferenceCompat(autoXKey, 1f));
+            float storedAutoY = clampWorkspaceAutoScale(
+                    getFloatPreferenceCompat(autoYKey, 1f));
+            float selectedFactor = 1f;
+
+            for (int percent = 95; percent >= 50; percent -= 5) {
+                float factor = percent / 100f;
+                candidate.setScaleX(originalX * factor);
+                candidate.setScaleY(originalY * factor);
+                selectedFactor = factor;
+
+                int[] candidateSlot;
+                if (itemAlreadyOnPage && resizeItemFitsAtCurrentPosition(searchPage, protectedItem)) {
+                    int[] g = itemGeometry(protectedItem);
+                    candidateSlot = new int[]{g[0], g[1]};
+                } else {
+                    candidateSlot = findResizeFreeGridPosition(searchPage, protectedItem);
+                }
+                if (candidateSlot != null) {
+                    provisional.put(candidate, new float[]{originalX, originalY,
+                            storedAutoX, storedAutoY, selectedFactor});
+                    SharedPreferences.Editor edit = prefs.edit();
+                    for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
+                        View changed = entry.getKey();
+                        float[] values = entry.getValue();
+                        edit.putFloat(workspaceAutoShrinkScaleKey(changed, true),
+                                        clampWorkspaceAutoScale(values[2] * values[4]))
+                                .putFloat(workspaceAutoShrinkScaleKey(changed, false),
+                                        clampWorkspaceAutoScale(values[3] * values[4]));
+                    }
+                    edit.putFloat(autoXKey, clampWorkspaceAutoScale(storedAutoX * selectedFactor))
+                            .putFloat(autoYKey, clampWorkspaceAutoScale(storedAutoY * selectedFactor));
+                    edit.apply();
+                    resizeRepairNeighbourIconShrinkCount += provisional.size() + 1;
+                    return candidateSlot;
+                }
+            }
+
+            // This item alone was not enough; keep it provisionally at its minimum so
+            // the next neighbour can also yield space. The preference is not written yet.
+            provisional.put(candidate, new float[]{originalX, originalY,
+                    storedAutoX, storedAutoY, 0.50f});
+        }
+
+        // No valid placement resulted from the shrink attempt. Roll all visual changes back.
+        for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
+            View candidate = entry.getKey();
+            float[] values = entry.getValue();
+            candidate.setScaleX(values[0]);
+            candidate.setScaleY(values[1]);
+        }
+        return null;
     }
 
     private void repairResizeCollisionsOnPage(FrameLayout page) {
@@ -14550,38 +14840,70 @@ public class MainActivity extends Activity {
                 resizeItems.add(child);
             }
         }
+        // Keep the page's own clock first. Other widgets then route around it.
         java.util.Collections.sort(resizeItems, (a, b) ->
                 Boolean.compare(isClockWorkspaceItem(b), isClockWorkspaceItem(a)));
         for (View item : resizeItems) {
             if (item.getParent() != page || item.getVisibility() != View.VISIBLE
                     || resizeItemFitsAtCurrentPosition(page, item)) continue;
-            if (tryShrinkResizeItemInPlace(page, item)) continue;
+            resizeRepairCollisionCount++;
+            if (hasClockBackgroundOverlapForResize(page, item)) {
+                resizeRepairClockBackgroundCollisionCount++;
+            }
 
+            // Priority 1: shrink the clock/widget itself before changing its location.
+            if (tryShrinkResizeItemInPlace(page, item)) {
+                resizeRepairSpecialShrinkCount++;
+                continue;
+            }
+
+            // Priority 2: use a collision-free grid slot on this screen.
             int[] local = findResizeFreeGridPosition(page, item);
             int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
             if (local != null) {
                 placeResizeRecoveredItem(page, item, pageIndex, local[0], local[1]);
                 continue;
             }
+
+            // Additional icon fallback: ordinary apps/groups/shortcuts may shrink to free
+            // a slot; the conflicting clock/widget itself and every other clock/widget are
+            // excluded from this neighbour-shrink step.
+            int[] afterNeighbourShrink = shrinkGridIconsToCreateResizeSpace(page, item);
+            if (afterNeighbourShrink != null) {
+                int[] before = itemGeometry(item);
+                if (before[0] != afterNeighbourShrink[0] || before[1] != afterNeighbourShrink[1]) {
+                    placeResizeRecoveredItem(page, item, pageIndex,
+                            afterNeighbourShrink[0], afterNeighbourShrink[1]);
+                }
+                continue;
+            }
+
             boolean widget = item.getTag() instanceof String
                     && ((String) item.getTag()).startsWith("launcher_widget:");
             if (widget) {
+                // Priority 3: try the other screen. Give it the same ordinary-icon
+                // shrinking fallback before declaring that neither page has room.
                 int otherIndex = pageIndex == 0 ? 1 : 0;
                 if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
                         && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
                     FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
                     int[] otherPosition = findResizeFreeGridPosition(other, item);
+                    if (otherPosition == null) {
+                        otherPosition = shrinkGridIconsToCreateResizeSpace(other, item);
+                    }
                     if (otherPosition == null) otherPosition = findResizeFreePixelPosition(other, item);
                     if (otherPosition != null) {
                         moveResizeWidgetToOtherPage(page, item, otherIndex,
                                 otherPosition[0], otherPosition[1]);
+                        resizeRepairMovedCount++;
                         continue;
                     }
                 }
+                // Last resort: both pages are full even after nearby grid items yielded space.
                 removeResizeOverflowWidget(page, item);
             } else {
-                // Clock panels are page-specific, so don't transplant one panel and break
-                // independent per-screen clock state. Try free pixels, then hide this page's clock.
+                // Clock panels are page-specific. Keep their independent state on this screen:
+                // try any safe pixel position, then hide this page's clock as a final resort.
                 int[] freePixels = findResizeFreePixelPosition(page, item);
                 if (freePixels != null) {
                     placeResizeRecoveredItem(page, item, pageIndex, freePixels[0], freePixels[1]);
@@ -14974,6 +15296,7 @@ public class MainActivity extends Activity {
                 Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
             int oldIconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             if (newSize == oldIconSize) return;
+            clearAutoShrunkHomeGridItems();
             int oldColumns = getHomeColumns();
             boolean reduceColumns = newSize > 64 && oldColumns > 5;
             int newColumns = reduceColumns ? 5 : oldColumns;
