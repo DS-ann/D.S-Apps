@@ -4504,7 +4504,7 @@ public class MainActivity extends Activity {
                 Math.max(LauncherUiUtils.dp(this, 120), targetRowHeight * 2));
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
-remove manage group action        final int panelWidthLimit = Math.max(LauncherUiUtils.dp(this, 240),
+        final int panelWidthLimit = Math.max(LauncherUiUtils.dp(this, 240),
                 Math.min(getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 380)));
         final int panelHeightLimit = Math.max(LauncherUiUtils.dp(this, 180),
