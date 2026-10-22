@@ -52,7 +52,6 @@ public class BatteryNotificationService extends Service {
     private final Handler handler = new Handler();
     private long lastHistorySampleMs;
     private long lastCalculatorSampleMs;
-    private long lastNotificationUpdateUptimeMs;
     private long nextNotificationUpdateUptimeMs;
     private long lastRootCommandMs;
     private int lastAttemptedPowerStatus = -1;
@@ -276,10 +275,7 @@ public class BatteryNotificationService extends Service {
         if (!recordingEnabled && !usePercent && !resetPending && !estimating) return;
 
         long now = System.currentTimeMillis();
-        long notificationUptime = SystemClock.uptimeMillis();
-        if (lastNotificationUpdateUptimeMs != 0L
-                && notificationUptime - lastNotificationUpdateUptimeMs
-                < NOTIFICATION_REFRESH_INTERVAL_MS) return;
+        long myBatteryInterval = getMyBatterySamplingInterval();
 
         BatteryReader.Reading reading = latestReading;
         String liveText = reading.compact();
@@ -298,7 +294,6 @@ public class BatteryNotificationService extends Service {
                             SessionStore.getActiveScreenOnMs(this),
                             BatteryPercentCalculator.current(this)));
         }
-        lastNotificationUpdateUptimeMs = notificationUptime;
     }
 
     private void applyCalculatedAndroidPercentage(BatteryPercentCalculator.Estimate estimate, long now) {
