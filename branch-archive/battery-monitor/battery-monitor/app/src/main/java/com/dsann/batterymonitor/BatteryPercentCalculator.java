@@ -1,9 +1,7 @@
 package com.dsann.batterymonitor;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.BatteryManager;
 
 import java.util.Locale;
 
@@ -68,7 +66,7 @@ final class BatteryPercentCalculator {
         running = true;
         lastSampleMs = System.currentTimeMillis();
         previousCurrentMa = currentMa(reading);
-        previousCharging = isPlugged(context);
+        previousCharging = BatteryReader.getPowerState(context).isCharging();
         status = "";
         persist(context, lastSampleMs, true);
         return snapshot();
@@ -106,7 +104,7 @@ final class BatteryPercentCalculator {
                 || !isAmount(remainingMah)) return snapshot();
 
         long now = System.currentTimeMillis();
-        boolean charging = isPlugged(context);
+        boolean charging = BatteryReader.getPowerState(context).isCharging();
         long elapsedMs = now - lastSampleMs;
         if (lastSampleMs > 0L && elapsedMs >= 0L && elapsedMs < MIN_SAMPLE_INTERVAL_MS) {
             return snapshot();
@@ -170,12 +168,6 @@ final class BatteryPercentCalculator {
             running = false;
         }
         loaded = true;
-    }
-
-    private static boolean isPlugged(Context context) {
-        Intent intent = context.registerReceiver(null,
-                new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        return intent != null && intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
     }
 
     private static double currentMa(BatteryReader.Reading reading) {
