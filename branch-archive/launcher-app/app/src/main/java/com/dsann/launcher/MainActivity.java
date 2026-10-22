@@ -526,6 +526,11 @@ public class MainActivity extends Activity {
     // Invalidates stale post-layout clamps queued by earlier live resize frames.
     private final int[] clockLayoutGenerationByPage = new int[2];
     private boolean gestureStartedOnClock = false;
+    // Pin the clock panel/page for the entire touch stream. Clock refresh and layout
+    // callbacks temporarily activate the other page's clock, so gesture code must not
+    // follow that mutable global reference between DOWN, MOVE, and UP.
+    private LinearLayout clockGesturePanel;
+    private int clockGesturePage = -1;
     // Locks the whole touch sequence against launcher swipes if it began while
     // clock move/edit mode was already active.
     private boolean clockGestureLockedAtDown = false;
@@ -1084,6 +1089,14 @@ public class MainActivity extends Activity {
                 return true;
             }
         }
+        if (action == MotionEvent.ACTION_DOWN) {
+            clockGesturePanel = null;
+            clockGesturePage = -1;
+        } else if (clockGesturePanel != null && clockGesturePage >= 0) {
+            // Keep all movement and resize updates on the exact panel that received DOWN,
+            // even if a clock refresh temporarily swaps activeClockPage between callbacks.
+            activateClockForPage(clockGesturePage);
+        }
         if (action == MotionEvent.ACTION_DOWN && !drawerOpen && drawerScreen != null
                 && drawerScreen.getVisibility() == View.VISIBLE
                 && !LauncherScreenTransitions.isDrawerTransitionRunning(
@@ -1308,6 +1321,12 @@ public class MainActivity extends Activity {
                 suppressResizeOutsideTouchStream = true;
                 return true;
             }
+            // Ensure the visible page is the active clock before resolving hit targets.
+            // This is essential because edit/resize gestures are consumed at activity level
+            // before the clock panel's own touch listener can activate its captured page.
+            if (!drawerOpen) {
+                activateClockForPage(Math.max(0, Math.min(1, currentPage)));
+            }
             clockGestureLockedAtDown = clockWidgetMoving || clockWidgetEditing;
             gestureDownX = event.getX();
             gestureDownY = event.getY();
@@ -1343,7 +1362,11 @@ public class MainActivity extends Activity {
                     ? hitClockResizeEdge(event.getRawX(), event.getRawY()) : 0;
             gestureStartedOnClock = touchStartedOnClock(event.getRawX(), event.getRawY())
                     || clockResizeEdge != 0;
-            if (gestureStartedOnClock) clockGeometryRejectedAtLastMove = false;
+            if (gestureStartedOnClock && clockPanel != null) {
+                clockGesturePanel = clockPanel;
+                clockGesturePage = activeClockPage;
+                clockGeometryRejectedAtLastMove = false;
+            }
             // A tap anywhere outside the clock cancels its 1-second move-ready
             // dance immediately, even before the 2-second edit mode has begun.
             if (!gestureStartedOnClock && clockWidgetMoving && !clockWidgetEditing) {
@@ -2089,6 +2112,13 @@ public class MainActivity extends Activity {
                     int[] pageLocation = new int[2];
                     page.getLocationOnScreen(pageLocation);
                     rendered.offset(pageLocation[0], pageLocation[1]);
+                    // While moving/editing, tolerate small mismatches from scaled child text
+                    // bounds and screen insets; otherwise a valid body drag can be mistaken
+                    // for an outside tap and the editor closes before the MOVE arrives.
+                    if (clockWidgetEditing || clockWidgetMoving) {
+                        int touchSlop = LauncherUiUtils.dp(this, 12);
+                        rendered.inset(-touchSlop, -touchSlop);
+                    }
                     if (rawX >= rendered.left && rawX < rendered.right
                             && rawY >= rendered.top && rawY < rendered.bottom) return true;
                 }
