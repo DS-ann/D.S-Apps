@@ -2149,6 +2149,67 @@ public class MainActivity extends Activity {
      * already intersects the clock's fixed portion; shrinking that edge should still
      * remain possible, and expansion is blocked only by newly occupied space.
      */
+    /**
+     * Limit expansion only where the new strip would meet a neighbour. Work is linear
+     * in the page's child count, rather than repeatedly validating the complete rectangle
+     * and binary-searching on every MOVE frame. The original rectangle is the fixed anchor
+     * for the duration of one resize transaction.
+     */
+    private android.graphics.Rect constrainClockResizeExpansion(
+            FrameLayout page, View clock, android.graphics.Rect requested, int edge) {
+        android.graphics.Rect bounds = new android.graphics.Rect(requested);
+        if (page == null || clock == null || edge < 1 || edge > 4) return bounds;
+        final int startLeft = clockWidgetStartVisualX;
+        final int startTop = clockWidgetStartVisualY;
+        final int startRight = startLeft + clockWidgetStartVisualWidth;
+        final int startBottom = startTop + clockWidgetStartVisualHeight;
+        final int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
+
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == clock || other == workspaceTransferProxy
+                    || other.getVisibility() != View.VISIBLE || !isWorkspaceItem(other)) continue;
+            int[] geometry = itemGeometry(other);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            android.graphics.Rect obstacle = collisionRectForInteraction(other, geometry, clock);
+            obstacle.inset(-gap, -gap);
+            constrainClockExpansionAgainstObstacle(bounds, obstacle, edge,
+                    startLeft, startTop, startRight, startBottom);
+
+            int[] reserved = liveDisplacementTargets.get(other);
+            if (reserved != null) {
+                android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
+                        other, reserved[0], reserved[1], geometry[2], geometry[3], clock);
+                reservedBounds.inset(-gap, -gap);
+                constrainClockExpansionAgainstObstacle(bounds, reservedBounds, edge,
+                        startLeft, startTop, startRight, startBottom);
+            }
+        }
+        return bounds;
+    }
+
+    private void constrainClockExpansionAgainstObstacle(android.graphics.Rect bounds,
+            android.graphics.Rect obstacle, int edge, int startLeft, int startTop,
+            int startRight, int startBottom) {
+        if (edge == 1 && bounds.left < startLeft
+                && bounds.top < obstacle.bottom && bounds.bottom > obstacle.top
+                && obstacle.left < startLeft && obstacle.right > bounds.left) {
+            bounds.left = Math.max(bounds.left, Math.min(startLeft, obstacle.right));
+        } else if (edge == 2 && bounds.right > startRight
+                && bounds.top < obstacle.bottom && bounds.bottom > obstacle.top
+                && obstacle.right > startRight && obstacle.left < bounds.right) {
+            bounds.right = Math.min(bounds.right, Math.max(startRight, obstacle.left));
+        } else if (edge == 3 && bounds.top < startTop
+                && bounds.left < obstacle.right && bounds.right > obstacle.left
+                && obstacle.top < startTop && obstacle.bottom > bounds.top) {
+            bounds.top = Math.max(bounds.top, Math.min(startTop, obstacle.bottom));
+        } else if (edge == 4 && bounds.bottom > startBottom
+                && bounds.left < obstacle.right && bounds.right > obstacle.left
+                && obstacle.bottom > startBottom && obstacle.top < bounds.bottom) {
+            bounds.bottom = Math.min(bounds.bottom, Math.max(startBottom, obstacle.top));
+        }
+    }
+
     private boolean canApplyClockResizeCandidate(FrameLayout page, View clock,
             android.graphics.Rect candidate, int edge) {
         if (page == null || clock == null || candidate == null || edge < 1 || edge > 4
@@ -2259,46 +2320,79 @@ public class MainActivity extends Activity {
                 int top = clockWidgetStartVisualY;
                 int right = left + clockWidgetStartVisualWidth;
                 int bottom = top + clockWidgetStartVisualHeight;
-                int minW = Math.min(LauncherUiUtils.dp(this, 140), pageWidth);
+                // Never force the inactive axis to a minimum size: doing so changes the
+                // opposite edge when a vertical grip is dragged and creates a false resize
+                // boundary. The minimum is no larger than the rectangle at gesture start.
+                int minW = Math.min(Math.min(LauncherUiUtils.dp(this, 140), pageWidth),
+                        Math.max(1, clockWidgetStartVisualWidth));
                 int breadthFloorHeight =
                         (LauncherUiUtils.dp(this, 114) * 80 + 99) / 100;
-                int minH = Math.min(Math.max(LauncherUiUtils.dp(this, 90),
-                        breadthFloorHeight), pageHeight);
-                // Horizontal grips must change width only. Do not force the height
-                // back up to the vertical minimum when the user deliberately makes
-                // a seven-segment clock very short.
+                int minH = Math.min(Math.min(Math.max(LauncherUiUtils.dp(this, 90),
+                        breadthFloorHeight), pageHeight),
+                        Math.max(1, clockWidgetStartVisualHeight));
                 boolean horizontalResize = clockResizeEdge == 1 || clockResizeEdge == 2;
-                if (clockResizeEdge == 1) {
-                    left = Math.round(clockWidgetStartVisualX + resizeDeltaX);
-                    left = Math.max(0, Math.min(left, right - minW));
-                } else if (clockResizeEdge == 2) {
-                    right = Math.round(clockWidgetStartVisualX + clockWidgetStartVisualWidth + resizeDeltaX);
-                    right = Math.max(left + minW, Math.min(right, pageWidth));
-                } else if (clockResizeEdge == 3) {
-                    top = Math.round(clockWidgetStartVisualY + resizeDeltaY);
-                    top = Math.max(0, Math.min(top, bottom - minH));
-                } else if (clockResizeEdge == 4) {
-                    bottom = Math.round(clockWidgetStartVisualY + clockWidgetStartVisualHeight + resizeDeltaY);
-                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
-                }
-                left = Math.max(0, Math.min(left, pageWidth - minW));
-                right = Math.max(left + minW, Math.min(right, pageWidth));
                 if (horizontalResize) {
-                    // Preserve the exact vertical bounds for left/right resizing.
+                    if (clockResizeEdge == 1) {
+                        left = Math.round(clockWidgetStartVisualX + resizeDeltaX);
+                        left = Math.max(0, Math.min(left, right - minW));
+                    } else {
+                        right = Math.round(clockWidgetStartVisualX
+                                + clockWidgetStartVisualWidth + resizeDeltaX);
+                        right = Math.max(left + minW, Math.min(right, pageWidth));
+                    }
+                    left = Math.max(0, Math.min(left, pageWidth - minW));
+                    right = Math.max(left + minW, Math.min(right, pageWidth));
+                    // A horizontal resize preserves both vertical edges exactly.
                     top = clockWidgetStartVisualY;
                     bottom = clockWidgetStartVisualY + clockWidgetStartVisualHeight;
                 } else {
-                    top = Math.max(0, Math.min(top, pageHeight - minH));
-                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                    // A vertical resize preserves the original horizontal rectangle exactly.
+                    left = clockWidgetStartVisualX;
+                    right = clockWidgetStartVisualX + clockWidgetStartVisualWidth;
+                    if (clockResizeEdge == 3) {
+                        top = Math.round(clockWidgetStartVisualY + resizeDeltaY);
+                        top = Math.max(0, Math.min(top, bottom - minH));
+                        bottom = clockWidgetStartVisualY + clockWidgetStartVisualHeight;
+                    } else {
+                        top = clockWidgetStartVisualY;
+                        bottom = Math.round(clockWidgetStartVisualY
+                                + clockWidgetStartVisualHeight + resizeDeltaY);
+                        bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                    }
                 }
-                // Clamp the moving edge to the nearest workspace boundary. A clock resize
-                // is not a displacement gesture: apps, groups, shortcuts and widgets keep
-                // their full layout rectangles and the clock edge stops before touching them.
-                android.graphics.Rect constrainedBounds = constrainClockResizeBounds(
-                        activePage, resizePanel, left, top, right, bottom, clockResizeEdge,
-                        minW, minH);
-                constrainedBounds = settleClockResizeBounds(activePage, resizePanel,
-                        constrainedBounds, clockResizeEdge, minW, minH);
+                // Only the newly added strip is checked against neighbours. A collision
+                // in the fixed/original part must not block all four edges or cause a
+                // resize to fluctuate between legal and rejected frames.
+                android.graphics.Rect constrainedBounds = constrainClockResizeExpansion(
+                        activePage, resizePanel,
+                        new android.graphics.Rect(left, top, right, bottom), clockResizeEdge);
+                if (!canApplyClockResizeCandidate(activePage, resizePanel,
+                        constrainedBounds, clockResizeEdge)) {
+                    // If a stale or animated neighbour still fails the exact collision
+                    // check, hold only the expanding edge at its original position. The
+                    // user can continue shrinking or move the grip back without freezing.
+                    if (clockResizeEdge == 1 && constrainedBounds.left < clockWidgetStartVisualX) {
+                        constrainedBounds.left = clockWidgetStartVisualX;
+                    } else if (clockResizeEdge == 2
+                            && constrainedBounds.right > clockWidgetStartVisualX
+                                    + clockWidgetStartVisualWidth) {
+                        constrainedBounds.right = clockWidgetStartVisualX
+                                + clockWidgetStartVisualWidth;
+                    } else if (clockResizeEdge == 3
+                            && constrainedBounds.top < clockWidgetStartVisualY) {
+                        constrainedBounds.top = clockWidgetStartVisualY;
+                    } else if (clockResizeEdge == 4
+                            && constrainedBounds.bottom > clockWidgetStartVisualY
+                                    + clockWidgetStartVisualHeight) {
+                        constrainedBounds.bottom = clockWidgetStartVisualY
+                                + clockWidgetStartVisualHeight;
+                    }
+                }
+                if (!canApplyClockResizeCandidate(activePage, resizePanel,
+                        constrainedBounds, clockResizeEdge)) {
+                    clockGeometryRejectedAtLastMove = true;
+                    return;
+                }
                 left = constrainedBounds.left;
                 top = constrainedBounds.top;
                 right = constrainedBounds.right;
