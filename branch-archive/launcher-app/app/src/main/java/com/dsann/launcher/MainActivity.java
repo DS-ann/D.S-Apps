@@ -1397,11 +1397,17 @@ public class MainActivity extends Activity {
                     clockWidgetStartScreenX = clockStartLocation[0];
                     clockWidgetStartScreenY = clockStartLocation[1];
                     clockWidgetStartPanelWidth = clockPanel.getWidth();
-                    clockWidgetStartPanelHeight = clockPanel.getHeight();
                     clockWidgetStartRowHeight = clockRow != null && clockRow.getHeight() > 0
                             ? clockRow.getHeight() : LauncherUiUtils.dp(this, 114);
-                    clockWidgetStartNonRowHeight = Math.max(0,
-                            clockWidgetStartPanelHeight - clockWidgetStartRowHeight);
+                    // The date line contains the AM/PM prefix and may need more vertical
+                    // space than an earlier TextView measure reserved (especially after a
+                    // font/span refresh). Include its measured text and margins explicitly
+                    // so vertical resizing never assigns that space to the digit row.
+                    int nonRowChromeHeight = clockNonRowChromeHeight(clockPanel, dateText);
+                    clockWidgetStartPanelHeight = Math.max(clockPanel.getHeight(),
+                            clockWidgetStartRowHeight + nonRowChromeHeight);
+                    clockWidgetStartNonRowHeight = Math.max(nonRowChromeHeight,
+                            Math.max(0, clockWidgetStartPanelHeight - clockWidgetStartRowHeight));
                     clockWidgetStartPanelScaleX = clockPanel.getScaleX();
                     clockWidgetStartTextScaleY = clockText == null ? 1f : clockText.getScaleY();
                     clockWidgetLiveResizeLength = clockWidgetStartLength;
@@ -1410,7 +1416,8 @@ public class MainActivity extends Activity {
                     clockWidgetStartVisualX = startGeometry[0];
                     clockWidgetStartVisualY = startGeometry[1];
                     clockWidgetStartVisualWidth = startGeometry[2];
-                    clockWidgetStartVisualHeight = startGeometry[3];
+                    clockWidgetStartVisualHeight = Math.max(startGeometry[3],
+                            clockWidgetStartPanelHeight);
                     clockResizeGeneration++;
                     clockWidgetStartX = clockPanel.getTranslationX();
                     clockWidgetStartY = clockPanel.getTranslationY();
@@ -2318,6 +2325,32 @@ public class MainActivity extends Activity {
         clockResizeFramePending = false;
     }
 
+    /**
+     * Minimum vertical space that must remain outside the resizable clock row.
+     * The date TextView includes the AM/PM prefix as styled text; using only the
+     * panel's previous measured-height remainder can undercount it after font/span
+     * changes and clip the complete line during a resize.
+     */
+    private int clockNonRowChromeHeight(LinearLayout panel, TextView date) {
+        if (panel == null) return 0;
+        int height = panel.getPaddingTop() + panel.getPaddingBottom();
+        if (date == null || date.getVisibility() == View.GONE) return height;
+
+        int dateHeight = Math.max(date.getHeight(), date.getMeasuredHeight());
+        if (dateHeight <= 0) {
+            android.graphics.Paint.FontMetrics metrics = date.getPaint().getFontMetrics();
+            dateHeight = Math.max(LauncherUiUtils.dp(this, 14),
+                    (int) Math.ceil(metrics.descent - metrics.ascent)
+                            + date.getPaddingTop() + date.getPaddingBottom());
+        }
+        ViewGroup.LayoutParams rawParams = date.getLayoutParams();
+        if (rawParams instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams dateParams = (LinearLayout.LayoutParams) rawParams;
+            height += dateParams.topMargin + dateParams.bottomMargin;
+        }
+        return height + dateHeight;
+    }
+
     private void applyClockResizeMove(float rawX, float rawY) {
         if (clockResizeEdge == 0 || !clockWidgetDragging) return;
         final LinearLayout resizePanel = clockGesturePanel != null
@@ -2386,38 +2419,28 @@ public class MainActivity extends Activity {
                         bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
                     }
                 }
-                // Only the newly added strip is checked against neighbours. A collision
-                // in the fixed/original part must not block all four edges or cause a
-                // resize to fluctuate between legal and rejected frames.
-                android.graphics.Rect constrainedBounds = constrainClockResizeExpansion(
-                        activePage, resizePanel,
-                        new android.graphics.Rect(left, top, right, bottom), clockResizeEdge);
-                if (!canApplyClockResizeCandidate(activePage, resizePanel,
-                        constrainedBounds, clockResizeEdge)) {
-                    // If a stale or animated neighbour still fails the exact collision
-                    // check, hold only the expanding edge at its original position. The
-                    // user can continue shrinking or move the grip back without freezing.
-                    if (clockResizeEdge == 1 && constrainedBounds.left < clockWidgetStartVisualX) {
-                        constrainedBounds.left = clockWidgetStartVisualX;
-                    } else if (clockResizeEdge == 2
-                            && constrainedBounds.right > clockWidgetStartVisualX
-                                    + clockWidgetStartVisualWidth) {
-                        constrainedBounds.right = clockWidgetStartVisualX
-                                + clockWidgetStartVisualWidth;
-                    } else if (clockResizeEdge == 3
-                            && constrainedBounds.top < clockWidgetStartVisualY) {
-                        constrainedBounds.top = clockWidgetStartVisualY;
-                    } else if (clockResizeEdge == 4
-                            && constrainedBounds.bottom > clockWidgetStartVisualY
-                                    + clockWidgetStartVisualHeight) {
-                        constrainedBounds.bottom = clockWidgetStartVisualY
-                                + clockWidgetStartVisualHeight;
+                // Only an expanding edge can collide with new workspace items. Shrinking
+                // is always allowed after the page/minimum checks above, so skip the two
+                // full-page collision scans for that common path. When expansion is
+                // blocked, keep the last accepted geometry instead of snapping the grip
+                // back to its DOWN coordinate; the user can reverse direction immediately.
+                android.graphics.Rect constrainedBounds =
+                        new android.graphics.Rect(left, top, right, bottom);
+                boolean expandsIntoWorkspace =
+                        (clockResizeEdge == 1 && left < clockWidgetStartVisualX)
+                        || (clockResizeEdge == 2
+                                && right > clockWidgetStartVisualX + clockWidgetStartVisualWidth)
+                        || (clockResizeEdge == 3 && top < clockWidgetStartVisualY)
+                        || (clockResizeEdge == 4
+                                && bottom > clockWidgetStartVisualY + clockWidgetStartVisualHeight);
+                if (expandsIntoWorkspace) {
+                    constrainedBounds = constrainClockResizeExpansion(
+                            activePage, resizePanel, constrainedBounds, clockResizeEdge);
+                    if (!canApplyClockResizeCandidate(activePage, resizePanel,
+                            constrainedBounds, clockResizeEdge)) {
+                        clockGeometryRejectedAtLastMove = true;
+                        return;
                     }
-                }
-                if (!canApplyClockResizeCandidate(activePage, resizePanel,
-                        constrainedBounds, clockResizeEdge)) {
-                    clockGeometryRejectedAtLastMove = true;
-                    return;
                 }
                 left = constrainedBounds.left;
                 top = constrainedBounds.top;
@@ -2524,17 +2547,26 @@ public class MainActivity extends Activity {
                     syncClockColonVerticalCenter();
                 }
 
-                // Anchor synchronously from current transform/layout geometry so each edge
-                // follows the finger without a delayed callback competing with the next MOVE.
-                int[] actual = itemGeometry(resizePanel);
-                float adjustX = 0f;
-                float adjustY = 0f;
-                if (resizingEdge == 1) adjustX = targetRight - (actual[0] + actual[2]);
-                else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
-                if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
-                else if (resizingEdge == 4) adjustY = targetTop - actual[1];
-                float correctedX = resizePanel.getTranslationX() + adjustX;
-                float correctedY = resizePanel.getTranslationY() + adjustY;
+                // Recompute translation from the absolute target edge each frame. Adding a
+                // correction to the previous translation accumulates rounding/layout error
+                // and makes the whole clock drift or fluctuate during resizing.
+                float savedTranslationX = resizePanel.getTranslationX();
+                float savedTranslationY = resizePanel.getTranslationY();
+                resizePanel.setTranslationX(0f);
+                resizePanel.setTranslationY(0f);
+                int[] unshifted = itemGeometry(resizePanel);
+                float correctedX = savedTranslationX;
+                float correctedY = savedTranslationY;
+                if (resizingEdge == 1) {
+                    correctedX = targetRight - (unshifted[0] + unshifted[2]);
+                } else if (resizingEdge == 2) {
+                    correctedX = targetLeft - unshifted[0];
+                }
+                if (resizingEdge == 3) {
+                    correctedY = targetBottom - (unshifted[1] + unshifted[3]);
+                } else if (resizingEdge == 4) {
+                    correctedY = targetTop - unshifted[1];
+                }
                 resizePanel.setTranslationX(correctedX);
                 resizePanel.setTranslationY(correctedY);
                 scheduleClockResizeHandlesUpdate();
@@ -4561,8 +4593,9 @@ public class MainActivity extends Activity {
                 // Keep one static rounded-square outline throughout the animation.
                 // Invalidating a changing clip outline every frame forced expensive
                 // redraws on Android 6 and made the popup morph look like separate steps.
-                float radius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
-                        Math.min(width, height) * 0.5f);
+                // Match the source group's 8% rounded-square corner radius exactly.
+                // Using a fixed 24dp radius changed the icon silhouette as the panel grew.
+                float radius = Math.min(width, height) * 0.08f;
                 outline.setRoundRect(0, 0, Math.round(width), Math.round(height), radius);
             }
         };
@@ -4807,6 +4840,10 @@ public class MainActivity extends Activity {
                     Math.min(safeRight - safe, safeBottom - safeTop)));
             lp.width = safeSquareSide;
             lp.height = safeSquareSide;
+            // The icon uses an 8% corner radius. Scale the panel's drawable radius by
+            // the same ratio for every safe-area size, so opening/closing keeps one shape.
+            panelBackground.setCornerRadius(Math.min(lp.width, lp.height) * 0.08f);
+            panel.invalidateOutline();
             ViewGroup.LayoutParams safeScrollParams = scroll.getLayoutParams();
             safeScrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
                     Math.min(scrollHeight,
