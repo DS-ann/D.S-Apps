@@ -544,7 +544,8 @@ public class BatteryNotificationService extends Service {
 
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         int requested = (int) Math.round(estimate.percentExact);
-        BatteryReader.PowerInfo powerInfo = BatteryReader.getPowerInfo(this);
+        BatteryReader.PowerInfo powerInfo = BatteryChargingOverride.powerInfoForAndroid(
+                this, BatteryReader.getPowerInfo(this));
         int status = powerInfo.androidStatus;
         int sourceMask = powerInfo.sourceMask();
         int previousPercent = prefs.getInt(KEY_LAST_ANDROID_PERCENT, -1);
@@ -599,7 +600,7 @@ public class BatteryNotificationService extends Service {
         lastRootCommandMs=now;
         rootCommandInFlight=true;
         rootExecutor.execute(()->{
-            BatteryPercentOverride.Result result=BatteryPercentOverride.reset();
+            BatteryPercentOverride.Result result=BatteryChargingOverride.resetAndroidBattery(this);
             handler.post(()->{
                 rootCommandInFlight=false;
                 if(result.success){

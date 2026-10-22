@@ -56,6 +56,8 @@ public class MainActivity extends Activity {
     private EditText customCapacityInput,startingChargeInput;
     private Button useAndroidPercentButton;
     private Switch notificationSwitch;
+    private Switch fakeChargingSwitch;
+    private TextView fakeChargingStatus;
     private SeekBar samplingBar,myBatterySamplingBar;
     private TextView samplingLabel,myBatterySamplingLabel;
     private LinearLayout monitorView,myBatteryView,historyView,historyList;
@@ -152,6 +154,21 @@ public class MainActivity extends Activity {
                 || BatteryPercentCalculator.isRunning(this)) {
             startNotificationService();
         }
+        if (BatteryChargingOverride.isEnabled(this)) {
+            try {
+                sensorExecutor.execute(() -> {
+                    BatteryChargingOverride.Result result =
+                            BatteryChargingOverride.reapplyIfEnabled(MainActivity.this);
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed() && fakeChargingStatus != null) {
+                            fakeChargingStatus.setText(result.message);
+                            fakeChargingStatus.setTextColor(result.success
+                                    ? 0xFF63E6A8 : 0xFFFF7F9A);
+                        }
+                    });
+                });
+            } catch (RejectedExecutionException ignored) { }
+        }
         root.setFocusableInTouchMode(true);
         root.requestFocus();
     }
@@ -245,6 +262,45 @@ public class MainActivity extends Activity {
             });}catch(RejectedExecutionException ignored){}
         });
         
+        LinearLayout fakeChargeBox=toolCard("Fake Android charging",
+                "Simulates Android's charging indication only; it does not charge the battery.");
+        LinearLayout fakeChargeRow=new LinearLayout(this);
+        fakeChargeRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView fakeChargeLabel=text("Reported charging state",14);
+        fakeChargeRow.addView(fakeChargeLabel,new LinearLayout.LayoutParams(0,-2,1));
+        fakeChargingSwitch=new Switch(this);
+        fakeChargingSwitch.setChecked(BatteryChargingOverride.isEnabled(this));
+        fakeChargeRow.addView(fakeChargingSwitch,new LinearLayout.LayoutParams(-2,-2));
+        fakeChargeBox.addView(fakeChargeRow,top(8));
+        fakeChargingStatus=text(BatteryChargingOverride.isEnabled(this)
+                ? "Fake Android charging is active."
+                : "Android uses the reported battery state.",12);
+        fakeChargingStatus.setTextColor(0xFF858D99);
+        fakeChargeBox.addView(fakeChargingStatus,top(4));
+        r.addView(fakeChargeBox,top(12));
+        fakeChargingSwitch.setOnCheckedChangeListener((button,on)->handleFakeChargingSwitch(on));
+
+        LinearLayout fgDaemonBox=toolCard("Fuel-gauge daemon",
+                "Root control for /sys/devices/platform/battery_meter/FG_daemon_disable.");
+        LinearLayout fgDaemonRow=new LinearLayout(this);
+        fgDaemonRow.setGravity(Gravity.CENTER_VERTICAL);
+        Button disableFgDaemon=actionButton("Disable daemon");
+        Button enableFgDaemon=actionButton("Enable daemon");
+        fgDaemonRow.addView(disableFgDaemon,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout.LayoutParams enableFgParams=new LinearLayout.LayoutParams(0,-2,1);
+        enableFgParams.leftMargin=dp(8);
+        fgDaemonRow.addView(enableFgDaemon,enableFgParams);
+        fgDaemonBox.addView(fgDaemonRow,top(10));
+        TextView fgDaemonStatus=text(
+                "Disable writes 1; Enable writes 0. Re-enable after testing.",12);
+        fgDaemonStatus.setTextColor(0xFF858D99);
+        fgDaemonBox.addView(fgDaemonStatus,top(4));
+        r.addView(fgDaemonBox,top(12));
+        disableFgDaemon.setOnClickListener(v->runFuelGaugeDaemonCommand(
+                true,disableFgDaemon,enableFgDaemon,fgDaemonStatus));
+        enableFgDaemon.setOnClickListener(v->runFuelGaugeDaemonCommand(
+                false,disableFgDaemon,enableFgDaemon,fgDaemonStatus));
+
         LinearLayout percentBox=toolCard("Battery percentage override","Temporarily change Android's displayed battery level.");
         LinearLayout percentRow=new LinearLayout(this);
         percentRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -278,11 +334,19 @@ public class MainActivity extends Activity {
             try{
                 sensorExecutor.execute(()->{
                     BatteryPercentOverride.Result result;
-                    try{result=BatteryPercentOverride.set(requested,BatteryReader.getPowerInfo(MainActivity.this));}
+                    try{result=BatteryPercentOverride.set(requested,
+                            BatteryChargingOverride.powerInfoForAndroid(MainActivity.this,
+                                    BatteryReader.getPowerInfo(MainActivity.this)));}
                     catch(Throwable error){result=new BatteryPercentOverride.Result(false,
                             error.getMessage()==null?"Root command failed.":error.getMessage());}
                     final BatteryPercentOverride.Result finalResult=result;
                     runOnUiThread(()->{
+                        if (finalResult.success) {
+                            getSharedPreferences(PREFS,0).edit()
+                                    .putBoolean(BatteryChargingOverride.KEY_MANUAL_PERCENT_ENABLED,true)
+                                    .putInt(BatteryChargingOverride.KEY_MANUAL_PERCENT,requested)
+                                    .apply();
+                        }
                         if(!isFinishing()&&!isDestroyed())percentStatus.setText(finalResult.message);
                         setPercent.setEnabled(true);
                     });
@@ -293,8 +357,14 @@ public class MainActivity extends Activity {
             resetPercent.setEnabled(false);
             try{
                 sensorExecutor.execute(()->{
-                    BatteryPercentOverride.Result result=BatteryPercentOverride.reset();
+                    BatteryPercentOverride.Result result=BatteryChargingOverride.resetAndroidBattery(MainActivity.this);
                     runOnUiThread(()->{
+                        if (result.success) {
+                            getSharedPreferences(PREFS,0).edit()
+                                    .putBoolean(BatteryChargingOverride.KEY_MANUAL_PERCENT_ENABLED,false)
+                                    .remove(BatteryChargingOverride.KEY_MANUAL_PERCENT)
+                                    .apply();
+                        }
                         if(!isFinishing()&&!isDestroyed())percentStatus.setText(result.message);
                         resetPercent.setEnabled(true);
                     });
@@ -322,6 +392,58 @@ public class MainActivity extends Activity {
         return r;
     }
     
+    private void handleFakeChargingSwitch(boolean enabled){
+        if(fakeChargingSwitch==null)return;
+        fakeChargingSwitch.setEnabled(false);
+        try{
+            sensorExecutor.execute(()->{
+                BatteryChargingOverride.Result result=
+                        BatteryChargingOverride.setEnabled(MainActivity.this,enabled);
+                runOnUiThread(()->{
+                    if(isFinishing()||isDestroyed())return;
+                    fakeChargingSwitch.setOnCheckedChangeListener(null);
+                    fakeChargingSwitch.setChecked(result.enabled);
+                    fakeChargingSwitch.setOnCheckedChangeListener(
+                            (button,on)->handleFakeChargingSwitch(on));
+                    fakeChargingStatus.setText(result.message);
+                    fakeChargingStatus.setTextColor(result.success
+                            ? 0xFF63E6A8 : 0xFFFF7F9A);
+                    fakeChargingSwitch.setEnabled(true);
+                });
+            });
+        }catch(RejectedExecutionException ignored){
+            fakeChargingSwitch.setEnabled(true);
+            fakeChargingSwitch.setOnCheckedChangeListener(null);
+            fakeChargingSwitch.setChecked(BatteryChargingOverride.isEnabled(this));
+            fakeChargingSwitch.setOnCheckedChangeListener(
+                    (button,on)->handleFakeChargingSwitch(on));
+        }
+    }
+
+    private void runFuelGaugeDaemonCommand(boolean disable,Button disableButton,
+                                           Button enableButton,TextView status){
+        disableButton.setEnabled(false);
+        enableButton.setEnabled(false);
+        try{
+            sensorExecutor.execute(()->{
+                BatteryChargingOverride.Result result=
+                        BatteryChargingOverride.setFuelGaugeDaemonDisabled(disable);
+                runOnUiThread(()->{
+                    if(!isFinishing()&&!isDestroyed()){
+                        status.setText(result.message);
+                        status.setTextColor(result.success?0xFF63E6A8:0xFFFF7F9A);
+                    }
+                    disableButton.setEnabled(true);
+                    enableButton.setEnabled(true);
+                });
+            });
+        }catch(RejectedExecutionException ignored){
+            disableButton.setEnabled(true);
+            enableButton.setEnabled(true);
+            status.setText("Root command could not be queued.");
+        }
+    }
+
     private LinearLayout buildMyBattery(){
         LinearLayout r=new LinearLayout(this);
         r.setOrientation(LinearLayout.VERTICAL);
@@ -880,7 +1002,8 @@ public class MainActivity extends Activity {
         if(androidPercentStatus!=null)androidPercentStatus.setText("Applying calculated percentage with root…");
         final int percent=estimate.percent;
         new Thread(()->{
-            final BatteryReader.PowerInfo powerInfo=BatteryReader.getPowerInfo(MainActivity.this);
+            final BatteryReader.PowerInfo powerInfo=BatteryChargingOverride.powerInfoForAndroid(
+                    MainActivity.this,BatteryReader.getPowerInfo(MainActivity.this));
             BatteryPercentOverride.Result result=BatteryPercentOverride.set(percent,powerInfo);
             runOnUiThread(()->{
                 if(result.success){
@@ -890,6 +1013,8 @@ public class MainActivity extends Activity {
                             .putInt(KEY_LAST_ANDROID_PERCENT,percent)
                             .putInt(KEY_LAST_ANDROID_POWER_STATUS,powerInfo.androidStatus)
                             .putInt(KEY_LAST_ANDROID_POWER_SOURCE,powerInfo.sourceMask())
+                            .putBoolean(BatteryChargingOverride.KEY_MANUAL_PERCENT_ENABLED,false)
+                            .remove(BatteryChargingOverride.KEY_MANUAL_PERCENT)
                             .apply();
                     if(useAndroidPercentButton!=null)useAndroidPercentButton.setText("Stop using app percentage");
                     if(androidPercentStatus!=null)androidPercentStatus.setText("Android battery level: "+percent+"%");
