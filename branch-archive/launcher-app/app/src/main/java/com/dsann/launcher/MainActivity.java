@@ -3953,7 +3953,8 @@ public class MainActivity extends Activity {
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
-        panel.setAlpha(1f);
+        // Keep the not-yet-positioned popup hidden for the first layout frame.
+        panel.setAlpha(0f);
         panel.setPivotX(0f);
         panel.setPivotY(0f);
         panel.setOutlineProvider(morphOutlineProvider);
