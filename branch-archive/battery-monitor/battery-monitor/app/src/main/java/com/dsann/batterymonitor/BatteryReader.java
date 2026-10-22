@@ -25,18 +25,20 @@ final class BatteryReader {
     private BatteryReader() {}
 
     enum PowerState {
-        CHARGING("Charging", true),
-        DISCHARGING("Discharging", false),
-        FULL("Fully charged", false),
-        NOT_CHARGING("Not charging", false),
-        UNKNOWN("Power state unavailable", false);
+        CHARGING("Charging", true, BatteryManager.BATTERY_STATUS_CHARGING),
+        DISCHARGING("Discharging", false, BatteryManager.BATTERY_STATUS_DISCHARGING),
+        FULL("Fully charged", false, BatteryManager.BATTERY_STATUS_FULL),
+        NOT_CHARGING("Not charging", false, BatteryManager.BATTERY_STATUS_NOT_CHARGING),
+        UNKNOWN("Power state unavailable", false, BatteryManager.BATTERY_STATUS_UNKNOWN);
 
         private final String notificationLabel;
         private final boolean charging;
+        private final int androidStatus;
 
-        PowerState(String notificationLabel, boolean charging) {
+        PowerState(String notificationLabel, boolean charging, int androidStatus) {
             this.notificationLabel = notificationLabel;
             this.charging = charging;
+            this.androidStatus = androidStatus;
         }
 
         String notificationLabel() {
@@ -48,21 +50,88 @@ final class BatteryReader {
         }
     }
 
+    static final class PowerInfo {
+        final PowerState state;
+        final int androidStatus;
+        final boolean acOnline;
+        final boolean usbOnline;
+        final boolean wirelessOnline;
+
+        PowerInfo(PowerState state, boolean acOnline, boolean usbOnline, boolean wirelessOnline) {
+            this.state = state == null ? PowerState.UNKNOWN : state;
+            this.acOnline = acOnline;
+            this.usbOnline = usbOnline;
+            this.wirelessOnline = wirelessOnline;
+            boolean powered = acOnline || usbOnline || wirelessOnline;
+            this.androidStatus = this.state.androidStatus != BatteryManager.BATTERY_STATUS_UNKNOWN
+                    ? this.state.androidStatus
+                    : (powered ? BatteryManager.BATTERY_STATUS_CHARGING
+                               : BatteryManager.BATTERY_STATUS_DISCHARGING);
+        }
+
+        int sourceMask() {
+            return (acOnline ? 1 : 0) | (usbOnline ? 2 : 0) | (wirelessOnline ? 4 : 0);
+        }
+
+        boolean isPowered() {
+            return acOnline || usbOnline || wirelessOnline;
+        }
+    }
+
     /**
-     * Prefer the kernel's physical battery status. The Android battery broadcast can reflect
-     * the percentage override set through dumpsys, so it is only used as a fallback.
+     * Prefer Linux power-supply sysfs, which keeps reflecting physical state even while
+     * "dumpsys battery set level" freezes Android BatteryService updates.
      */
     static PowerState getPowerState(Context context) {
-        PowerState physical = parsePowerState(
+        return getPowerInfo(context).state;
+    }
+
+    static PowerInfo getPowerInfo(Context context) {
+        PowerState state = parsePowerState(
                 readTextSysfs("/sys/class/power_supply/battery/status"));
-        if (physical != PowerState.UNKNOWN) return physical;
+        Intent battery = null;
+        if (state == PowerState.UNKNOWN) {
+            battery = context.registerReceiver(null,
+                    new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (battery != null) {
+                state = parseAndroidStatus(battery.getIntExtra(BatteryManager.EXTRA_STATUS,
+                        BatteryManager.BATTERY_STATUS_UNKNOWN));
+            }
+        }
 
-        Intent battery = context.registerReceiver(null,
-                new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        if (battery == null) return PowerState.UNKNOWN;
+        PhysicalPowerSource source = readPhysicalPowerSource();
+        boolean acOnline;
+        boolean usbOnline;
+        boolean wirelessOnline;
+        if (source.known) {
+            acOnline = source.acOnline;
+            usbOnline = source.usbOnline;
+            wirelessOnline = source.wirelessOnline;
+        } else {
+            if (battery == null) {
+                battery = context.registerReceiver(null,
+                        new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            }
+            int plugged = battery == null ? 0 : battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0);
+            acOnline = (plugged & BatteryManager.BATTERY_PLUGGED_AC) != 0;
+            usbOnline = (plugged & BatteryManager.BATTERY_PLUGGED_USB) != 0;
+            wirelessOnline = (plugged & BatteryManager.BATTERY_PLUGGED_WIRELESS) != 0;
+        }
 
-        int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS,
-                BatteryManager.BATTERY_STATUS_UNKNOWN);
+        // The physical battery status is stronger evidence than stale framework flags.
+        // If sysfs does not expose the charger node, infer USB power while charging/full.
+        if ((state == PowerState.CHARGING || state == PowerState.FULL)
+                && !acOnline && !usbOnline && !wirelessOnline) {
+            usbOnline = true;
+        }
+        if (state == PowerState.UNKNOWN) {
+            state = acOnline || usbOnline || wirelessOnline
+                    ? PowerState.CHARGING : PowerState.DISCHARGING;
+        }
+        return new PowerInfo(state, acOnline, usbOnline, wirelessOnline);
+    }
+
+    private static PowerState parseAndroidStatus(int status) {
         switch (status) {
             case BatteryManager.BATTERY_STATUS_CHARGING:
                 return PowerState.CHARGING;
@@ -73,8 +142,7 @@ final class BatteryReader {
             case BatteryManager.BATTERY_STATUS_NOT_CHARGING:
                 return PowerState.NOT_CHARGING;
             default:
-                return battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-                        ? PowerState.CHARGING : PowerState.DISCHARGING;
+                return PowerState.UNKNOWN;
         }
     }
 
@@ -86,6 +154,51 @@ final class BatteryReader {
         if ("Full".equalsIgnoreCase(value)) return PowerState.FULL;
         if ("Not charging".equalsIgnoreCase(value)) return PowerState.NOT_CHARGING;
         return PowerState.UNKNOWN;
+    }
+
+    private static final class PhysicalPowerSource {
+        final boolean known;
+        final boolean acOnline;
+        final boolean usbOnline;
+        final boolean wirelessOnline;
+
+        PhysicalPowerSource(boolean known, boolean acOnline, boolean usbOnline,
+                            boolean wirelessOnline) {
+            this.known = known;
+            this.acOnline = acOnline;
+            this.usbOnline = usbOnline;
+            this.wirelessOnline = wirelessOnline;
+        }
+    }
+
+    private static PhysicalPowerSource readPhysicalPowerSource() {
+        boolean known = false;
+        boolean ac = false;
+        boolean usb = false;
+        boolean wireless = false;
+        File directory = new File("/sys/class/power_supply");
+        File[] supplies = directory.listFiles();
+        if (supplies == null) return new PhysicalPowerSource(false, false, false, false);
+
+        for (File supply : supplies) {
+            String type = readTextSysfs(new File(supply, "type").getAbsolutePath());
+            String identity = ((type == null ? "" : type) + " " + supply.getName())
+                    .toLowerCase(java.util.Locale.US);
+            if (identity.contains("battery")) continue;
+            boolean isAc = identity.contains("mains") || identity.matches(".*\\bac\\b.*");
+            boolean isUsb = identity.contains("usb");
+            boolean isWireless = identity.contains("wireless");
+            if (!isAc && !isUsb && !isWireless) continue;
+
+            Long online = readSysfs(new File(supply, "online").getAbsolutePath());
+            if (online == null) continue;
+            known = true;
+            if (online.longValue() == 0L) continue;
+            if (isAc) ac = true;
+            if (isUsb) usb = true;
+            if (isWireless) wireless = true;
+        }
+        return new PhysicalPowerSource(known, ac, usb, wireless);
     }
 
     private static final long READ_CACHE_MS = 40L;
