@@ -662,6 +662,9 @@ public class MainActivity extends Activity {
     private View activeDragView;
     private String activeDragPackage;
     private String activeAppGroupMoveModeId;
+    // Highlight app groups as workspace targets while the move grid is active.
+    // A group's own move-ready state remains highlighted after the grid is hidden.
+    private boolean workspaceMoveModeHighlightActive;
     private boolean gestureStartedOnAppGroupMoveMode;
     private String activeAppGroupMemberMoveModeId;
     private String activeAppGroupMemberMoveModePackage;
@@ -2799,7 +2802,11 @@ public class MainActivity extends Activity {
     }
 
     private void setWorkspaceGridVisible(boolean visible, View movingView) {
-        if (pagesStrip == null) return;
+        workspaceMoveModeHighlightActive = visible;
+        if (pagesStrip == null) {
+            refreshAppGroupMoveModeHighlights();
+            return;
+        }
         // Do not leave full-page invisible overlays attached between edit gestures.
         // They are visual guides only, never workspace items or collision surfaces.
         if (!visible) {
@@ -2810,6 +2817,7 @@ public class MainActivity extends Activity {
                 }
                 workspaceGridOverlays[i] = null;
             }
+            refreshAppGroupMoveModeHighlights();
             return;
         }
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
@@ -2849,6 +2857,7 @@ public class MainActivity extends Activity {
             }
         }
         refreshWorkspaceGrid();
+        refreshAppGroupMoveModeHighlights();
     }
 
     private void refreshWorkspaceGrid() {
@@ -3782,6 +3791,8 @@ public class MainActivity extends Activity {
             page.addView(cell, cellParams);
             installAppGroupTouch(cell, id);
         }
+        // Preserve target highlight when a layout/style update rebuilds group cells.
+        refreshAppGroupMoveModeHighlights();
     }
 
     private int[] findFreeAppGroupSlot(FrameLayout page, View ignored) {
@@ -4184,16 +4195,11 @@ public class MainActivity extends Activity {
                     outline.setEmpty();
                     return;
                 }
-                float progress = Math.max(0f, Math.min(1f, morphProgress[0]));
-                float minDimension = Math.min(width, height);
-                float targetRadius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
-                        minDimension * 0.5f);
-                // Contract the silhouette slightly faster than the panel expands.
-                // Rounded-rectangle outlines are substantially cheaper than rebuilding
-                // and clipping a custom Path every frame on the Android 6 GPU pipeline.
-                float shapeProgress = (float) Math.sqrt(progress);
-                float startRadius = minDimension * 0.5f;
-                float radius = startRadius + (targetRadius - startRadius) * shapeProgress;
+                // Keep the popup a rounded rectangle for the full morph. Animating from
+                // half the panel height made it look like an oval and needlessly invalidated
+                // the outline during every animation frame on older Android hardware.
+                float radius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
+                        Math.min(width, height) * 0.5f);
                 outline.setRoundRect(0, 0, Math.round(width), Math.round(height), radius);
             }
         };
@@ -4220,9 +4226,9 @@ public class MainActivity extends Activity {
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         GradientDrawable panelBackground = appGroupGradient(false);
-        // Keep the drawable itself pill-shaped; the cheaper animated outline above
-        // contracts it to the final 24dp radius while the panel expands from the icon.
-        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 180));
+        // Match the drawable to the panel outline. A large pill radius clamps to half
+        // the short side and makes the opened group appear oval rather than square.
+        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 24));
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
@@ -4607,7 +4613,7 @@ public class MainActivity extends Activity {
                 if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
             }
 
-            final long duration = animationDuration(145L);
+            final long duration = animationDuration(200L);
             android.animation.ValueAnimator transition =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
             transition.setDuration(duration);
@@ -4624,7 +4630,9 @@ public class MainActivity extends Activity {
                 panel.setTranslationX(tx);
                 panel.setTranslationY(ty);
 
-                float contentFade = Math.max(0f, Math.min(1f, (progress - 0.32f) / 0.42f));
+                // Panel, title, members, dim layer and icon snapshot follow one progress
+                // curve instead of appearing in separate, delayed stages.
+                float contentFade = progress;
                 title.setAlpha(contentFade);
                 rows.setAlpha(contentFade);
                 manage.setAlpha(contentFade);
@@ -4635,12 +4643,10 @@ public class MainActivity extends Activity {
                     snapshot.setScaleY(1f + (iconScale[3] - 1f) * progress);
                     snapshot.setTranslationX(-morphStartTranslation[0] * progress);
                     snapshot.setTranslationY(-morphStartTranslation[1] * progress);
-                    snapshot.setAlpha(1f - Math.max(0f,
-                            Math.min(1f, (progress - 0.18f) / 0.36f)));
+                    snapshot.setAlpha(1f - progress);
                     
                 }
                 dimLayer.setAlpha(0.36f * progress);
-                panel.invalidateOutline();
             });
             transition.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator animation) {
@@ -4693,7 +4699,7 @@ public class MainActivity extends Activity {
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
-        transition.setDuration(animationDuration(115L));
+        transition.setDuration(animationDuration(175L));
         transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
         transition.addUpdateListener(animation -> {
             float progress = (Float) animation.getAnimatedValue();
@@ -4706,7 +4712,8 @@ public class MainActivity extends Activity {
             panel.setScaleY(sy);
             panel.setTranslationX(tx);
             panel.setTranslationY(ty);
-            float contentFade = Math.max(0f, Math.min(1f, (progress - 0.32f) / 0.42f));
+            // Keep the reverse content fade synchronized with the panel morph.
+            float contentFade = progress;
             if (title != null) title.setAlpha(contentFade);
             if (rows != null) rows.setAlpha(contentFade);
             if (manage != null) manage.setAlpha(contentFade);
@@ -4717,11 +4724,9 @@ public class MainActivity extends Activity {
                         ? iconScale[3] : 1f) - 1f) * progress);
                 snapshot.setTranslationX(-offsetX * progress);
                 snapshot.setTranslationY(-offsetY * progress);
-                snapshot.setAlpha(1f - Math.max(0f,
-                        Math.min(1f, (progress - 0.18f) / 0.36f)));
+                snapshot.setAlpha(1f - progress);
             }
             if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
-            panel.invalidateOutline();
         });
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
@@ -4984,22 +4989,49 @@ public class MainActivity extends Activity {
 
     private GradientDrawable appGroupMoveHighlight() {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(Color.argb(92, 25, 105, 210));
+        d.setColor(Color.argb(112, 25, 105, 210));
         d.setCornerRadius(LauncherUiUtils.dp(this, 14));
         d.setStroke(LauncherUiUtils.dp(this, 2), Color.rgb(84, 176, 255));
         return d;
     }
 
-    private void setAppGroupMoveModeVisual(View cell, boolean active) {
+    private void applyAppGroupMoveModeBackground(View cell, boolean active) {
         if (cell == null) return;
         if (active) {
-            cell.setBackground(appGroupMoveHighlight());
+            if (cell.getBackground() == null) cell.setBackground(appGroupMoveHighlight());
             if (Build.VERSION.SDK_INT >= 21) cell.setElevation(LauncherUiUtils.dp(this, 8));
         } else {
-            cell.setBackground(null);
-            if (Build.VERSION.SDK_INT >= 21) cell.setElevation(0f);
-            cell.setAlpha(1f);
+            if (cell.getBackground() != null) cell.setBackground(null);
+            if (Build.VERSION.SDK_INT >= 21 && cell.getElevation() != 0f) {
+                cell.setElevation(0f);
+            }
         }
+    }
+
+    private void refreshAppGroupMoveModeHighlights() {
+        if (pagesStrip == null) return;
+        for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof ViewGroup)) continue;
+            ViewGroup page = (ViewGroup) pageView;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                if (!isAppGroupItem(child)) continue;
+                String id = appGroupId(child);
+                boolean ownMoveMode = id != null && id.equals(activeAppGroupMoveModeId);
+                applyAppGroupMoveModeBackground(child,
+                        workspaceMoveModeHighlightActive || ownMoveMode);
+            }
+        }
+    }
+
+    private void setAppGroupMoveModeVisual(View cell, boolean active) {
+        if (cell == null) return;
+        String id = appGroupId(cell);
+        boolean ownMoveMode = id != null && id.equals(activeAppGroupMoveModeId);
+        boolean highlighted = active || workspaceMoveModeHighlightActive || ownMoveMode;
+        applyAppGroupMoveModeBackground(cell, highlighted);
+        if (!highlighted) cell.setAlpha(1f);
         cell.invalidate();
     }
 
