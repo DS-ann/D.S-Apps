@@ -138,6 +138,9 @@ public class BatteryNotificationService extends Service {
         powerFilter.addAction(Intent.ACTION_SCREEN_OFF);
         powerFilter.addAction(Intent.ACTION_POWER_CONNECTED);
         powerFilter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            powerFilter.addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED);
+        }
         try {
             registerReceiver(powerStateReceiver, powerFilter);
             powerStateReceiverRegistered = true;
@@ -188,17 +191,26 @@ public class BatteryNotificationService extends Service {
     }
 
     private boolean shouldUseDozeSamplingMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
         PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
-        if (manager == null || manager.isInteractive()) return false;
+        if (manager == null) return false;
 
-        boolean pluggedIn = false;
+        // Enter the reduced sampling mode only when Android confirms Doze.
+        if (manager.isDeviceIdleMode()) return true;
+
+        // isDeviceIdleMode() is temporarily false during Doze maintenance windows.
+        // If this service already entered Doze sampling, stay low-power through those
+        // windows instead of reacquiring a continuous CPU wake lock.
+        if (!dozeSamplingMode || manager.isInteractive()) return false;
+
         try {
             Intent battery = registerReceiver(null,
                     new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-            pluggedIn = battery != null
-                    && battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
-        } catch (Throwable ignored) { }
-        return !pluggedIn;
+            return battery != null
+                    && battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) == 0;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private void handlePowerStateChanged() {
