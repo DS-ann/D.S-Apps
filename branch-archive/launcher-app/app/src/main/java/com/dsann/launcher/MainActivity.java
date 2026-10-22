@@ -3891,6 +3891,40 @@ public class MainActivity extends Activity {
         final View openingGroupIcon = findAppGroupLogoView(groupId);
         final View openingGroupCell = findAppGroupView(groupId);
         final Dialog dialog = new Dialog(this);
+        final boolean[] closing = new boolean[]{false};
+        final float[] iconScale = new float[]{0.12f, 0.12f};
+        final float[] morphStartTranslation = new float[2];
+        final float[] morphProgress = new float[]{0f};
+        final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
+        final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
+        final android.graphics.Path morphOutlinePath = new android.graphics.Path();
+        final android.graphics.RectF morphOutlineBounds = new android.graphics.RectF();
+        final float[] morphOutlineRadii = new float[8];
+        final android.view.ViewOutlineProvider morphOutlineProvider =
+                new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View view, android.graphics.Outline outline) {
+                float width = view.getWidth();
+                float height = view.getHeight();
+                if (width <= 0f || height <= 0f) {
+                    outline.setEmpty();
+                    return;
+                }
+                float progress = Math.max(0f, Math.min(1f, morphProgress[0]));
+                float targetRadius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
+                        Math.min(width, height) * 0.5f);
+                float radiusX = width * 0.5f + (targetRadius - width * 0.5f) * progress;
+                float radiusY = height * 0.5f + (targetRadius - height * 0.5f) * progress;
+                for (int i = 0; i < morphOutlineRadii.length; i += 2) {
+                    morphOutlineRadii[i] = radiusX;
+                    morphOutlineRadii[i + 1] = radiusY;
+                }
+                morphOutlineBounds.set(0f, 0f, width, height);
+                morphOutlinePath.reset();
+                morphOutlinePath.addRoundRect(morphOutlineBounds, morphOutlineRadii,
+                        android.graphics.Path.Direction.CW);
+                outline.setConvexPath(morphOutlinePath);
+            }
+        };
         dialog.setOnDismissListener(ignored -> {
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
         });
@@ -3919,9 +3953,11 @@ public class MainActivity extends Activity {
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
-        panel.setAlpha(0f);
+        panel.setAlpha(1f);
         panel.setPivotX(0f);
         panel.setPivotY(0f);
+        panel.setOutlineProvider(morphOutlineProvider);
+        panel.setClipToOutline(true);
         panel.setClickable(true);
         panel.setOnClickListener(v -> { /* Consume blank-panel taps; only outside taps close. */ });
         panel.setClipChildren(false);
@@ -3937,6 +3973,7 @@ public class MainActivity extends Activity {
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
+        title.setAlpha(0f);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
@@ -3945,6 +3982,7 @@ public class MainActivity extends Activity {
         scroll.setClipChildren(false);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setAlpha(0f);
         rows.setClipChildren(false);
         rows.setClipToPadding(false);
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
@@ -4026,10 +4064,11 @@ public class MainActivity extends Activity {
         manage.setTextSize(12f);
         manage.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 3));
-        manage.setOnClickListener(v -> {
-            dialog.dismiss();
-            showAppGroupOptions(groupId);
-        });
+        manage.setAlpha(0f);
+        manage.setOnClickListener(v -> closeAppGroupWithAnimation(
+                dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
+                morphProgress, morphSnapshotRef, morphAnimator, title, rows, manage,
+                () -> showAppGroupOptions(groupId)));
         panel.addView(manage, new LinearLayout.LayoutParams(-1, -2));
 
         final int panelWidth = Math.max(LauncherUiUtils.dp(this, 240),
@@ -4044,14 +4083,15 @@ public class MainActivity extends Activity {
         overlay.addView(panel, panelParams);
         panel.bringToFront();
 
-        final boolean[] closing = new boolean[]{false};
-        final float[] iconScale = new float[]{0.12f, 0.12f};
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
-                dialog, panel, dimLayer, closing, iconScale));
+                dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
+                morphProgress, morphSnapshotRef, morphAnimator, title, rows, manage, null));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale);
+                closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
+                        morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
+                        title, rows, manage, null);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -4219,49 +4259,197 @@ public class MainActivity extends Activity {
             float pivotY = Math.max(0f, Math.min(lp.height, iconY - panelBounds.top));
             panel.setPivotX(pivotX);
             panel.setPivotY(pivotY);
-            float startScaleX = Math.min(1f, Math.max(0.06f, iconW / (float) Math.max(1, lp.width)));
-            float startScaleY = Math.min(1f, Math.max(0.06f, iconH / (float) Math.max(1, lp.height)));
+            float startScaleX = Math.min(1f,
+                    iconW / (float) Math.max(1, lp.width));
+            float startScaleY = Math.min(1f,
+                    iconH / (float) Math.max(1, lp.height));
+            float panelCenterX = panelBounds.left + lp.width * 0.5f;
+            float panelCenterY = panelBounds.top + lp.height * 0.5f;
+            // Final panel position is unchanged; translation simply begins with its centre
+            // exactly over the original icon, including when the chosen side is left/right.
+            morphStartTranslation[0] = iconX - panelCenterX;
+            morphStartTranslation[1] = iconY - panelCenterY;
+            panel.setPivotX(lp.width * 0.5f);
+            panel.setPivotY(lp.height * 0.5f);
             panel.setScaleX(startScaleX);
             panel.setScaleY(startScaleY);
+            panel.setTranslationX(morphStartTranslation[0]);
+            panel.setTranslationY(morphStartTranslation[1]);
+            panel.setAlpha(1f);
+            panel.setOutlineProvider(morphOutlineProvider);
+            panel.setClipToOutline(true);
+            panel.invalidateOutline();
             iconScale[0] = startScaleX;
             iconScale[1] = startScaleY;
-            panel.setAlpha(0f);
+            morphProgress[0] = 0f;
             dimLayer.setAlpha(0f);
 
-            final long duration = animationDuration(175L);
-            // Render the complete group once, then animate only this single hardware
-            // layer. No per-member animators or per-frame background redraws.
+            android.graphics.Bitmap iconSnapshot = null;
+            if (openingGroupIcon != null && openingGroupIcon.getWidth() > 0
+                    && openingGroupIcon.getHeight() > 0) {
+                try {
+                    iconSnapshot = android.graphics.Bitmap.createBitmap(
+                            openingGroupIcon.getWidth(), openingGroupIcon.getHeight(),
+                            android.graphics.Bitmap.Config.ARGB_8888);
+                    openingGroupIcon.draw(new android.graphics.Canvas(iconSnapshot));
+                } catch (RuntimeException snapshotError) {
+                    if (iconSnapshot != null && !iconSnapshot.isRecycled()) iconSnapshot.recycle();
+                    iconSnapshot = null;
+                }
+            }
+            if (iconSnapshot != null) {
+                android.widget.ImageView snapshot = new android.widget.ImageView(this);
+                snapshot.setImageBitmap(iconSnapshot);
+                snapshot.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+                snapshot.setClickable(false);
+                snapshot.setFocusable(false);
+                snapshot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                FrameLayout.LayoutParams snapshotParams = new FrameLayout.LayoutParams(
+                        lp.width, lp.height, Gravity.TOP | Gravity.LEFT);
+                snapshotParams.leftMargin = panelBounds.left;
+                snapshotParams.topMargin = panelBounds.top;
+                overlay.addView(snapshot, snapshotParams);
+                snapshot.setPivotX(lp.width * 0.5f);
+                snapshot.setPivotY(lp.height * 0.5f);
+                snapshot.setScaleX(startScaleX);
+                snapshot.setScaleY(startScaleY);
+                snapshot.setTranslationX(morphStartTranslation[0]);
+                snapshot.setTranslationY(morphStartTranslation[1]);
+                snapshot.setOutlineProvider(morphOutlineProvider);
+                snapshot.setClipToOutline(true);
+                snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                snapshot.bringToFront();
+                morphSnapshotRef[0] = snapshot;
+            }
+
+            final long duration = animationDuration(220L);
             panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-            panel.animate().cancel();
-            panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
-                    .setDuration(duration)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.3f))
-                    .start();
-            dimLayer.animate().cancel();
-            dimLayer.setAlpha(0f);
-        });
+            android.animation.ValueAnimator transition =
+                    android.animation.ValueAnimator.ofFloat(0f, 1f);
+            transition.setDuration(duration);
+            transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            transition.addUpdateListener(animation -> {
+                float progress = (Float) animation.getAnimatedValue();
+                morphProgress[0] = progress;
+                float sx = startScaleX + (1f - startScaleX) * progress;
+                float sy = startScaleY + (1f - startScaleY) * progress;
+                float tx = morphStartTranslation[0] * (1f - progress);
+                float ty = morphStartTranslation[1] * (1f - progress);
+                panel.setScaleX(sx);
+                panel.setScaleY(sy);
+                panel.setTranslationX(tx);
+                panel.setTranslationY(ty);
+
+                float contentFade = Math.max(0f, Math.min(1f, (progress - 0.20f) / 0.60f));
+                title.setAlpha(contentFade);
+                rows.setAlpha(contentFade);
+                manage.setAlpha(contentFade);
+                android.widget.ImageView snapshot = morphSnapshotRef[0];
+                if (snapshot != null) {
+                    snapshot.setVisibility(View.VISIBLE);
+                    snapshot.setScaleX(sx);
+                    snapshot.setScaleY(sy);
+                    snapshot.setTranslationX(tx);
+                    snapshot.setTranslationY(ty);
+                    snapshot.setAlpha(1f - Math.max(0f,
+                            Math.min(1f, (progress - 0.12f) / 0.48f)));
+                    snapshot.invalidateOutline();
+                }
+                dimLayer.setAlpha(0.36f * progress);
+                panel.invalidateOutline();
+            });
+            transition.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator animation) {
+                    if (closing[0] || !dialog.isShowing()) return;
+                    morphProgress[0] = 1f;
+                    panel.setScaleX(1f);
+                    panel.setScaleY(1f);
+                    panel.setTranslationX(0f);
+                    panel.setTranslationY(0f);
+                    panel.setLayerType(View.LAYER_TYPE_NONE, null);
+                    title.setAlpha(1f);
+                    rows.setAlpha(1f);
+                    manage.setAlpha(1f);
+                    dimLayer.setAlpha(0.36f);
+                    android.widget.ImageView snapshot = morphSnapshotRef[0];
+                    if (snapshot != null) {
+                        snapshot.setAlpha(0f);
+                        snapshot.setVisibility(View.INVISIBLE);
+                        snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                    }
+                    panel.invalidateOutline();
+                }
+            });
+            morphAnimator[0] = transition;
+            transition.start();        });
     }
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
-            boolean[] closing, float[] iconScale) {
+            boolean[] closing, float[] iconScale, float[] startTranslation,
+            float[] morphProgress, android.widget.ImageView[] snapshotRef,
+            android.animation.ValueAnimator[] morphAnimator,
+            View title, View rows, View manage, Runnable afterClose) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
-        long duration = animationDuration(150L);
-        panel.animate().cancel();
-        float targetScaleX = iconScale != null ? iconScale[0] : 0.08f;
-        float targetScaleY = iconScale != null ? iconScale[1] : 0.08f;
-        panel.animate().scaleX(targetScaleX).scaleY(targetScaleY).alpha(0f)
-                .setDuration(duration)
-                .setInterpolator(new android.view.animation.AccelerateInterpolator(1.2f))
-                .withEndAction(() -> {
-                    panel.setLayerType(View.LAYER_TYPE_NONE, null);
-                    if (dialog.isShowing()) dialog.dismiss();
-                }).start();
-        if (dimLayer != null) {
-            dimLayer.animate().cancel();
-            dimLayer.animate().alpha(0f).setDuration(duration).start();
+        if (morphAnimator != null && morphAnimator.length > 0 && morphAnimator[0] != null) {
+            morphAnimator[0].cancel();
         }
+        float targetScaleX = iconScale != null ? iconScale[0] : 0.12f;
+        float targetScaleY = iconScale != null ? iconScale[1] : targetScaleX;
+        float offsetX = startTranslation != null ? startTranslation[0] : 0f;
+        float offsetY = startTranslation != null ? startTranslation[1] : 0f;
+        float initialProgress = morphProgress != null
+                ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
+        android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
+                ? snapshotRef[0] : null;
+        if (snapshot != null) {
+            snapshot.setVisibility(View.VISIBLE);
+            snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            snapshot.bringToFront();
+        }
+        panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        android.animation.ValueAnimator transition =
+                android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
+        transition.setDuration(animationDuration(175L));
+        transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+        transition.addUpdateListener(animation -> {
+            float progress = (Float) animation.getAnimatedValue();
+            if (morphProgress != null) morphProgress[0] = progress;
+            float sx = targetScaleX + (1f - targetScaleX) * progress;
+            float sy = targetScaleY + (1f - targetScaleY) * progress;
+            float tx = offsetX * (1f - progress);
+            float ty = offsetY * (1f - progress);
+            panel.setScaleX(sx);
+            panel.setScaleY(sy);
+            panel.setTranslationX(tx);
+            panel.setTranslationY(ty);
+            float contentFade = Math.max(0f, Math.min(1f, (progress - 0.20f) / 0.60f));
+            if (title != null) title.setAlpha(contentFade);
+            if (rows != null) rows.setAlpha(contentFade);
+            if (manage != null) manage.setAlpha(contentFade);
+            if (snapshot != null) {
+                snapshot.setScaleX(sx);
+                snapshot.setScaleY(sy);
+                snapshot.setTranslationX(tx);
+                snapshot.setTranslationY(ty);
+                snapshot.setAlpha(1f - Math.max(0f,
+                        Math.min(1f, (progress - 0.12f) / 0.48f)));
+                snapshot.invalidateOutline();
+            }
+            if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
+            panel.invalidateOutline();
+        });
+        transition.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                panel.setLayerType(View.LAYER_TYPE_NONE, null);
+                if (snapshot != null) snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                if (dialog.isShowing()) dialog.dismiss();
+                if (afterClose != null) afterClose.run();
+            }
+        });
+        morphAnimator[0] = transition;
+        transition.start();
     }
 
     private void clearAppGroupMemberMoveMode() {
@@ -10031,11 +10219,205 @@ public class MainActivity extends Activity {
      * icon. This is a fast, bounded first choice; the existing collision planner remains
      * the fallback when a safe common shift is unavailable.
      */
+    /**
+     * Slot-based push for contiguous app rows/columns. When icon artwork leaves gaps inside grid
+     * cells, the visual sweep can miss neighbours; this moves an occupied lane as one transaction.
+     */
+    private boolean tryShiftHomeIconLaneCohort(FrameLayout page, View movingView, View seed,
+            int preferredX, int preferredY, int pushDx, int pushDy) {
+        if (page == null || movingView == null || seed == null
+                || !isHomeGridDragMover(movingView) || !isHomeGridIcon(seed)
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+
+        int columns = homeGridColumnsForItem(seed);
+        int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+        int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        int[] seedSlot = homeGridIconSlot(page, seed, cellHeight, rows);
+        if (seedSlot == null) return false;
+
+        java.util.ArrayList<int[]> directions = new java.util.ArrayList<int[]>();
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        if (Math.abs(pushDx) >= Math.abs(pushDy)) {
+            addAppShiftDirection(directions, seen, Integer.signum(pushDx), 0);
+            addAppShiftDirection(directions, seen, 0, Integer.signum(pushDy));
+        } else {
+            addAppShiftDirection(directions, seen, 0, Integer.signum(pushDy));
+            addAppShiftDirection(directions, seen, Integer.signum(pushDx), 0);
+        }
+        if (preferredX >= 0 && preferredY >= 0) {
+            int preferredCol = Math.max(0, Math.min(columns - 1,
+                    Math.round(preferredX / (float) cellWidth)));
+            int preferredRow = homeGridRowFromTop(
+                    preferredY, rows, page.getHeight(), cellHeight);
+            int dx = preferredCol - seedSlot[0];
+            int dy = preferredRow - seedSlot[1];
+            if (Math.abs(dx) >= Math.abs(dy)) {
+                addAppShiftDirection(directions, seen, Integer.signum(dx), 0);
+                addAppShiftDirection(directions, seen, 0, Integer.signum(dy));
+            } else {
+                addAppShiftDirection(directions, seen, 0, Integer.signum(dy));
+                addAppShiftDirection(directions, seen, Integer.signum(dx), 0);
+            }
+        }
+        int[] moverGeometry = itemGeometry(movingView);
+        int[] seedGeometry = itemGeometry(seed);
+        int moverCenterX = moverGeometry[0] + moverGeometry[2] / 2;
+        int moverCenterY = moverGeometry[1] + moverGeometry[3] / 2;
+        int seedCenterX = seedGeometry[0] + seedGeometry[2] / 2;
+        int seedCenterY = seedGeometry[1] + seedGeometry[3] / 2;
+        if (Math.abs(seedCenterX - moverCenterX) >= Math.abs(seedCenterY - moverCenterY)) {
+            addAppShiftDirection(directions, seen, seedCenterX >= moverCenterX ? 1 : -1, 0);
+            addAppShiftDirection(directions, seen, 0, seedCenterY >= moverCenterY ? 1 : -1);
+        } else {
+            addAppShiftDirection(directions, seen, 0, seedCenterY >= moverCenterY ? 1 : -1);
+            addAppShiftDirection(directions, seen, seedCenterX >= moverCenterX ? 1 : -1, 0);
+        }
+        addAppShiftDirection(directions, seen, 1, 0);
+        addAppShiftDirection(directions, seen, -1, 0);
+        addAppShiftDirection(directions, seen, 0, 1);
+        addAppShiftDirection(directions, seen, 0, -1);
+
+        android.graphics.Rect movingVisible = collisionRectForInteraction(
+                movingView, moverGeometry, seed);
+        for (int[] direction : directions) {
+            int dxCells = direction[0];
+            int dyCells = direction[1];
+            if (dxCells == 0 && dyCells == 0) continue;
+
+            java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
+            java.util.IdentityHashMap<View, Boolean> cohortSet =
+                    new java.util.IdentityHashMap<View, Boolean>();
+            java.util.IdentityHashMap<View, int[]> slots =
+                    new java.util.IdentityHashMap<View, int[]>();
+            cohort.add(seed);
+            cohortSet.put(seed, Boolean.TRUE);
+            slots.put(seed, seedSlot);
+            int cursorCol = seedSlot[0];
+            int cursorRow = seedSlot[1];
+            boolean foundFreeSlot = false;
+            boolean blocked = false;
+
+            for (int steps = 0; steps < Math.max(columns, rows); steps++) {
+                int nextCol = cursorCol + dxCells;
+                int nextRow = cursorRow + dyCells;
+                if (nextCol < 0 || nextCol >= columns || nextRow < 0 || nextRow >= rows) {
+                    blocked = true;
+                    break;
+                }
+                View occupant = null;
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    View candidate = page.getChildAt(i);
+                    if (!isHomeGridIcon(candidate) || candidate.getVisibility() != View.VISIBLE) continue;
+                    int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
+                    if (candidateSlot == null || candidateSlot[0] != nextCol
+                            || candidateSlot[1] != nextRow) continue;
+                    if (candidate == movingView) {
+                        blocked = true;
+                        break;
+                    }
+                    boolean sameGridFamily = isWorkspaceContactShortcut(candidate)
+                            == isWorkspaceContactShortcut(seed);
+                    if (!sameGridFamily || cohortSet.containsKey(candidate)) {
+                        blocked = true;
+                        break;
+                    }
+                    occupant = candidate;
+                    break;
+                }
+                if (blocked) break;
+                if (occupant == null) {
+                    foundFreeSlot = true;
+                    break;
+                }
+                int[] occupantSlot = homeGridIconSlot(page, occupant, cellHeight, rows);
+                if (occupantSlot == null) {
+                    blocked = true;
+                    break;
+                }
+                cohort.add(occupant);
+                cohortSet.put(occupant, Boolean.TRUE);
+                slots.put(occupant, occupantSlot);
+                cursorCol = nextCol;
+                cursorRow = nextRow;
+            }
+            if (blocked || !foundFreeSlot) continue;
+
+            java.util.IdentityHashMap<View, int[]> targets =
+                    new java.util.IdentityHashMap<View, int[]>();
+            java.util.IdentityHashMap<View, int[]> geometries =
+                    new java.util.IdentityHashMap<View, int[]>();
+            for (View member : cohort) {
+                int[] originSlot = slots.get(member);
+                int[] geometry = itemGeometry(member);
+                int targetCol = originSlot[0] + dxCells;
+                int targetRow = originSlot[1] + dyCells;
+                int targetX = homeGridIconLeftAt(member, targetCol, cellWidth, geometry[2]);
+                int targetY = homeGridIconTopAt(page, member, targetRow, rows, cellHeight);
+                if (targetX < 0 || targetY < 0
+                        || targetX + geometry[2] > page.getWidth()
+                        || targetY + geometry[3] > page.getHeight()) {
+                    blocked = true;
+                    break;
+                }
+                android.graphics.Rect targetVisible = appIconVisualRectAt(
+                        member, targetX, targetY, geometry[2], geometry[3]);
+                if (android.graphics.Rect.intersects(targetVisible, movingVisible)) {
+                    blocked = true;
+                    break;
+                }
+                android.graphics.Rect sweep = appIconVisualRectAt(
+                        member, geometry[0], geometry[1], geometry[2], geometry[3]);
+                sweep.union(targetVisible);
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    View blocker = page.getChildAt(i);
+                    if (blocker == member || blocker == movingView
+                            || cohortSet.containsKey(blocker)
+                            || blocker.getVisibility() != View.VISIBLE
+                            || !isWorkspaceItem(blocker)) continue;
+                    int[] blockerGeometry = itemGeometry(blocker);
+                    if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
+                    android.graphics.Rect blockerVisible =
+                            collisionRectForInteraction(blocker, blockerGeometry, member);
+                    if (android.graphics.Rect.intersects(targetVisible, blockerVisible)
+                            || android.graphics.Rect.intersects(sweep, blockerVisible)) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (blocked) break;
+                targets.put(member, new int[]{targetX, targetY});
+                geometries.put(member, geometry);
+            }
+            if (blocked || targets.size() != cohort.size()) continue;
+
+            for (View member : cohort) {
+                int[] geometry = geometries.get(member);
+                int[] target = targets.get(member);
+                if (!liveDisplacedItems.containsKey(member)) {
+                    liveDisplacedItems.put(member, new int[]{geometry[0], geometry[1]});
+                }
+                liveDisplacementTargets.put(member, new int[]{target[0], target[1]});
+                liveDragGeometryCache.remove(member);
+            }
+            for (View member : cohort) {
+                int[] target = targets.get(member);
+                animateDisplacedItemTo(member, target[0], target[1]);
+            }
+            return true;
+        }
+        return false;
+    }
+
     private boolean tryShiftHomeIconCohort(FrameLayout page, View movingView, View seed,
             int preferredX, int preferredY, int pushDx, int pushDy) {
         if (page == null || movingView == null || seed == null
                 || !isHomeGridDragMover(movingView) || !isHomeGridIcon(seed)
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+
+        if (tryShiftHomeIconLaneCohort(page, movingView, seed,
+                preferredX, preferredY, pushDx, pushDy)) return true;
 
         int columns = homeGridColumnsForItem(seed);
         int cellWidth = Math.max(1, page.getWidth() / columns);
@@ -13255,7 +13637,10 @@ public class MainActivity extends Activity {
                 }
             }
             float textScaleX = Math.max(0.01f, Math.abs(clockText.getScaleX()));
-            if (hourDigits == 1) {
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M && !sevenSegment
+                    && hourDigits >= 2) {
+                targetX = 0f;
+            } else if (hourDigits == 1) {
                 // The invisible leading figure-space equalizes 9:xx and 10:xx widths.
                 // Shift by half that reserved cell so the *visible* one-digit clock is
                 // balanced, leaving the colon slightly left of the background midpoint.
