@@ -13888,10 +13888,8 @@ public class MainActivity extends Activity {
         if (drawerFont < 8 || drawerFont > 15) edit.putInt(KEY_DRAWER_FONT_SIZE, Math.max(8, Math.min(15, drawerFont)));
         // Keep every icon inside its slot at the selected size. Preserve normalized
         // positions instead of clearing them when a large size reduces column capacity.
-        int maxHomeColumns = maxHomeColumnsForIconSize(homeSize);
-        if (homeSize > 64) maxHomeColumns = Math.min(5, maxHomeColumns);
-        if (homeColumns > maxHomeColumns) {
-            homeColumns = maxHomeColumns;
+        if (homeSize > 64 && homeColumns > 5) {
+            homeColumns = 5;
             edit.putInt(KEY_COLUMNS, homeColumns);
         }
         if (drawerSize > 64 && drawerColumns > 5) {
@@ -13901,22 +13899,11 @@ public class MainActivity extends Activity {
         edit.apply();
     }
 
-    private int maxHomeColumnsForIconSize(int iconSizeDp) {
-        int pageWidthPx = pageViewport != null && pageViewport.getWidth() > 0
-                ? pageViewport.getWidth()
-                : Math.max(1, getResources().getDisplayMetrics().widthPixels
-                        - LauncherUiUtils.dp(this, 40));
-        int iconWidthPx = LauncherUiUtils.dp(this,
-                Math.max(32, Math.min(74, iconSizeDp)));
-        return Math.max(3, Math.min(6, pageWidthPx / Math.max(1, iconWidthPx)));
-    }
-
     private int getHomeColumns() {
         int columns = Math.max(3, Math.min(6,
                 prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS)));
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
-        if (iconSize > 64) columns = Math.min(5, columns);
-        return Math.max(3, Math.min(columns, maxHomeColumnsForIconSize(iconSize)));
+        return iconSize > 64 ? Math.min(5, columns) : columns;
     }
 
     private int getDrawerColumns() {
@@ -14471,20 +14458,12 @@ public class MainActivity extends Activity {
         }
 
         addSection(content, "Home layout & icons");
-        int configuredHomeSize = prefs.getInt(KEY_ICON_SIZE, 48);
-        int maxHomeColumns = maxHomeColumnsForIconSize(configuredHomeSize);
-        if (configuredHomeSize > 64) maxHomeColumns = Math.min(5, maxHomeColumns);
-        String[] homeColumnChoices = new String[Math.max(1, maxHomeColumns - 2)];
-        for (int i = 0; i < homeColumnChoices.length; i++) {
-            homeColumnChoices[i] = String.valueOf(i + 3);
-        }
-        addChoiceRow(content, "Home columns",
-                Math.max(0, Math.min(homeColumnChoices.length - 1, getHomeColumns() - 3)),
-                homeColumnChoices, value -> {
+        String[] homeColumnChoices = prefs.getInt(KEY_ICON_SIZE, 48) <= 64
+                ? new String[]{"3", "4", "5", "6"} : new String[]{"3", "4", "5"};
+        addChoiceRow(content, "Home columns", getHomeColumns() - 3, homeColumnChoices, value -> {
             int oldColumns = getHomeColumns();
             int iconSize = prefs.getInt(KEY_ICON_SIZE, 48);
-            int newColumns = Math.max(3, Math.min(maxHomeColumnsForIconSize(iconSize), value + 3));
-            if (iconSize > 64) newColumns = Math.min(5, newColumns);
+            int newColumns = value + 3;
             remapHomeIconSlotsForColumnChange(oldColumns, newColumns, iconSize, iconSize);
             prefs.edit().putInt(KEY_COLUMNS, newColumns).apply();
             currentPage = Math.max(0, Math.min(1, currentPage));
@@ -14496,14 +14475,11 @@ public class MainActivity extends Activity {
                 Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
             int oldIconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             int oldColumns = getHomeColumns();
-            int maxColumnsForNewSize = maxHomeColumnsForIconSize(newSize);
-            if (newSize > 64) maxColumnsForNewSize = Math.min(5, maxColumnsForNewSize);
-            int newColumns = Math.max(3, Math.min(oldColumns, maxColumnsForNewSize));
+            boolean reduceColumns = newSize > 64 && oldColumns > 5;
+            int newColumns = reduceColumns ? 5 : oldColumns;
             remapHomeIconSlotsForColumnChange(oldColumns, newColumns, oldIconSize, newSize);
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_ICON_SIZE, newSize);
-            if (prefs.getInt(KEY_COLUMNS, COLUMNS) != newColumns) {
-                edit.putInt(KEY_COLUMNS, newColumns);
-            }
+            if (reduceColumns) edit.putInt(KEY_COLUMNS, newColumns);
             edit.apply();
             currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
