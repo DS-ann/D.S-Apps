@@ -891,7 +891,7 @@ public class MainActivity extends Activity {
                 targetClock.setVisibility(View.VISIBLE);
                 targetClock.setAlpha(1f);
                 syncClockColonVerticalCenter();
-                syncNativeClockColonVerticalCenter();
+                
                 updateClockDigitHorizontalOffset();
                 applyClockColorEffectsToActivePage(clockColorPhase);
                 targetClock.requestLayout();
@@ -9616,23 +9616,9 @@ public class MainActivity extends Activity {
             for (int i = 0; fallbackColonAt >= 0 && i < fallbackColonAt; i++) {
                 if (Character.digit(clockValue.charAt(i), 10) >= 0) fallbackHourDigits++;
             }
-            boolean api23TwoDigitTextFallback = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
-                    && !sevenSegmentClock && fallbackHourDigits >= 2;
             int styleForClockSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
             float baseClockLetterSpacing = clockPresetLetterSpacing(styleForClockSpacing);
-            boolean api23CompactTwoDigitClock = api23TwoDigitTextFallback
-                    && styleForClockSpacing != 2;
-            if (api23CompactTwoDigitClock) {
-                // API 23 keeps ordinary TextView text for the two-digit-hour fallback;
-                // compact its total advances by 15dp without introducing ReplacementSpans.
-                float advanceCount = Math.max(1f, clockValue.length() - 1f);
-                float renderScaleX = Math.max(0.25f,
-                        Math.abs(clockText.getScaleX())
-                                * Math.abs(clockPanel == null ? 1f : clockPanel.getScaleX()));
-                float spacingReduction = (LauncherUiUtils.dp(this, 15f) / renderScaleX)
-                        / Math.max(1f, clockText.getTextSize() * advanceCount);
-                clockText.setLetterSpacing(baseClockLetterSpacing - spacingReduction);
-            } else if (Math.abs(clockText.getLetterSpacing() - baseClockLetterSpacing) > 0.001f) {
+            if (Math.abs(clockText.getLetterSpacing() - baseClockLetterSpacing) > 0.001f) {
                 clockText.setLetterSpacing(baseClockLetterSpacing);
             }
             if (clockText instanceof SevenSegmentClockTextView) {
@@ -9650,8 +9636,7 @@ public class MainActivity extends Activity {
                     || (!sevenSegmentClock && fallbackHourDigits >= 2);
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
-            if (!sevenSegmentClock && !clockValue.isEmpty()
-                    && !api23TwoDigitTextFallback) {
+            if (!sevenSegmentClock && !clockValue.isEmpty()) {
                 // Reserve a leading invisible '1' when the hour has one digit.
                 int firstDigit = -1;
                 for (int i = 0; i < clockValue.length(); i++) {
@@ -9730,48 +9715,12 @@ public class MainActivity extends Activity {
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
-            if (api23TwoDigitTextFallback) {
-                int nativeColonAt = displayClock.toString().indexOf(':');
-                if (nativeColonAt >= 0) {
-                    boolean compactNativeColon = styleForClockSpacing != 2;
-                    int shiftPx = getNativeClockColonBaselineShift(
-                            displayClock.toString(), nativeColonAt, compactNativeColon);
-                    displayClock.setSpan(new ClockColonBaselineSpan(shiftPx, compactNativeColon),
-                            nativeColonAt, nativeColonAt + 1,
-                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                }
-            }
             Boolean previousDigitBorderMode = clockDigitInnerBorderModeApplied.get(clockText);
             boolean digitBorderModeChanged = previousDigitBorderMode == null
                     || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
             boolean missingDisplaySpans = false;
-            boolean staleApi23ReplacementSpans = false;
-            if (api23TwoDigitTextFallback) {
-                CharSequence existingText = clockText.getText();
-                if (existingText instanceof android.text.Spanned) {
-                    android.text.Spanned oldSpanned = (android.text.Spanned) existingText;
-                    staleApi23ReplacementSpans =
-                            oldSpanned.getSpans(0, oldSpanned.length(), TightDigitSpan.class).length > 0
-                            || oldSpanned.getSpans(0, oldSpanned.length(),
-                                    CenteredColonSpan.class).length > 0;
-                    int existingColonAt = oldSpanned.toString().indexOf(':');
-                    if (existingColonAt >= 0) {
-                        ClockColonBaselineSpan[] oldBaseline = oldSpanned.getSpans(
-                                existingColonAt, existingColonAt + 1, ClockColonBaselineSpan.class);
-                        boolean compactNativeColon = prefs == null
-                                || prefs.getInt(KEY_CLOCK_STYLE, 0) != 2;
-                        int requiredShift = getNativeClockColonBaselineShift(
-                                oldSpanned.toString(), existingColonAt, compactNativeColon);
-                        staleApi23ReplacementSpans = staleApi23ReplacementSpans
-                                || oldBaseline.length != 1
-                                || oldBaseline[0].getShiftPx() != requiredShift
-                                || oldBaseline[0].isCompact() != compactNativeColon;
-                    }
-                }
-            }
             int expectedColon = displayClock.toString().indexOf(':');
-            if (!sevenSegmentClock && !api23TwoDigitTextFallback
-                    && !clockValue.isEmpty() && expectedColon >= 0) {
+            if (!sevenSegmentClock && !clockValue.isEmpty() && expectedColon >= 0) {
                 CharSequence existingText = clockText.getText();
                 if (!(existingText instanceof android.text.Spanned)) {
                     missingDisplaySpans = true;
@@ -9790,8 +9739,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            if (forceTextRefresh || api23TwoDigitTextFallback
-                    || missingDisplaySpans || staleApi23ReplacementSpans
+            if (forceTextRefresh || missingDisplaySpans
                     || !displayClock.toString().contentEquals(clockText.getText())
                     || digitBorderModeChanged) {
                 // The seven-segment renderer owns its glyph geometry; standard styles
@@ -9800,24 +9748,13 @@ public class MainActivity extends Activity {
                     clockText.setText(displayClock, TextView.BufferType.NORMAL);
                     clockText.postInvalidateOnAnimation();
                 } else {
-                    // Keep replacement spans in a mutable buffer on API 23. This forces
-                    // the two-digit glyph/colon layout to be rebuilt after package updates.
+                    // All non-seven-segment styles, including Android 6 two-digit hours,
+                    // use the same mutable per-digit and centered-colon spans.
                     clockText.setText(displayClock, TextView.BufferType.SPANNABLE);
                     clockText.requestLayout();
                     clockText.invalidate();
                 }
                 clockDigitInnerBorderModeApplied.put(clockText, useWhiteDigitInnerBorder);
-            }
-            // Android 6's two-digit-hour fallback uses native TextView glyphs rather
-            // than per-digit ReplacementSpans. Reassert the white inner contour after
-            // that text buffer is installed; only enable it for gradient/artwork modes.
-            if (api23TwoDigitTextFallback && useWhiteDigitInnerBorder
-                    && clockText instanceof SevenSegmentClockTextView) {
-                ((SevenSegmentClockTextView) clockText).setContrastInnerBorderEnabled(
-                        true, CLOCK_DIGIT_GRADIENT_COLORS,
-                        2f * getResources().getDisplayMetrics().density,
-                        CLOCK_WHITE_BORDER_COLORS);
-                clockText.invalidate();
             }
             // Keep the separator aligned with the active clock's vertical transform
             // after every text refresh, independently of the date/AM-PM typography.
@@ -9832,7 +9769,7 @@ public class MainActivity extends Activity {
                 int restoreColonPage = Math.max(0, Math.min(1, activeClockPage));
                 activateClockForPage(pendingColonSyncPage);
                 syncClockColonVerticalCenter();
-                syncNativeClockColonVerticalCenter();
+                
                 updateClockDigitHorizontalOffset();
                 activateClockForPage(restoreColonPage);
             });
@@ -9877,31 +9814,18 @@ public class MainActivity extends Activity {
     private void enforceApi23TwoDigitWhiteInnerBorder() {
         if (Build.VERSION.SDK_INT != Build.VERSION_CODES.M) return;
         int restorePage = Math.max(0, Math.min(1, activeClockPage));
-        float borderWidth = 2f * getResources().getDisplayMetrics().density;
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         for (int page = 0; page < clockTextsByPage.length; page++) {
             TextView target = clockTextsByPage[page];
             if (!(target instanceof SevenSegmentClockTextView)) continue;
             activateClockForPage(page);
-            boolean sevenSegment = style == 5;
-            String value = target.getText() == null ? "" : target.getText().toString();
-            int colonAt = value.indexOf(':');
-            int hourDigits = 0;
-            for (int i = 0; colonAt >= 0 && i < colonAt; i++) {
-                if (Character.digit(value.charAt(i), 10) >= 0) hourDigits++;
+            if (style != 5) {
+                // Standard clocks now use per-glyph spans on Android 6 too. A
+                // TextView-wide contour would double-outline the visible glyphs.
+                ((SevenSegmentClockTextView) target).setContrastInnerBorderEnabled(
+                        false, null, 0f, null);
             }
-            boolean drawWhiteBorder = !sevenSegment && hourDigits >= 2;
-            SevenSegmentClockTextView renderer = (SevenSegmentClockTextView) target;
-            if (drawWhiteBorder) {
-                renderer.setDigitOnlyInnerBorder(false);
-                renderer.setContrastInnerBorderEnabled(true, CLOCK_DIGIT_GRADIENT_COLORS,
-                        borderWidth, CLOCK_WHITE_BORDER_COLORS);
-            } else if (!sevenSegment) {
-                // One-digit clocks use their own TightDigitSpan border. Do not let a
-                // previous two-digit fallback leave a second TextView-wide contour behind.
-                renderer.setContrastInnerBorderEnabled(false, null, 0f, null);
-            }
-            renderer.invalidate();
+            target.invalidate();
         }
         activateClockForPage(restorePage);
     }
@@ -14225,54 +14149,6 @@ public class MainActivity extends Activity {
      * Computes a translation that centers actual native API-23 glyph ink inside the
      * existing clock group. This avoids changing background size or widget geometry.
      */
-    private float getApi23VisibleClockCenteringOffset(int groupWidth) {
-        if (clockText == null || groupWidth <= 0) return 0f;
-        android.text.Layout layout = clockText.getLayout();
-        CharSequence value = clockText.getText();
-        if (layout == null || value == null || value.length() == 0
-                || layout.getLineCount() == 0) return 0f;
-
-        String plainText = value.toString();
-        android.text.Spanned spanned = value instanceof android.text.Spanned
-                ? (android.text.Spanned) value : null;
-        int start = layout.getLineStart(0);
-        int end = Math.min(plainText.length(), layout.getLineEnd(0));
-        float inkLeft = Float.POSITIVE_INFINITY;
-        float inkRight = Float.NEGATIVE_INFINITY;
-        android.graphics.Rect glyphBounds = new android.graphics.Rect();
-
-        for (int index = start; index < end; index++) {
-            char ch = plainText.charAt(index);
-            if (Character.isWhitespace(ch) || Character.isSpaceChar(ch)) continue;
-
-            android.text.TextPaint glyphPaint = new android.text.TextPaint(clockText.getPaint());
-            if (spanned != null) {
-                android.text.style.CharacterStyle[] styles = spanned.getSpans(
-                        index, index + 1, android.text.style.CharacterStyle.class);
-                for (android.text.style.CharacterStyle span : styles) {
-                    span.updateDrawState(glyphPaint);
-                }
-            }
-            glyphBounds.setEmpty();
-            glyphPaint.getTextBounds(plainText, index, index + 1, glyphBounds);
-            if (glyphBounds.isEmpty()) continue;
-
-            float glyphX = layout.getPrimaryHorizontal(index);
-            inkLeft = Math.min(inkLeft, glyphX + glyphBounds.left);
-            inkRight = Math.max(inkRight, glyphX + glyphBounds.right);
-        }
-
-        if (Float.isNaN(inkLeft) || Float.isInfinite(inkLeft)
-                || Float.isNaN(inkRight) || Float.isInfinite(inkRight)
-                || inkRight <= inkLeft) return 0f;
-        float inkCenter = (inkLeft + inkRight) * 0.5f;
-        float pivotX = clockText.getPivotX();
-        float displayedInkCenter = pivotX
-                + (inkCenter - pivotX) * clockText.getScaleX();
-        float target = groupWidth * 0.5f - displayedInkCenter;
-        return Float.isNaN(target) || Float.isInfinite(target) ? 0f : target;
-    }
-
     private void updateClockDigitHorizontalOffset() {
         if (clockPanel == null || clockText == null) return;
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
@@ -14293,22 +14169,7 @@ public class MainActivity extends Activity {
                 }
             }
             float textScaleX = Math.max(0.01f, Math.abs(clockText.getScaleX()));
-            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M && !sevenSegment
-                    && hourDigits >= 2) {
-                // API 23 uses native TextView glyphs for a two-digit hour. Center the
-                // actual visible glyph bounds (including the compact native colon), not
-                // merely the layout advances. This changes only the glyph translation;
-                // the panel/background geometry is intentionally left untouched.
-                int groupWidth = 0;
-                ViewGroup.LayoutParams groupParams = clockGroup == null
-                        ? null : clockGroup.getLayoutParams();
-                if (groupParams != null && groupParams.width > 0) {
-                    groupWidth = groupParams.width;
-                } else if (clockGroup != null) {
-                    groupWidth = clockGroup.getWidth();
-                }
-                targetX = getApi23VisibleClockCenteringOffset(groupWidth);
-            } else if (hourDigits == 1) {
+            if (hourDigits == 1) {
                 // The invisible leading figure-space equalizes 9:xx and 10:xx widths.
                 // Shift by half that reserved cell so the *visible* one-digit clock is
                 // balanced, leaving the colon slightly left of the background midpoint.
@@ -14443,33 +14304,6 @@ public class MainActivity extends Activity {
         return LauncherUiUtils.dp(this, 114) / 2f;
     }
 
-    private int getNativeClockColonBaselineShift(String text, int colonAt,
-            boolean compactNativeColon) {
-        if (clockText == null || text == null || colonAt < 0 || colonAt >= text.length()) return 0;
-        android.text.Layout layout = clockText.getLayout();
-        if (layout == null || layout.getLineCount() <= 0) return 0;
-        Paint glyphPaint = new Paint(clockText.getPaint());
-        if (compactNativeColon) {
-            glyphPaint.setTextSize(glyphPaint.getTextSize()
-                    * ClockColonBaselineSpan.TEXT_SIZE_SCALE);
-            glyphPaint.setTextScaleX(glyphPaint.getTextScaleX()
-                    * ClockColonBaselineSpan.WIDTH_SCALE);
-        }
-        android.graphics.Rect inkBounds = new android.graphics.Rect();
-        glyphPaint.getTextBounds(text, colonAt, colonAt + 1, inkBounds);
-        float baseline = layout.getLineBaseline(0);
-        float glyphInkCenter = baseline + (inkBounds.top + inkBounds.bottom) * 0.5f;
-        Paint digitPaint = new Paint(clockText.getPaint());
-        android.graphics.Rect digitBounds = new android.graphics.Rect();
-        digitPaint.getTextBounds("8", 0, 1, digitBounds);
-        float digitInkCenter = digitBounds.bottom > digitBounds.top
-                ? baseline + (digitBounds.top + digitBounds.bottom) * 0.5f
-                : (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
-        // TextLine draws at baseline + baselineShift. Center the scaled colon's visible
-        // ink on the digit's ink center rather than on the font's line-box midpoint.
-        return Math.round(digitInkCenter - glyphInkCenter);
-    }
-
     private float clockPresetLetterSpacing(int style) {
         switch (style) {
             case 1: return 0.12f;
@@ -14493,47 +14327,6 @@ public class MainActivity extends Activity {
         for (CenteredColonSpan span : spans) {
             span.setRowCenterY(centerY);
         }
-        clockText.invalidate();
-    }
-
-    /**
-     * API 23 fallback for the two-digit standard clock. The digits use TextView's native
-     * renderer; only the colon receives a metric-affecting baseline adjustment. Recompute
-     * the adjustment after a real Layout exists, rather than carrying a stale pre-update
-     * baseline through package replacement.
-     */
-    private void syncNativeClockColonVerticalCenter() {
-        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.M || clockText == null) return;
-        CharSequence value = clockText.getText();
-        if (!(value instanceof android.text.Spanned)) return;
-        String plain = value.toString();
-        if (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5) return;
-        int colonAt = plain.indexOf(':');
-        if (colonAt < 0) return;
-        int hourDigits = 0;
-        for (int i = 0; i < colonAt; i++) {
-            if (Character.digit(plain.charAt(i), 10) >= 0) hourDigits++;
-        }
-        // Single-digit Android 6 clocks use CenteredColonSpan already; this native
-        // fallback is only for the two-digit path that avoids ReplacementSpan glyphs.
-        if (hourDigits < 2) return;
-        boolean compactNativeColon = prefs == null || prefs.getInt(KEY_CLOCK_STYLE, 0) != 2;
-        int shift = getNativeClockColonBaselineShift(plain, colonAt, compactNativeColon);
-        android.text.Spanned spanned = (android.text.Spanned) value;
-        ClockColonBaselineSpan[] current = spanned.getSpans(
-                colonAt, colonAt + 1, ClockColonBaselineSpan.class);
-        if (current.length == 1 && current[0].getShiftPx() == shift
-                && current[0].isCompact() == compactNativeColon) return;
-
-        android.text.SpannableStringBuilder rebuilt =
-                new android.text.SpannableStringBuilder(value);
-        ClockColonBaselineSpan[] old = rebuilt.getSpans(
-                0, rebuilt.length(), ClockColonBaselineSpan.class);
-        for (ClockColonBaselineSpan span : old) rebuilt.removeSpan(span);
-        rebuilt.setSpan(new ClockColonBaselineSpan(shift, compactNativeColon),
-                colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        clockText.setText(rebuilt, TextView.BufferType.SPANNABLE);
-        clockText.requestLayout();
         clockText.invalidate();
     }
 
@@ -14704,21 +14497,16 @@ public class MainActivity extends Activity {
         float baseTrackingWidth = clockText.getTextSize()
                 * clockPresetLetterSpacing(selectedClockStyle)
                 * Math.max(0, widthClockValue.length() - 1);
-        boolean api23NativeClockPath = Build.VERSION.SDK_INT == Build.VERSION_CODES.M;
-        float api23GapCompression = api23NativeClockPath
-                ? LauncherUiUtils.dp(this, 15f) : 0f;
-        float customColonAdvanceReduction = api23NativeClockPath ? 0f
-                : clockText.getPaint().measureText(":") * 0.55f;
-        // Older versions retain their existing 15dp clearance reservation. Android 16
-        // needs that 15dp returned to the two-digit clock instead of being subtracted.
-        float customDigitGroupReduction = api23NativeClockPath ? 0f
-                : LauncherUiUtils.dp(this, Build.VERSION.SDK_INT >= 36 ? -15f : 15f);
+        float customColonAdvanceReduction = clockText.getPaint().measureText(":") * 0.55f;
+        // The standard-clock width follows the shared per-glyph spans on every Android
+        // release. The reserved width is stable across one- and two-digit hours.
+        float customDigitGroupReduction = LauncherUiUtils.dp(this,
+                Build.VERSION.SDK_INT >= 36 ? -15f : 15f);
         // Paint.measureText excludes TextView letter spacing, and the standard renderer
-        // enlarges glyphs horizontally by 1.12x. Reserve the net width after the 15dp
-        // hour/minute tightening and compact custom colon. On Android 6 the same 15dp
-        // compression is applied through letter spacing and the colon remains native.
+        // enlarges glyphs horizontally by 1.12x. Reserve the net width after digit-gap
+        // tightening and the compact centered-colon advance.
         float requiredExtraWidth = naturalClockWidth * (nonLedDigitScale - 1f)
-                + nonLedDigitScale * (baseTrackingWidth - api23GapCompression)
+                + nonLedDigitScale * baseTrackingWidth
                 - nonLedDigitScale * customColonAdvanceReduction
                 - customDigitGroupReduction - markerWidth - LauncherUiUtils.dp(this, 5f);
         final int twoDigitStandardWidthClearance = reserveTwoDigitStandardWidth
@@ -14827,7 +14615,7 @@ public class MainActivity extends Activity {
                 activateClockForPage(targetPage);
                 updateClockDigitHorizontalOffset();
                 syncClockColonVerticalCenter();
-                syncNativeClockColonVerticalCenter();
+                
                 if (clockText != null) clockText.invalidate();
                 activateClockForPage(restoreGeometryPage);
             }
@@ -15074,7 +14862,7 @@ public class MainActivity extends Activity {
                     int restorePage = Math.max(0, Math.min(1, activeClockPage));
                     activateClockForPage(targetPage);
                     syncClockColonVerticalCenter();
-                    syncNativeClockColonVerticalCenter();
+                    
                     updateClockDigitHorizontalOffset();
                     activateClockForPage(restorePage);
                     // API 23's native baseline span may request another layout; settle it
@@ -15087,7 +14875,7 @@ public class MainActivity extends Activity {
                         int finalRestorePage = Math.max(0, Math.min(1, activeClockPage));
                         activateClockForPage(targetPage);
                         syncClockColonVerticalCenter();
-                        syncNativeClockColonVerticalCenter();
+                        
                         updateClockDigitHorizontalOffset();
                         activateClockForPage(finalRestorePage);
                     });
@@ -15208,34 +14996,6 @@ public class MainActivity extends Activity {
                 drawClockGlyphInnerWhiteBorder(canvas, text, start, end,
                         glyphX, top, y, bottom, paint, innerWhiteBorderPx);
             }
-        }
-    }
-
-    private static final class ClockColonBaselineSpan
-            extends android.text.style.CharacterStyle {
-        // These draw-only scales make the native API-23 colon use approximately the
-        // same visual width/height as the replacement-span colon on newer releases.
-        static final float TEXT_SIZE_SCALE = 0.58f;
-        static final float WIDTH_SCALE = 0.72f;
-        private final int shiftPx;
-        private final boolean compact;
-
-        ClockColonBaselineSpan(int shiftPx, boolean compact) {
-            this.shiftPx = shiftPx;
-            this.compact = compact;
-        }
-
-        int getShiftPx() { return shiftPx; }
-        boolean isCompact() { return compact; }
-
-        // Drawing-only: changing font metrics on API 23 can re-layout the complete
-        // two-digit clock and move its baseline away from the line we're centering to.
-        @Override public void updateDrawState(android.text.TextPaint paint) {
-            if (compact) {
-                paint.setTextSize(paint.getTextSize() * TEXT_SIZE_SCALE);
-                paint.setTextScaleX(paint.getTextScaleX() * WIDTH_SCALE);
-            }
-            paint.baselineShift += shiftPx;
         }
     }
 
