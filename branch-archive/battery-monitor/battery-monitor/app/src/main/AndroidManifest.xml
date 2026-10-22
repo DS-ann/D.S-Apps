@@ -41,6 +41,7 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                     <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="com.dsann.batterymonitor.RECOVER_MEASUREMENT" />
+                <action android:name="com.dsann.batterymonitor.DOZE_WAKE" />
             </intent-filter>
         </receiver>
     </application>

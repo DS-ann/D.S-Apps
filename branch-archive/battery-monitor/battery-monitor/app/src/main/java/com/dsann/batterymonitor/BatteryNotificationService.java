@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
@@ -48,6 +49,11 @@ public class BatteryNotificationService extends Service {
     private static final long NOTIFICATION_REFRESH_INTERVAL_MS = 1000L;
     private static final long ROOT_RETRY_GAP_MS = 5000L;
     private static final long RECOVERY_DELAY_MS = 15000L;
+    private static final String ACTION_RECOVER = "com.dsann.batterymonitor.RECOVER_MEASUREMENT";
+    private static final String ACTION_DOZE_WAKE = "com.dsann.batterymonitor.DOZE_WAKE";
+    private static final int DOZE_ALARM_REQUEST_CODE = 9382;
+    private static final long DOZE_WAKE_INTERVAL_MS = 10L * 60L * 1000L;
+    private static final long DOZE_WAKE_WINDOW_MS = 10000L;
 
     private final Handler handler = new Handler();
     private long lastHistorySampleMs;
@@ -64,6 +70,18 @@ public class BatteryNotificationService extends Service {
             new BatteryReader.Reading(Long.MIN_VALUE, Long.MIN_VALUE);
     private volatile long latestReadingAtMs;
     private PowerManager.WakeLock wakeLock;
+    private boolean dozeSamplingMode;
+    private boolean dozeWakeCycleInFlight;
+    private boolean powerStateReceiverRegistered;
+    private long dozeWakeCycleToken;
+    private Runnable dozeWakeTimeout;
+    private volatile Runnable pendingSampleCompletion;
+
+    private final BroadcastReceiver powerStateReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            handlePowerStateChanged();
+        }
+    };
 
     private final Runnable updater = new Runnable() {
         @Override public void run() {
@@ -114,45 +132,218 @@ public class BatteryNotificationService extends Service {
         createChannel();
         startForeground(NOTIFICATION_ID,
                 buildNotification("--", 0.0, 0L, BatteryPercentCalculator.current(this)));
-        acquireCpuLock();
-        requestSampleUpdate();
-        publishNotification();
-        if (shouldRunService()) {
-            handler.postDelayed(updater, getNextSamplingInterval());
-            nextNotificationUpdateUptimeMs = SystemClock.uptimeMillis()
-                    + NOTIFICATION_REFRESH_INTERVAL_MS;
-            handler.postAtTime(notificationUpdater, nextNotificationUpdateUptimeMs);
-        } else {
+
+        IntentFilter powerFilter = new IntentFilter();
+        powerFilter.addAction(Intent.ACTION_SCREEN_ON);
+        powerFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        powerFilter.addAction(Intent.ACTION_POWER_CONNECTED);
+        powerFilter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+        try {
+            registerReceiver(powerStateReceiver, powerFilter);
+            powerStateReceiverRegistered = true;
+        } catch (Throwable ignored) { }
+
+        if (!shouldRunService()) {
             stopSelf();
+            return;
+        }
+
+        if (shouldUseDozeSamplingMode()) {
+            dozeSamplingMode = true;
+            cancelRecoveryAlarm();
+            scheduleDozeWakeup();
+            publishNotification();
+        } else {
+            acquireCpuLock();
+            requestSampleUpdate();
+            publishNotification();
+            startRegularLoops(false);
         }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (shouldRunService()) {
-            if (wakeLock == null || !wakeLock.isHeld()) acquireCpuLock();
-            handler.removeCallbacks(updater);
-            handler.post(updater);
-            handler.removeCallbacks(notificationUpdater);
-            nextNotificationUpdateUptimeMs = SystemClock.uptimeMillis()
-                    + NOTIFICATION_REFRESH_INTERVAL_MS;
-            handler.postAtTime(notificationUpdater, nextNotificationUpdateUptimeMs);
+        if (!shouldRunService()) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if (shouldUseDozeSamplingMode()) {
+            enterDozeMode(false);
+            runDozeWakeCycle();
             return START_STICKY;
         }
-        stopSelf();
-        return START_NOT_STICKY;
+
+        enterActiveMode(true);
+        return START_STICKY;
+    }
+
+    private void startRegularLoops(boolean runImmediately) {
+        handler.removeCallbacks(updater);
+        handler.removeCallbacks(notificationUpdater);
+        if (runImmediately) handler.post(updater);
+        else handler.postDelayed(updater, getNextSamplingInterval());
+        nextNotificationUpdateUptimeMs = SystemClock.uptimeMillis()
+                + NOTIFICATION_REFRESH_INTERVAL_MS;
+        handler.postAtTime(notificationUpdater, nextNotificationUpdateUptimeMs);
+    }
+
+    private boolean shouldUseDozeSamplingMode() {
+        PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (manager == null || manager.isInteractive()) return false;
+
+        boolean pluggedIn = false;
+        try {
+            Intent battery = registerReceiver(null,
+                    new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            pluggedIn = battery != null
+                    && battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
+        } catch (Throwable ignored) { }
+        return !pluggedIn;
+    }
+
+    private void handlePowerStateChanged() {
+        if (!shouldRunService()) {
+            stopSelf();
+            return;
+        }
+        boolean shouldUseDozeMode = shouldUseDozeSamplingMode();
+        if (shouldUseDozeMode && !dozeSamplingMode) {
+            enterDozeMode(true);
+        } else if (!shouldUseDozeMode && dozeSamplingMode) {
+            enterActiveMode(true);
+        }
+    }
+
+    private void enterDozeMode(boolean sampleImmediately) {
+        if (!dozeSamplingMode) {
+            dozeSamplingMode = true;
+            handler.removeCallbacks(updater);
+            handler.removeCallbacks(notificationUpdater);
+            nextNotificationUpdateUptimeMs = 0L;
+            releaseCpuLock();
+            cancelRecoveryAlarm();
+            scheduleDozeWakeup();
+        }
+        if (sampleImmediately) runDozeWakeCycle();
+    }
+
+    private void enterActiveMode(boolean sampleImmediately) {
+        if (dozeSamplingMode) {
+            dozeSamplingMode = false;
+            cancelDozeWakeup();
+        }
+        if (wakeLock == null || !wakeLock.isHeld()) acquireCpuLock();
+        if (sampleImmediately) publishNotification();
+        startRegularLoops(sampleImmediately);
+    }
+
+    private void runDozeWakeCycle() {
+        if (!dozeSamplingMode || !shouldRunService() || dozeWakeCycleInFlight) return;
+
+        dozeWakeCycleInFlight = true;
+        final long cycleToken = ++dozeWakeCycleToken;
+        acquireCpuLock(DOZE_WAKE_WINDOW_MS);
+        scheduleDozeWakeup();
+
+        Runnable timeout = new Runnable() {
+            @Override public void run() {
+                if (cycleToken != dozeWakeCycleToken) return;
+                dozeWakeCycleInFlight = false;
+                dozeWakeTimeout = null;
+                releaseCpuLock();
+            }
+        };
+        dozeWakeTimeout = timeout;
+        handler.postDelayed(timeout, DOZE_WAKE_WINDOW_MS);
+
+        requestSampleUpdate(new Runnable() {
+            @Override public void run() {
+                if (cycleToken != dozeWakeCycleToken) return;
+                if (dozeWakeTimeout != null) handler.removeCallbacks(dozeWakeTimeout);
+                dozeWakeTimeout = null;
+                dozeWakeCycleInFlight = false;
+                publishNotification();
+                releaseCpuLock();
+            }
+        });
     }
 
     private void acquireCpuLock() {
+        acquireCpuLock(0L);
+    }
+
+    private void acquireCpuLock(long timeoutMs) {
         try {
             PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
             if (manager != null) {
                 if (wakeLock == null) {
                     wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
-                            "BatteryPulse:continuous-measurement");
+                            "BatteryPulse:bounded-measurement");
                     wakeLock.setReferenceCounted(false);
                 }
-                if (!wakeLock.isHeld()) wakeLock.acquire();
+                if (timeoutMs > 0L && wakeLock.isHeld()) wakeLock.release();
+                if (!wakeLock.isHeld()) {
+                    if (timeoutMs > 0L) wakeLock.acquire(timeoutMs);
+                    else wakeLock.acquire();
+                }
             }
+        } catch (Throwable ignored) { }
+    }
+
+    private void releaseCpuLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            try { wakeLock.release(); } catch (RuntimeException ignored) { }
+        }
+    }
+
+    private PendingIntent getDozeWakePendingIntent(int intentFlags) {
+        Intent wake = new Intent(this, BootReceiver.class);
+        wake.setAction(ACTION_DOZE_WAKE);
+        int flags = intentFlags;
+        if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getBroadcast(this, DOZE_ALARM_REQUEST_CODE, wake, flags);
+    }
+
+    private void scheduleDozeWakeup() {
+        if (!shouldRunService()) return;
+        try {
+            AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
+            if (alarm == null) return;
+            PendingIntent pending = getDozeWakePendingIntent(PendingIntent.FLAG_UPDATE_CURRENT);
+            long trigger = SystemClock.elapsedRealtime() + DOZE_WAKE_INTERVAL_MS;
+            // A non-exact idle-allowed alarm avoids requiring special exact-alarm access.
+            // Android may defer delivery, but the alarm can run while Doze is active.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarm.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+            } else {
+                alarm.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private void cancelDozeWakeup() {
+        try {
+            int flags = PendingIntent.FLAG_NO_CREATE;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent pending = getDozeWakePendingIntent(flags);
+            if (pending == null) return;
+            AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
+            if (alarm != null) alarm.cancel(pending);
+            pending.cancel();
+        } catch (Throwable ignored) { }
+    }
+
+    private void cancelRecoveryAlarm() {
+        try {
+            Intent recovery = new Intent(this, BootReceiver.class);
+            recovery.setAction(ACTION_RECOVER);
+            int flags = PendingIntent.FLAG_NO_CREATE;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent pending = PendingIntent.getBroadcast(this, 9381, recovery, flags);
+            if (pending == null) return;
+            AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
+            if (alarm != null) alarm.cancel(pending);
+            pending.cancel();
         } catch (Throwable ignored) { }
     }
 
@@ -195,7 +386,14 @@ public class BatteryNotificationService extends Service {
      * must not stop the foreground notification's refresh timer.
      */
     private void requestSampleUpdate() {
-        if (!sampleInFlight.compareAndSet(false, true)) return;
+        requestSampleUpdate(null);
+    }
+
+    private void requestSampleUpdate(final Runnable completion) {
+        if (!sampleInFlight.compareAndSet(false, true)) {
+            if (completion != null) pendingSampleCompletion = completion;
+            return;
+        }
         try {
             samplingExecutor.execute(() -> {
                 try {
@@ -204,10 +402,18 @@ public class BatteryNotificationService extends Service {
                     // Keep last good sensor reading; the independent notifier remains live.
                 } finally {
                     sampleInFlight.set(false);
+                    Runnable deferred = pendingSampleCompletion;
+                    pendingSampleCompletion = null;
+                    if (completion != null) handler.post(completion);
+                    if (deferred != null && deferred != completion) handler.post(deferred);
                 }
             });
         } catch (RejectedExecutionException ignored) {
             sampleInFlight.set(false);
+            Runnable deferred = pendingSampleCompletion;
+            pendingSampleCompletion = null;
+            if (completion != null) handler.post(completion);
+            if (deferred != null && deferred != completion) handler.post(deferred);
         }
     }
 
@@ -473,15 +679,18 @@ public class BatteryNotificationService extends Service {
             AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
             // Use a receiver so Android 8+ can legally restart the foreground service.
             Intent recovery = new Intent(this, BootReceiver.class);
-            recovery.setAction("com.dsann.batterymonitor.RECOVER_MEASUREMENT");
+            recovery.setAction(ACTION_RECOVER);
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
             PendingIntent pending = PendingIntent.getBroadcast(this, 9381, recovery, flags);
             long trigger = SystemClock.elapsedRealtime() + RECOVERY_DELAY_MS;
             if (alarm != null) {
-                if (Build.VERSION.SDK_INT >= 23) alarm.setExactAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
-                else alarm.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    // Recovery is best-effort; avoid depending on exact-alarm special access.
+                    alarm.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+                } else {
+                    alarm.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+                }
             }
         } catch (Throwable ignored) { }
     }
@@ -489,11 +698,30 @@ public class BatteryNotificationService extends Service {
     @Override public void onDestroy() {
         handler.removeCallbacks(updater);
         handler.removeCallbacks(notificationUpdater);
+        if (dozeWakeTimeout != null) handler.removeCallbacks(dozeWakeTimeout);
+        dozeWakeTimeout = null;
+        dozeWakeCycleToken++;
+        dozeWakeCycleInFlight = false;
         nextNotificationUpdateUptimeMs = 0L;
-        if (wakeLock != null && wakeLock.isHeld()) {
-            try { wakeLock.release(); } catch (RuntimeException ignored) { }
+
+        if (powerStateReceiverRegistered) {
+            try { unregisterReceiver(powerStateReceiver); } catch (Throwable ignored) { }
+            powerStateReceiverRegistered = false;
         }
-        if (shouldRunService()) scheduleRecovery();
+        releaseCpuLock();
+
+        if (shouldRunService()) {
+            if (shouldUseDozeSamplingMode()) {
+                cancelRecoveryAlarm();
+                scheduleDozeWakeup();
+            } else {
+                cancelDozeWakeup();
+                scheduleRecovery();
+            }
+        } else {
+            cancelDozeWakeup();
+            cancelRecoveryAlarm();
+        }
         rootExecutor.shutdown();
         samplingExecutor.shutdownNow();
         stopForeground(true);

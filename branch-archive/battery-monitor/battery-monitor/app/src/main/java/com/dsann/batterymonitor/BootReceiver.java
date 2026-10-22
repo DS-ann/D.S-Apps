@@ -8,12 +8,15 @@ import android.os.Build;
 public class BootReceiver extends BroadcastReceiver {
     private static final String ACTION_RECOVER =
             "com.dsann.batterymonitor.RECOVER_MEASUREMENT";
+    private static final String ACTION_DOZE_WAKE =
+            "com.dsann.batterymonitor.DOZE_WAKE";
 
     @Override public void onReceive(Context context, Intent intent) {
         String action = intent != null ? intent.getAction() : null;
         if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
                 && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
-                && !ACTION_RECOVER.equals(action)) {
+                && !ACTION_RECOVER.equals(action)
+                && !ACTION_DOZE_WAKE.equals(action)) {
             return;
         }
 
@@ -30,6 +33,7 @@ public class BootReceiver extends BroadcastReceiver {
         if (!recording && !useAppPercent && !resetPending && !estimatorRunning) return;
 
         Intent service = new Intent(context, BatteryNotificationService.class);
+        if (ACTION_DOZE_WAKE.equals(action)) service.setAction(ACTION_DOZE_WAKE);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(service);
