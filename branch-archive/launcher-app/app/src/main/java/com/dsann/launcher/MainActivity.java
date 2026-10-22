@@ -13696,6 +13696,11 @@ public class MainActivity extends Activity {
             prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), item.getTranslationX())
                     .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, pageIndex), item.getTranslationY()).apply();
         }
+        // A deliberate move or collision relocation becomes the new center anchor,
+        // so a later redraw cannot snap the item back to its pre-drag location.
+        if (isWorkspaceAppIcon(item) || isAppGroupItem(item) || isWorkspaceContactShortcut(item)) {
+            saveWorkspaceCenterAnchor(page, item, x, y);
+        }
     }
 
     /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
@@ -14111,6 +14116,145 @@ public class MainActivity extends Activity {
         if (changedShortcuts) shortcutEdit.apply();
     }
 
+    /**
+     * Identifies the visual icon itself, independent of the larger layout cell and
+     * its label. A size change can alter row height, but it must not change the
+     * saved icon center.
+     */
+    private String workspaceCenterAnchorToken(View item) {
+        if (item == null || !(item.getTag() instanceof String)) return null;
+        String tag = (String) item.getTag();
+        if (tag.startsWith("launcher_app:")) return "app_" + tag.substring("launcher_app:".length());
+        if (tag.startsWith(APP_GROUP_TAG_PREFIX)) {
+            return "group_" + tag.substring(APP_GROUP_TAG_PREFIX.length());
+        }
+        if ("launcher_contact_shortcut".equals(tag)) {
+            String id = shortcutIdFromTile(item);
+            return id.isEmpty() ? null : "shortcut_" + id;
+        }
+        return null;
+    }
+
+    private String workspaceCenterAnchorKey(View item, boolean horizontal) {
+        String token = workspaceCenterAnchorToken(item);
+        return token == null ? null
+                : "workspace_icon_center_" + (horizontal ? "x_" : "y_") + token;
+    }
+
+    private float[] workspaceIconCenterInPage(View item, int itemX, int itemY) {
+        if (!(item instanceof ViewGroup)) return new float[]{itemX, itemY};
+        ViewGroup group = (ViewGroup) item;
+        if (group.getChildCount() == 0) return new float[]{itemX, itemY};
+        View icon = group.getChildAt(0);
+        ViewGroup.LayoutParams raw = icon.getLayoutParams();
+        int width = icon.getWidth();
+        int height = icon.getHeight();
+        if (width <= 0 && raw != null && raw.width > 0) width = raw.width;
+        if (height <= 0 && raw != null && raw.height > 0) height = raw.height;
+        float sx = Math.max(0.01f, icon.getScaleX());
+        float sy = Math.max(0.01f, icon.getScaleY());
+        float left = icon.getLeft() + icon.getTranslationX()
+                + icon.getPivotX() * (1f - sx);
+        float top = icon.getTop() + icon.getTranslationY()
+                + icon.getPivotY() * (1f - sy);
+        if (raw instanceof FrameLayout.LayoutParams && icon.isLayoutRequested()) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            int gravity = Gravity.getAbsoluteGravity(lp.gravity, icon.getLayoutDirection())
+                    & Gravity.HORIZONTAL_GRAVITY_MASK;
+            if (gravity == Gravity.CENTER_HORIZONTAL) {
+                left = (group.getWidth() - width) / 2f + lp.leftMargin - lp.rightMargin;
+            } else if (gravity == Gravity.RIGHT) {
+                left = group.getWidth() - width - lp.rightMargin;
+            } else {
+                left = lp.leftMargin;
+            }
+            top = lp.topMargin;
+        } else if (raw instanceof LinearLayout.LayoutParams
+                && icon.isLayoutRequested()) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
+            if (lp.gravity == Gravity.CENTER) {
+                left = (group.getWidth() - width) / 2f + lp.leftMargin - lp.rightMargin;
+            }
+            top = group.getPaddingTop() + lp.topMargin;
+        }
+        return new float[]{
+                itemX + left + width * sx / 2f,
+                itemY + top + height * sy / 2f
+        };
+    }
+
+    private void saveWorkspaceCenterAnchor(FrameLayout page, View item, int itemX, int itemY) {
+        if (prefs == null || page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        String xKey = workspaceCenterAnchorKey(item, true);
+        String yKey = workspaceCenterAnchorKey(item, false);
+        if (xKey == null || yKey == null) return;
+        float[] center = workspaceIconCenterInPage(item, itemX, itemY);
+        prefs.edit()
+                .putFloat(xKey, Math.max(0f, Math.min(1f, center[0] / page.getWidth())))
+                .putFloat(yKey, Math.max(0f, Math.min(1f, center[1] / page.getHeight())))
+                .apply();
+    }
+
+    private void captureWorkspaceCentersForResize() {
+        if (prefs == null || pagesStrip == null) return;
+        SharedPreferences.Editor edit = prefs.edit();
+        boolean changed = false;
+        for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            if (page.getWidth() <= 0 || page.getHeight() <= 0) continue;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View item = page.getChildAt(i);
+                if (!isWorkspaceAppIcon(item) && !isAppGroupItem(item)
+                        && !isWorkspaceContactShortcut(item)) continue;
+                String xKey = workspaceCenterAnchorKey(item, true);
+                String yKey = workspaceCenterAnchorKey(item, false);
+                if (xKey == null || yKey == null) continue;
+                int[] geometry = itemGeometry(item);
+                float[] center = workspaceIconCenterInPage(item, geometry[0], geometry[1]);
+                edit.putFloat(xKey, Math.max(0f, Math.min(1f, center[0] / page.getWidth())));
+                edit.putFloat(yKey, Math.max(0f, Math.min(1f, center[1] / page.getHeight())));
+                changed = true;
+            }
+        }
+        if (changed) edit.apply();
+    }
+
+    private void applySavedWorkspaceCenterAnchors(FrameLayout page) {
+        if (prefs == null || page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View item = page.getChildAt(i);
+            if (!isWorkspaceAppIcon(item) && !isAppGroupItem(item)
+                    && !isWorkspaceContactShortcut(item)) continue;
+            String xKey = workspaceCenterAnchorKey(item, true);
+            String yKey = workspaceCenterAnchorKey(item, false);
+            if (xKey == null || yKey == null
+                    || !prefs.contains(xKey) || !prefs.contains(yKey)
+                    || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            // Center anchors are page-local and independent of the changing row metric.
+            item.setTranslationX(0f);
+            item.setTranslationY(0f);
+            int[] geometry = itemGeometry(item);
+            float[] current = workspaceIconCenterInPage(item, geometry[0], geometry[1]);
+            float targetX = prefs.getFloat(xKey, 0.5f) * page.getWidth();
+            float targetY = prefs.getFloat(yKey, 0.5f) * page.getHeight();
+            int dx = Math.round(targetX - current[0]);
+            int dy = Math.round(targetY - current[1]);
+            // Keep the layout cell inside the page while preserving the icon center
+            // as closely as the actual cell bounds allow.
+            dx = Math.max(-geometry[0],
+                    Math.min(page.getWidth() - geometry[0] - geometry[2], dx));
+            dy = Math.max(-geometry[1],
+                    Math.min(page.getHeight() - geometry[1] - geometry[3], dy));
+            if (dx == 0 && dy == 0) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+            lp.leftMargin += dx;
+            lp.topMargin += dy;
+            item.setLayoutParams(lp);
+        }
+    }
+
     private void validateWorkspacePagesAfterLayout() {
         if (pagesStrip == null) return;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
@@ -14120,6 +14264,13 @@ public class MainActivity extends Activity {
             page.post(() -> {
                 if (pagesStrip != null && page.getParent() == pagesStrip) {
                     resolveAllWorkspaceOverlaps(page, null);
+                    // Run after collision validation: with unchanged centers, merely
+                    // changing the icon size must not change its logical row.
+                    page.post(() -> {
+                        if (pagesStrip != null && page.getParent() == pagesStrip) {
+                            applySavedWorkspaceCenterAnchors(page);
+                        }
+                    });
                 }
             });
         }
@@ -14479,11 +14630,12 @@ public class MainActivity extends Activity {
         });
         addSliderRowOnStop(content, "Home icon size", 32, 74,
                 Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
+            // Save the actual visual centers before the new icon size changes row heights.
+            captureWorkspaceCentersForResize();
             int oldIconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             int oldColumns = getHomeColumns();
             boolean reduceColumns = newSize > 64 && oldColumns > 5;
             int newColumns = reduceColumns ? 5 : oldColumns;
-            remapHomeIconSlotsForColumnChange(oldColumns, newColumns, oldIconSize, newSize);
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_ICON_SIZE, newSize);
             if (reduceColumns) edit.putInt(KEY_COLUMNS, newColumns);
             edit.apply();
@@ -14585,8 +14737,10 @@ public class MainActivity extends Activity {
         int shortcutSizeMax = Math.max(24, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
         addSliderRowOnStop(content, "Contact shortcut icon size", 24, shortcutSizeMax,
                 Math.max(24, Math.min(shortcutSizeMax, getShortcutIconSizeDp())), " dp", value -> {
+            captureWorkspaceCentersForResize();
             prefs.edit().putInt(KEY_SHORTCUT_ICON_SIZE_DP, value).apply();
             applyShortcutIconSizeToWorkspace();
+            validateWorkspacePagesAfterLayout();
         });
         addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
             prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
