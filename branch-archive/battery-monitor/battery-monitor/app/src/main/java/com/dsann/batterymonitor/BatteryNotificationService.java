@@ -231,8 +231,17 @@ public class BatteryNotificationService extends Service {
         if (dozeSamplingMode) {
             dozeSamplingMode = false;
             cancelDozeWakeup();
+            // Invalidate any pending Doze-cycle callbacks and discard its timed lock.
+            dozeWakeCycleToken++;
+            dozeWakeCycleInFlight = false;
+            if (dozeWakeTimeout != null) handler.removeCallbacks(dozeWakeTimeout);
+            dozeWakeTimeout = null;
+            pendingSampleCompletion = null;
+            releaseCpuLock();
+            acquireCpuLock();
+        } else if (wakeLock == null || !wakeLock.isHeld()) {
+            acquireCpuLock();
         }
-        if (wakeLock == null || !wakeLock.isHeld()) acquireCpuLock();
         if (sampleImmediately) publishNotification();
         startRegularLoops(sampleImmediately);
     }
@@ -391,7 +400,16 @@ public class BatteryNotificationService extends Service {
 
     private void requestSampleUpdate(final Runnable completion) {
         if (!sampleInFlight.compareAndSet(false, true)) {
-            if (completion != null) pendingSampleCompletion = completion;
+            if (completion != null) {
+                pendingSampleCompletion = completion;
+                // Close the small race where the existing sample finishes just as
+                // this request discovers that another sample is in flight.
+                if (!sampleInFlight.get()) {
+                    Runnable deferred = pendingSampleCompletion;
+                    pendingSampleCompletion = null;
+                    if (deferred != null) handler.post(deferred);
+                }
+            }
             return;
         }
         try {
