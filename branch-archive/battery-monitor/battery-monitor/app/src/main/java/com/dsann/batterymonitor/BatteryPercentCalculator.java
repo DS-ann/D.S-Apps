@@ -16,7 +16,6 @@ final class BatteryPercentCalculator {
     private static final String KEY_REMAINING_MAH = "remaining_mah";
     private static final String KEY_LAST_SAMPLE_MS = "last_sample_ms";
     private static final String KEY_LAST_CURRENT = "last_current_ma";
-    private static final String KEY_LAST_CHARGING = "last_charging";
     private static final String KEY_STATUS = "status";
     private static final String KEY_LAST_PERSIST_MS = "last_persist_ms";
 
@@ -29,7 +28,6 @@ final class BatteryPercentCalculator {
     private static boolean loaded;
     private static boolean initialized;
     private static boolean running;
-    private static boolean previousCharging;
     private static long lastSampleMs;
     private static long lastPersistMs;
     private static double capacityMah = Double.NaN;
@@ -66,7 +64,6 @@ final class BatteryPercentCalculator {
         running = true;
         lastSampleMs = System.currentTimeMillis();
         previousCurrentMa = currentMa(reading);
-        previousCharging = BatteryReader.getPowerState(context).isCharging();
         status = "";
         persist(context, lastSampleMs, true);
         return snapshot();
@@ -90,7 +87,6 @@ final class BatteryPercentCalculator {
         remainingMah = 0.0;
         initialized = false;
         running = false;
-        previousCharging = false;
         lastSampleMs = 0L;
         previousCurrentMa = Double.NaN;
         status = "";
@@ -104,34 +100,32 @@ final class BatteryPercentCalculator {
                 || !isAmount(remainingMah)) return snapshot();
 
         long now = System.currentTimeMillis();
-        boolean charging = BatteryReader.getPowerState(context).isCharging();
         long elapsedMs = now - lastSampleMs;
         if (lastSampleMs > 0L && elapsedMs >= 0L && elapsedMs < MIN_SAMPLE_INTERVAL_MS) {
             return snapshot();
         }
 
         double currentMa = currentMa(reading);
-        if (!isAmount(currentMa)) {
+        if (!isFinite(currentMa)) {
             lastSampleMs = now;
             previousCurrentMa = Double.NaN;
-            previousCharging = charging;
             status = "";
             persist(context, now, false);
             return snapshot();
         }
 
         if (lastSampleMs > 0L && elapsedMs > 0L && elapsedMs <= MAX_INTEGRATION_GAP_MS
-                && isAmount(previousCurrentMa)) {
+                && isFinite(previousCurrentMa)) {
             double segmentMah = ((previousCurrentMa + currentMa) / 2.0)
                     * (elapsedMs / 3600000.0);
-            remainingMah += previousCharging ? segmentMah : -segmentMah;
+            // Negative current adds charge; positive current removes charge.
+            remainingMah -= segmentMah;
             remainingMah = clamp(remainingMah, capacityMah);
         }
 
         // If a long gap occurred, hold the last estimate and restart from this sample.
         lastSampleMs = now;
         previousCurrentMa = currentMa;
-        previousCharging = charging;
         persist(context, now, elapsedMs > MAX_INTEGRATION_GAP_MS);
         return snapshot();
     }
@@ -157,9 +151,11 @@ final class BatteryPercentCalculator {
         // Older saved estimates are not automatically resumed: require an explicit Save & start.
         running = version >= 3 && p.getBoolean(KEY_RUNNING, false);
         remainingMah = readDouble(p, KEY_REMAINING_MAH, Double.NaN);
-        lastSampleMs = p.getLong(KEY_LAST_SAMPLE_MS, 0L);
-        previousCurrentMa = readDouble(p, KEY_LAST_CURRENT, Double.NaN);
-        previousCharging = p.getBoolean(KEY_LAST_CHARGING, false);
+        // Version 3 stored absolute current, so its last sample cannot safely seed signed
+        // integration. Preserve the remaining mAh but wait for a fresh signed current sample.
+        lastSampleMs = version >= 4 ? p.getLong(KEY_LAST_SAMPLE_MS, 0L) : 0L;
+        previousCurrentMa = version >= 4
+                ? readDouble(p, KEY_LAST_CURRENT, Double.NaN) : Double.NaN;
         lastPersistMs = p.getLong(KEY_LAST_PERSIST_MS, 0L);
         status = "";
         if (!isValidCapacity(capacityMah) || !isAmount(startingChargeMah)
@@ -172,7 +168,11 @@ final class BatteryPercentCalculator {
 
     private static double currentMa(BatteryReader.Reading reading) {
         if (reading == null || reading.currentUa == Long.MIN_VALUE) return Double.NaN;
-        return Math.abs((double) reading.currentUa) / 1000.0;
+        return (double) reading.currentUa / 1000.0;
+    }
+
+    private static boolean isFinite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value);
     }
 
     private static boolean isValidCapacity(double value) {
@@ -197,7 +197,7 @@ final class BatteryPercentCalculator {
                 && now - lastPersistMs < PERSIST_INTERVAL_MS) return;
         SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         p.edit()
-                .putInt(KEY_ESTIMATOR_VERSION, 3)
+                .putInt(KEY_ESTIMATOR_VERSION, 4)
                 .putLong(KEY_CUSTOM_CAPACITY_MAH, Double.doubleToLongBits(capacityMah))
                 .putLong(KEY_STARTING_CHARGE_MAH, Double.doubleToLongBits(startingChargeMah))
                 .putBoolean(KEY_INITIALIZED, initialized)
@@ -205,7 +205,6 @@ final class BatteryPercentCalculator {
                 .putLong(KEY_REMAINING_MAH, Double.doubleToLongBits(remainingMah))
                 .putLong(KEY_LAST_SAMPLE_MS, lastSampleMs)
                 .putLong(KEY_LAST_CURRENT, Double.doubleToLongBits(previousCurrentMa))
-                .putBoolean(KEY_LAST_CHARGING, previousCharging)
                 .putString(KEY_STATUS, status)
                 .putLong(KEY_LAST_PERSIST_MS, now)
                 .apply();

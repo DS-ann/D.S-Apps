@@ -763,18 +763,19 @@ public class MainActivity extends Activity {
         if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
             capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
         }
-        double rate=BatteryRateAverager.ratePerHour(reading,state,capacityMah);
+        // The signed rate follows actual current, not Android's charger-connected state.
+        double rate=BatteryRateAverager.ratePerHour(reading,capacityMah);
+        boolean validRate=!Double.isNaN(rate)&&!Double.isInfinite(rate);
         if(state==BatteryReader.PowerState.CHARGING){
-            if(!Double.isNaN(rate)&&!Double.isInfinite(rate)){
-                chargingRate=String.format(java.util.Locale.US,"%.2f",rate);
-            }
+            if(validRate)chargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
         }else if(state==BatteryReader.PowerState.DISCHARGING
                 ||state==BatteryReader.PowerState.NOT_CHARGING){
-            if(!Double.isNaN(rate)&&!Double.isInfinite(rate)){
-                dischargingRate=String.format(java.util.Locale.US,"%.2f",rate);
-            }
+            if(validRate)dischargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
         }else if(state==BatteryReader.PowerState.FULL){
-            chargingRate="0.00";
+            if(validRate)chargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
+        }else if(validRate){
+            if(rate>=0.0)chargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
+            else dischargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
         }
         myBatteryRateLabel.setText("Charging rate: "+chargingRate+"%/h\n"
                 +"Discharging rate: "+dischargingRate+"%/h");

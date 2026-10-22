@@ -386,7 +386,7 @@ public class BatteryNotificationService extends Service {
                 ?String.format(java.util.Locale.US,"%.2f%% • %s • %.1f mAh",
                         estimate.percentExact,action,usedMah)
                 :String.format(java.util.Locale.US,"Battery • %s • %.1f mAh",action,usedMah);
-        String rateText=ratePerHourText(latestReading,estimate,powerState);
+        String rateText=ratePerHourText(latestReading,estimate);
 
         Notification.Builder builder=Build.VERSION.SDK_INT>=26
                 ?new Notification.Builder(this,CHANNEL_ID)
@@ -411,15 +411,14 @@ public class BatteryNotificationService extends Service {
     }
 
     private String ratePerHourText(BatteryReader.Reading reading,
-                                   BatteryPercentCalculator.Estimate estimate,
-                                   BatteryReader.PowerState powerState){
+                                   BatteryPercentCalculator.Estimate estimate){
         double capacityMah=estimate==null?Double.NaN:estimate.capacityMah;
         if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
             capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
         }
-        double rate=BatteryRateAverager.ratePerHour(reading,powerState,capacityMah);
+        double rate=BatteryRateAverager.ratePerHour(reading,capacityMah);
         if(Double.isNaN(rate)||Double.isInfinite(rate))return "--%/h";
-        return String.format(java.util.Locale.US,"%.2f%%/h",rate);
+        return String.format(java.util.Locale.US,"%+.2f%%/h",rate);
     }
 
     private int getAndroidBatteryPercent(){
