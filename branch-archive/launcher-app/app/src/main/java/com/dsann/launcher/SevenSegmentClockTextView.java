@@ -567,6 +567,9 @@ public final class SevenSegmentClockTextView extends TextView {
     }
 
     private final android.graphics.Path api23NativeGlyphPath = new android.graphics.Path();
+    // Paint.getTextPath's API-23-compatible overload accepts a char array rather than
+    // CharSequence. Reuse the one-character buffer to avoid per-glyph allocations.
+    private final char[] api23NativeGlyphChars = new char[1];
     private final android.text.TextPaint api23NativeOutlinePaint =
             new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final android.text.TextPaint api23NativeSecondaryPaint =
@@ -612,8 +615,9 @@ public final class SevenSegmentClockTextView extends TextView {
                 float x = layoutOriginX + layout.getPrimaryHorizontal(index);
                 float y = baseline + api23NativeOutlinePaint.baselineShift;
                 api23NativeGlyphPath.reset();
+                api23NativeGlyphChars[0] = ch;
                 api23NativeOutlinePaint.getTextPath(
-                        value, index, index + 1, x, y, api23NativeGlyphPath);
+                        api23NativeGlyphChars, 0, 1, x, y, api23NativeGlyphPath);
                 if (api23NativeGlyphPath.isEmpty()) continue;
 
                 api23NativeOutlinePaint.setColor(Color.WHITE);
