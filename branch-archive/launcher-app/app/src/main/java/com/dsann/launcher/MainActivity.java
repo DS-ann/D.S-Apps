@@ -9842,8 +9842,49 @@ public class MainActivity extends Activity {
         // can shrink and the clock shifts horizontally at a minute/day boundary.
         // Geometry is recalculated on creation, style changes, and explicit resize.
         applyClockColorEffects(clockColorPhase, true);
+        enforceApi23TwoDigitWhiteInnerBorder();
         updateClockResizeHandles();
         applyBrandVisibility();
+    }
+
+    /**
+     * Android 6 uses native TextView glyphs for two-digit standard hours to avoid a
+     * ReplacementSpan rendering failure. Reassert the white inner contour after the
+     * general colour pass, but only for a two-digit hour with gradient/artwork matching.
+     */
+    private void enforceApi23TwoDigitWhiteInnerBorder() {
+        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.M) return;
+        int restorePage = Math.max(0, Math.min(1, activeClockPage));
+        float borderWidth = 2f * getResources().getDisplayMetrics().density;
+        boolean colourEffectEnabled = prefs != null
+                && (prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
+                        || isClockIconArtworkActive());
+        int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+        for (int page = 0; page < clockTextsByPage.length; page++) {
+            TextView target = clockTextsByPage[page];
+            if (!(target instanceof SevenSegmentClockTextView)) continue;
+            activateClockForPage(page);
+            boolean sevenSegment = style == 5;
+            String value = target.getText() == null ? "" : target.getText().toString();
+            int colonAt = value.indexOf(':');
+            int hourDigits = 0;
+            for (int i = 0; colonAt >= 0 && i < colonAt; i++) {
+                if (Character.digit(value.charAt(i), 10) >= 0) hourDigits++;
+            }
+            boolean drawWhiteBorder = !sevenSegment && hourDigits >= 2 && colourEffectEnabled;
+            SevenSegmentClockTextView renderer = (SevenSegmentClockTextView) target;
+            if (drawWhiteBorder) {
+                renderer.setDigitOnlyInnerBorder(false);
+                renderer.setContrastInnerBorderEnabled(true, CLOCK_DIGIT_GRADIENT_COLORS,
+                        borderWidth, CLOCK_WHITE_BORDER_COLORS);
+            } else if (!sevenSegment) {
+                // One-digit clocks use their own TightDigitSpan border. Do not let a
+                // previous two-digit fallback leave a second TextView-wide contour behind.
+                renderer.setContrastInnerBorderEnabled(false, null, 0f, null);
+            }
+            renderer.invalidate();
+        }
+        activateClockForPage(restorePage);
     }
 
     private void installClockWidgetInteraction() {
@@ -14520,6 +14561,7 @@ public class MainActivity extends Activity {
                 activateClockForPage(targetPage);
                 updateClockDigitHorizontalOffset();
                 syncClockColonVerticalCenter();
+                syncNativeClockColonVerticalCenter();
                 if (clockText != null) clockText.invalidate();
                 activateClockForPage(restoreGeometryPage);
             }
