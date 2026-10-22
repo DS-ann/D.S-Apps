@@ -348,13 +348,13 @@ public class BatteryNotificationService extends Service {
 
         boolean available=estimate!=null&&estimate.running&&estimate.isAvailable();
         BatteryReader.PowerState powerState=BatteryReader.getPowerState(this);
-        String action=powerState.notificationLabel();
+        String action=powerState==BatteryReader.PowerState.CHARGING
+                ?"Discharging":powerState.notificationLabel();
         String title=available
-                ?String.format(java.util.Locale.US,"Calculated %.2f%% • %s • %.1f mAh",
+                ?String.format(java.util.Locale.US,"%.2f%% • %s • %.1f mAh",
                         estimate.percentExact,action,usedMah)
                 :String.format(java.util.Locale.US,"Battery • %s • %.1f mAh",action,usedMah);
-        String measuredPercentage=available
-                ?String.format(java.util.Locale.US,"%.2f%%",estimate.percentExact):"--";
+        String rateText=ratePerHourText(latestReading,estimate,powerState);
 
         Notification.Builder builder=Build.VERSION.SDK_INT>=26
                 ?new Notification.Builder(this,CHANNEL_ID)
@@ -365,7 +365,7 @@ public class BatteryNotificationService extends Service {
         }else{
             builder.setSmallIcon(R.drawable.ic_battery_percentage);
         }
-        String details=measuredPercentage+" • Screen ON: "
+        String details=rateText+" • Screen ON: "
                 +SessionStore.formatDuration(screenOnMs)+" • "+liveText;
         builder.setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setContentTitle(title)
@@ -376,6 +376,21 @@ public class BatteryNotificationService extends Service {
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_STATUS);
         return builder.build();
+    }
+
+    private String ratePerHourText(BatteryReader.Reading reading,
+                                   BatteryPercentCalculator.Estimate estimate,
+                                   BatteryReader.PowerState powerState){
+        if(reading==null||reading.currentUa==Long.MIN_VALUE
+                ||estimate==null||!estimate.isAvailable()||estimate.capacityMah<=0.0){
+            return "--%/h";
+        }
+        if(powerState==BatteryReader.PowerState.FULL)return "0.00%/h";
+        if(powerState!=BatteryReader.PowerState.CHARGING
+                &&powerState!=BatteryReader.PowerState.DISCHARGING)return "--%/h";
+        double rate=Math.abs((double)reading.currentUa)/1000.0
+                *100.0/estimate.capacityMah;
+        return String.format(java.util.Locale.US,"%.2f%%/h",rate);
     }
 
     private int getAndroidBatteryPercent(){
@@ -411,7 +426,7 @@ public class BatteryNotificationService extends Service {
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID, "Battery percentage", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Calculated battery percentage and session recording");
+            channel.setDescription("Battery percentage and session recording");
             channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             channel.setShowBadge(false);
             NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);

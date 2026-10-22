@@ -9,7 +9,8 @@ import java.util.Date;
 import java.util.Locale;
 
 final class SessionStore {
-    private static final String PREFS="history", KEY_HISTORY="records", KEY_START="start",
+    private static final String PREFS="history", KEY_HISTORY="records",
+            KEY_CAPACITY_HISTORY="capacity_reports", KEY_START="start",
             KEY_LAST="last", KEY_MAH="mah", KEY_CHARGING="charging",
             KEY_MIN_CURRENT="min_current", KEY_MAX_CURRENT="max_current",
             KEY_START_PERCENT="start_percent", KEY_LAST_PERCENT="last_percent",
@@ -157,59 +158,141 @@ final class SessionStore {
 
     static synchronized ArrayList<Record> getRecords(Context c){
         android.content.SharedPreferences p=c.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
-        String raw=p.getString(KEY_HISTORY,"");
         ArrayList<Record> out=new ArrayList<>();
+        Record active=activeRecord(p);
+        if(active!=null)out.add(active);
+        out.addAll(parseRecords(p.getString(KEY_HISTORY,"")));
+        return out;
+    }
 
-        // Show the currently active session first, so History is live while a session is running.
-        long start=p.getLong(KEY_START,0), last=p.getLong(KEY_LAST,0);
-        if(start!=0&&last!=0){
-            boolean charging=p.getBoolean(KEY_CHARGING,false);
-            double mah=readDouble(p,KEY_MAH,0);
-            double minCurrent=readDouble(p,KEY_MIN_CURRENT,Double.NaN);
-            double maxCurrent=readDouble(p,KEY_MAX_CURRENT,Double.NaN);
-            int startPercent=p.getInt(KEY_START_PERCENT,-1), endPercent=p.getInt(KEY_LAST_PERCENT,-1);
-            out.add(new Record(start,System.currentTimeMillis(),charging,mah,minCurrent,maxCurrent,startPercent,endPercent,
-                    p.getLong(KEY_ON_MS,0),readDouble(p,KEY_ON_MAH,0),readDouble(p,KEY_ON_MIN,Double.NaN),readDouble(p,KEY_ON_MAX,Double.NaN),
-                    p.getInt(KEY_ON_START_PERCENT,-1),p.getInt(KEY_ON_END_PERCENT,-1),
-                    p.getLong(KEY_OFF_MS,0),readDouble(p,KEY_OFF_MAH,0),readDouble(p,KEY_OFF_MIN,Double.NaN),readDouble(p,KEY_OFF_MAX,Double.NaN),
-                    p.getInt(KEY_OFF_START_PERCENT,-1),p.getInt(KEY_OFF_END_PERCENT,-1)));
+    /**
+     * Capacity estimation uses reports independent from visible History. Existing qualifying
+     * charging sessions are migrated before the user clears the visible list.
+     */
+    static synchronized ArrayList<Record> getCapacityRecords(Context c){
+        android.content.SharedPreferences p=c.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+        ArrayList<Record> reports=parseRecords(p.getString(KEY_CAPACITY_HISTORY,""));
+        String savedReports=p.getString(KEY_CAPACITY_HISTORY,"");
+        boolean changed=false;
+        ArrayList<Record> visibleRecords=parseRecords(p.getString(KEY_HISTORY,""));
+        for(Record rec:visibleRecords){
+            if(!qualifiesForCapacity(rec)||containsRecord(reports,rec.start,rec.end))continue;
+            savedReports=appendRecord(savedReports,serializeRecord(rec),0);
+            reports.add(rec);
+            changed=true;
         }
+        if(changed)p.edit().putString(KEY_CAPACITY_HISTORY,savedReports).apply();
 
+        ArrayList<Record> out=new ArrayList<>();
+        Record active=activeRecord(p);
+        if(active!=null)out.add(active);
+        out.addAll(reports);
+        return out;
+    }
+
+    private static Record activeRecord(android.content.SharedPreferences p){
+        long start=p.getLong(KEY_START,0),last=p.getLong(KEY_LAST,0);
+        if(start==0||last==0)return null;
+        return new Record(start,System.currentTimeMillis(),p.getBoolean(KEY_CHARGING,false),
+                readDouble(p,KEY_MAH,0),readDouble(p,KEY_MIN_CURRENT,Double.NaN),
+                readDouble(p,KEY_MAX_CURRENT,Double.NaN),p.getInt(KEY_START_PERCENT,-1),
+                p.getInt(KEY_LAST_PERCENT,-1),p.getLong(KEY_ON_MS,0),readDouble(p,KEY_ON_MAH,0),
+                readDouble(p,KEY_ON_MIN,Double.NaN),readDouble(p,KEY_ON_MAX,Double.NaN),
+                p.getInt(KEY_ON_START_PERCENT,-1),p.getInt(KEY_ON_END_PERCENT,-1),
+                p.getLong(KEY_OFF_MS,0),readDouble(p,KEY_OFF_MAH,0),
+                readDouble(p,KEY_OFF_MIN,Double.NaN),readDouble(p,KEY_OFF_MAX,Double.NaN),
+                p.getInt(KEY_OFF_START_PERCENT,-1),p.getInt(KEY_OFF_END_PERCENT,-1));
+    }
+
+    private static ArrayList<Record> parseRecords(String raw){
+        ArrayList<Record> out=new ArrayList<>();
         if(raw==null||raw.isEmpty())return out;
         String[] lines=raw.split("\\n");
         for(int i=lines.length-1;i>=0;i--){
             String[] x=lines[i].split("\\|");
             if(x.length!=4&&x.length!=8&&x.length!=20)continue;
             try{
-                if(x.length==4) out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),"1".equals(x[2]),Double.parseDouble(x[3]),
-                        Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1));
-                else if(x.length==8) out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),"1".equals(x[2]),Double.parseDouble(x[3]),
-                        Double.parseDouble(x[5]),Double.parseDouble(x[4]),Integer.parseInt(x[6]),Integer.parseInt(x[7]),
+                if(x.length==4)out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),
+                        "1".equals(x[2]),Double.parseDouble(x[3]),Double.NaN,Double.NaN,-1,-1,
                         0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1));
-                else out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),"1".equals(x[2]),Double.parseDouble(x[3]),
-                        Double.parseDouble(x[5]),Double.parseDouble(x[4]),Integer.parseInt(x[6]),Integer.parseInt(x[7]),
-                        Long.parseLong(x[8]),Double.parseDouble(x[9]),Double.parseDouble(x[10]),Double.parseDouble(x[11]),Integer.parseInt(x[12]),Integer.parseInt(x[13]),
-                        Long.parseLong(x[14]),Double.parseDouble(x[15]),Double.parseDouble(x[16]),Double.parseDouble(x[17]),Integer.parseInt(x[18]),Integer.parseInt(x[19])));
+                else if(x.length==8)out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),
+                        "1".equals(x[2]),Double.parseDouble(x[3]),Double.parseDouble(x[5]),
+                        Double.parseDouble(x[4]),Integer.parseInt(x[6]),Integer.parseInt(x[7]),
+                        0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1));
+                else out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),
+                        "1".equals(x[2]),Double.parseDouble(x[3]),Double.parseDouble(x[5]),
+                        Double.parseDouble(x[4]),Integer.parseInt(x[6]),Integer.parseInt(x[7]),
+                        Long.parseLong(x[8]),Double.parseDouble(x[9]),Double.parseDouble(x[10]),
+                        Double.parseDouble(x[11]),Integer.parseInt(x[12]),Integer.parseInt(x[13]),
+                        Long.parseLong(x[14]),Double.parseDouble(x[15]),Double.parseDouble(x[16]),
+                        Double.parseDouble(x[17]),Integer.parseInt(x[18]),Integer.parseInt(x[19])));
             }catch(Exception ignored){}
         }
         return out;
     }
 
-    static synchronized void clear(Context c){c.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().clear().apply();}
+    private static boolean qualifiesForCapacity(Record rec){
+        return rec!=null&&rec.charging&&rec.startPercent>=0&&rec.endPercent>=0
+                &&rec.endPercent-rec.startPercent>=40&&rec.mah>0.0;
+    }
+
+    private static boolean containsRecord(ArrayList<Record> records,long start,long end){
+        for(Record rec:records)if(rec.start==start&&rec.end==end)return true;
+        return false;
+    }
+
+    private static String serializeRecord(Record rec){
+        return rec.start+"|"+rec.end+"|"+(rec.charging?"1":"0")+"|"+
+                String.format(Locale.US,"%.1f",rec.mah)+"|"+
+                String.format(Locale.US,"%.1f",rec.maxCurrent)+"|"+
+                String.format(Locale.US,"%.1f",rec.minCurrent)+"|"+rec.startPercent+"|"+rec.endPercent+"|"+
+                rec.onMs+"|"+String.format(Locale.US,"%.1f",rec.onMah)+"|"+
+                String.format(Locale.US,"%.1f",rec.onMin)+"|"+String.format(Locale.US,"%.1f",rec.onMax)+"|"+
+                rec.onStartPercent+"|"+rec.onEndPercent+"|"+
+                rec.offMs+"|"+String.format(Locale.US,"%.1f",rec.offMah)+"|"+
+                String.format(Locale.US,"%.1f",rec.offMin)+"|"+String.format(Locale.US,"%.1f",rec.offMax)+"|"+
+                rec.offStartPercent+"|"+rec.offEndPercent;
+    }
+
+    private static String appendRecord(String existing,String record,int maxRecords){
+        String value=(existing==null||existing.isEmpty())?record:existing+"\n"+record;
+        if(maxRecords>0){
+            String[] rows=value.split("\\n");
+            if(rows.length>maxRecords){
+                StringBuilder b=new StringBuilder();
+                for(int i=rows.length-maxRecords;i<rows.length;i++){
+                    if(b.length()>0)b.append('\n');
+                    b.append(rows[i]);
+                }
+                value=b.toString();
+            }
+        }
+        return value;
+    }
+
+    static synchronized void clear(Context c){
+        // Keep the live session and independent capacity reports when clearing visible History.
+        getCapacityRecords(c);
+        c.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove(KEY_HISTORY).apply();
+    }
 
     private static void addRecord(android.content.SharedPreferences p,long start,long end,boolean charging,double mah,double minCurrent,double maxCurrent,
-                                  int startPercent,int endPercent,long onMs,double onMah,double onMin,double onMax,int onStartPercent,int onEndPercent,
-                                  long offMs,double offMah,double offMin,double offMax,int offStartPercent,int offEndPercent){
+                                   int startPercent,int endPercent,long onMs,double onMah,double onMin,double onMax,int onStartPercent,int onEndPercent,
+                                   long offMs,double offMah,double offMin,double offMax,int offStartPercent,int offEndPercent){
         if(end<=start||mah<0.01)return;
-        String old=p.getString(KEY_HISTORY,"");
         String rec=start+"|"+end+"|"+(charging?"1":"0")+"|"+String.format(Locale.US,"%.1f",mah)+"|"+
                 String.format(Locale.US,"%.1f",maxCurrent)+"|"+String.format(Locale.US,"%.1f",minCurrent)+"|"+startPercent+"|"+endPercent+"|"+
                 onMs+"|"+String.format(Locale.US,"%.1f",onMah)+"|"+String.format(Locale.US,"%.1f",onMin)+"|"+String.format(Locale.US,"%.1f",onMax)+"|"+onStartPercent+"|"+onEndPercent+"|"+
                 offMs+"|"+String.format(Locale.US,"%.1f",offMah)+"|"+String.format(Locale.US,"%.1f",offMin)+"|"+String.format(Locale.US,"%.1f",offMax)+"|"+offStartPercent+"|"+offEndPercent;
-        String s=(old==null||old.isEmpty())?rec:old+"\n"+rec;
-        String[] a=s.split("\\n");
-        if(a.length>100){StringBuilder b=new StringBuilder();for(int i=a.length-100;i<a.length;i++){if(b.length()>0)b.append('\n');b.append(a[i]);}s=b.toString();}
-        p.edit().putString(KEY_HISTORY,s).apply();
+        String historyValue=appendRecord(p.getString(KEY_HISTORY,""),rec,100);
+        android.content.SharedPreferences.Editor editor=p.edit().putString(KEY_HISTORY,historyValue);
+        if(charging&&startPercent>=0&&endPercent>=0&&endPercent-startPercent>=40&&mah>0.0){
+            String capacityRaw=p.getString(KEY_CAPACITY_HISTORY,"");
+            if(!containsRecord(parseRecords(capacityRaw),start,end)){
+                editor.putString(KEY_CAPACITY_HISTORY,appendRecord(capacityRaw,rec,0));
+            }
+        }
+        editor.apply();
     }
 
     private static double readDouble(android.content.SharedPreferences p,String key,double fallback){
