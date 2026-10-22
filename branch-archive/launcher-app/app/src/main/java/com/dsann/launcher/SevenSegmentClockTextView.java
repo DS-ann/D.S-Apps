@@ -641,7 +641,7 @@ public final class SevenSegmentClockTextView extends TextView {
                         api23NativeGlyphPath, api23NativeGlyphMask);
                 if (hasInnerContour) {
                     hasInnerContour = api23NativeGlyphMask.op(
-                            api23NativeGlyphPath, Path.Op.INTERSECT);
+                            api23NativeGlyphPath, android.graphics.Path.Op.INTERSECT);
                 }
                 if (hasInnerContour) {
                     api23NativeMaskPaint.set(api23NativeOutlinePaint);
@@ -671,7 +671,7 @@ public final class SevenSegmentClockTextView extends TextView {
                             api23NativeGlyphPath, api23NativeGlyphMask);
                     if (hasSecondaryContour) {
                         hasSecondaryContour = api23NativeGlyphMask.op(
-                                api23NativeGlyphPath, Path.Op.INTERSECT);
+                                api23NativeGlyphPath, android.graphics.Path.Op.INTERSECT);
                     }
                     if (hasSecondaryContour) {
                         api23NativeSecondaryPaint.setStyle(Paint.Style.FILL);
