@@ -33,6 +33,8 @@ public class BatteryNotificationService extends Service {
     private static final String KEY_USE_ANDROID_PERCENT = "my_battery_use_android_percent";
     private static final String KEY_RESET_PENDING = "my_battery_android_percent_reset_pending";
     private static final String KEY_LAST_ANDROID_PERCENT = "my_battery_last_android_percent";
+    private static final String KEY_LAST_ANDROID_POWER_STATUS = "my_battery_last_android_power_status";
+    private static final String KEY_LAST_ANDROID_POWER_SOURCE = "my_battery_last_android_power_source";
     private static final String KEY_CALCULATOR_RUNNING = "running";
     private static final String KEY_NOTIFICATION_ENABLED = "notification_enabled";
     private static final long MIN_INTERVAL_MS = 100L;
@@ -50,6 +52,8 @@ public class BatteryNotificationService extends Service {
     private long lastCalculatorSampleMs;
     private long lastNotificationUpdateMs;
     private long lastRootCommandMs;
+    private int lastAttemptedPowerStatus = -1;
+    private int lastAttemptedPowerSource = -1;
     private boolean rootCommandInFlight;
     private final ExecutorService rootExecutor=Executors.newSingleThreadExecutor();
     private PowerManager.WakeLock wakeLock;
@@ -196,23 +200,52 @@ public class BatteryNotificationService extends Service {
     }
 
     private void applyCalculatedAndroidPercentage(BatteryPercentCalculator.Estimate estimate, long now) {
-        if(rootCommandInFlight)return;
-        android.content.SharedPreferences prefs=getSharedPreferences(PREFS,MODE_PRIVATE);
-        int requested=(int)Math.round(estimate.percentExact);
-        if(prefs.getInt(KEY_LAST_ANDROID_PERCENT,-1)==requested)return;
-        if(lastRootCommandMs>0L&&now>=lastRootCommandMs&&now-lastRootCommandMs<ROOT_RETRY_GAP_MS)return;
-        lastRootCommandMs=now;
-        rootCommandInFlight=true;
-        rootExecutor.execute(()->{
-            BatteryPercentOverride.Result result=BatteryPercentOverride.set(requested);
-            handler.post(()->{
-                rootCommandInFlight=false;
-                android.content.SharedPreferences current=getSharedPreferences(PREFS,MODE_PRIVATE);
-                if(result.success){
-                    current.edit().putInt(KEY_LAST_ANDROID_PERCENT,requested)
-                            .putBoolean(KEY_RESET_PENDING,false).apply();
-                }else{
-                    current.edit().remove(KEY_LAST_ANDROID_PERCENT).apply();
+        if (rootCommandInFlight) return;
+
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        int requested = (int) Math.round(estimate.percentExact);
+        BatteryReader.PowerInfo powerInfo = BatteryReader.getPowerInfo(this);
+        int status = powerInfo.androidStatus;
+        int sourceMask = powerInfo.sourceMask();
+        int previousPercent = prefs.getInt(KEY_LAST_ANDROID_PERCENT, -1);
+        int previousStatus = prefs.getInt(KEY_LAST_ANDROID_POWER_STATUS, -1);
+        int previousSourceMask = prefs.getInt(KEY_LAST_ANDROID_POWER_SOURCE, -1);
+
+        boolean percentChanged = previousPercent != requested;
+        boolean powerStateChanged = previousStatus != status
+                || previousSourceMask != sourceMask;
+        if (!percentChanged && !powerStateChanged) return;
+
+        // Percentage changes can be rate-limited, but a physical charge/unplug transition
+        // should synchronize immediately. Failed state updates are still throttled.
+        boolean newPhysicalStateSinceAttempt = status != lastAttemptedPowerStatus
+                || sourceMask != lastAttemptedPowerSource;
+        if (lastRootCommandMs > 0L && now >= lastRootCommandMs
+                && now - lastRootCommandMs < ROOT_RETRY_GAP_MS
+                && !newPhysicalStateSinceAttempt) return;
+
+        lastRootCommandMs = now;
+        lastAttemptedPowerStatus = status;
+        lastAttemptedPowerSource = sourceMask;
+        rootCommandInFlight = true;
+        rootExecutor.execute(() -> {
+            BatteryPercentOverride.Result result = BatteryPercentOverride.set(
+                    requested, powerInfo, previousPercent, previousStatus, previousSourceMask);
+            handler.post(() -> {
+                rootCommandInFlight = false;
+                android.content.SharedPreferences current = getSharedPreferences(PREFS, MODE_PRIVATE);
+                if (result.success) {
+                    current.edit()
+                            .putInt(KEY_LAST_ANDROID_PERCENT, requested)
+                            .putInt(KEY_LAST_ANDROID_POWER_STATUS, status)
+                            .putInt(KEY_LAST_ANDROID_POWER_SOURCE, sourceMask)
+                            .putBoolean(KEY_RESET_PENDING, false)
+                            .apply();
+                } else {
+                    current.edit().remove(KEY_LAST_ANDROID_PERCENT)
+                            .remove(KEY_LAST_ANDROID_POWER_STATUS)
+                            .remove(KEY_LAST_ANDROID_POWER_SOURCE)
+                            .apply();
                 }
             });
         });
@@ -231,7 +264,11 @@ public class BatteryNotificationService extends Service {
                 rootCommandInFlight=false;
                 if(result.success){
                     getSharedPreferences(PREFS,MODE_PRIVATE).edit()
-                            .putBoolean(KEY_RESET_PENDING,false).remove(KEY_LAST_ANDROID_PERCENT).apply();
+                            .putBoolean(KEY_RESET_PENDING,false)
+                            .remove(KEY_LAST_ANDROID_PERCENT)
+                            .remove(KEY_LAST_ANDROID_POWER_STATUS)
+                            .remove(KEY_LAST_ANDROID_POWER_SOURCE)
+                            .apply();
                 }
             });
         });
