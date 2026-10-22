@@ -200,6 +200,23 @@ final class HomePageController {
                 int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
                 int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
                         actualPageWidth / columns);
+                // Keep artwork inside its assigned slot. Otherwise larger configured
+                // icons overlap neighbouring items and collision repair moves them to
+                // another row even though the user's grid position has not changed.
+                int maxArtworkSize = Math.max(1,
+                        cellWidth - LauncherUiUtils.dp(activity, 4));
+                if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 0
+                        && ((ViewGroup) cell).getChildAt(0) instanceof android.widget.ImageView) {
+                    View iconView = ((ViewGroup) cell).getChildAt(0);
+                    ViewGroup.LayoutParams iconParams = iconView.getLayoutParams();
+                    if (iconParams != null) {
+                        int fittedSize = Math.min(LauncherUiUtils.dp(activity, configuredIconSize),
+                                maxArtworkSize);
+                        iconParams.width = fittedSize;
+                        iconParams.height = fittedSize;
+                        iconView.setLayoutParams(iconParams);
+                    }
+                }
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;

@@ -4156,15 +4156,20 @@ public class MainActivity extends Activity {
                         .apply();
             }
 
+            // Large configured artwork must not extend into neighbouring grid cells.
+            // Keep the logical slot unchanged and fit only the visible logo to that cell.
+            int visibleGroupIconSizePx = Math.max(1, Math.min(iconSizePx,
+                    cellWidth - LauncherUiUtils.dp(this, 4)));
             FrameLayout cell = new FrameLayout(this);
             cell.setTag(APP_GROUP_TAG_PREFIX + id);
             cell.setContentDescription("App group: " + getAppGroupLabel(id));
             cell.setClipChildren(false);
             cell.setClipToPadding(false);
             int iconTop = LauncherUiUtils.dp(this, 14);
-            FrameLayout logo = createAppGroupLogo(id, iconSizePx);
+            FrameLayout logo = createAppGroupLogo(id, visibleGroupIconSizePx);
             FrameLayout.LayoutParams logoParams = new FrameLayout.LayoutParams(
-                    iconSizePx, iconSizePx, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                    visibleGroupIconSizePx, visibleGroupIconSizePx,
+                    Gravity.TOP | Gravity.CENTER_HORIZONTAL);
             logoParams.topMargin = iconTop;
             cell.addView(logo, logoParams);
 
@@ -4183,7 +4188,8 @@ public class MainActivity extends Activity {
             int labelHeight = workspaceLabelHeightPx(label);
             FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
                     cellWidth, labelHeight, Gravity.TOP | Gravity.LEFT);
-            labelParams.topMargin = iconTop + iconSizePx + LauncherUiUtils.dp(this, 1);
+            labelParams.topMargin = iconTop + visibleGroupIconSizePx
+                    + LauncherUiUtils.dp(this, 1);
             cell.addView(label, labelParams);
             label.setVisibility(prefs.getBoolean("show_home_labels", true)
                     ? View.VISIBLE : View.GONE);
