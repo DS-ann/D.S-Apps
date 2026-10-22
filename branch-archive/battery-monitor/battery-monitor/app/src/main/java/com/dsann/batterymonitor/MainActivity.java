@@ -23,6 +23,10 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends Activity {
     private static final String PREFS="settings";
@@ -42,6 +46,11 @@ public class MainActivity extends Activity {
     private static final long RECORDING_INTERVAL_STEP_MS=10L;
     private static final long DEFAULT_RECORDING_INTERVAL_MS=1000L;
     private final Handler handler=new Handler(Looper.getMainLooper());
+    private final ExecutorService sensorExecutor=Executors.newSingleThreadExecutor();
+    private final AtomicBoolean monitorReadInFlight=new AtomicBoolean(false);
+    private final AtomicBoolean myBatteryReadInFlight=new AtomicBoolean(false);
+    private final AtomicBoolean healthReadInFlight=new AtomicBoolean(false);
+    private final AtomicBoolean calculatorStartInFlight=new AtomicBoolean(false);
     private TextView voltage,current;
     private TextView calculatedPercent,calculatedMah,myBatteryCurrentLabel,myBatteryRateLabel,androidPercentStatus;
     private EditText customCapacityInput,startingChargeInput;
@@ -56,8 +65,8 @@ public class MainActivity extends Activity {
     private LinearLayout healthView;
     private ScrollView healthScroll;
     private TextView healthLevel,healthStatus,healthTemp,healthVoltage,healthCurrent,healthSource,healthFullCharge,healthRemaining,healthDesign,healthRatio,healthRaw,healthFile,healthFullEnergy,healthDesignEnergy,healthSessionEstimate,healthSessionHealth;
-    private final Runnable updater=new Runnable(){public void run(){updateValues();handler.postDelayed(this,currentRecordingIntervalMs());}};
-    private final Runnable myBatteryUpdater=new Runnable(){public void run(){updateMyBatteryEstimate();handler.postDelayed(this,currentMyBatteryIntervalMs());}};
+    private final Runnable updater=new Runnable(){public void run(){if(monitorContainer==null||monitorContainer.getVisibility()==View.VISIBLE)updateValues();handler.postDelayed(this,currentRecordingIntervalMs());}};
+    private final Runnable myBatteryUpdater=new Runnable(){public void run(){if(myBatteryScroll==null||myBatteryScroll.getVisibility()==View.VISIBLE)updateMyBatteryEstimate();handler.postDelayed(this,currentMyBatteryIntervalMs());}};
     
     @Override protected void onCreate(Bundle state){
         super.onCreate(state);
@@ -211,8 +220,18 @@ public class MainActivity extends Activity {
         dozeBox.addView(dozeStatus,top(4));
         r.addView(dozeBox,top(12));
         
-        enableDoze.setOnClickListener(v->{DozeController.Result result=DozeController.forceDoze();dozeStatus.setText(result.message);});
-        disableDoze.setOnClickListener(v->{DozeController.Result result=DozeController.disableForceDoze();dozeStatus.setText(result.message);});
+        enableDoze.setOnClickListener(v->{
+            try{sensorExecutor.execute(()->{
+                DozeController.Result result=DozeController.forceDoze();
+                runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())dozeStatus.setText(result.message);});
+            });}catch(RejectedExecutionException ignored){}
+        });
+        disableDoze.setOnClickListener(v->{
+            try{sensorExecutor.execute(()->{
+                DozeController.Result result=DozeController.disableForceDoze();
+                runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())dozeStatus.setText(result.message);});
+            });}catch(RejectedExecutionException ignored){}
+        });
         
         LinearLayout percentBox=toolCard("Battery percentage override","Temporarily change Android's displayed battery level.");
         LinearLayout percentRow=new LinearLayout(this);
@@ -239,13 +258,36 @@ public class MainActivity extends Activity {
         setPercent.setOnClickListener(v->{
             String value=percentInput.getText().toString().trim();
             if(value.isEmpty()){percentStatus.setText("Enter a value from 0 to 100.");return;}
+            final int requested;
+            try{requested=Integer.parseInt(value);}
+            catch(NumberFormatException e){percentStatus.setText("Enter a value from 0 to 100.");return;}
+            setPercent.setEnabled(false);
             try{
-                BatteryPercentOverride.Result result=BatteryPercentOverride.set(
-                        Integer.parseInt(value),BatteryReader.getPowerInfo(this));
-                percentStatus.setText(result.message);
-            }catch(NumberFormatException e){percentStatus.setText("Enter a value from 0 to 100.");}
+                sensorExecutor.execute(()->{
+                    BatteryPercentOverride.Result result;
+                    try{result=BatteryPercentOverride.set(requested,BatteryReader.getPowerInfo(MainActivity.this));}
+                    catch(Throwable error){result=new BatteryPercentOverride.Result(false,
+                            error.getMessage()==null?"Root command failed.":error.getMessage());}
+                    final BatteryPercentOverride.Result finalResult=result;
+                    runOnUiThread(()->{
+                        if(!isFinishing()&&!isDestroyed())percentStatus.setText(finalResult.message);
+                        setPercent.setEnabled(true);
+                    });
+                });
+            }catch(RejectedExecutionException ignored){setPercent.setEnabled(true);}
         });
-        resetPercent.setOnClickListener(v->{BatteryPercentOverride.Result result=BatteryPercentOverride.reset();percentStatus.setText(result.message);});
+        resetPercent.setOnClickListener(v->{
+            resetPercent.setEnabled(false);
+            try{
+                sensorExecutor.execute(()->{
+                    BatteryPercentOverride.Result result=BatteryPercentOverride.reset();
+                    runOnUiThread(()->{
+                        if(!isFinishing()&&!isDestroyed())percentStatus.setText(result.message);
+                        resetPercent.setEnabled(true);
+                    });
+                });
+            }catch(RejectedExecutionException ignored){resetPercent.setEnabled(true);}
+        });
         
         notificationSwitch.setOnCheckedChangeListener((b,on)->{
             getSharedPreferences(PREFS,0).edit().putBoolean("notification_enabled",on).apply();
@@ -447,30 +489,101 @@ public class MainActivity extends Activity {
         if(index==2){refreshHistory();handler.postDelayed(historyUpdater,10000);}
         else if(index==3) refreshHealth();
     }
+    private static final class HealthSnapshot {
+        String level="--";
+        String status="Status: unavailable";
+        String voltage="N/A";
+        String temperature="N/A";
+        String current="N/A";
+        String source="Unavailable";
+        String fullCharge="Unavailable";
+        String remaining="Unavailable";
+        String design="Unavailable";
+        String ratio="Unavailable";
+        String raw="Unavailable";
+        String file="Unavailable";
+        String fullEnergy="Unavailable";
+        String designEnergy="Unavailable";
+        String sessionEstimate="Unavailable";
+        String sessionHealth="Unavailable";
+    }
+
     private void refreshHealth(){
+        if(!healthReadInFlight.compareAndSet(false,true))return;
         try{
-            android.content.Intent b=registerReceiver(null,new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
-            if(b!=null){
-                int level=b.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL,-1), scale=b.getIntExtra(android.os.BatteryManager.EXTRA_SCALE,100); int pct=(level>=0&&scale>0)?Math.round(level*100f/scale):-1;
-                healthLevel.setText(pct>=0?pct+"%":"--"); int status=b.getIntExtra(android.os.BatteryManager.EXTRA_STATUS,-1);
-                healthStatus.setText("Status: "+(status==android.os.BatteryManager.BATTERY_STATUS_CHARGING?"Charging":status==android.os.BatteryManager.BATTERY_STATUS_FULL?"Full":"Discharging / idle"));
-                int mv=b.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE,0); healthVoltage.setText(mv>0?String.format(java.util.Locale.US,"%.3f V",mv/1000.0):"N/A");
-                int temp=b.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE,0); healthTemp.setText(temp!=0?String.format(java.util.Locale.US,"%.1f °C",temp/10.0):"N/A");
-            }
-            BatteryReader.Reading rr=BatteryReader.read(this); healthCurrent.setText(rr.currentText()); healthSource.setText(rr.currentUa!=Long.MIN_VALUE?"Fuel gauge":"Android");
-            BatteryHealthReader.Data d=BatteryHealthReader.read(this);
-            healthFullCharge.setText(d.charge(d.fullChargeUaH)); healthRemaining.setText(d.charge(d.remainingChargeUaH)); healthDesign.setText(d.charge(d.designChargeUaH));
-            healthRatio.setText(Double.isNaN(d.ratio)?"Unavailable":String.format(java.util.Locale.US,"%.1f %%",d.ratio));
-            healthRaw.setText(d.rawHealth==null?"Unavailable":d.rawHealth); healthFile.setText(d.sourceFile);
-            healthFullEnergy.setText(d.energy(d.fullEnergyUWh)); healthDesignEnergy.setText(d.energy(d.designEnergyUWh));
-            SessionEstimate est=estimateFromSessions();
-            healthSessionEstimate.setText(est.capacityMah>0?String.format(java.util.Locale.US,"%.0f mAh",est.capacityMah):"Unavailable");
-            healthSessionHealth.setText(est.health>0?String.format(java.util.Locale.US,"%.1f %%  •  %d qualifying sessions",est.health,est.count):"Unavailable");
-        }catch(Throwable ignored){
-            healthLevel.setText("--"); healthStatus.setText("Status: unavailable"); healthVoltage.setText("N/A"); healthTemp.setText("N/A"); healthCurrent.setText("N/A"); healthSource.setText("Unavailable");
-            healthFullCharge.setText("Unavailable"); healthRemaining.setText("Unavailable"); healthDesign.setText("Unavailable"); healthRatio.setText("Unavailable"); healthRaw.setText("Unavailable"); healthFile.setText("Unavailable"); healthFullEnergy.setText("Unavailable"); healthDesignEnergy.setText("Unavailable"); healthSessionEstimate.setText("Unavailable"); healthSessionHealth.setText("Unavailable");
+            sensorExecutor.execute(()->{
+                HealthSnapshot snapshot=new HealthSnapshot();
+                try{
+                    android.content.Intent b=registerReceiver(null,
+                            new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+                    if(b!=null){
+                        int level=b.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL,-1);
+                        int scale=b.getIntExtra(android.os.BatteryManager.EXTRA_SCALE,100);
+                        int pct=(level>=0&&scale>0)?Math.round(level*100f/scale):-1;
+                        snapshot.level=pct>=0?pct+"%":"--";
+                        int status=b.getIntExtra(android.os.BatteryManager.EXTRA_STATUS,-1);
+                        snapshot.status="Status: "+(status==android.os.BatteryManager.BATTERY_STATUS_CHARGING
+                                ?"Charging":status==android.os.BatteryManager.BATTERY_STATUS_FULL
+                                ?"Full":"Discharging / idle");
+                        int mv=b.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE,0);
+                        snapshot.voltage=mv>0?String.format(java.util.Locale.US,"%.3f V",mv/1000.0):"N/A";
+                        int temp=b.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE,0);
+                        snapshot.temperature=temp!=0?String.format(java.util.Locale.US,"%.1f °C",temp/10.0):"N/A";
+                    }
+                    BatteryReader.Reading reading=BatteryReader.read(MainActivity.this);
+                    snapshot.current=reading.currentText();
+                    snapshot.source=reading.currentUa!=Long.MIN_VALUE?"Fuel gauge":"Android";
+                    BatteryHealthReader.Data data=BatteryHealthReader.read(MainActivity.this);
+                    snapshot.fullCharge=data.charge(data.fullChargeUaH);
+                    snapshot.remaining=data.charge(data.remainingChargeUaH);
+                    snapshot.design=data.charge(data.designChargeUaH);
+                    snapshot.ratio=Double.isNaN(data.ratio)?"Unavailable"
+                            :String.format(java.util.Locale.US,"%.1f %%",data.ratio);
+                    snapshot.raw=data.rawHealth==null?"Unavailable":data.rawHealth;
+                    snapshot.file=data.sourceFile;
+                    snapshot.fullEnergy=data.energy(data.fullEnergyUWh);
+                    snapshot.designEnergy=data.energy(data.designEnergyUWh);
+                    SessionEstimate estimate=estimateFromSessions();
+                    snapshot.sessionEstimate=estimate.capacityMah>0
+                            ?String.format(java.util.Locale.US,"%.0f mAh",estimate.capacityMah)
+                            :"Unavailable";
+                    snapshot.sessionHealth=estimate.health>0
+                            ?String.format(java.util.Locale.US,"%.1f %%  •  %d qualifying sessions",
+                                    estimate.health,estimate.count)
+                            :"Unavailable";
+                }catch(Throwable ignored){
+                    // Return whatever was read; a later refresh retries missing fields.
+                }
+                final HealthSnapshot result=snapshot;
+                runOnUiThread(()->{
+                    try{
+                        if(isFinishing()||isDestroyed())return;
+                        healthLevel.setText(result.level);
+                        healthStatus.setText(result.status);
+                        healthVoltage.setText(result.voltage);
+                        healthTemp.setText(result.temperature);
+                        healthCurrent.setText(result.current);
+                        healthSource.setText(result.source);
+                        healthFullCharge.setText(result.fullCharge);
+                        healthRemaining.setText(result.remaining);
+                        healthDesign.setText(result.design);
+                        healthRatio.setText(result.ratio);
+                        healthRaw.setText(result.raw);
+                        healthFile.setText(result.file);
+                        healthFullEnergy.setText(result.fullEnergy);
+                        healthDesignEnergy.setText(result.designEnergy);
+                        healthSessionEstimate.setText(result.sessionEstimate);
+                        healthSessionHealth.setText(result.sessionHealth);
+                    }finally{
+                        healthReadInFlight.set(false);
+                    }
+                });
+            });
+        }catch(RejectedExecutionException ignored){
+            healthReadInFlight.set(false);
         }
     }
+
     private SessionEstimate estimateFromSessions(){
         ArrayList<SessionStore.Record> records=SessionStore.getRecords(this);
         double weightedCapacity=0;
@@ -540,36 +653,81 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(historyUpdater);
         super.onPause();
     }
+
+    @Override protected void onDestroy(){
+        handler.removeCallbacks(updater);
+        handler.removeCallbacks(myBatteryUpdater);
+        handler.removeCallbacks(historyUpdater);
+        sensorExecutor.shutdownNow();
+        super.onDestroy();
+    }
     
     private void updateValues(){
-        try {
-            BatteryReader.Reading r=BatteryReader.read(this);
-            voltage.setText(r.voltageText());
-            current.setText(r.currentText());
-
-        } catch (Throwable ignored) {
-            voltage.setText("N/A");
-            current.setText("N/A");
+        if(monitorContainer!=null&&monitorContainer.getVisibility()!=View.VISIBLE)return;
+        if(!monitorReadInFlight.compareAndSet(false,true))return;
+        try{
+            sensorExecutor.execute(()->{
+                BatteryReader.Reading reading=null;
+                try{reading=BatteryReader.read(MainActivity.this);}catch(Throwable ignored){}
+                final BatteryReader.Reading result=reading;
+                try{
+                    runOnUiThread(()->{
+                        if(isFinishing()||isDestroyed()||voltage==null||current==null)return;
+                        if(result==null){
+                            voltage.setText("N/A");
+                            current.setText("N/A");
+                        }else{
+                            voltage.setText(result.voltageText());
+                            current.setText(result.currentText());
+                        }
+                    });
+                }finally{
+                    monitorReadInFlight.set(false);
+                }
+            });
+        }catch(RejectedExecutionException ignored){
+            monitorReadInFlight.set(false);
         }
     }
 
     private void updateMyBatteryEstimate(){
+        if(myBatteryScroll!=null&&myBatteryScroll.getVisibility()!=View.VISIBLE)return;
+        if(!myBatteryReadInFlight.compareAndSet(false,true))return;
         try{
-            BatteryReader.Reading reading=BatteryReader.read(this);
-            if(myBatteryCurrentLabel!=null)myBatteryCurrentLabel.setText("Current: "+reading.currentText());
-            updateBatteryRates(reading);
-            android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
-            boolean serviceActive=prefs.getBoolean("notification_enabled",false)
-                    ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
-                    ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
-                    ||BatteryPercentCalculator.isRunning(this);
-            updateCalculatedLevel(serviceActive
-                    ?BatteryPercentCalculator.current(this)
-                    :BatteryPercentCalculator.sample(this,reading));
-        }catch(Throwable ignored){
-            if(myBatteryCurrentLabel!=null)myBatteryCurrentLabel.setText("Current: N/A");
-            updateBatteryRates(null);
-            updateCalculatedLevel(BatteryPercentCalculator.current(this));
+            sensorExecutor.execute(()->{
+                BatteryReader.Reading reading=null;
+                BatteryPercentCalculator.Estimate estimate=BatteryPercentCalculator.current(MainActivity.this);
+                try{
+                    reading=BatteryReader.read(MainActivity.this);
+                    android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
+                    boolean serviceActive=prefs.getBoolean("notification_enabled",false)
+                            ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                            ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                            ||BatteryPercentCalculator.isRunning(MainActivity.this);
+                    estimate=serviceActive
+                            ?BatteryPercentCalculator.current(MainActivity.this)
+                            :BatteryPercentCalculator.sample(MainActivity.this,reading);
+                }catch(Throwable ignored){
+                    estimate=BatteryPercentCalculator.current(MainActivity.this);
+                }
+                final BatteryReader.Reading readingResult=reading;
+                final BatteryPercentCalculator.Estimate estimateResult=estimate;
+                try{
+                    runOnUiThread(()->{
+                        if(isFinishing()||isDestroyed())return;
+                        if(myBatteryCurrentLabel!=null){
+                            myBatteryCurrentLabel.setText("Current: "
+                                    +(readingResult==null?"N/A":readingResult.currentText()));
+                        }
+                        updateBatteryRates(readingResult);
+                        updateCalculatedLevel(estimateResult);
+                    });
+                }finally{
+                    myBatteryReadInFlight.set(false);
+                }
+            });
+        }catch(RejectedExecutionException ignored){
+            myBatteryReadInFlight.set(false);
         }
     }
 
@@ -628,12 +786,32 @@ public class MainActivity extends Activity {
                 Toast.makeText(this,"Starting charge must be between 0 and the capacity.",Toast.LENGTH_SHORT).show();
                 return;
             }
-            BatteryPercentCalculator.Estimate estimate=BatteryPercentCalculator.startEstimate(
-                    this,capacity,starting,BatteryReader.read(this));
-            updateCalculatedLevel(estimate);
-            if(estimate.isAvailable()&&estimate.running){
-                startNotificationService();
-                requestBatteryOptimizationExemption();
+            if(!calculatorStartInFlight.compareAndSet(false,true))return;
+            try{
+                sensorExecutor.execute(()->{
+                    BatteryPercentCalculator.Estimate estimate;
+                    try{
+                        estimate=BatteryPercentCalculator.startEstimate(MainActivity.this,capacity,starting,
+                                BatteryReader.read(MainActivity.this));
+                    }catch(Throwable ignored){
+                        estimate=BatteryPercentCalculator.current(MainActivity.this);
+                    }
+                    final BatteryPercentCalculator.Estimate result=estimate;
+                    runOnUiThread(()->{
+                        try{
+                            if(isFinishing()||isDestroyed())return;
+                            updateCalculatedLevel(result);
+                            if(result.isAvailable()&&result.running){
+                                startNotificationService();
+                                requestBatteryOptimizationExemption();
+                            }
+                        }finally{
+                            calculatorStartInFlight.set(false);
+                        }
+                    });
+                });
+            }catch(RejectedExecutionException ignored){
+                calculatorStartInFlight.set(false);
             }
         }catch(NumberFormatException e){
             Toast.makeText(this,"Enter valid numeric mAh values.",Toast.LENGTH_SHORT).show();

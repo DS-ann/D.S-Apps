@@ -149,10 +149,8 @@ final class RootShell {
             if (input != null) input.close();
         } catch (Exception ignored) {
         }
-        try {
-            if (output != null) output.close();
-        } catch (Exception ignored) {
-        }
+        // Do not call BufferedReader.close() here: a timed-out daemon thread may still be
+        // inside readLine() and close() would wait on that same reader lock.
         input = null;
         output = null;
         process = null;
