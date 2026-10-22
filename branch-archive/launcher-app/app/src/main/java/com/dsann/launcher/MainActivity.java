@@ -4064,7 +4064,6 @@ public class MainActivity extends Activity {
                 || KEY_ICON_BACKGROUND_COLOR.equals(key)
                 || KEY_ICON_BACKGROUND_COLOR_POSITION.equals(key)
                 || KEY_ICON_FIT_BACKGROUND.equals(key)
-                || KEY_ICON_SIZE.equals(key)
                 || KEY_HOME_FONT_SIZE.equals(key)
                 || KEY_HOME_LABEL_FONT.equals(key)
                 || KEY_HOME_LABEL_COLOR.equals(key)
@@ -6527,7 +6526,12 @@ public class MainActivity extends Activity {
                     fitShortcutLabelWithDots(label);
                 }
             }
-            resolveAllWorkspaceOverlaps(page, null);
+            page.post(() -> {
+                if (pagesStrip == null || page.getParent() != pagesStrip) return;
+                resolveAllWorkspaceOverlaps(page, null);
+                ensureShortcutLabelsNotClipped();
+                refreshWorkspaceGrid();
+            });
         }
         ensureShortcutLabelsNotClipped();
         refreshWorkspaceGrid();
@@ -13882,11 +13886,13 @@ public class MainActivity extends Activity {
         }
         if (homeFont < 8 || homeFont > 15) edit.putInt(KEY_HOME_FONT_SIZE, Math.max(8, Math.min(15, homeFont)));
         if (drawerFont < 8 || drawerFont > 15) edit.putInt(KEY_DRAWER_FONT_SIZE, Math.max(8, Math.min(15, drawerFont)));
-        // Six icons per row are available only for Small and Medium icon sizes.
-        if (homeSize > 64 && homeColumns > 5) {
-            homeColumns = 5;
+        // Keep every icon inside its slot at the selected size. Preserve normalized
+        // positions instead of clearing them when a large size reduces column capacity.
+        int maxHomeColumns = maxHomeColumnsForIconSize(homeSize);
+        if (homeSize > 64) maxHomeColumns = Math.min(5, maxHomeColumns);
+        if (homeColumns > maxHomeColumns) {
+            homeColumns = maxHomeColumns;
             edit.putInt(KEY_COLUMNS, homeColumns);
-            clearIconPositions();
         }
         if (drawerSize > 64 && drawerColumns > 5) {
             drawerColumns = 5;
@@ -13895,11 +13901,22 @@ public class MainActivity extends Activity {
         edit.apply();
     }
 
+    private int maxHomeColumnsForIconSize(int iconSizeDp) {
+        int pageWidthPx = pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth()
+                : Math.max(1, getResources().getDisplayMetrics().widthPixels
+                        - LauncherUiUtils.dp(this, 40));
+        int iconWidthPx = LauncherUiUtils.dp(this,
+                Math.max(32, Math.min(74, iconSizeDp)));
+        return Math.max(3, Math.min(6, pageWidthPx / Math.max(1, iconWidthPx)));
+    }
+
     private int getHomeColumns() {
         int columns = Math.max(3, Math.min(6,
                 prefs == null ? COLUMNS : prefs.getInt(KEY_COLUMNS, COLUMNS)));
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
-        return iconSize > 64 ? Math.min(5, columns) : columns;
+        if (iconSize > 64) columns = Math.min(5, columns);
+        return Math.max(3, Math.min(columns, maxHomeColumnsForIconSize(iconSize)));
     }
 
     private int getDrawerColumns() {
@@ -13930,81 +13947,93 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Re-map app slots when the home column count changes without reordering the page.
-     * Existing columns that still fit are kept exactly. Only icons that no longer fit
-     * to the right (or below the new row capacity after an icon-size change) are moved,
-     * each to the nearest unoccupied grid slot on its current page.
+     * Preserve logical workspace slots across icon-size and column changes. Legal
+     * app/group slots stay fixed; only slots made invalid by the new row/column
+     * capacity are assigned to the nearest free cell. Shortcuts use their own
+     * four-column mapping but share the same vertical row metric.
      */
-    private void remapHomeIconSlotsForColumnChange(int oldColumns, int newColumns, int targetIconSize) {
+    private void remapHomeIconSlotsForColumnChange(int oldColumns, int newColumns,
+            int oldIconSize, int targetIconSize) {
         oldColumns = Math.max(3, Math.min(6, oldColumns));
         newColumns = Math.max(3, Math.min(6, newColumns));
-        if (pagesStrip == null || oldColumns == newColumns) return;
+        oldIconSize = Math.max(32, Math.min(74, oldIconSize));
+        targetIconSize = Math.max(32, Math.min(74, targetIconSize));
+        if (pagesStrip == null
+                || (oldColumns == newColumns && oldIconSize == targetIconSize)) return;
 
-        int oldCellHeight = LauncherUiUtils.dp(this,
-                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+        int oldCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(oldIconSize));
         int newCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(targetIconSize));
+        int fallbackWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels
+                - LauncherUiUtils.dp(this, 40));
+        int fallbackHeight = Math.max(LauncherUiUtils.dp(this, 360),
+                getResources().getDisplayMetrics().heightPixels
+                        - LauncherUiUtils.dp(this, 260));
+
         for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pageView;
             int width = page.getWidth() > 0 ? page.getWidth()
                     : (pageViewport != null && pageViewport.getWidth() > 0
-                            ? pageViewport.getWidth()
-                            : Math.max(1, getResources().getDisplayMetrics().widthPixels
-                                    - LauncherUiUtils.dp(this, 40)));
+                            ? pageViewport.getWidth() : fallbackWidth);
             int height = page.getHeight() > 0 ? page.getHeight()
                     : (pageViewport != null && pageViewport.getHeight() > 0
-                            ? pageViewport.getHeight()
-                            : Math.max(LauncherUiUtils.dp(this, 360),
-                                    getResources().getDisplayMetrics().heightPixels
-                                            - LauncherUiUtils.dp(this, 260)));
+                            ? pageViewport.getHeight() : fallbackHeight);
             int oldCellWidth = Math.max(1, width / oldColumns);
-            int oldRows = Math.max(1, height / Math.max(1, oldCellHeight));
-            int rows = Math.max(1, height / Math.max(1, newCellHeight));
+            int oldRows = Math.max(1, homeGridRowsForHeight(height, oldCellHeight));
+            int rows = Math.max(1, homeGridRowsForHeight(height, newCellHeight));
 
-            final java.util.ArrayList<String> ordered = new java.util.ArrayList<String>();
-            final java.util.HashMap<String, int[]> oldSlots =
-                    new java.util.HashMap<String, int[]>();
+            final java.util.ArrayList<View> slotItems = new java.util.ArrayList<View>();
+            final java.util.IdentityHashMap<View, int[]> oldSlots =
+                    new java.util.IdentityHashMap<View, int[]>();
             for (int i = 0; i < page.getChildCount(); i++) {
                 View child = page.getChildAt(i);
-                if (!(child.getTag() instanceof String)
-                        || !((String) child.getTag()).startsWith("launcher_app:")
+                if ((!isWorkspaceAppIcon(child) && !isAppGroupItem(child))
                         || !(child.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
-                String packageName = ((String) child.getTag()).substring("launcher_app:".length());
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
-                int col = Math.max(0, Math.round(lp.leftMargin / (float) oldCellWidth));
-                int row = homeGridRowFromTop(
-                        lp.topMargin, oldRows, height, oldCellHeight);
-                ordered.add(packageName);
-                oldSlots.put(packageName, new int[]{col, row});
+                int col = Math.max(0, Math.min(oldColumns - 1,
+                        Math.round(lp.leftMargin / (float) oldCellWidth)));
+                int row = homeGridRowFromTop(lp.topMargin, oldRows, height, oldCellHeight);
+                slotItems.add(child);
+                oldSlots.put(child, new int[]{col, row});
             }
-            java.util.Collections.sort(ordered, (a, b) -> {
-                int[] pa = oldSlots.get(a);
-                int[] pb = oldSlots.get(b);
-                int rowOrder = Integer.compare(pa[1], pb[1]);
-                return rowOrder != 0 ? rowOrder : Integer.compare(pa[0], pb[0]);
+            java.util.Collections.sort(slotItems, (first, second) -> {
+                int[] a = oldSlots.get(first);
+                int[] b = oldSlots.get(second);
+                int rowOrder = Integer.compare(a[1], b[1]);
+                if (rowOrder != 0) return rowOrder;
+                if (a[0] != b[0]) return Integer.compare(a[0], b[0]);
+                // When stale positions already collide, preserve the group and let
+                // the ordinary icon move to the next free cell.
+                if (isAppGroupItem(first) != isAppGroupItem(second)) {
+                    return isAppGroupItem(first) ? -1 : 1;
+                }
+                return 0;
             });
 
             boolean[][] occupied = new boolean[rows][newColumns];
-            java.util.HashMap<String, int[]> assigned =
-                    new java.util.HashMap<String, int[]>();
-            // Pass one: pin all slots that remain legal. This prevents a right-hand
-            // overflow icon from stealing a position belonging to an existing icon.
-            for (String packageName : ordered) {
-                int[] old = oldSlots.get(packageName);
-                if (old[0] >= newColumns || old[1] >= rows) continue;
-                if (occupied[old[1]][old[0]]) continue;
+            java.util.IdentityHashMap<View, int[]> assigned =
+                    new java.util.IdentityHashMap<View, int[]>();
+
+            // First pin every still-legal slot. This avoids moving a valid item just
+            // because another item that overflows is visited earlier.
+            for (View item : slotItems) {
+                int[] old = oldSlots.get(item);
+                if (old[0] < 0 || old[0] >= newColumns || old[1] < 0 || old[1] >= rows
+                        || occupied[old[1]][old[0]]) continue;
                 occupied[old[1]][old[0]] = true;
-                assigned.put(packageName, new int[]{old[0], old[1]});
+                assigned.put(item, new int[]{old[0], old[1]});
             }
 
-            // Pass two: move only overflow/duplicate slots into the nearest free cell.
-            for (String packageName : ordered) {
-                if (assigned.containsKey(packageName)) continue;
-                int[] old = oldSlots.get(packageName);
+            // Only items whose old slot is no longer legal (or was duplicated) move.
+            for (View item : slotItems) {
+                if (assigned.containsKey(item)) continue;
+                int[] old = oldSlots.get(item);
                 int wantedCol = Math.max(0, Math.min(newColumns - 1, old[0]));
                 int wantedRow = Math.max(0, Math.min(rows - 1, old[1]));
-                int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
+                int bestCol = -1;
+                int bestRow = -1;
+                int bestDistance = Integer.MAX_VALUE;
                 for (int row = 0; row < rows; row++) {
                     for (int col = 0; col < newColumns; col++) {
                         if (occupied[row][col]) continue;
@@ -14016,24 +14045,77 @@ public class MainActivity extends Activity {
                         }
                     }
                 }
-                if (bestCol >= 0) {
+                if (bestCol < 0) {
+                    // An over-capacity page will still be repaired by the visible-bounds
+                    // collision pass after rendering; never drop the item's saved slot.
+                    bestCol = wantedCol;
+                    bestRow = wantedRow;
+                }
+                assigned.put(item, new int[]{bestCol, bestRow});
+                if (bestRow >= 0 && bestRow < rows
+                        && bestCol >= 0 && bestCol < newColumns) {
                     occupied[bestRow][bestCol] = true;
-                    assigned.put(packageName, new int[]{bestCol, bestRow});
                 }
             }
 
             SharedPreferences.Editor edit = prefs.edit();
-            for (java.util.Map.Entry<String, int[]> entry : assigned.entrySet()) {
-                String packageName = entry.getKey();
-                int[] slot = entry.getValue();
-                edit.putInt(KEY_ICON_PAGE + packageName, pageIndex)
-                        .putFloat(KEY_ICON_X + packageName,
-                                slot[0] / (float) Math.max(1, newColumns - 1))
-                        .putFloat(KEY_ICON_Y + packageName,
-                                slot[1] / (float) Math.max(1, rows - 1));
+            for (View item : slotItems) {
+                int[] slot = assigned.get(item);
+                if (slot == null) continue;
+                float normalizedX = slot[0] / (float) Math.max(1, newColumns - 1);
+                float normalizedY = slot[1] / (float) Math.max(1, rows - 1);
+                if (isAppGroupItem(item)) {
+                    String groupId = appGroupId(item);
+                    if (groupId != null) {
+                        edit.putInt(appGroupKey("page", groupId), pageIndex)
+                                .putFloat(appGroupKey("x", groupId), normalizedX)
+                                .putFloat(appGroupKey("y", groupId), normalizedY);
+                    }
+                } else if (isWorkspaceAppIcon(item)) {
+                    String tag = String.valueOf(item.getTag());
+                    String packageName = tag.substring("launcher_app:".length());
+                    edit.putInt(KEY_ICON_PAGE + packageName, pageIndex)
+                            .putFloat(KEY_ICON_X + packageName, normalizedX)
+                            .putFloat(KEY_ICON_Y + packageName, normalizedY);
+                }
             }
             edit.apply();
         }
+
+        // Saved contact shortcuts occupy a separate four-column grid. Preserve their
+        // column and row when possible, remapping only rows invalidated by a taller slot.
+        java.util.ArrayList<String> shortcutIds = getSavedShortcutIds();
+        SharedPreferences.Editor shortcutEdit = prefs.edit();
+        boolean changedShortcuts = false;
+        for (String shortcutId : shortcutIds) {
+            String gridKey = shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId);
+            if (!prefs.getBoolean(gridKey, false)) continue;
+            int pageIndex = Math.max(0, Math.min(1,
+                    prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), 0)));
+            if (pageIndex >= pagesStrip.getChildCount()
+                    || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+            int pageHeight = page.getHeight() > 0 ? page.getHeight()
+                    : (pageViewport != null && pageViewport.getHeight() > 0
+                            ? pageViewport.getHeight() : fallbackHeight);
+            int oldRows = Math.max(1, homeGridRowsForHeight(pageHeight, oldCellHeight));
+            int rows = Math.max(1, homeGridRowsForHeight(pageHeight, newCellHeight));
+            float savedX = getFloatPreferenceCompat(
+                    shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
+            float savedY = getFloatPreferenceCompat(
+                    shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
+            if (savedX < 0f || savedY < 0f) continue;
+            int col = Math.max(0, Math.min(3, Math.round(
+                    Math.min(1f, savedX) * 3f)));
+            int oldRow = Math.max(0, Math.min(oldRows - 1, Math.round(
+                    Math.min(1f, savedY) * Math.max(1, oldRows - 1))));
+            int row = Math.max(0, Math.min(rows - 1, oldRow));
+            shortcutEdit.putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), col / 3f)
+                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                            row / (float) Math.max(1, rows - 1));
+            changedShortcuts = true;
+        }
+        if (changedShortcuts) shortcutEdit.apply();
     }
 
     private void validateWorkspacePagesAfterLayout() {
@@ -14389,13 +14471,21 @@ public class MainActivity extends Activity {
         }
 
         addSection(content, "Home layout & icons");
-        String[] homeColumnChoices = prefs.getInt(KEY_ICON_SIZE, 48) <= 64
-                ? new String[]{"3", "4", "5", "6"} : new String[]{"3", "4", "5"};
-        addChoiceRow(content, "Home columns", getHomeColumns() - 3, homeColumnChoices, value -> {
+        int configuredHomeSize = prefs.getInt(KEY_ICON_SIZE, 48);
+        int maxHomeColumns = maxHomeColumnsForIconSize(configuredHomeSize);
+        if (configuredHomeSize > 64) maxHomeColumns = Math.min(5, maxHomeColumns);
+        String[] homeColumnChoices = new String[Math.max(1, maxHomeColumns - 2)];
+        for (int i = 0; i < homeColumnChoices.length; i++) {
+            homeColumnChoices[i] = String.valueOf(i + 3);
+        }
+        addChoiceRow(content, "Home columns",
+                Math.max(0, Math.min(homeColumnChoices.length - 1, getHomeColumns() - 3)),
+                homeColumnChoices, value -> {
             int oldColumns = getHomeColumns();
-            int newColumns = value + 3;
-            remapHomeIconSlotsForColumnChange(oldColumns, newColumns,
-                    prefs.getInt(KEY_ICON_SIZE, 48));
+            int iconSize = prefs.getInt(KEY_ICON_SIZE, 48);
+            int newColumns = Math.max(3, Math.min(maxHomeColumnsForIconSize(iconSize), value + 3));
+            if (iconSize > 64) newColumns = Math.min(5, newColumns);
+            remapHomeIconSlotsForColumnChange(oldColumns, newColumns, iconSize, iconSize);
             prefs.edit().putInt(KEY_COLUMNS, newColumns).apply();
             currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
@@ -14404,12 +14494,16 @@ public class MainActivity extends Activity {
         });
         addSliderRowOnStop(content, "Home icon size", 32, 74,
                 Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
+            int oldIconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             int oldColumns = getHomeColumns();
-            boolean reduceColumns = newSize > 64 && oldColumns > 5;
-            int newColumns = reduceColumns ? 5 : oldColumns;
-            if (newColumns != oldColumns) remapHomeIconSlotsForColumnChange(oldColumns, newColumns, newSize);
+            int maxColumnsForNewSize = maxHomeColumnsForIconSize(newSize);
+            if (newSize > 64) maxColumnsForNewSize = Math.min(5, maxColumnsForNewSize);
+            int newColumns = Math.max(3, Math.min(oldColumns, maxColumnsForNewSize));
+            remapHomeIconSlotsForColumnChange(oldColumns, newColumns, oldIconSize, newSize);
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_ICON_SIZE, newSize);
-            if (reduceColumns) edit.putInt(KEY_COLUMNS, newColumns);
+            if (prefs.getInt(KEY_COLUMNS, COLUMNS) != newColumns) {
+                edit.putInt(KEY_COLUMNS, newColumns);
+            }
             edit.apply();
             currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
