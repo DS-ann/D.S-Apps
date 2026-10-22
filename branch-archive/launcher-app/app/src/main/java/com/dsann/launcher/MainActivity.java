@@ -2042,6 +2042,7 @@ public class MainActivity extends Activity {
             if (clockPanel == null || clockResizeGeneration != finalGeometryGeneration
                     || clockResizeEdge != 0) return;
             setClampedClockTranslation(clockPanel.getTranslationX(), clockPanel.getTranslationY(), true);
+            if (!cancelled) moveClockToNearestFreePosition(clockPanel);
             updateClockResizeHandles();
         });
         if (clockPanel.getParent() instanceof FrameLayout) {
@@ -9690,12 +9691,29 @@ public class MainActivity extends Activity {
                     // The previous 15dp inward shift compressed their clearance too far
                     // on newer Android releases. The colon keeps its compact own advance.
                     float innerWhiteBorderPx = LauncherUiUtils.dp(this, 1f);
+                    int spacingStyle = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+                    boolean widenTwoDigitGap = hourDigitCount >= 2
+                            && !sevenSegmentClock && spacingStyle != 2
+                            && Build.VERSION.SDK_INT >= 36;
+                    float renderScaleX = Math.max(0.25f,
+                            Math.abs(clockText.getScaleX())
+                                    * Math.abs(clockPanel == null ? 1f : clockPanel.getScaleX()));
+                    float halfGroupSpreadPx = widenTwoDigitGap
+                            ? LauncherUiUtils.dp(this, 7.5f) / renderScaleX : 0f;
                     for (int digitAt = 0; digitAt < displayClock.length(); digitAt++) {
                         if (Character.digit(displayClock.charAt(digitAt), 10) < 0) continue;
                         boolean moveFirstHourDigitRight = digitAt == hourStart && hourDigitCount >= 2;
                         float gap = digitAt == minuteFirst && hasMinutePair
                                 ? tightenedDigitGap : 0f;
                         float glyphOffsetX = 0f;
+                        if (widenTwoDigitGap) {
+                            if (digitAt >= hourStart && digitAt <= hourEnd) {
+                                glyphOffsetX = -halfGroupSpreadPx;
+                            } else if (digitAt >= minuteFirst && hasMinutePair
+                                    && digitAt <= minuteFirst + 1) {
+                                glyphOffsetX = halfGroupSpreadPx;
+                            }
+                        }
                         displayClock.setSpan(new TightDigitSpan(
                                         moveFirstHourDigitRight, gap, glyphOffsetX,
                                         useWhiteDigitInnerBorder, innerWhiteBorderPx),
@@ -11241,6 +11259,12 @@ public class MainActivity extends Activity {
     }
 
     private int workspaceCollisionMargin(View view) {
+        // Keep clearance around the expanded text/date footprint of typography clocks;
+        // the glyph outlines and date can extend beyond the background's rounded edge.
+        if (isClockWorkspaceItem(view)
+                && (prefs == null || prefs.getInt(KEY_CLOCK_STYLE, 0) != 5)) {
+            return LauncherUiUtils.dp(this, 5);
+        }
         // Apply only a tiny gap around the visible app artwork/label bounds.
         // collisionRect() has already removed the cell's empty area, so this does
         // not make neighboring grid slots collide merely because their cells touch.
@@ -11360,6 +11384,71 @@ public class MainActivity extends Activity {
             bounds.union(childLeft, childTop, childRight, childBottom);
         }
         return bounds;
+    }
+
+    /**
+     * When preset/font/date/size changes alter the rendered footprint without a drag,
+     * move the clock to the nearest legal position after descendants finish layout.
+     * Resize-time checks run before child layout settles and can miss the final footprint.
+     */
+    private boolean moveClockToNearestFreePosition(View panel) {
+        if (!(panel != null && panel.getParent() instanceof FrameLayout)
+                || !isClockWorkspaceItem(panel)
+                || (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5)) return true;
+        FrameLayout page = (FrameLayout) panel.getParent();
+        if (page.getWidth() <= 0 || page.getHeight() <= 0) return true;
+        int[] geometry = itemGeometry(panel);
+        int width = Math.max(1, geometry[2]);
+        int height = Math.max(1, geometry[3]);
+        int startX = geometry[0];
+        int startY = geometry[1];
+        android.graphics.Rect current = new android.graphics.Rect(
+                startX, startY, startX + width, startY + height);
+        if (canPlaceWorkspaceItem(page, panel, current)) return true;
+
+        int gap = LauncherUiUtils.dp(this, 5);
+        int maxX = Math.max(0, page.getWidth() - width);
+        int maxY = Math.max(0, page.getHeight() - height);
+        java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
+        java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
+        xs.add(Math.max(0, Math.min(maxX, startX)));
+        ys.add(Math.max(0, Math.min(maxY, startY)));
+        xs.add(0);
+        xs.add(maxX);
+        ys.add(0);
+        ys.add(maxY);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == panel || other == workspaceTransferProxy
+                    || !isWorkspaceItem(other) || other.getVisibility() != View.VISIBLE) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            android.graphics.Rect obstacle = workspaceLayoutCollisionRect(other,
+                    otherGeometry[0], otherGeometry[1], otherGeometry[2], otherGeometry[3]);
+            xs.add(Math.max(0, Math.min(maxX, obstacle.left - width - gap)));
+            xs.add(Math.max(0, Math.min(maxX, obstacle.right + gap)));
+            ys.add(Math.max(0, Math.min(maxY, obstacle.top - height - gap)));
+            ys.add(Math.max(0, Math.min(maxY, obstacle.bottom + gap)));
+        }
+
+        long bestDistance = Long.MAX_VALUE;
+        int bestX = -1;
+        int bestY = -1;
+        for (int x : xs) {
+            for (int y : ys) {
+                long distance = Math.abs((long) x - startX) + Math.abs((long) y - startY);
+                if (distance >= bestDistance) continue;
+                android.graphics.Rect candidate = new android.graphics.Rect(
+                        x, y, x + width, y + height);
+                if (!canPlaceWorkspaceItem(page, panel, candidate)) continue;
+                bestDistance = distance;
+                bestX = x;
+                bestY = y;
+            }
+        }
+        if (bestX < 0) return false;
+        setClockVisualPosition(panel, bestX, bestY, true);
+        return true;
     }
 
     private android.graphics.Rect workspaceLayoutCollisionRect(
@@ -14555,8 +14644,10 @@ public class MainActivity extends Activity {
                 ? LauncherUiUtils.dp(this, 15f) : 0f;
         float customColonAdvanceReduction = api23NativeClockPath ? 0f
                 : clockText.getPaint().measureText(":") * 0.55f;
-        float customDigitGroupReduction = api23NativeClockPath
-                ? 0f : LauncherUiUtils.dp(this, 15f);
+        // Older versions retain their existing 15dp clearance reservation. Android 16
+        // needs that 15dp returned to the two-digit clock instead of being subtracted.
+        float customDigitGroupReduction = api23NativeClockPath ? 0f
+                : LauncherUiUtils.dp(this, Build.VERSION.SDK_INT >= 36 ? -15f : 15f);
         // Paint.measureText excludes TextView letter spacing, and the standard renderer
         // enlarges glyphs horizontally by 1.12x. Reserve the net width after the 15dp
         // hour/minute tightening and compact custom colon. On Android 6 the same 15dp
@@ -14674,6 +14765,14 @@ public class MainActivity extends Activity {
                 syncNativeClockColonVerticalCenter();
                 if (clockText != null) clockText.invalidate();
                 activateClockForPage(restoreGeometryPage);
+            }
+            boolean activeClockResize = activeClockPage == targetPage
+                    && clockPanel == targetPanel && clockWidgetDragging
+                    && clockWidgetEditing && clockResizeEdge != 0;
+            boolean anotherDragOwnsPage = pendingLiveDisplacementPage == targetPanel.getParent()
+                    && pendingLiveDisplacementMover != null;
+            if (!activeClockResize && !anotherDragOwnsPage) {
+                moveClockToNearestFreePosition(targetPanel);
             }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
                 updateClockResizeHandles();
@@ -15108,15 +15207,13 @@ public class MainActivity extends Activity {
             // This keeps a balanced two-digit time centered in its background.
             float colonAdvance = Math.max(1f, Math.round(naturalWidth * 0.45f));
             float centerX = x + colonAdvance * 0.5f;
-            // Use the clock-row pivot after converting it into Layout coordinates.
-            // If the Layout was not available when the span was created, keep the dots
-            // inside this rendered line instead of drawing them beyond its visible bounds.
-            float centerY = rowCenterY;
-            float lineTop = Math.min(top, bottom);
-            float lineBottom = Math.max(top, bottom);
-            if (centerY < lineTop || centerY > lineBottom) {
-                centerY = (lineTop + lineBottom) * 0.5f;
-            }
+            // Recompute the center from the live digit baseline. After a resize a cached
+            // rowCenterY could remain inside the line box but no longer match the digit ink.
+            android.graphics.Rect digitInk = new android.graphics.Rect();
+            paint.getTextBounds("8", 0, 1, digitInk);
+            float centerY = digitInk.bottom > digitInk.top
+                    ? y + (digitInk.top + digitInk.bottom) * 0.5f
+                    : (Math.min(top, bottom) + Math.max(top, bottom)) * 0.5f;
             float gap = paint.getTextSize() * 0.18f;
 
             Paint dots = new Paint(paint);
