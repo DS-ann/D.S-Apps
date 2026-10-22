@@ -4788,8 +4788,9 @@ public class MainActivity extends Activity {
                             }
                         }
                     };
-                    android.animation.ValueAnimator running = morphAnimator[0];
-                    if (running != null && running.isRunning()) {
+                    // If artwork finishes before the first animation frame, defer it too:
+                    // changing card children just before layer capture can reintroduce tap lag.
+                    if (morphProgress[0] < 1f) {
                         deferredMemberIconApply[0] = applyLoadedIcons;
                     } else {
                         applyLoadedIcons.run();
