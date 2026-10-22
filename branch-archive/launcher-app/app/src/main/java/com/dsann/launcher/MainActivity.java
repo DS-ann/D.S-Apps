@@ -13992,8 +13992,16 @@ public class MainActivity extends Activity {
         CharSequence value = clockText.getText();
         if (!(value instanceof android.text.Spanned)) return;
         String plain = value.toString();
+        if (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5) return;
         int colonAt = plain.indexOf(':');
         if (colonAt < 0) return;
+        int hourDigits = 0;
+        for (int i = 0; i < colonAt; i++) {
+            if (Character.digit(plain.charAt(i), 10) >= 0) hourDigits++;
+        }
+        // Single-digit Android 6 clocks use CenteredColonSpan already; this native
+        // fallback is only for the two-digit path that avoids ReplacementSpan glyphs.
+        if (hourDigits < 2) return;
         int shift = getNativeClockColonBaselineShift(plain, colonAt);
         android.text.Spanned spanned = (android.text.Spanned) value;
         ClockColonBaselineSpan[] current = spanned.getSpans(
