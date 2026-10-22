@@ -9712,6 +9712,9 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        // Recompute every group from the final mode state so no other group keeps
+        // a stale blue overlay after move mode is dismissed by an outside tap.
+        refreshAppGroupMoveModeHighlights();
     }
 
     private boolean touchStartedOnAppCell(float rawX, float rawY) {
