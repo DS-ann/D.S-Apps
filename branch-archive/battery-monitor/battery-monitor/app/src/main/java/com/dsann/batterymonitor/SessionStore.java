@@ -20,9 +20,9 @@ final class SessionStore {
             KEY_OFF_MIN="off_min", KEY_OFF_MAX="off_max", KEY_OFF_START_PERCENT="off_start_percent",
             KEY_LAST_CURRENT="last_current",
             KEY_OFF_END_PERCENT="off_end_percent";
-    private static final long MAX_GAP=2*60*60*1000L;
-    // A session may remain open across a longer outage, but we must never
-    // assume the previous current reading was valid for an unknown interval.
+    // Any interval longer than this is an unobserved gap (for example, while
+    // the phone is powered off). Close the old record at its last real sample
+    // and start a new segment rather than spanning the missing time.
     private static final long MAX_INTEGRATION_GAP=2*60*1000L;
     private SessionStore(){}
 
@@ -51,7 +51,10 @@ final class SessionStore {
         int onStartPercent=p.getInt(KEY_ON_START_PERCENT,-1), onEndPercent=p.getInt(KEY_ON_END_PERCENT,-1);
         int offStartPercent=p.getInt(KEY_OFF_START_PERCENT,-1), offEndPercent=p.getInt(KEY_OFF_END_PERCENT,-1);
 
-        if(start==0||last==0||now-last>MAX_GAP||oldCharging!=charging){
+        // Never include an unobserved interval in a session's duration, mAh,
+        // screen-on/off totals, or capacity-estimation percentage delta.
+        // The previous record ends at 'last'; this sample starts a new segment.
+        if(start==0||last==0||now<last||now-last>MAX_INTEGRATION_GAP||oldCharging!=charging){
             if(start!=0&&last!=0){
                 addRecord(p,start,last,oldCharging,mah,minCurrent,maxCurrent,startPercent,lastPercent,
                         onMs,onMah,onMin,onMax,onStartPercent,onEndPercent,
@@ -193,7 +196,9 @@ final class SessionStore {
     private static Record activeRecord(android.content.SharedPreferences p){
         long start=p.getLong(KEY_START,0),last=p.getLong(KEY_LAST,0);
         if(start==0||last==0)return null;
-        return new Record(start,System.currentTimeMillis(),p.getBoolean(KEY_CHARGING,false),
+        // The last measured timestamp is authoritative. Using wall-clock "now"
+        // would make a stale active session grow while the phone was off.
+        return new Record(start,last,p.getBoolean(KEY_CHARGING,false),
                 readDouble(p,KEY_MAH,0),readDouble(p,KEY_MIN_CURRENT,Double.NaN),
                 readDouble(p,KEY_MAX_CURRENT,Double.NaN),p.getInt(KEY_START_PERCENT,-1),
                 p.getInt(KEY_LAST_PERCENT,-1),p.getLong(KEY_ON_MS,0),readDouble(p,KEY_ON_MAH,0),
