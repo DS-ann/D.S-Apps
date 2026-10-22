@@ -321,7 +321,7 @@ final class SessionStore {
 
     private static void addRecord(android.content.SharedPreferences p,long start,long end,boolean charging,double mah,double minCurrent,double maxCurrent,
                                    int startPercent,int endPercent,long onMs,double onMah,double onMin,double onMax,int onStartPercent,int onEndPercent,
-                                   long offMs,double offMah,double offMin,double offMax,int offStartPercent,int offEndPercent){
+                                   long offMs,double offMah,double offMin,double offMax,int offStartPercent,int offEndPercent,long unobservedGapMs){
         if(end<=start||mah<0.01)return;
         String rec=start+"|"+end+"|"+(charging?"1":"0")+"|"+String.format(Locale.US,"%.1f",mah)+"|"+
                 String.format(Locale.US,"%.1f",maxCurrent)+"|"+String.format(Locale.US,"%.1f",minCurrent)+"|"+startPercent+"|"+endPercent+"|"+
