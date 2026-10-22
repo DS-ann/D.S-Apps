@@ -118,6 +118,14 @@ final class BatteryReader {
             wirelessOnline = (plugged & BatteryManager.BATTERY_PLUGGED_WIRELESS) != 0;
         }
 
+        // With sysfs source nodes unavailable, do not let a frozen framework "plugged" flag
+        // survive a physical transition to discharging.
+        if (!source.known && state == PowerState.DISCHARGING) {
+            acOnline = false;
+            usbOnline = false;
+            wirelessOnline = false;
+        }
+
         // The physical battery status is stronger evidence than stale framework flags.
         // If sysfs does not expose the charger node, infer USB power while charging/full.
         if ((state == PowerState.CHARGING || state == PowerState.FULL)
