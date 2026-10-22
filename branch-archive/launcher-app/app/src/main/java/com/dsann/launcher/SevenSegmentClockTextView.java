@@ -596,74 +596,90 @@ public final class SevenSegmentClockTextView extends TextView {
         float layoutOriginX = getCompoundPaddingLeft() - getScrollX();
         int firstBaseline = layout.getLineBaseline(0);
         int viewBaseline = getBaseline();
-        api23NativeGlyphMask.reset();
 
-        // Render every glyph contour into one off-screen layer, then mask that layer
-        // with the combined glyph silhouettes. This mirrors the one-digit ReplacementSpan
-        // path but avoids ReplacementSpan on Android 6's two-digit native-text fallback.
-        int layer = canvas.saveLayer(0f, 0f, getWidth(), getHeight(), null);
-        boolean hasGlyph = false;
-        try {
-            for (int line = 0; line < layout.getLineCount(); line++) {
-                int start = layout.getLineStart(line);
-                int end = Math.min(value.length(), layout.getLineEnd(line));
-                float baseline = viewBaseline + layout.getLineBaseline(line) - firstBaseline;
-                for (int index = start; index < end; index++) {
-                    char ch = value.charAt(index);
-                    if (Character.isWhitespace(ch) || Character.isSpaceChar(ch)
-                            || ch == '\n' || ch == '\r') continue;
+        // Android 6 can lose DST_IN contours on a TextView layer after PACKAGE_REPLACED.
+        // Build the centered stroke geometry in software paths, intersect it with each
+        // glyph's actual fill silhouette, then draw that inner strip as a normal fill path.
+        // This avoids per-frame saveLayer compositing and guarantees the contour stays inside.
+        for (int line = 0; line < layout.getLineCount(); line++) {
+            int start = layout.getLineStart(line);
+            int end = Math.min(value.length(), layout.getLineEnd(line));
+            float baseline = viewBaseline + layout.getLineBaseline(line) - firstBaseline;
+            for (int index = start; index < end; index++) {
+                char ch = value.charAt(index);
+                if (Character.isWhitespace(ch) || Character.isSpaceChar(ch)
+                        || ch == '\\n' || ch == '\\r') continue;
 
-                    api23NativeOutlinePaint.set(getPaint());
-                    api23NativeOutlinePaint.baselineShift = getPaint().baselineShift;
-                    if (spanned != null) {
-                        android.text.style.CharacterStyle[] styles = spanned.getSpans(
-                                index, index + 1, android.text.style.CharacterStyle.class);
-                        for (android.text.style.CharacterStyle style : styles) {
-                            style.updateDrawState(api23NativeOutlinePaint);
-                        }
+                api23NativeOutlinePaint.set(getPaint());
+                api23NativeOutlinePaint.baselineShift = getPaint().baselineShift;
+                if (spanned != null) {
+                    android.text.style.CharacterStyle[] styles = spanned.getSpans(
+                            index, index + 1, android.text.style.CharacterStyle.class);
+                    for (android.text.style.CharacterStyle style : styles) {
+                        style.updateDrawState(api23NativeOutlinePaint);
                     }
+                }
 
-                    float x = layoutOriginX + layout.getPrimaryHorizontal(index);
-                    float y = baseline + api23NativeOutlinePaint.baselineShift;
-                    api23NativeGlyphPath.reset();
-                    api23NativeOutlinePaint.getTextPath(
-                            value.toString(), index, index + 1, x, y, api23NativeGlyphPath);
-                    if (api23NativeGlyphPath.isEmpty()) continue;
+                float x = layoutOriginX + layout.getPrimaryHorizontal(index);
+                float y = baseline + api23NativeOutlinePaint.baselineShift;
+                api23NativeGlyphPath.reset();
+                api23NativeOutlinePaint.getTextPath(
+                        value.toString(), index, index + 1, x, y, api23NativeGlyphPath);
+                if (api23NativeGlyphPath.isEmpty()) continue;
 
-                    hasGlyph = true;
-                    api23NativeGlyphMask.addPath(api23NativeGlyphPath);
-                    api23NativeOutlinePaint.setColor(Color.WHITE);
-                    api23NativeOutlinePaint.setShader(ensureTextBorderGradient());
-                    api23NativeOutlinePaint.setXfermode(null);
-                    api23NativeOutlinePaint.setStyle(Paint.Style.STROKE);
-                    api23NativeOutlinePaint.setStrokeWidth(contrastInnerBorderWidth);
-                    api23NativeOutlinePaint.setStrokeJoin(Paint.Join.ROUND);
-                    api23NativeOutlinePaint.setStrokeCap(Paint.Cap.ROUND);
-                    api23NativeOutlinePaint.clearShadowLayer();
-                    canvas.drawPath(api23NativeGlyphPath, api23NativeOutlinePaint);
+                api23NativeOutlinePaint.setColor(Color.WHITE);
+                api23NativeOutlinePaint.setShader(null);
+                api23NativeOutlinePaint.setXfermode(null);
+                api23NativeOutlinePaint.setStyle(Paint.Style.STROKE);
+                api23NativeOutlinePaint.setStrokeWidth(contrastInnerBorderWidth);
+                api23NativeOutlinePaint.setStrokeJoin(Paint.Join.ROUND);
+                api23NativeOutlinePaint.setStrokeCap(Paint.Cap.ROUND);
+                api23NativeOutlinePaint.clearShadowLayer();
 
-                    if (drawSecondaryBorder && secondaryInnerBorderEnabled
-                            && secondaryInnerBorderWidth > 0f) {
-                        api23NativeSecondaryPaint.set(api23NativeOutlinePaint);
-                        api23NativeSecondaryPaint.setShader(null);
-                        api23NativeSecondaryPaint.setColor(secondaryInnerBorderColor);
-                        api23NativeSecondaryPaint.setStrokeWidth(secondaryInnerBorderWidth);
-                        canvas.drawPath(api23NativeGlyphPath, api23NativeSecondaryPaint);
+                api23NativeGlyphMask.reset();
+                boolean hasInnerContour = api23NativeOutlinePaint.getFillPath(
+                        api23NativeGlyphPath, api23NativeGlyphMask);
+                if (hasInnerContour) {
+                    hasInnerContour = api23NativeGlyphMask.op(
+                            api23NativeGlyphPath, Path.Op.INTERSECT);
+                }
+                if (hasInnerContour) {
+                    api23NativeMaskPaint.set(api23NativeOutlinePaint);
+                    api23NativeMaskPaint.setStyle(Paint.Style.FILL);
+                    api23NativeMaskPaint.setStrokeWidth(0f);
+                    api23NativeMaskPaint.setColor(Color.WHITE);
+                    api23NativeMaskPaint.setShader(null);
+                    api23NativeMaskPaint.setXfermode(null);
+                    api23NativeMaskPaint.clearShadowLayer();
+                    canvas.drawPath(api23NativeGlyphMask, api23NativeMaskPaint);
+                }
+
+                if (drawSecondaryBorder && secondaryInnerBorderEnabled
+                        && secondaryInnerBorderWidth > 0f) {
+                    api23NativeSecondaryPaint.set(api23NativeOutlinePaint);
+                    api23NativeSecondaryPaint.setShader(null);
+                    api23NativeSecondaryPaint.setXfermode(null);
+                    api23NativeSecondaryPaint.setStyle(Paint.Style.STROKE);
+                    api23NativeSecondaryPaint.setStrokeWidth(secondaryInnerBorderWidth);
+                    api23NativeSecondaryPaint.setColor(secondaryInnerBorderColor);
+                    api23NativeSecondaryPaint.setStrokeJoin(Paint.Join.ROUND);
+                    api23NativeSecondaryPaint.setStrokeCap(Paint.Cap.ROUND);
+                    api23NativeSecondaryPaint.clearShadowLayer();
+
+                    api23NativeGlyphMask.reset();
+                    boolean hasSecondaryContour = api23NativeSecondaryPaint.getFillPath(
+                            api23NativeGlyphPath, api23NativeGlyphMask);
+                    if (hasSecondaryContour) {
+                        hasSecondaryContour = api23NativeGlyphMask.op(
+                                api23NativeGlyphPath, Path.Op.INTERSECT);
+                    }
+                    if (hasSecondaryContour) {
+                        api23NativeSecondaryPaint.setStyle(Paint.Style.FILL);
+                        api23NativeSecondaryPaint.setStrokeWidth(0f);
+                        canvas.drawPath(api23NativeGlyphMask, api23NativeSecondaryPaint);
                     }
                 }
             }
-
-            if (hasGlyph) {
-                api23NativeMaskPaint.setColor(Color.WHITE);
-                api23NativeMaskPaint.setShader(null);
-                api23NativeMaskPaint.setStyle(Paint.Style.FILL);
-                api23NativeMaskPaint.setStrokeWidth(0f);
-                api23NativeMaskPaint.setXfermode(new android.graphics.PorterDuffXfermode(
-                        android.graphics.PorterDuff.Mode.DST_IN));
-                canvas.drawPath(api23NativeGlyphMask, api23NativeMaskPaint);
-            }
-        } finally {
-            canvas.restoreToCount(layer);
         }
     }
 
