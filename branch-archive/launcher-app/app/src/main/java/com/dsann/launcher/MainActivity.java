@@ -7070,12 +7070,19 @@ public class MainActivity extends Activity {
                 iconArmDrag = () -> {
                     if (activeDragView == view) {
                         iconDragArmed = true;
+                        // App icons arm without showing the workspace grid until the
+                        // finger actually starts dragging. Highlight groups immediately
+                        // so they are visible as move targets during that ready state.
+                        workspaceMoveModeHighlightActive = true;
+                        refreshAppGroupMoveModeHighlights();
                         LauncherUiUtils.startMoveHint(view, this);
                     }
                 };
                 iconShowOptions = () -> {
                     if (activeDragView == view && !iconDragging) {
                         LauncherUiUtils.stopMoveHint(view);
+                        workspaceMoveModeHighlightActive = false;
+                        refreshAppGroupMoveModeHighlights();
                         longPressTriggered = true;
                         ResolveInfo app = findApp(packageName);
                         if (app != null) showAppOptions(app, true);
@@ -7568,6 +7575,8 @@ public class MainActivity extends Activity {
                     if (app != null) launchApp(app, view);
                 }
                 iconDragArmed = false;
+                workspaceMoveModeHighlightActive = false;
+                refreshAppGroupMoveModeHighlights();
                 activeDragView = null;
                 activeDragPackage = null;
                 return true;
