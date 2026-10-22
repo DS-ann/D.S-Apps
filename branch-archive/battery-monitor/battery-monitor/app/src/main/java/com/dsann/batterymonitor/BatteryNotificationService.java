@@ -348,7 +348,7 @@ public class BatteryNotificationService extends Service {
 
         boolean available=estimate!=null&&estimate.running&&estimate.isAvailable();
         BatteryReader.PowerState powerState=BatteryReader.getPowerState(this);
-        String action=powerState==BatteryReader.PowerState.CHARGING
+        String action=powerState==BatteryReader.PowerState.NOT_CHARGING
                 ?"Discharging":powerState.notificationLabel();
         String title=available
                 ?String.format(java.util.Locale.US,"%.2f%% • %s • %.1f mAh",

@@ -70,43 +70,54 @@ public class MainActivity extends Activity {
     
     @Override protected void onCreate(Bundle state){
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.TRANSPARENT);
-        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        getWindow().setStatusBarColor(0xFF0D1117);
+        getWindow().setNavigationBarColor(0xFF0D1117);
         
         LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFF0F1115);
+        root.setBackgroundColor(0xFF0D1117);
         
         LinearLayout header=new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(20),dp(18),dp(20),dp(8));
+        header.setPadding(dp(18),dp(16),dp(18),dp(15));
+        header.setBackground(round(0xFF151D27,18));
         TextView appTitle=text("BatteryPulse",25);
         appTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        appTitle.setLetterSpacing(0.015f);
         header.addView(appTitle,full());
         TextView subtitle=text("Battery monitor • sessions • health",13);
         subtitle.setTextColor(0xFF9AA0AA);
         header.addView(subtitle,top(2));
-        root.addView(header);
+        LinearLayout.LayoutParams headerParams=top(10);
+        headerParams.leftMargin=dp(16);
+        headerParams.rightMargin=dp(16);
+        root.addView(header,headerParams);
         
         LinearLayout tabs=new LinearLayout(this);
-        tabs.setPadding(dp(16),dp(4),dp(16),dp(10));
+        tabs.setPadding(dp(4),dp(4),dp(4),dp(4));
+        tabs.setBackground(round(0xFF151B24,15));
         monitorTab=tab("Monitor");
         myBatteryTab=tab("My Battery");
         historyTab=tab("History");
         healthTab=tab("Health");
-        tabs.addView(monitorTab,new LinearLayout.LayoutParams(0,dp(42),1));
-        tabs.addView(myBatteryTab,new LinearLayout.LayoutParams(0,dp(42),1));
-        tabs.addView(historyTab,new LinearLayout.LayoutParams(0,dp(42),1));
-        tabs.addView(healthTab,new LinearLayout.LayoutParams(0,dp(42),1));
-        root.addView(tabs);
+        addTabToBar(tabs,monitorTab);
+        addTabToBar(tabs,myBatteryTab);
+        addTabToBar(tabs,historyTab);
+        addTabToBar(tabs,healthTab);
+        LinearLayout.LayoutParams tabsParams=top(10);
+        tabsParams.leftMargin=dp(16);
+        tabsParams.rightMargin=dp(16);
+        root.addView(tabs,tabsParams);
         
         monitorView=buildMonitor();
         monitorContainer=new ScrollView(this);
         ((ScrollView)monitorContainer).setFillViewport(true);
+        ((ScrollView)monitorContainer).setVerticalScrollBarEnabled(false);
         ((ScrollView)monitorContainer).addView(monitorView);
         myBatteryView=buildMyBattery();
         myBatteryScroll=new ScrollView(this);
         myBatteryScroll.setFillViewport(true);
+        myBatteryScroll.setVerticalScrollBarEnabled(false);
         myBatteryScroll.setClipToPadding(false);
         myBatteryScroll.setPadding(0,0,0,dp(8));
         myBatteryScroll.addView(myBatteryView);
@@ -114,6 +125,7 @@ public class MainActivity extends Activity {
         LinearLayout healthContent=buildHealth();
         healthScroll=new ScrollView(this);
         healthScroll.setFillViewport(true);
+        healthScroll.setVerticalScrollBarEnabled(false);
         healthScroll.setClipToPadding(false);
         healthScroll.setPadding(0,0,0,dp(8));
         healthScroll.addView(healthContent);
@@ -237,11 +249,12 @@ public class MainActivity extends Activity {
         LinearLayout percentRow=new LinearLayout(this);
         percentRow.setGravity(Gravity.CENTER_VERTICAL);
         EditText percentInput=new EditText(this);
+        styleInput(percentInput);
         percentInput.setHint("0–100");
         percentInput.setSingleLine(true);
         percentInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         percentRow.addView(percentInput,new LinearLayout.LayoutParams(0,-2,1));
-        Button setPercent=actionButton("Set");
+        Button setPercent=primaryButton("Set");
         Button resetPercent=actionButton("Reset");
         LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-2,-2);
         slp.leftMargin=dp(6);
@@ -363,6 +376,7 @@ public class MainActivity extends Activity {
         capacityLabel.setTextColor(0xFFD2D8E0);
         calculator.addView(capacityLabel,top(12));
         customCapacityInput=new EditText(this);
+        styleInput(customCapacityInput);
         customCapacityInput.setSingleLine(true);
         customCapacityInput.setHint("e.g. 4050");
         customCapacityInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
@@ -378,6 +392,7 @@ public class MainActivity extends Activity {
         startingLabel.setTextColor(0xFFD2D8E0);
         calculator.addView(startingLabel,top(10));
         startingChargeInput=new EditText(this);
+        styleInput(startingChargeInput);
         startingChargeInput.setSingleLine(true);
         startingChargeInput.setHint("Your estimate, e.g. 1800");
         startingChargeInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
@@ -391,16 +406,16 @@ public class MainActivity extends Activity {
 
         LinearLayout actions=new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
-        Button saveStart=actionButton("Save & start");
-        Button stopMeasurement=actionButton("Stop");
+        Button saveStart=primaryButton("Save & start");
+        Button stopMeasurement=dangerButton("Stop");
         actions.addView(saveStart,new LinearLayout.LayoutParams(0,-2,1));
         LinearLayout.LayoutParams stopParams=new LinearLayout.LayoutParams(0,-2,1);
         stopParams.leftMargin=dp(8);
         actions.addView(stopMeasurement,stopParams);
         calculator.addView(actions,top(10));
-        Button clearAll=actionButton("Clear all");
+        Button clearAll=dangerButton("Clear all");
         calculator.addView(clearAll,top(6));
-        useAndroidPercentButton=actionButton("Use this as Android %");
+        useAndroidPercentButton=primaryButton("Use this as Android %");
         calculator.addView(useAndroidPercentButton,top(6));
         androidPercentStatus=text("",12);
         androidPercentStatus.setTextColor(0xFF9AA0AA);
@@ -621,7 +636,7 @@ public class MainActivity extends Activity {
         TextView sub=text("Measured energy use across recording sessions.",13);
         sub.setTextColor(0xFF707070);
         r.addView(sub,top(2));
-        Button clear=actionButton("Clear history");
+        Button clear=dangerButton("Clear history");
         r.addView(clear,top(10));
         clear.setOnClickListener(v->{SessionStore.clear(this);refreshHistory();});
         ScrollView s=new ScrollView(this);
@@ -1023,13 +1038,12 @@ public class MainActivity extends Activity {
     private LinearLayout card(int color){
         LinearLayout c=new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
-        c.setPadding(dp(14),dp(13),dp(14),dp(13));
+        c.setPadding(dp(16),dp(15),dp(16),dp(15));
         GradientDrawable bg=new GradientDrawable();
-        bg.setColor(color == Color.WHITE ? 0xFF171A20 : color);
-        bg.setCornerRadius(dp(14));
-        bg.setStroke(dp(1),0xFF303744);
+        bg.setColor(color == Color.WHITE ? 0xFF161D27 : color);
+        bg.setCornerRadius(dp(17));
+        bg.setStroke(dp(1),0xFF2B3746);
         c.setBackground(bg);
-        if(Build.VERSION.SDK_INT>=21)c.setElevation(dp(1));
         return c;
     }
 
@@ -1041,15 +1055,53 @@ public class MainActivity extends Activity {
     }
     
     private Button actionButton(String label){
+        return styledButton(label,0xFF1B2634,0xFF35465B,0xFFE5EDF7);
+    }
+
+    private Button primaryButton(String label){
+        return styledButton(label,0xFF20496C,0xFF3979A8,Color.WHITE);
+    }
+
+    private Button dangerButton(String label){
+        return styledButton(label,0xFF382329,0xFF75404B,0xFFFFDCE1);
+    }
+
+    private Button styledButton(String label,int fill,int stroke,int textColor){
         Button b=new Button(this);
         b.setText(label);
         b.setTextSize(13);
+        b.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         b.setAllCaps(false);
+        b.setTextColor(textColor);
+        b.setMinHeight(dp(44));
+        b.setMinimumHeight(dp(44));
+        b.setPadding(dp(12),dp(8),dp(12),dp(8));
+        GradientDrawable background=new GradientDrawable();
+        background.setColor(fill);
+        background.setCornerRadius(dp(12));
+        background.setStroke(dp(1),stroke);
+        b.setBackground(background);
         return b;
     }
-    
+
+    private void styleInput(EditText input){
+        input.setTextColor(0xFFE8EDF4);
+        input.setHintTextColor(0xFF7F8B9B);
+        input.setTextSize(15);
+        input.setPadding(dp(13),dp(11),dp(13),dp(11));
+        input.setMinHeight(dp(48));
+        input.setBackground(roundStroke(0xFF111720,12,0xFF344255));
+    }
+
+    private void addTabToBar(LinearLayout tabs,TextView tab){
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(44),1);
+        lp.leftMargin=dp(2);
+        lp.rightMargin=dp(2);
+        tabs.addView(tab,lp);
+    }
+
     private TextView tab(String label){
-        TextView v=text(label,14);
+        TextView v=text(label,12);
         v.setGravity(Gravity.CENTER);
         v.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         return v;
@@ -1061,9 +1113,10 @@ public class MainActivity extends Activity {
         int[] activeBg={0xFF172334,0xFF17271F,0xFF211B2D,0xFF17271F};
         for(int i=0;i<tabs.length;i++){
             boolean active=i==selected;
-            tabs[i].setTextColor(active?activeText[i]:0xFF8E96A3);
-            tabs[i].setBackground(round(active?activeBg[i]:0x00000000,12));
-            tabs[i].setMinHeight(dp(48));
+            tabs[i].setTextColor(active?activeText[i]:0xFFA2ADBC);
+            tabs[i].setBackground(roundStroke(active?activeBg[i]:0xFF171F2A,
+                    11,active?activeText[i]:0xFF252F3E));
+            tabs[i].setMinHeight(dp(44));
             tabs[i].setContentDescription(tabs[i].getText()+" tab"+(active?", selected":""));
         }
     }
@@ -1072,6 +1125,12 @@ public class MainActivity extends Activity {
         GradientDrawable d=new GradientDrawable();
         d.setColor(color);
         d.setCornerRadius(dp(radius));
+        return d;
+    }
+
+    private GradientDrawable roundStroke(int color,int radius,int strokeColor){
+        GradientDrawable d=round(color,radius);
+        d.setStroke(dp(1),strokeColor);
         return d;
     }
     
