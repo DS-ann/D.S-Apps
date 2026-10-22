@@ -322,6 +322,17 @@ public final class SevenSegmentClockTextView extends TextView {
                 return;
             }
 
+            // Android 6's native-text two-digit-hour fallback deliberately avoids
+            // ReplacementSpan glyphs. Draw its inner border per laid-out glyph instead
+            // of relying on TextView's repeated onDraw + DST_IN layer pass, which can
+            // lose the contour on API 23 after a package replacement.
+            if (android.os.Build.VERSION.SDK_INT == android.os.Build.VERSION_CODES.M
+                    && drawContrastBorder && !sevenSegmentMode) {
+                super.onDraw(canvas);
+                drawApi23NativeTextInnerBorder(canvas, drawSecondaryBorder);
+                return;
+            }
+
             // Draw the normal glyphs, then stroke them in a temporary layer. A glyph-shaped
             // DST_IN mask removes all stroke pixels outside the fill, keeping both contours
             // genuinely inside the text instead of producing a halo around each character.
@@ -553,6 +564,86 @@ public final class SevenSegmentClockTextView extends TextView {
         segmentPaint.setStrokeWidth(0f);
         segmentPaint.setShader(segmentGradientEnabled ? segmentGradient : null);
         canvas.restore();
+    }
+
+    private final android.graphics.Path api23NativeGlyphPath = new android.graphics.Path();
+    private final android.text.TextPaint api23NativeOutlinePaint =
+            new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final android.text.TextPaint api23NativeSecondaryPaint =
+            new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+
+    /**
+     * API-23-safe inner contour for ordinary TextView glyphs. It follows Layout's real
+     * horizontal positions, applies drawing-only spans (including the shrunken native
+     * colon), and clips each centered stroke to its glyph outline so the border stays
+     * inside the fill without needing a destination-in bitmap mask.
+     */
+    private void drawApi23NativeTextInnerBorder(Canvas canvas, boolean drawSecondaryBorder) {
+        android.text.Layout layout = getLayout();
+        CharSequence value = getText();
+        if (layout == null || value == null || value.length() == 0
+                || layout.getLineCount() == 0 || contrastInnerBorderWidth <= 0f) return;
+
+        android.text.Spanned spanned = value instanceof android.text.Spanned
+                ? (android.text.Spanned) value : null;
+        float layoutOriginX = getCompoundPaddingLeft() - getScrollX();
+        int firstBaseline = layout.getLineBaseline(0);
+        int viewBaseline = getBaseline();
+
+        for (int line = 0; line < layout.getLineCount(); line++) {
+            int start = layout.getLineStart(line);
+            int end = Math.min(value.length(), layout.getLineEnd(line));
+            float baseline = viewBaseline + layout.getLineBaseline(line) - firstBaseline;
+            for (int index = start; index < end; index++) {
+                char ch = value.charAt(index);
+                if (Character.isWhitespace(ch) || Character.isSpaceChar(ch)
+                        || ch == '\\n' || ch == '\\r') continue;
+
+                api23NativeOutlinePaint.set(getPaint());
+                api23NativeOutlinePaint.baselineShift = getPaint().baselineShift;
+                if (spanned != null) {
+                    android.text.style.CharacterStyle[] styles = spanned.getSpans(
+                            index, index + 1, android.text.style.CharacterStyle.class);
+                    for (android.text.style.CharacterStyle style : styles) {
+                        style.updateDrawState(api23NativeOutlinePaint);
+                    }
+                }
+
+                float x = layoutOriginX + layout.getPrimaryHorizontal(index);
+                float y = baseline + api23NativeOutlinePaint.baselineShift;
+                api23NativeGlyphPath.reset();
+                api23NativeOutlinePaint.getTextPath(
+                        value, index, index + 1, x, y, api23NativeGlyphPath);
+                if (api23NativeGlyphPath.isEmpty()) continue;
+
+                api23NativeOutlinePaint.setColor(Color.WHITE);
+                api23NativeOutlinePaint.setShader(ensureTextBorderGradient());
+                api23NativeOutlinePaint.setXfermode(null);
+                api23NativeOutlinePaint.setStyle(Paint.Style.STROKE);
+                api23NativeOutlinePaint.setStrokeWidth(contrastInnerBorderWidth);
+                api23NativeOutlinePaint.setStrokeJoin(Paint.Join.ROUND);
+                api23NativeOutlinePaint.setStrokeCap(Paint.Cap.ROUND);
+                api23NativeOutlinePaint.clearShadowLayer();
+
+                int save = canvas.save();
+                try {
+                    canvas.clipPath(api23NativeGlyphPath);
+                    canvas.drawText(value, index, index + 1, x, y, api23NativeOutlinePaint);
+
+                    if (drawSecondaryBorder && secondaryInnerBorderEnabled
+                            && secondaryInnerBorderWidth > 0f) {
+                        api23NativeSecondaryPaint.set(api23NativeOutlinePaint);
+                        api23NativeSecondaryPaint.setShader(null);
+                        api23NativeSecondaryPaint.setColor(secondaryInnerBorderColor);
+                        api23NativeSecondaryPaint.setStrokeWidth(secondaryInnerBorderWidth);
+                        canvas.drawText(value, index, index + 1, x, y,
+                                api23NativeSecondaryPaint);
+                    }
+                } finally {
+                    canvas.restoreToCount(save);
+                }
+            }
+        }
     }
 
     private static void setSegment(float[] out, float left, float top, float right, float bottom) {

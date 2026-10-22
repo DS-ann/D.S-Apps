@@ -2201,6 +2201,41 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Newer framework classes stay inside version-specific helpers. This matters on
+    // API 23, where a type referenced directly from MainActivity can fail verification
+    // even when the code path is guarded by an SDK_INT check.
+    private static final class Api29HomeRoleManager {
+        @android.annotation.TargetApi(29)
+        static Intent createHomeRoleRequest(Activity activity) {
+            Object service = activity.getSystemService("role");
+            if (!(service instanceof android.app.role.RoleManager)) return null;
+            android.app.role.RoleManager manager =
+                    (android.app.role.RoleManager) service;
+            if (!manager.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)
+                    || manager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) return null;
+            return manager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME);
+        }
+
+        @android.annotation.TargetApi(29)
+        static boolean isHomeRoleHeld(Activity activity) {
+            Object service = activity.getSystemService("role");
+            return service instanceof android.app.role.RoleManager
+                    && ((android.app.role.RoleManager) service)
+                            .isRoleHeld(android.app.role.RoleManager.ROLE_HOME);
+        }
+    }
+
+    private static final class Api30WindowInsets {
+        @android.annotation.TargetApi(30)
+        static int[] systemBarsAndIme(android.view.WindowInsets insets) {
+            android.graphics.Insets bars = insets.getInsets(
+                    android.view.WindowInsets.Type.systemBars());
+            android.graphics.Insets ime = insets.getInsets(
+                    android.view.WindowInsets.Type.ime());
+            return new int[]{bars.top, Math.max(bars.bottom, ime.bottom)};
+        }
+    }
+
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -2266,20 +2301,14 @@ public class MainActivity extends Activity {
 
     private void ensureHomeRoleOnAndroid10Plus() {
         if (Build.VERSION.SDK_INT < 29 || homeRoleRequestAttempted || isFinishing()) return;
-        android.app.role.RoleManager roleManager =
-                (android.app.role.RoleManager) getSystemService("role");
-        if (roleManager == null) return;
         try {
-            if (!roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)
-                    || roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
-                return;
-            }
+            Intent roleRequest = Api29HomeRoleManager.createHomeRoleRequest(this);
+            if (roleRequest == null) return;
             homeRoleRequestAttempted = true;
             Toast.makeText(this,
                     "Choose PhoneBridge as the Home app to keep it as your default launcher.",
                     Toast.LENGTH_LONG).show();
-            startActivityForResult(roleManager.createRequestRoleIntent(
-                    android.app.role.RoleManager.ROLE_HOME), REQUEST_HOME_ROLE);
+            startActivityForResult(roleRequest, REQUEST_HOME_ROLE);
         } catch (RuntimeException ignored) {
             // Some OEM builds restrict role UI integration. Keep the launcher usable.
             homeRoleRequestAttempted = true;
@@ -2449,12 +2478,9 @@ public class MainActivity extends Activity {
             int topInset;
             int bottomInset;
             if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets systemBars = insets.getInsets(
-                        android.view.WindowInsets.Type.systemBars());
-                android.graphics.Insets ime = insets.getInsets(
-                        android.view.WindowInsets.Type.ime());
-                topInset = systemBars.top;
-                bottomInset = Math.max(systemBars.bottom, ime.bottom);
+                int[] modernInsets = Api30WindowInsets.systemBarsAndIme(insets);
+                topInset = modernInsets[0];
+                bottomInset = modernInsets[1];
             } else {
                 topInset = insets.getSystemWindowInsetTop();
                 // Before API 30, the navigation bar remains outside the content
@@ -3900,7 +3926,8 @@ public class MainActivity extends Activity {
                 ? 1f : openingGroupCell.getAlpha();
         final Dialog dialog = new Dialog(this);
         final boolean[] closing = new boolean[]{false};
-        final float[] iconScale = new float[]{0.12f, 0.12f};
+        // [panel start scale X/Y, icon snapshot expanded scale X/Y].
+        final float[] iconScale = new float[]{0.12f, 0.12f, 1f, 1f};
         final float[] morphStartTranslation = new float[2];
         final float[] morphProgress = new float[]{0f};
         final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
@@ -4301,10 +4328,15 @@ public class MainActivity extends Activity {
             if (openingGroupIcon != null && openingGroupIcon.getWidth() > 0
                     && openingGroupIcon.getHeight() > 0) {
                 try {
+                    // Rasterize at 2x so the source artwork remains clean while it grows.
+                    int snapshotWidth = openingGroupIcon.getWidth();
+                    int snapshotHeight = openingGroupIcon.getHeight();
                     iconSnapshot = android.graphics.Bitmap.createBitmap(
-                            openingGroupIcon.getWidth(), openingGroupIcon.getHeight(),
+                            snapshotWidth * 2, snapshotHeight * 2,
                             android.graphics.Bitmap.Config.ARGB_8888);
-                    openingGroupIcon.draw(new android.graphics.Canvas(iconSnapshot));
+                    android.graphics.Canvas snapshotCanvas = new android.graphics.Canvas(iconSnapshot);
+                    snapshotCanvas.scale(2f, 2f);
+                    openingGroupIcon.draw(snapshotCanvas);
                 } catch (RuntimeException snapshotError) {
                     if (iconSnapshot != null && !iconSnapshot.isRecycled()) iconSnapshot.recycle();
                     iconSnapshot = null;
@@ -4317,22 +4349,24 @@ public class MainActivity extends Activity {
                 snapshot.setClickable(false);
                 snapshot.setFocusable(false);
                 snapshot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                // Keep the image view at the real icon bounds. Its independent scale
+                // and translation then expand the actual rounded icon into the panel,
+                // instead of stretching it over the panel before scaling it down.
                 FrameLayout.LayoutParams snapshotParams = new FrameLayout.LayoutParams(
-                        lp.width, lp.height, Gravity.TOP | Gravity.LEFT);
-                snapshotParams.leftMargin = panelBounds.left;
-                snapshotParams.topMargin = panelBounds.top;
+                        iconW, iconH, Gravity.TOP | Gravity.LEFT);
+                snapshotParams.leftMargin = iconX - iconW / 2;
+                snapshotParams.topMargin = iconY - iconH / 2;
                 overlay.addView(snapshot, snapshotParams);
-                snapshot.setPivotX(lp.width * 0.5f);
-                snapshot.setPivotY(lp.height * 0.5f);
-                snapshot.setScaleX(startScaleX);
-                snapshot.setScaleY(startScaleY);
-                snapshot.setTranslationX(morphStartTranslation[0]);
-                snapshot.setTranslationY(morphStartTranslation[1]);
-                // This bitmap is already rasterized from the rounded launcher icon;
-                // animating a second clipping outline adds work without changing its shape.
-                snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                snapshot.setPivotX(iconW * 0.5f);
+                snapshot.setPivotY(iconH * 0.5f);
+                snapshot.setScaleX(1f);
+                snapshot.setScaleY(1f);
+                snapshot.setTranslationX(0f);
+                snapshot.setTranslationY(0f);
                 snapshot.bringToFront();
                 morphSnapshotRef[0] = snapshot;
+                iconScale[2] = lp.width / (float) Math.max(1, iconW);
+                iconScale[3] = lp.height / (float) Math.max(1, iconH);
                 if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
             }
 
@@ -4360,10 +4394,10 @@ public class MainActivity extends Activity {
                 android.widget.ImageView snapshot = morphSnapshotRef[0];
                 if (snapshot != null) {
                     snapshot.setVisibility(View.VISIBLE);
-                    snapshot.setScaleX(sx);
-                    snapshot.setScaleY(sy);
-                    snapshot.setTranslationX(tx);
-                    snapshot.setTranslationY(ty);
+                    snapshot.setScaleX(1f + (iconScale[2] - 1f) * progress);
+                    snapshot.setScaleY(1f + (iconScale[3] - 1f) * progress);
+                    snapshot.setTranslationX(-morphStartTranslation[0] * progress);
+                    snapshot.setTranslationY(-morphStartTranslation[1] * progress);
                     snapshot.setAlpha(1f - Math.max(0f,
                             Math.min(1f, (progress - 0.30f) / 0.40f)));
                     
@@ -4417,7 +4451,6 @@ public class MainActivity extends Activity {
                 ? snapshotRef[0] : null;
         if (snapshot != null) {
             snapshot.setVisibility(View.VISIBLE);
-            snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             snapshot.bringToFront();
         }
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -4441,13 +4474,14 @@ public class MainActivity extends Activity {
             if (rows != null) rows.setAlpha(contentFade);
             if (manage != null) manage.setAlpha(contentFade);
             if (snapshot != null) {
-                snapshot.setScaleX(sx);
-                snapshot.setScaleY(sy);
-                snapshot.setTranslationX(tx);
-                snapshot.setTranslationY(ty);
+                snapshot.setScaleX(1f + ((iconScale != null && iconScale.length > 2
+                        ? iconScale[2] : 1f) - 1f) * progress);
+                snapshot.setScaleY(1f + ((iconScale != null && iconScale.length > 3
+                        ? iconScale[3] : 1f) - 1f) * progress);
+                snapshot.setTranslationX(-offsetX * progress);
+                snapshot.setTranslationY(-offsetY * progress);
                 snapshot.setAlpha(1f - Math.max(0f,
                         Math.min(1f, (progress - 0.30f) / 0.40f)));
-                
             }
             if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
             panel.invalidateOutline();
@@ -4455,7 +4489,6 @@ public class MainActivity extends Activity {
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 panel.setLayerType(View.LAYER_TYPE_NONE, null);
-                if (snapshot != null) snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
                 if (dialog.isShowing()) dialog.dismiss();
                 if (afterClose != null) afterClose.run();
             }
@@ -8312,10 +8345,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_HOME_ROLE) {
             if (Build.VERSION.SDK_INT >= 29) {
-                android.app.role.RoleManager roleManager =
-                        (android.app.role.RoleManager) getSystemService("role");
-                if (roleManager != null
-                        && roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
+                if (Api29HomeRoleManager.isHomeRoleHeld(this)) {
                     Toast.makeText(this, "PhoneBridge is now the default Home app.",
                             Toast.LENGTH_SHORT).show();
                 } else {
@@ -9665,9 +9695,10 @@ public class MainActivity extends Activity {
             if (api23TwoDigitTextFallback) {
                 int nativeColonAt = displayClock.toString().indexOf(':');
                 if (nativeColonAt >= 0) {
+                    boolean compactNativeColon = styleForClockSpacing != 2;
                     int shiftPx = getNativeClockColonBaselineShift(
-                            displayClock.toString(), nativeColonAt);
-                    displayClock.setSpan(new ClockColonBaselineSpan(shiftPx),
+                            displayClock.toString(), nativeColonAt, compactNativeColon);
+                    displayClock.setSpan(new ClockColonBaselineSpan(shiftPx, compactNativeColon),
                             nativeColonAt, nativeColonAt + 1,
                             android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
@@ -9689,11 +9720,14 @@ public class MainActivity extends Activity {
                     if (existingColonAt >= 0) {
                         ClockColonBaselineSpan[] oldBaseline = oldSpanned.getSpans(
                                 existingColonAt, existingColonAt + 1, ClockColonBaselineSpan.class);
+                        boolean compactNativeColon = prefs == null
+                                || prefs.getInt(KEY_CLOCK_STYLE, 0) != 2;
                         int requiredShift = getNativeClockColonBaselineShift(
-                                oldSpanned.toString(), existingColonAt);
+                                oldSpanned.toString(), existingColonAt, compactNativeColon);
                         staleApi23ReplacementSpans = staleApi23ReplacementSpans
                                 || oldBaseline.length != 1
-                                || oldBaseline[0].getShiftPx() != requiredShift;
+                                || oldBaseline[0].getShiftPx() != requiredShift
+                                || oldBaseline[0].isCompact() != compactNativeColon;
                     }
                 }
             }
@@ -10541,9 +10575,19 @@ public class MainActivity extends Activity {
                 }
                 android.graphics.Rect targetVisible = appIconVisualRectAt(
                         member, targetX, targetY, geometry[2], geometry[3]);
+                int originX = homeGridIconLeftAt(
+                        member, originSlot[0], cellWidth, geometry[2]);
+                int originY = homeGridIconTopAt(
+                        page, member, originSlot[1], rows, cellHeight);
                 android.graphics.Rect sweep = appIconVisualRectAt(
-                        member, geometry[0], geometry[1], geometry[2], geometry[3]);
+                        member, originX, originY, geometry[2], geometry[3]);
                 sweep.union(targetVisible);
+                android.graphics.Rect movingVisible = collisionRectForInteraction(
+                        movingView, moverGeometry, member);
+                if (android.graphics.Rect.intersects(targetVisible, movingVisible)) {
+                    blocked = true;
+                    break;
+                }
                 for (int i = 0; i < page.getChildCount(); i++) {
                     View blocker = page.getChildAt(i);
                     if (blocker == member || blocker == movingView
@@ -13942,11 +13986,18 @@ public class MainActivity extends Activity {
         return LauncherUiUtils.dp(this, 114) / 2f;
     }
 
-    private int getNativeClockColonBaselineShift(String text, int colonAt) {
+    private int getNativeClockColonBaselineShift(String text, int colonAt,
+            boolean compactNativeColon) {
         if (clockText == null || text == null || colonAt < 0 || colonAt >= text.length()) return 0;
         android.text.Layout layout = clockText.getLayout();
         if (layout == null || layout.getLineCount() <= 0) return 0;
         Paint glyphPaint = new Paint(clockText.getPaint());
+        if (compactNativeColon) {
+            glyphPaint.setTextSize(glyphPaint.getTextSize()
+                    * ClockColonBaselineSpan.TEXT_SIZE_SCALE);
+            glyphPaint.setTextScaleX(glyphPaint.getTextScaleX()
+                    * ClockColonBaselineSpan.WIDTH_SCALE);
+        }
         android.graphics.Rect inkBounds = new android.graphics.Rect();
         glyphPaint.getTextBounds(text, colonAt, colonAt + 1, inkBounds);
         float baseline = layout.getLineBaseline(0);
@@ -14004,19 +14055,21 @@ public class MainActivity extends Activity {
         // Single-digit Android 6 clocks use CenteredColonSpan already; this native
         // fallback is only for the two-digit path that avoids ReplacementSpan glyphs.
         if (hourDigits < 2) return;
-        int shift = getNativeClockColonBaselineShift(plain, colonAt);
+        boolean compactNativeColon = prefs == null || prefs.getInt(KEY_CLOCK_STYLE, 0) != 2;
+        int shift = getNativeClockColonBaselineShift(plain, colonAt, compactNativeColon);
         android.text.Spanned spanned = (android.text.Spanned) value;
         ClockColonBaselineSpan[] current = spanned.getSpans(
                 colonAt, colonAt + 1, ClockColonBaselineSpan.class);
-        if (current.length == 1 && current[0].getShiftPx() == shift) return;
+        if (current.length == 1 && current[0].getShiftPx() == shift
+                && current[0].isCompact() == compactNativeColon) return;
 
         android.text.SpannableStringBuilder rebuilt =
                 new android.text.SpannableStringBuilder(value);
         ClockColonBaselineSpan[] old = rebuilt.getSpans(
                 0, rebuilt.length(), ClockColonBaselineSpan.class);
         for (ClockColonBaselineSpan span : old) rebuilt.removeSpan(span);
-        rebuilt.setSpan(new ClockColonBaselineSpan(shift), colonAt, colonAt + 1,
-                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        rebuilt.setSpan(new ClockColonBaselineSpan(shift, compactNativeColon),
+                colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         clockText.setText(rebuilt, TextView.BufferType.SPANNABLE);
         clockText.requestLayout();
         clockText.invalidate();
@@ -14649,17 +14702,28 @@ public class MainActivity extends Activity {
 
     private static final class ClockColonBaselineSpan
             extends android.text.style.CharacterStyle {
+        // These draw-only scales make the native API-23 colon use approximately the
+        // same visual width/height as the replacement-span colon on newer releases.
+        static final float TEXT_SIZE_SCALE = 0.58f;
+        static final float WIDTH_SCALE = 0.72f;
         private final int shiftPx;
+        private final boolean compact;
 
-        ClockColonBaselineSpan(int shiftPx) {
+        ClockColonBaselineSpan(int shiftPx, boolean compact) {
             this.shiftPx = shiftPx;
+            this.compact = compact;
         }
 
         int getShiftPx() { return shiftPx; }
+        boolean isCompact() { return compact; }
 
         // Drawing-only: changing font metrics on API 23 can re-layout the complete
         // two-digit clock and move its baseline away from the line we're centering to.
         @Override public void updateDrawState(android.text.TextPaint paint) {
+            if (compact) {
+                paint.setTextSize(paint.getTextSize() * TEXT_SIZE_SCALE);
+                paint.setTextScaleX(paint.getTextScaleX() * WIDTH_SCALE);
+            }
             paint.baselineShift += shiftPx;
         }
     }
