@@ -4783,7 +4783,21 @@ public class MainActivity extends Activity {
             pendingMemberIconViews.add(icon);
             item.addView(icon, new LinearLayout.LayoutParams(miniIconPx, miniIconPx));
             TextView label = new TextView(this);
-            label.setText(String.valueOf(app.loadLabel(packageManager)));
+            String memberLabel = null;
+            if (app.activityInfo != null) {
+                memberLabel = preloadedAppLabels.get(
+                        app.activityInfo.packageName + "/" + app.activityInfo.name);
+            }
+            if (memberLabel == null || memberLabel.trim().isEmpty()) {
+                memberLabel = app.activityInfo != null && app.activityInfo.name != null
+                        ? app.activityInfo.name : packageName;
+                int dot = memberLabel.lastIndexOf('.');
+                if (dot >= 0 && dot + 1 < memberLabel.length()) {
+                    memberLabel = memberLabel.substring(dot + 1);
+                }
+            }
+            label.setText(memberLabel);
+            label.setContentDescription(memberLabel);
             label.setTextSize(miniLabelSp);
             label.setTextColor(homeLabelColor());
             label.setTypeface(Typeface.create(homeLabelTypefaceFamily(), Typeface.NORMAL));
@@ -4841,14 +4855,27 @@ public class MainActivity extends Activity {
                 }
                 handler.post(() -> {
                     if (!dialog.isShowing()) return;
-                    Runnable applyLoadedIcons = () -> {
+                    final int[] nextIconIndex = {0};
+                    final Runnable[] applyNextIconBatch = new Runnable[1];
+                    applyNextIconBatch[0] = () -> {
                         if (!dialog.isShowing()) return;
-                        for (int i = 0; i < loaded.length; i++) {
-                            ImageView target = iconTargets[i];
+                        int end = Math.min(loaded.length, nextIconIndex[0] + 2);
+                        while (nextIconIndex[0] < end) {
+                            int iconIndex = nextIconIndex[0]++;
+                            ImageView target = iconTargets[iconIndex];
                             if (target != null && target.getParent() != null) {
-                                target.setImageDrawable(loaded[i]);
+                                target.setImageDrawable(loaded[iconIndex]);
                             }
                         }
+                        if (nextIconIndex[0] < loaded.length) {
+                            overlay.postOnAnimation(applyNextIconBatch[0]);
+                        }
+                    };
+                    Runnable applyLoadedIcons = () -> {
+                        nextIconIndex[0] = 0;
+                        // Spread texture uploads and invalidations over frames so a large
+                        // group cannot hitch when its member artwork becomes available.
+                        overlay.postOnAnimation(applyNextIconBatch[0]);
                     };
                     // If artwork finishes before the first animation frame, defer it too:
                     // changing card children just before layer capture can reintroduce tap lag.
@@ -5103,11 +5130,10 @@ public class MainActivity extends Activity {
             // Avoid per-tap bitmap rasterization and a second animated layer.
             if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
 
-            // Prewarm the static popup surface before its first visible frame. On older
-            // GPUs a lazy hardware-layer allocation at animation start caused a visible
-            // pause, making the icon-to-panel morph appear as separate steps.
+            // Keep the panel on a hardware layer, but don't force a synchronous raster
+            // of every inner icon immediately before animation starts; large groups stalled
+            // here despite artwork loading on a background thread.
             panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-            if (panel.getWidth() > 0 && panel.getHeight() > 0) panel.buildLayer();
 
             final long duration = animationDuration(240L);
             android.animation.ValueAnimator transition =
@@ -14561,9 +14587,52 @@ public class MainActivity extends Activity {
         int width = Math.max(1, g[2]), height = Math.max(1, g[3]);
         int maxX = Math.max(0, page.getWidth() - width);
         int maxY = Math.max(0, page.getHeight() - height);
-        int step = Math.max(1, LauncherUiUtils.dp(this, 8));
-        int bestX = -1, bestY = -1;
         long bestDistance = Long.MAX_VALUE;
+        int bestX = -1, bestY = -1;
+
+        // Exact obstacle-edge candidates catch free rectangles between grid slots even
+        // when no sample from the old coarse 8dp scan happened to land in that gap.
+        java.util.TreeSet<Integer> xs = new java.util.TreeSet<Integer>();
+        java.util.TreeSet<Integer> ys = new java.util.TreeSet<Integer>();
+        xs.add(0);
+        xs.add(maxX);
+        xs.add(Math.max(0, Math.min(maxX, g[0])));
+        ys.add(0);
+        ys.add(maxY);
+        ys.add(Math.max(0, Math.min(maxY, g[1])));
+        int clearance = Math.max(1, workspaceCollisionMargin(moving)
+                + LauncherUiUtils.dp(this, 1));
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == moving || !isWorkspaceItem(other)
+                    || other.getVisibility() != View.VISIBLE) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            android.graphics.Rect obstacle =
+                    collisionRectForInteraction(other, otherGeometry, moving);
+            xs.add(Math.max(0, Math.min(maxX, obstacle.left - width - clearance)));
+            xs.add(Math.max(0, Math.min(maxX, obstacle.right + clearance)));
+            ys.add(Math.max(0, Math.min(maxY, obstacle.top - height - clearance)));
+            ys.add(Math.max(0, Math.min(maxY, obstacle.bottom + clearance)));
+        }
+        for (Integer yValue : ys) {
+            int cy = yValue.intValue();
+            for (Integer xValue : xs) {
+                int cx = xValue.intValue();
+                if (!resizeCandidateIsFree(page, moving, cx, cy, width, height)) continue;
+                long distance = Math.abs((long) cx - g[0]) + Math.abs((long) cy - g[1]);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestX = cx;
+                    bestY = cy;
+                }
+            }
+        }
+        if (bestX >= 0) return new int[]{bestX, bestY};
+
+        // Irregular clock backgrounds can differ slightly from their outer rectangle.
+        // Keep a finer pixel scan as a fallback if no exact edge candidate works.
+        int step = Math.max(1, LauncherUiUtils.dp(this, 6));
         for (int y = 0; y <= maxY; y += step) {
             int cy = Math.min(maxY, y);
             for (int x = 0; x <= maxX; x += step) {
@@ -14874,6 +14943,15 @@ public class MainActivity extends Activity {
                 continue;
             }
 
+            // A page may contain safe space between grid slots. Test pixel positions on
+            // the current page before moving a widget away or deciding to delete it.
+            int[] localPixelPosition = findResizeFreePixelPosition(page, item);
+            if (localPixelPosition != null) {
+                placeResizeRecoveredItem(page, item, pageIndex,
+                        localPixelPosition[0], localPixelPosition[1]);
+                continue;
+            }
+
             boolean widget = item.getTag() instanceof String
                     && ((String) item.getTag()).startsWith("launcher_widget:");
             if (widget) {
@@ -14895,7 +14973,26 @@ public class MainActivity extends Activity {
                         continue;
                     }
                 }
-                // Last resort: both pages are full even after nearby grid items yielded space.
+                // Last safety check before destructive removal: re-evaluate both pages
+                // after neighbour-shrink attempts. Grid-only failure is not proof that
+                // there is no usable rectangular gap.
+                int[] finalLocalPosition = findResizeFreePixelPosition(page, item);
+                if (finalLocalPosition != null) {
+                    placeResizeRecoveredItem(page, item, pageIndex,
+                            finalLocalPosition[0], finalLocalPosition[1]);
+                    continue;
+                }
+                if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
+                        && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
+                    FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
+                    int[] finalOtherPosition = findResizeFreePixelPosition(other, item);
+                    if (finalOtherPosition != null) {
+                        moveResizeWidgetToOtherPage(page, item, otherIndex,
+                                finalOtherPosition[0], finalOtherPosition[1]);
+                        resizeRepairMovedCount++;
+                        continue;
+                    }
+                }
                 removeResizeOverflowWidget(page, item);
             } else {
                 // Clock panels are page-specific. Keep their independent state on this screen:
