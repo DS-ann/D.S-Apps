@@ -14284,10 +14284,9 @@ public class MainActivity extends Activity {
                     // Center the colon in parent-local coordinates. Do not divide by
                     // panelScaleX: the background receives that same parent transform.
                     float measuredTargetX = (groupWidth * 0.5f - colonCenter) * textScaleX;
-                    // API 23 can briefly report inconsistent desired widths for two-digit
-                    // hours with ReplacementSpans immediately after package replacement.
-                    // Bound this correction so bad transient metrics cannot push all digits
-                    // outside their clock group.
+                    // Text layout can briefly report inconsistent desired widths during
+                    // refreshes or hour-width transitions. Bound the correction so transient
+                    // metrics cannot push visible digits outside their clock group.
                     if (Float.isNaN(measuredTargetX) || Float.isInfinite(measuredTargetX)) {
                         measuredTargetX = 0f;
                     }
@@ -14833,9 +14832,10 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        final boolean neonCircuitTwoDigitHour = !sevenSegment
+        final boolean neonCircuitCompactWidth = !sevenSegment
                 && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2
-                && hourDigitCountForWidthAdjustment > 1;
+                && (hourDigitCountForWidthAdjustment > 1
+                        || Build.VERSION.SDK_INT == Build.VERSION_CODES.M);
 
         // Center typography-clock text inside its fixed-width group; the group itself is
         // centered inside the background. The seven-segment renderer retains its left anchor.
@@ -14886,12 +14886,11 @@ public class MainActivity extends Activity {
         // Reduce the non-seven-segment glyph size by 20% from the previous
         // 1.4x setting, keeping the background dimensions unchanged.
         // The custom colon span remains vertically centered in the background.
-        // When Neon Circuit shows a two-digit hour, reduce the total clock-glyph
-        // width by 20dp to leave clearance inside the unchanged background. Derive
-        // the factor from the stable widest-digit measurement so the clock won't
-        // wobble as individual minute digits change.
+        // Keep Neon Circuit's 20dp width reduction stable across one- and two-digit
+        // hours on Android 6, so the hour-width transition does not rescale the text.
+        // Newer Android releases retain their existing two-digit-only treatment.
         float neonCircuitWidthScale = 1f;
-        if (neonCircuitTwoDigitHour) {
+        if (neonCircuitCompactWidth) {
             float currentGlyphWidth = Math.max(1f, naturalClockWidth * nonLedDigitScale);
             neonCircuitWidthScale = Math.max(0.01f,
                     (currentGlyphWidth - LauncherUiUtils.dp(this, 20)) / currentGlyphWidth);
