@@ -1,8 +1,5 @@
 package com.dsann.batterymonitor;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-
 final class BatteryPercentOverride {
     private BatteryPercentOverride() {}
 
@@ -69,34 +66,11 @@ final class BatteryPercentOverride {
     }
 
     private static Result runRoot(String command, String successMessage) {
-        try {
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", command});
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(p.getInputStream()))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    if (output.length() > 0) output.append('\n');
-                    output.append(line);
-                }
-            }
-            StringBuilder error = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(p.getErrorStream()))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    if (error.length() > 0) error.append('\n');
-                    error.append(line);
-                }
-            }
-            int code = p.waitFor();
-            if (code == 0) return new Result(true, successMessage);
-            String detail = error.length() > 0 ? error.toString() : output.toString();
-            return new Result(false, "Root command failed" +
-                    (detail.isEmpty() ? "." : ": " + detail));
-        } catch (Exception e) {
-            return new Result(false, "Root access failed: " + e.getMessage());
-        }
+        RootShell.CommandResult result = RootShell.execute(command);
+        if (result.success) return new Result(true, successMessage);
+        String detail = result.output == null ? "" : result.output.trim();
+        if (detail.isEmpty()) detail = "exit code " + result.exitCode;
+        return new Result(false, "Root command failed: " + detail);
     }
 
     static final class Result {

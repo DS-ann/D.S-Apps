@@ -7,20 +7,14 @@ import android.os.BatteryManager;
 import android.os.Build;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 
 final class BatteryReader {
     private static final String FG_CURRENT =
             "/sys/devices/platform/battery_meter/FG_Current";
     private static final String INSTAT_VOLT =
             "/sys/class/power_supply/battery/InstatVolt";
-
-    private static RootReader rootReader;
 
     private BatteryReader() {}
 
@@ -240,8 +234,8 @@ final class BatteryReader {
         // Keep one persistent su process instead of starting su once per read.
         RootReading rr = readAsRoot();
         if (rr != null) {
-            currentRaw = rr.currentRaw;
-            if (voltageMv == null) voltageMv = rr.voltageMv;
+            if (rr.currentRaw != null) currentRaw = rr.currentRaw;
+            if (voltageMv == null && rr.voltageMv != null) voltageMv = rr.voltageMv;
         }
 
         if (currentRaw != null) {
@@ -295,14 +289,35 @@ final class BatteryReader {
 
     private static synchronized RootReading readAsRoot() {
         try {
-            if (rootReader == null || !rootReader.isAlive()) {
-                if (rootReader != null) rootReader.close();
-                rootReader = new RootReader();
+            // Use the same persistent shell as percentage overrides so all root work is
+            // serialized and does not launch another su process for every reading.
+            RootShell.CommandResult result = RootShell.execute(
+                    "printf 'BP_CURRENT='; cat " + FG_CURRENT
+                            + " 2>/dev/null; printf '\\nBP_VOLTAGE='; cat " + INSTAT_VOLT
+                            + " 2>/dev/null; printf '\\n'");
+            Long currentRaw = null;
+            Long voltageMv = null;
+            if (result == null || !result.success) return null;
+            String[] lines = result.output.split("\\r?\\n");
+            for (String line : lines) {
+                if (line.startsWith("BP_CURRENT=")) {
+                    currentRaw = parseRootLong(line.substring("BP_CURRENT=".length()));
+                } else if (line.startsWith("BP_VOLTAGE=")) {
+                    voltageMv = parseRootLong(line.substring("BP_VOLTAGE=".length()));
+                }
             }
-            return rootReader.read();
-        } catch (Exception e) {
-            if (rootReader != null) rootReader.close();
-            rootReader = null;
+            return currentRaw == null && voltageMv == null
+                    ? null : new RootReading(currentRaw, voltageMv);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static Long parseRootLong(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException ignored) {
             return null;
         }
     }
@@ -330,56 +345,11 @@ final class BatteryReader {
         }
     }
 
-    static final class RootReader {
-        private final Process process;
-        private final BufferedWriter stdin;
-        private final BufferedReader stdout;
-
-        RootReader() throws IOException {
-            process = Runtime.getRuntime().exec(new String[]{"su"});
-            stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream()));
-            stdout = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        }
-
-        boolean isAlive() {
-            try {
-                process.exitValue();
-                return false;
-            } catch (IllegalThreadStateException e) {
-                return true;
-            }
-        }
-
-        RootReading read() throws IOException {
-            stdin.write("cat " + FG_CURRENT);
-            stdin.newLine();
-            stdin.write("cat " + INSTAT_VOLT);
-            stdin.newLine();
-            stdin.flush();
-
-            String current = stdout.readLine();
-            String voltage = stdout.readLine();
-            if (current == null || voltage == null) throw new IOException("su closed");
-
-            return new RootReading(
-                    Long.parseLong(current.trim()),
-                    Long.parseLong(voltage.trim())
-            );
-        }
-
-        void close() {
-            try { stdin.write("exit"); stdin.newLine(); stdin.flush(); } catch (Exception ignored) {}
-            try { stdin.close(); } catch (Exception ignored) {}
-            try { stdout.close(); } catch (Exception ignored) {}
-            process.destroy();
-        }
-    }
-
     static final class RootReading {
-        final long currentRaw;
-        final long voltageMv;
+        final Long currentRaw;
+        final Long voltageMv;
 
-        RootReading(long currentRaw, long voltageMv) {
+        RootReading(Long currentRaw, Long voltageMv) {
             this.currentRaw = currentRaw;
             this.voltageMv = voltageMv;
         }

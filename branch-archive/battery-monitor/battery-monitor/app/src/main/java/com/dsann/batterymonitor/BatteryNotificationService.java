@@ -363,11 +363,12 @@ public class BatteryNotificationService extends Service {
         if (!shouldRunService()) return;
         try {
             AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
-            Intent recovery = new Intent(this, BatteryNotificationService.class);
+            // Use a receiver so Android 8+ can legally restart the foreground service.
+            Intent recovery = new Intent(this, BootReceiver.class);
             recovery.setAction("com.dsann.batterymonitor.RECOVER_MEASUREMENT");
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
-            PendingIntent pending = PendingIntent.getService(this, 9381, recovery, flags);
+            PendingIntent pending = PendingIntent.getBroadcast(this, 9381, recovery, flags);
             long trigger = SystemClock.elapsedRealtime() + RECOVERY_DELAY_MS;
             if (alarm != null) {
                 if (Build.VERSION.SDK_INT >= 23) alarm.setExactAndAllowWhileIdle(
