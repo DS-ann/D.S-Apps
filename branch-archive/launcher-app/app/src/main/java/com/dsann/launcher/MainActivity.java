@@ -14125,15 +14125,6 @@ public class MainActivity extends Activity {
                 return (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
             }
 
-            Paint digitPaint = new Paint(clockText.getPaint());
-            android.graphics.Rect digitBounds = new android.graphics.Rect();
-            digitPaint.getTextBounds("8", 0, 1, digitBounds);
-            if (digitBounds.bottom > digitBounds.top) {
-                Paint.FontMetricsInt metrics = new Paint.FontMetricsInt();
-                digitPaint.getFontMetricsInt(metrics);
-                return (metrics.bottom + metrics.top) * 0.5f
-                        + (digitBounds.top + digitBounds.bottom) * 0.5f;
-            }
             Paint.FontMetricsInt metrics = new Paint.FontMetricsInt();
             clockText.getPaint().getFontMetricsInt(metrics);
             if (metrics.bottom > metrics.top) {
