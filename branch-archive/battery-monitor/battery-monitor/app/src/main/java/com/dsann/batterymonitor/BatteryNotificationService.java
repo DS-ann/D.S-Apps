@@ -196,6 +196,10 @@ public class BatteryNotificationService extends Service {
     }
 
     private boolean shouldUseDozeSamplingMode() {
+        // A root whitelist permits this foreground service to keep its wake lock during Doze.
+        // In that mode, preserve the requested continuous sampling instead of backing off to
+        // the ten-minute Doze alarm loop.
+        if (DozeWhitelistController.isEnabled(this)) return false;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
         PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
         if (manager == null || manager.isInteractive()) return false;

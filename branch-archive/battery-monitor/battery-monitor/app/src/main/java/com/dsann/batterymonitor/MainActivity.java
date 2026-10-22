@@ -58,6 +58,8 @@ public class MainActivity extends Activity {
     private Button useAndroidPercentButton;
     private Switch notificationSwitch;
     private Switch alwaysRunningSwitch;
+    private Switch rootDozeSwitch;
+    private TextView rootDozeStatus;
     private Switch fakeChargingSwitch;
     private TextView fakeChargingStatus;
     private SeekBar samplingBar,myBatterySamplingBar;
@@ -78,6 +80,13 @@ public class MainActivity extends Activity {
         boolean enableAlwaysBackgroundByDefault=!initialPrefs.contains(KEY_ALWAYS_BACKGROUND);
         if(enableAlwaysBackgroundByDefault){
             initialPrefs.edit().putBoolean(KEY_ALWAYS_BACKGROUND,true).apply();
+        }
+        boolean autoApplyRootDozeWhitelist =
+                !initialPrefs.getBoolean(DozeWhitelistController.KEY_SETUP_ATTEMPTED,false)
+                && initialPrefs.getBoolean(KEY_ALWAYS_BACKGROUND,true);
+        if(autoApplyRootDozeWhitelist){
+            initialPrefs.edit().putBoolean(
+                    DozeWhitelistController.KEY_SETUP_ATTEMPTED,true).apply();
         }
         getWindow().setStatusBarColor(0xFF0D1117);
         getWindow().setNavigationBarColor(0xFF0D1117);
@@ -158,6 +167,27 @@ public class MainActivity extends Activity {
             startNotificationService();
             if(enableAlwaysBackgroundByDefault) requestBatteryOptimizationExemption();
         }
+        if (autoApplyRootDozeWhitelist || DozeWhitelistController.isEnabled(this)) {
+            if (rootDozeStatus != null) rootDozeStatus.setText("Applying root Doze exemption...");
+            try {
+                sensorExecutor.execute(() -> {
+                    DozeWhitelistController.Result result = autoApplyRootDozeWhitelist
+                            ? DozeWhitelistController.enable(MainActivity.this)
+                            : DozeWhitelistController.reapplyIfEnabled(MainActivity.this);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        setRootDozeSwitchState(result.enabled);
+                        rootDozeStatus.setText(result.message);
+                        rootDozeStatus.setTextColor(result.success ? 0xFF63E6A8 : 0xFFFF7F9A);
+                        if (shouldKeepServiceRunning(getSharedPreferences(PREFS,0))) {
+                            startNotificationService();
+                        }
+                    });
+                });
+            } catch (RejectedExecutionException ignored) {
+                rootDozeStatus.setText("Could not queue root Doze setup.");
+            }
+        }
         if (BatteryChargingOverride.isEnabled(this)) {
             try {
                 sensorExecutor.execute(() -> {
@@ -222,6 +252,25 @@ public class MainActivity extends Activity {
                 +"Android Force stop can still block restarts.",12);
         alwaysRunningSub.setTextColor(0xFF9AA0AA);
         recording.addView(alwaysRunningSub,top(2));
+
+        LinearLayout rootDozeRow=new LinearLayout(this);
+        rootDozeRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView rootDozeTitle=text("Root Doze exemption",15);
+        rootDozeRow.addView(rootDozeTitle,new LinearLayout.LayoutParams(0,-2,1));
+        rootDozeSwitch=new Switch(this);
+        rootDozeSwitch.setChecked(DozeWhitelistController.isEnabled(this));
+        rootDozeRow.addView(rootDozeSwitch,new LinearLayout.LayoutParams(-2,-2));
+        recording.addView(rootDozeRow,top(10));
+        TextView rootDozeSub=text(
+                "Uses root to exempt BatteryPulse from Doze restrictions, allowing continuous "
+                +"sampling and wake-lock use. Doze stays enabled for the rest of Android; "
+                +"battery use will increase.",12);
+        rootDozeSub.setTextColor(0xFF9AA0AA);
+        recording.addView(rootDozeSub,top(2));
+        rootDozeStatus=text(DozeWhitelistController.isEnabled(this)
+                ? "Root Doze exemption enabled." : "Root Doze exemption not enabled.",12);
+        rootDozeStatus.setTextColor(0xFF858D99);
+        recording.addView(rootDozeStatus,top(4));
 
         TextView recordingSub=text("Records session history while enabled.",13);
         recordingSub.setTextColor(0xFF9AA0AA);
@@ -394,6 +443,8 @@ public class MainActivity extends Activity {
             }catch(RejectedExecutionException ignored){resetPercent.setEnabled(true);}
         });
         
+        rootDozeSwitch.setOnCheckedChangeListener((b,on)->handleRootDozeSwitch(on));
+
         alwaysRunningSwitch.setOnCheckedChangeListener((b,on)->{
             android.content.SharedPreferences servicePrefs=getSharedPreferences(PREFS,0);
             servicePrefs.edit().putBoolean(KEY_ALWAYS_BACKGROUND,on).apply();
@@ -425,6 +476,44 @@ public class MainActivity extends Activity {
         return r;
     }
     
+    private void setRootDozeSwitchState(boolean enabled){
+        if(rootDozeSwitch==null)return;
+        rootDozeSwitch.setOnCheckedChangeListener(null);
+        rootDozeSwitch.setChecked(enabled);
+        rootDozeSwitch.setOnCheckedChangeListener((button,on)->handleRootDozeSwitch(on));
+    }
+
+    private void handleRootDozeSwitch(boolean enabled){
+        if(rootDozeSwitch==null)return;
+        rootDozeSwitch.setEnabled(false);
+        rootDozeStatus.setText(enabled
+                ? "Adding BatteryPulse to the root Doze whitelist..."
+                : "Removing BatteryPulse from the root Doze whitelist...");
+        rootDozeStatus.setTextColor(0xFF9AA0AA);
+        try{
+            sensorExecutor.execute(()->{
+                DozeWhitelistController.Result result=enabled
+                        ?DozeWhitelistController.enable(MainActivity.this)
+                        :DozeWhitelistController.disable(MainActivity.this);
+                runOnUiThread(()->{
+                    if(isFinishing()||isDestroyed())return;
+                    setRootDozeSwitchState(result.enabled);
+                    rootDozeSwitch.setEnabled(true);
+                    rootDozeStatus.setText(result.message);
+                    rootDozeStatus.setTextColor(result.success?0xFF63E6A8:0xFFFF7F9A);
+                    if(shouldKeepServiceRunning(getSharedPreferences(PREFS,0))){
+                        startNotificationService();
+                    }
+                });
+            });
+        }catch(RejectedExecutionException ignored){
+            setRootDozeSwitchState(DozeWhitelistController.isEnabled(this));
+            rootDozeSwitch.setEnabled(true);
+            rootDozeStatus.setText("Could not queue the root Doze command.");
+            rootDozeStatus.setTextColor(0xFFFF7F9A);
+        }
+    }
+
     private void handleFakeChargingSwitch(boolean enabled){
         if(fakeChargingSwitch==null)return;
         fakeChargingSwitch.setEnabled(false);

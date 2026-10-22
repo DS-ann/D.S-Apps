@@ -24,6 +24,14 @@ public class BootReceiver extends BroadcastReceiver {
 
         android.content.SharedPreferences settings =
                 context.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        if (DozeWhitelistController.isEnabled(context)) {
+            Context appContext = context.getApplicationContext();
+            Thread whitelistRestore = new Thread(
+                    () -> DozeWhitelistController.reapplyIfEnabled(appContext),
+                    "BatteryPulse-DozeWhitelist");
+            whitelistRestore.setDaemon(true);
+            whitelistRestore.start();
+        }
         boolean recording = settings.getBoolean("notification_enabled", false);
         boolean alwaysBackground = settings.getBoolean("always_run_background", true);
         boolean useAppPercent =
