@@ -98,6 +98,7 @@ public class MainActivity extends Activity {
     private static final String KEY_CLOCK_WIDGET_X = "clock_widget_x";
     private static final String KEY_CLOCK_WIDGET_Y = "clock_widget_y";
     private static final String KEY_CLOCK_WIDGET_ENABLED = "clock_widget_enabled";
+    private static final String KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX = "resize_auto_removed_clock_page_";
     private static final String KEY_SHOW_HOME_LABELS = "show_home_labels";
     private static final String KEY_SHOW_DRAWER_LABELS = "show_drawer_labels";
     private static final String KEY_SHOW_PAGE_INDICATOR = "show_page_indicator";
@@ -680,6 +681,8 @@ public class MainActivity extends Activity {
     private View activeAppGroupMemberMoveModeView;
     private boolean appGroupCreationPending;
     private boolean appGroupRenderDeferred;
+    // Defers generic overlap validation until resize-specific recovery completes.
+    private boolean homeIconResizeRepairPending;
     private long lastAppGroupCreationUptime;
     private View workspaceTransferItem;
     private FrameLayout workspaceTransferSourcePage;
@@ -3559,11 +3562,27 @@ public class MainActivity extends Activity {
         if (label == null) return;
         CharSequence source = label.getContentDescription();
         if (source == null) source = label.getText();
-        String fullText = source == null ? "" : source.toString();
-        if (!fullText.contentEquals(label.getText())) label.setText(fullText);
+        final String fullText = source == null ? "" : source.toString();
         label.setSingleLine(true);
         label.setMaxLines(1);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setEllipsize(null);
+        if (label.getWidth() <= 0) return;
+        float available = Math.max(0f, label.getWidth()
+                - label.getPaddingLeft() - label.getPaddingRight());
+        android.text.TextPaint paint = label.getPaint();
+        String fitted = fullText;
+        if (paint.measureText(fullText) > available) {
+            String suffix = "..";
+            while (suffix.length() > 0 && paint.measureText(suffix) > available) {
+                suffix = suffix.substring(0, suffix.length() - 1);
+            }
+            int end = fullText.length();
+            while (end > 0 && paint.measureText(fullText.substring(0, end) + suffix) > available) {
+                end--;
+            }
+            fitted = fullText.substring(0, end) + suffix;
+        }
+        if (!fitted.contentEquals(label.getText())) label.setText(fitted);
     }
 
     /**
@@ -3804,6 +3823,14 @@ public class MainActivity extends Activity {
             LinearLayout panel = clockPanelsByPage[pageIndex];
             if (panel == null) continue;
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+            if (prefs.getBoolean(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + pageIndex, false)) {
+                if (panel.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) panel.getParent()).removeView(panel);
+                }
+                panel.setVisibility(View.GONE);
+                continue;
+            }
+            panel.setVisibility(View.VISIBLE);
             // Also enforce clipping on pages that already existed before this rebuild.
             page.setClipChildren(true);
             page.setClipToPadding(true);
@@ -6065,8 +6092,14 @@ public class MainActivity extends Activity {
         label.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
         label.setSingleLine(true);
         label.setMaxLines(1);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setEllipsize(null);
         label.setIncludeFontPadding(false);
+        label.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                         oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left != oldRight - oldLeft) {
+                fitShortcutLabelWithDots((TextView) view);
+            }
+        });
         int shortcutLabelHeight = workspaceLabelHeightPx(label);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
                 cellW, shortcutLabelHeight, Gravity.TOP | Gravity.LEFT);
@@ -6554,7 +6587,7 @@ public class MainActivity extends Activity {
             }
             page.post(() -> {
                 if (pagesStrip == null || page.getParent() != pagesStrip) return;
-                resolveAllWorkspaceOverlaps(page, null);
+                if (!homeIconResizeRepairPending) resolveAllWorkspaceOverlaps(page, null);
                 ensureShortcutLabelsNotClipped();
                 refreshWorkspaceGrid();
             });
@@ -13466,7 +13499,24 @@ public class MainActivity extends Activity {
             // when one item overlaps but the rest of the workspace is already correct.
             boolean currentInsidePage = g[0] >= 0 && g[1] >= 0
                     && g[0] + w <= page.getWidth() && g[1] + h <= page.getHeight();
-            if (currentInsidePage) {
+            boolean currentOnLegalGridSlot = true;
+            if (isHomeGridIcon(item)) {
+                int gridColumns = homeGridColumnsForItem(item);
+                int gridCellWidth = Math.max(1, page.getWidth() / Math.max(1, gridColumns));
+                int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+                int gridCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+                int gridRows = homeGridRowsForHeight(page.getHeight(), gridCellHeight);
+                int topForSlot = isWorkspaceContactShortcut(item)
+                        ? g[1] - LauncherUiUtils.dp(this, 14) : g[1];
+                int gridCol = Math.max(0, Math.min(gridColumns - 1,
+                        Math.round(g[0] / (float) gridCellWidth)));
+                int gridRow = homeGridRowFromTop(topForSlot, gridRows, page.getHeight(), gridCellHeight);
+                int expectedX = homeGridIconLeftAt(item, gridCol, gridCellWidth, w);
+                int expectedY = homeGridIconTopAt(page, item, gridRow, gridRows, gridCellHeight);
+                currentOnLegalGridSlot = Math.abs(expectedX - g[0]) <= 1
+                        && Math.abs(expectedY - g[1]) <= 1;
+            }
+            if (currentInsidePage && currentOnLegalGridSlot) {
                 android.graphics.Rect currentCandidate = collisionRectAt(item, g[0], g[1], w, h);
                 boolean currentBlocked = false;
                 for (android.graphics.Rect prior : accepted) {
@@ -14142,8 +14192,408 @@ public class MainActivity extends Activity {
         if (changedShortcuts) shortcutEdit.apply();
     }
 
+    /**
+     * Resize-only collision recovery. Keep apps/groups in legal grid slots first; then
+     * shrink an overlapping clock/widget, relocate it on its current page, try the other
+     * page for widgets, and remove the widget only when both pages are full.
+     */
+    private void validateWorkspacePagesAfterIconResize() {
+        if (pagesStrip == null) {
+            homeIconResizeRepairPending = false;
+            return;
+        }
+        pagesStrip.post(() -> {
+            if (pagesStrip == null || isFinishing()) {
+                homeIconResizeRepairPending = false;
+                return;
+            }
+            final java.util.ArrayList<FrameLayout> targetPages =
+                    new java.util.ArrayList<FrameLayout>();
+            for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
+                View child = pagesStrip.getChildAt(i);
+                if (child instanceof FrameLayout) targetPages.add((FrameLayout) child);
+            }
+            if (targetPages.isEmpty()) {
+                homeIconResizeRepairPending = false;
+                return;
+            }
+            final int[] remaining = {targetPages.size()};
+            for (FrameLayout page : targetPages) {
+                page.post(() -> {
+                    if (pagesStrip == null || page.getParent() != pagesStrip) {
+                        if (--remaining[0] == 0) homeIconResizeRepairPending = false;
+                        return;
+                    }
+                    snapAppGroupsToGridAfterIconResize(page);
+                    repairResizeCollisionsOnPage(page);
+                    if (--remaining[0] == 0) {
+                        homeIconResizeRepairPending = false;
+                        ensureShortcutLabelsNotClipped();
+                        refreshWorkspaceGrid();
+                    }
+                });
+            }
+        });
+    }
+
+    private void snapAppGroupsToGridAfterIconResize(FrameLayout page) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
+        int columns = Math.max(1, getHomeColumns());
+        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
+        int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        boolean[][] occupied = new boolean[rows][columns];
+
+        // App icons reserve their logical slots first; groups must use another legal slot.
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (!isWorkspaceAppIcon(child)
+                    || !(child.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
+            int col = Math.max(0, Math.min(columns - 1,
+                    Math.round(lp.leftMargin / (float) cellWidth)));
+            int row = homeGridRowFromTop(lp.topMargin, rows, page.getHeight(), cellHeight);
+            occupied[row][col] = true;
+        }
+
+        java.util.ArrayList<View> groups = new java.util.ArrayList<View>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (isAppGroupItem(child)
+                    && child.getLayoutParams() instanceof FrameLayout.LayoutParams) groups.add(child);
+        }
+        for (View group : groups) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) group.getLayoutParams();
+            int oldCol = Math.max(0, Math.min(columns - 1,
+                    Math.round(lp.leftMargin / (float) cellWidth)));
+            int oldRow = homeGridRowFromTop(lp.topMargin, rows, page.getHeight(), cellHeight);
+            int col = oldCol;
+            int row = oldRow;
+            if (occupied[row][col]) {
+                int bestDistance = Integer.MAX_VALUE;
+                int bestCol = -1, bestRow = -1;
+                for (int r = 0; r < rows; r++) {
+                    for (int c = 0; c < columns; c++) {
+                        if (occupied[r][c]) continue;
+                        int distance = Math.abs(c - oldCol) + Math.abs(r - oldRow);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestCol = c;
+                            bestRow = r;
+                        }
+                    }
+                }
+                if (bestCol < 0) {
+                    // A full page may still have a free grid slot on the other screen.
+                    int otherIndex = pageIndex == 0 ? 1 : 0;
+                    if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
+                            && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
+                        FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
+                        int[] free = findFreeAppGroupSlot(other, null);
+                        if (free != null) {
+                            if (group.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) group.getParent()).removeView(group);
+                            }
+                            int otherColumns = Math.max(1, getHomeColumns());
+                            int otherWidth = Math.max(1, other.getWidth() / otherColumns);
+                            int otherCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
+                            int otherRows = homeGridRowsForHeight(other.getHeight(), otherCellHeight);
+                            FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
+                                    otherWidth, otherCellHeight, Gravity.TOP | Gravity.LEFT);
+                            moved.leftMargin = free[0] * otherWidth;
+                            moved.topMargin = homeGridRowTop(free[1], otherRows,
+                                    other.getHeight(), otherCellHeight);
+                            other.addView(group, moved);
+                            String groupId = appGroupId(group);
+                            if (groupId != null) {
+                                prefs.edit().putInt(appGroupKey("page", groupId), otherIndex)
+                                        .putFloat(appGroupKey("x", groupId),
+                                                free[0] / (float) Math.max(1, otherColumns - 1))
+                                        .putFloat(appGroupKey("y", groupId),
+                                                free[1] / (float) Math.max(1, otherRows - 1))
+                                        .apply();
+                            }
+                            continue;
+                        }
+                    }
+                    // If both grids are full, snap to the nearest valid slot rather than
+                    // allowing the group to drift into an arbitrary pixel position.
+                    bestCol = oldCol;
+                    bestRow = oldRow;
+                }
+                col = bestCol;
+                row = bestRow;
+            }
+            occupied[row][col] = true;
+            lp.width = cellWidth;
+            lp.height = cellHeight;
+            lp.leftMargin = col * cellWidth;
+            lp.topMargin = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            group.setLayoutParams(lp);
+            String groupId = appGroupId(group);
+            if (groupId != null) {
+                prefs.edit().putInt(appGroupKey("page", groupId), pageIndex)
+                        .putFloat(appGroupKey("x", groupId),
+                                col / (float) Math.max(1, columns - 1))
+                        .putFloat(appGroupKey("y", groupId),
+                                row / (float) Math.max(1, rows - 1))
+                        .apply();
+            }
+        }
+    }
+
+    private boolean resizeItemFitsAtCurrentPosition(FrameLayout page, View moving) {
+        if (page == null || moving == null || moving.getParent() != page) return false;
+        int[] g = itemGeometry(moving);
+        if (g[2] <= 0 || g[3] <= 0 || g[0] < 0 || g[1] < 0
+                || g[0] + g[2] > page.getWidth() || g[1] + g[3] > page.getHeight()) return false;
+        android.graphics.Rect candidate = collisionRect(moving, g);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == moving || !isWorkspaceItem(other)
+                    || other.getVisibility() != View.VISIBLE) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            if (android.graphics.Rect.intersects(candidate, collisionRect(other, otherGeometry))) return false;
+        }
+        return true;
+    }
+
+    private boolean resizeCandidateIsFree(FrameLayout page, View moving, int x, int y,
+                                           int width, int height) {
+        if (page == null || moving == null || width <= 0 || height <= 0
+                || x < 0 || y < 0 || x + width > page.getWidth()
+                || y + height > page.getHeight()) return false;
+        android.graphics.Rect candidate = collisionRectAt(moving, x, y, width, height);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == moving || !isWorkspaceItem(other)
+                    || other.getVisibility() != View.VISIBLE) continue;
+            int[] otherGeometry = itemGeometry(other);
+            if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+            if (android.graphics.Rect.intersects(candidate, collisionRect(other, otherGeometry))) return false;
+        }
+        return true;
+    }
+
+    private int[] findResizeFreeGridPosition(FrameLayout page, View moving) {
+        if (page == null || moving == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
+        int[] g = itemGeometry(moving);
+        int width = Math.max(1, g[2]), height = Math.max(1, g[3]);
+        int maxX = Math.max(0, page.getWidth() - width);
+        int maxY = Math.max(0, page.getHeight() - height);
+        int columns = Math.max(1, getHomeColumns());
+        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)))));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        int bestX = -1, bestY = -1;
+        long bestDistance = Long.MAX_VALUE;
+        for (int row = 0; row < rows; row++) {
+            int y = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            if (y > maxY) continue;
+            for (int col = 0; col < columns; col++) {
+                int x = Math.min(maxX, col * cellWidth);
+                if (!resizeCandidateIsFree(page, moving, x, y, width, height)) continue;
+                long distance = Math.abs((long) x - g[0]) + Math.abs((long) y - g[1]);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestX = x;
+                    bestY = y;
+                }
+            }
+        }
+        return bestX < 0 ? null : new int[]{bestX, bestY};
+    }
+
+    private int[] findResizeFreePixelPosition(FrameLayout page, View moving) {
+        if (page == null || moving == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
+        int[] g = itemGeometry(moving);
+        int width = Math.max(1, g[2]), height = Math.max(1, g[3]);
+        int maxX = Math.max(0, page.getWidth() - width);
+        int maxY = Math.max(0, page.getHeight() - height);
+        int step = Math.max(1, LauncherUiUtils.dp(this, 8));
+        int bestX = -1, bestY = -1;
+        long bestDistance = Long.MAX_VALUE;
+        for (int y = 0; y <= maxY; y += step) {
+            int cy = Math.min(maxY, y);
+            for (int x = 0; x <= maxX; x += step) {
+                int cx = Math.min(maxX, x);
+                if (!resizeCandidateIsFree(page, moving, cx, cy, width, height)) continue;
+                long distance = Math.abs((long) cx - g[0]) + Math.abs((long) cy - g[1]);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestX = cx;
+                    bestY = cy;
+                }
+            }
+            if (cy == maxY) break;
+        }
+        int[][] edges = {{maxX, Math.max(0, Math.min(maxY, g[1]))},
+                {Math.max(0, Math.min(maxX, g[0])), maxY}, {maxX, maxY}, {0, 0}};
+        for (int[] edge : edges) {
+            if (!resizeCandidateIsFree(page, moving, edge[0], edge[1], width, height)) continue;
+            long distance = Math.abs((long) edge[0] - g[0]) + Math.abs((long) edge[1] - g[1]);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestX = edge[0];
+                bestY = edge[1];
+            }
+        }
+        return bestX < 0 ? null : new int[]{bestX, bestY};
+    }
+
+    private void placeResizeRecoveredItem(FrameLayout page, View item, int pageIndex, int x, int y) {
+        int[] g = itemGeometry(item);
+        if (isClockWorkspaceItem(item)) {
+            setClockVisualPosition(item, x, y, true);
+            return;
+        }
+        if (!(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        lp.leftMargin = x;
+        lp.topMargin = y;
+        lp.rightMargin = 0;
+        lp.bottomMargin = 0;
+        item.setLayoutParams(lp);
+        if (item.getTag() instanceof String
+                && ((String) item.getTag()).startsWith("launcher_widget:")) {
+            try {
+                int id = Integer.parseInt(((String) item.getTag()).substring("launcher_widget:".length()));
+                saveWidgetGeometry(id, pageIndex, (FrameLayout) item);
+            } catch (NumberFormatException ignored) {}
+        }
+        persistWorkspaceItemPosition(page, item, x, y, g[2], g[3]);
+    }
+
+    private boolean tryShrinkResizeItemInPlace(FrameLayout page, View item) {
+        float oldX = item.getScaleX();
+        float oldY = item.getScaleY();
+        Object rawTag = item.getTag();
+        String tag = rawTag instanceof String ? (String) rawTag : "";
+        for (float factor = 0.95f; factor >= 0.50f; factor -= 0.05f) {
+            item.setScaleX(oldX * factor);
+            item.setScaleY(oldY * factor);
+            if (resizeItemFitsAtCurrentPosition(page, item)) {
+                if (!tag.isEmpty()) {
+                    prefs.edit().putFloat("workspace_scale_x_" + tag, item.getScaleX())
+                            .putFloat("workspace_scale_y_" + tag, item.getScaleY()).apply();
+                }
+                return true;
+            }
+        }
+        item.setScaleX(oldX);
+        item.setScaleY(oldY);
+        return false;
+    }
+
+    private void moveResizeWidgetToOtherPage(FrameLayout sourcePage, View widget,
+                                              int targetPageIndex, int x, int y) {
+        if (sourcePage == null || !(widget instanceof FrameLayout)
+                || targetPageIndex < 0 || targetPageIndex >= pagesStrip.getChildCount()
+                || !(pagesStrip.getChildAt(targetPageIndex) instanceof FrameLayout)) return;
+        FrameLayout targetPage = (FrameLayout) pagesStrip.getChildAt(targetPageIndex);
+        if (widget.getParent() instanceof ViewGroup) ((ViewGroup) widget.getParent()).removeView(widget);
+        FrameLayout.LayoutParams lp = widget.getLayoutParams() instanceof FrameLayout.LayoutParams
+                ? (FrameLayout.LayoutParams) widget.getLayoutParams()
+                : new FrameLayout.LayoutParams(widget.getWidth(), widget.getHeight());
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        lp.leftMargin = x;
+        lp.topMargin = y;
+        targetPage.addView(widget, lp);
+        int id;
+        try {
+            id = Integer.parseInt(String.valueOf(widget.getTag()).substring("launcher_widget:".length()));
+        } catch (RuntimeException ignored) {
+            return;
+        }
+        widgetInteractionController.updateWidgetPageIndex((FrameLayout) widget, targetPageIndex);
+        saveWidgetGeometry(id, targetPageIndex, (FrameLayout) widget);
+    }
+
+    private void removeResizeOverflowWidget(FrameLayout page, View widget) {
+        int id;
+        try {
+            id = Integer.parseInt(String.valueOf(widget.getTag()).substring("launcher_widget:".length()));
+        } catch (RuntimeException ignored) {
+            return;
+        }
+        if (widget.getParent() instanceof ViewGroup) ((ViewGroup) widget.getParent()).removeView(widget);
+        widgetInteractionController.forgetWidgetContainer((FrameLayout) widget);
+        WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
+        try { widgetHost.deleteAppWidgetId(id); } catch (Exception ignored) {}
+    }
+
+    private void removeResizeOverflowClock(FrameLayout page, View clock) {
+        int pageIndex = pagesStrip == null ? -1 : pagesStrip.indexOfChild(page);
+        if (pageIndex < 0) {
+            clock.setVisibility(View.GONE);
+            return;
+        }
+        prefs.edit().putBoolean(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + pageIndex, true).apply();
+        if (clock.getParent() instanceof ViewGroup) ((ViewGroup) clock.getParent()).removeView(clock);
+        clock.setVisibility(View.GONE);
+    }
+
+    private void repairResizeCollisionsOnPage(FrameLayout page) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        java.util.ArrayList<View> resizeItems = new java.util.ArrayList<View>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (!isWorkspaceItem(child) || child.getVisibility() != View.VISIBLE) continue;
+            if (isClockWorkspaceItem(child)
+                    || (child.getTag() instanceof String
+                    && ((String) child.getTag()).startsWith("launcher_widget:"))) {
+                resizeItems.add(child);
+            }
+        }
+        java.util.Collections.sort(resizeItems, (a, b) ->
+                Boolean.compare(isClockWorkspaceItem(b), isClockWorkspaceItem(a)));
+        for (View item : resizeItems) {
+            if (item.getParent() != page || item.getVisibility() != View.VISIBLE
+                    || resizeItemFitsAtCurrentPosition(page, item)) continue;
+            if (tryShrinkResizeItemInPlace(page, item)) continue;
+
+            int[] local = findResizeFreeGridPosition(page, item);
+            int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
+            if (local != null) {
+                placeResizeRecoveredItem(page, item, pageIndex, local[0], local[1]);
+                continue;
+            }
+            boolean widget = item.getTag() instanceof String
+                    && ((String) item.getTag()).startsWith("launcher_widget:");
+            if (widget) {
+                int otherIndex = pageIndex == 0 ? 1 : 0;
+                if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
+                        && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
+                    FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
+                    int[] otherPosition = findResizeFreeGridPosition(other, item);
+                    if (otherPosition == null) otherPosition = findResizeFreePixelPosition(other, item);
+                    if (otherPosition != null) {
+                        moveResizeWidgetToOtherPage(page, item, otherIndex,
+                                otherPosition[0], otherPosition[1]);
+                        continue;
+                    }
+                }
+                removeResizeOverflowWidget(page, item);
+            } else {
+                // Clock panels are page-specific, so don't transplant one panel and break
+                // independent per-screen clock state. Try free pixels, then hide this page's clock.
+                int[] freePixels = findResizeFreePixelPosition(page, item);
+                if (freePixels != null) {
+                    placeResizeRecoveredItem(page, item, pageIndex, freePixels[0], freePixels[1]);
+                } else {
+                    removeResizeOverflowClock(page, item);
+                }
+            }
+        }
+    }
+
     private void validateWorkspacePagesAfterLayout() {
-        if (pagesStrip == null) return;
+        if (pagesStrip == null || homeIconResizeRepairPending) return;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
             View pageView = pagesStrip.getChildAt(i);
             if (!(pageView instanceof FrameLayout)) continue;
@@ -14436,6 +14886,18 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomizationMenu() {
+        boolean restoreClock = false;
+        for (int page = 0; page < clockPanelsByPage.length; page++) {
+            restoreClock |= prefs.getBoolean(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + page, false);
+        }
+        if (restoreClock) {
+            SharedPreferences.Editor edit = prefs.edit();
+            for (int page = 0; page < clockPanelsByPage.length; page++) {
+                edit.remove(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + page);
+            }
+            edit.apply();
+            attachClockPanelsToPages();
+        }
         showCustomizationMenu(null, 0, true);
     }
 
@@ -14511,9 +14973,11 @@ public class MainActivity extends Activity {
         addSliderRowOnStop(content, "Home icon size", 32, 74,
                 Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
             int oldIconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
+            if (newSize == oldIconSize) return;
             int oldColumns = getHomeColumns();
             boolean reduceColumns = newSize > 64 && oldColumns > 5;
             int newColumns = reduceColumns ? 5 : oldColumns;
+            homeIconResizeRepairPending = true;
             remapHomeIconSlotsForColumnChange(oldColumns, newColumns, oldIconSize, newSize);
             SharedPreferences.Editor edit = prefs.edit().putInt(KEY_ICON_SIZE, newSize);
             if (reduceColumns) edit.putInt(KEY_COLUMNS, newColumns);
@@ -14523,7 +14987,8 @@ public class MainActivity extends Activity {
             renderHomePages(false);
             renderDock();
             rebuildContactShortcutViews();
-            validateWorkspacePagesAfterLayout();
+            ensureShortcutLabelsNotClipped();
+            validateWorkspacePagesAfterIconResize();
         });
         addSettingRow(content, "▣", "App icon background",
                 prefs.getBoolean("icon_rounded_square_background", false) ? "On" : "Off", () -> {

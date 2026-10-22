@@ -17,6 +17,9 @@ import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import android.widget.Toast;
 
 /** Owns widget container gestures, movement, resize and action menu interactions. */
@@ -58,6 +61,8 @@ final class WidgetInteractionController {
     private final SharedPreferences prefs;
     private final String widgetIdsKey;
     private final Listener listener;
+    private final IdentityHashMap<FrameLayout, int[][]> widgetPageRefs =
+            new IdentityHashMap<FrameLayout, int[][]>();
     private static final class EditChrome {
         final View container;
         final View[] resizeHandles;
@@ -67,6 +72,26 @@ final class WidgetInteractionController {
         }
     }
     private final java.util.ArrayList<EditChrome> editChrome = new java.util.ArrayList<>();
+
+    /** Update cached page indices after automatic resize recovery reparents a widget. */
+    void updateWidgetPageIndex(FrameLayout container, int pageIndex) {
+        int[][] refs = widgetPageRefs.get(container);
+        if (refs == null) return;
+        refs[0][0] = pageIndex;
+        refs[1][0] = pageIndex;
+    }
+
+    /** Drop controller bookkeeping when resize recovery removes an overflowing widget. */
+    void forgetWidgetContainer(FrameLayout container) {
+        widgetPageRefs.remove(container);
+        for (Iterator<EditChrome> iterator = editChrome.iterator(); iterator.hasNext();) {
+            EditChrome chrome = iterator.next();
+            if (chrome.container == container) {
+                chrome.clear.run();
+                iterator.remove();
+            }
+        }
+    }
 
     /** Dismiss active widget-resize mode only when the tap is outside that widget. */
     boolean clearEditChromeOutsideTouch(float rawX, float rawY) {
@@ -435,6 +460,7 @@ final class WidgetInteractionController {
         final boolean[] resizeRejectedAtLastPosition = {false};
         final int[] widgetPage = {pageIndex};
         final int[] originalPageAtDown = {pageIndex};
+        widgetPageRefs.put(container, new int[][]{widgetPage, originalPageAtDown});
         final int[] edgeLatch = {0};
         final Runnable[] movePress = new Runnable[1];
         final Runnable[] menuPress = new Runnable[1];
@@ -494,6 +520,7 @@ final class WidgetInteractionController {
                 if (which == 0) {
                     reparenting[0] = true;
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
+                    forgetWidgetContainer(container);
                     WidgetController.removeWidget(prefs, widgetIdsKey, widgetId);
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                     listener.renderHomePages(false);
