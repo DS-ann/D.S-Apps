@@ -1381,6 +1381,24 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(true, clockPanel);
                     return true;
                 }
+            // Once edit mode is open, dragging the clock body moves the widget while
+            // dragging one of the four edge grips resizes it. Start the body gesture here
+            // at the activity level so scaled text/date overhangs work even when the finger
+            // is outside the panel's untransformed hit rectangle.
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0
+                    && clockPanel != null && clockPanel.getParent() instanceof FrameLayout) {
+                clockWidgetDownRawX = event.getRawX();
+                clockWidgetDownRawY = event.getRawY();
+                clockWidgetStartX = clockPanel.getTranslationX();
+                clockWidgetStartY = clockPanel.getTranslationY();
+                clockWidgetDragging = false;
+                int[] safeClockGeometry = itemGeometry(clockPanel);
+                liveDragLastSafeGeometry.put(clockPanel,
+                        new int[]{safeClockGeometry[0], safeClockGeometry[1]});
+                clockGeometryRejectedAtLastMove = false;
+                setWorkspaceGridVisible(true, clockPanel);
+                return true;
+            }
             handler.removeCallbacks(homeLongPress);
             handler.removeCallbacks(clockWidgetLongPress);
             handler.removeCallbacks(clockWidgetEditLongPress);
@@ -1477,6 +1495,31 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
                         scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
+                    }
+                }
+                return true;
+            }
+            // In edit mode, the clock body is a move handle. Keep edge-grip gestures
+            // exclusively in the resize branch below.
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0
+                    && clockPanel != null) {
+                float moveX = event.getRawX() - clockWidgetDownRawX;
+                float moveY = event.getRawY() - clockWidgetDownRawY;
+                if (Math.abs(moveX) > LauncherUiUtils.dp(this, 5)
+                        || Math.abs(moveY) > LauncherUiUtils.dp(this, 5)) {
+                    if (!clockWidgetDragging) {
+                        int[] safeClockGeometry = itemGeometry(clockPanel);
+                        liveDragLastSafeGeometry.put(clockPanel,
+                                new int[]{safeClockGeometry[0], safeClockGeometry[1]});
+                    }
+                    clockWidgetDragging = true;
+                    setClampedClockTranslation(clockWidgetStartX + moveX,
+                            clockWidgetStartY + moveY, false);
+                    updateClockResizeHandles();
+                    setWorkspaceGridVisible(true, clockPanel);
+                    if (clockPanel.getParent() instanceof FrameLayout) {
+                        scheduleLiveDisplacementUpdate(
+                                (FrameLayout) clockPanel.getParent(), clockPanel);
                     }
                 }
                 return true;
@@ -1777,20 +1820,34 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(clockWidgetLongPress);
             handler.removeCallbacks(clockWidgetEditLongPress);
             clockGestureLockedAtDown = false;
-            if (clockWidgetMoving && !clockWidgetEditing) {
+            boolean cancelledEditorBodyMove = clockWidgetEditing && gestureStartedOnClock
+                    && clockResizeEdge == 0 && clockWidgetDragging;
+            if ((clockWidgetMoving && !clockWidgetEditing) || cancelledEditorBodyMove) {
+                boolean keepEditorOpen = clockWidgetEditing;
                 if (clockWidgetDragging && clockPanel != null
                         && clockPanel.getParent() instanceof FrameLayout) {
                     finishLiveDisplacements(false, clockPanel);
                 }
                 clockWidgetDragging = false;
-                clockWidgetMoving = false;
-                showClockMoveBorder(false);
+                if (!keepEditorOpen) {
+                    clockWidgetMoving = false;
+                    showClockMoveBorder(false);
+                }
                 if (clockPanel != null) {
                     clockPanel.setTranslationX(clockWidgetStartX);
                     clockPanel.setTranslationY(clockWidgetStartY);
                 }
-                setWorkspaceGridVisible(false, null);
+                if (keepEditorOpen) {
+                    setWorkspaceGridVisible(true, clockPanel);
+                } else {
+                    setWorkspaceGridVisible(false, null);
+                }
                 updateClockResizeHandles();
+                return true;
+            }
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0) {
+                updateClockResizeHandles();
+                setWorkspaceGridVisible(true, clockPanel);
                 return true;
             }
             if (clockResizeEdge != 0) {
@@ -1840,7 +1897,10 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(clockWidgetLongPress);
             handler.removeCallbacks(clockWidgetEditLongPress);
             clockGestureLockedAtDown = false;
-            if (clockWidgetMoving && !clockWidgetEditing) {
+            boolean completedEditorBodyMove = clockWidgetEditing && gestureStartedOnClock
+                    && clockResizeEdge == 0 && clockWidgetDragging;
+            if ((clockWidgetMoving && !clockWidgetEditing) || completedEditorBodyMove) {
+                boolean keepEditorOpen = clockWidgetEditing;
                 int[] rememberedSafeGeometry = clockPanel == null
                         ? null : liveDragLastSafeGeometry.get(clockPanel);
                 final int[] lastSafeClockGeometry = rememberedSafeGeometry == null
@@ -1867,8 +1927,10 @@ public class MainActivity extends Activity {
                     }
                 }
                 clockWidgetDragging = false;
-                clockWidgetMoving = false;
-                showClockMoveBorder(false);
+                if (!keepEditorOpen) {
+                    clockWidgetMoving = false;
+                    showClockMoveBorder(false);
+                }
                 if (clockPanel != null) {
                     prefs.edit()
                             .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), clockPanel.getTranslationX())
@@ -1877,8 +1939,18 @@ public class MainActivity extends Activity {
                 }
                 if (clockGeometryRejectedAtLastMove) showWorkspaceOverlapRejected();
                 clockGeometryRejectedAtLastMove = false;
-                setWorkspaceGridVisible(false, null);
+                if (keepEditorOpen) {
+                    setWorkspaceGridVisible(true, clockPanel);
+                } else {
+                    setWorkspaceGridVisible(false, null);
+                }
                 updateClockResizeHandles();
+                return true;
+            }
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0) {
+                // A tap on the clock body in edit mode should not dismiss the editor.
+                updateClockResizeHandles();
+                setWorkspaceGridVisible(true, clockPanel);
                 return true;
             }
             if (clockResizeEdge != 0) {
@@ -2161,9 +2233,10 @@ public class MainActivity extends Activity {
 
     private int hitClockResizeEdge(float rawX, float rawY) {
         if (clockPanel == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return 0;
-        // Hit-test the actual visible grips, with only a small accessibility margin.
-        // This prevents corner touches from being misclassified as another edge.
-        float margin = LauncherUiUtils.dp(this, 6);
+        // Use a forgiving hit target around each visible grip. The grips remain visually
+        // narrow, but a small finger-placement error must not turn a resize into a body drag.
+        // At corners the top/bottom grips retain priority, preventing axis misclassification.
+        float margin = LauncherUiUtils.dp(this, 12);
         // At corners, prioritize top/bottom grips so a vertical resize can never
         // accidentally be interpreted as a horizontal resize.
         for (int i = 2; i <= 3; i++) {
