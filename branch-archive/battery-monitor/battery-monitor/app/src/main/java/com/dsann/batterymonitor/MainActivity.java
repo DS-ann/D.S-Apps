@@ -74,6 +74,11 @@ public class MainActivity extends Activity {
     
     @Override protected void onCreate(Bundle state){
         super.onCreate(state);
+        android.content.SharedPreferences initialPrefs=getSharedPreferences(PREFS,0);
+        boolean enableAlwaysBackgroundByDefault=!initialPrefs.contains(KEY_ALWAYS_BACKGROUND);
+        if(enableAlwaysBackgroundByDefault){
+            initialPrefs.edit().putBoolean(KEY_ALWAYS_BACKGROUND,true).apply();
+        }
         getWindow().setStatusBarColor(0xFF0D1117);
         getWindow().setNavigationBarColor(0xFF0D1117);
         
@@ -149,9 +154,9 @@ public class MainActivity extends Activity {
         healthTab.setOnClickListener(v->showTab(3));
         
         setContentView(root);
-        android.content.SharedPreferences initialPrefs=getSharedPreferences(PREFS,0);
         if (shouldKeepServiceRunning(initialPrefs)) {
             startNotificationService();
+            if(enableAlwaysBackgroundByDefault) requestBatteryOptimizationExemption();
         }
         if (BatteryChargingOverride.isEnabled(this)) {
             try {
@@ -208,12 +213,13 @@ public class MainActivity extends Activity {
         alwaysRunningRow.addView(alwaysRunningTitle,new LinearLayout.LayoutParams(0,-2,1));
         alwaysRunningSwitch=new Switch(this);
         alwaysRunningSwitch.setChecked(getSharedPreferences(PREFS,0)
-                .getBoolean(KEY_ALWAYS_BACKGROUND,false));
+                .getBoolean(KEY_ALWAYS_BACKGROUND,true));
         alwaysRunningRow.addView(alwaysRunningSwitch,new LinearLayout.LayoutParams(-2,-2));
         recording.addView(alwaysRunningRow,top(10));
         TextView alwaysRunningSub=text(
-                "Keeps the service active after leaving the app and resumes after reboot. "
-                +"Doze switches to scheduled low-power sampling.",12);
+                "Starts automatically by default, stays active after leaving the app, and "
+                +"resumes after reboot. Allow the battery-optimization prompt for best reliability. "
+                +"Android Force stop can still block restarts.",12);
         alwaysRunningSub.setTextColor(0xFF9AA0AA);
         recording.addView(alwaysRunningSub,top(2));
 
@@ -1291,7 +1297,7 @@ public class MainActivity extends Activity {
     
     private String formatSigned(double value){return String.format(java.util.Locale.US,"%+.1f",value);}
     private boolean shouldKeepServiceRunning(android.content.SharedPreferences prefs){
-        return prefs.getBoolean(KEY_ALWAYS_BACKGROUND,false)
+        return prefs.getBoolean(KEY_ALWAYS_BACKGROUND,true)
                 ||prefs.getBoolean("notification_enabled",false)
                 ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
                 ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)

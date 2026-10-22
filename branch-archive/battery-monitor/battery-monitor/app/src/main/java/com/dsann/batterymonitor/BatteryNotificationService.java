@@ -382,7 +382,7 @@ public class BatteryNotificationService extends Service {
     private boolean shouldRunService() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean recording = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
-        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, true);
         boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean resetPending = settings.getBoolean(KEY_RESET_PENDING, false);
         boolean estimatorRunning = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
@@ -406,7 +406,7 @@ public class BatteryNotificationService extends Service {
     private long getNextSamplingInterval() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean recording = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
-        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, true);
         boolean appPercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_CALCULATOR_RUNNING, false);
@@ -470,7 +470,7 @@ public class BatteryNotificationService extends Service {
             settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         }
         boolean recordingEnabled = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
-        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, true);
         boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_CALCULATOR_RUNNING, false);
@@ -519,7 +519,7 @@ public class BatteryNotificationService extends Service {
     private void publishNotification() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean recordingEnabled = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
-        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, true);
         boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean resetPending = settings.getBoolean(KEY_RESET_PENDING, false);
         boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
