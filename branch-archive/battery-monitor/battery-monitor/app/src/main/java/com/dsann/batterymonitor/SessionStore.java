@@ -221,8 +221,7 @@ final class SessionStore {
         return level<0||scale<=0?-1:Math.round(level*100f/scale);
     }
     private static boolean isCharging(Context c){
-        Intent i=c.registerReceiver(null,new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        return i!=null&&i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED,0)!=0;
+        return BatteryReader.getPowerState(c).isCharging();
     }
     private static boolean isScreenOn(Context c){
         PowerManager pm=(PowerManager)c.getSystemService(Context.POWER_SERVICE);
