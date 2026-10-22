@@ -4,11 +4,8 @@ import android.content.Context;
 import android.os.BatteryManager;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
@@ -147,12 +144,7 @@ final class BatteryHealthReader {
 
     private static Map<String,String> readAsRoot() {
         Map<String,String> out = new TreeMap<>();
-        Process p = null;
         try {
-            p = Runtime.getRuntime().exec(new String[]{"su"});
-            BufferedWriter stdin = new BufferedWriter(new OutputStreamWriter(p.getOutputStream()));
-            BufferedReader stdout = new BufferedReader(new InputStreamReader(p.getInputStream()));
-
             StringBuilder cmd = new StringBuilder();
             cmd.append("for d in /sys/class/power_supply/*; do ");
             cmd.append("[ -d \"$d\" ] || continue; ");
@@ -167,28 +159,22 @@ final class BatteryHealthReader {
                     .append(" ").append(PERCENT_VOLT).append(" ").append(CAR).append(" ")
                     .append(FG_CURRENT).append(" ").append(FG_VOLT).append(" ").append(FG_TEMP).append("; do ");
             cmd.append("if [ -f \"$base/$n\" ]; then printf 'BM|%s|%s|%s\\n' \"$base\" \"$n\" \"$(cat \"$base/$n\")\"; fi; ");
-            cmd.append("done; done; exit");
+            cmd.append("done; done; true");
 
-            stdin.write(cmd.toString());
-            stdin.newLine();
-            stdin.flush();
+            RootShell.CommandResult result = RootShell.execute(cmd.toString());
+            if (result == null || !result.success || result.output.isEmpty()) return out;
 
-            String line;
-            while ((line = stdout.readLine()) != null) {
+            for (String line : result.output.split("\\r?\\n")) {
                 String[] parts = line.split("\\|", 4);
                 if (parts.length == 3) {
                     out.put(parts[1], parts[2].trim());
-                    out.put("_source_"+parts[1], parts[0]+"/"+parts[1]);
+                    out.put("_source_" + parts[1], parts[0] + "/" + parts[1]);
                 } else if (parts.length == 4 && "BM".equals(parts[0])) {
                     out.put(parts[2], parts[3].trim());
-                    out.put("_source_"+parts[2], parts[1]+"/"+parts[2]);
+                    out.put("_source_" + parts[2], parts[1] + "/" + parts[2]);
                 }
             }
-            stdin.close();
-            stdout.close();
-            p.waitFor();
         } catch (Exception ignored) {
-            if (p != null) p.destroy();
         }
         return out;
     }
