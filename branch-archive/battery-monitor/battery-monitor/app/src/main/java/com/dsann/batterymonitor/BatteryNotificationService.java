@@ -11,8 +11,8 @@ import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.RectF;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.Icon;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -245,20 +245,21 @@ public class BatteryNotificationService extends Service {
         PendingIntent pending=PendingIntent.getActivity(this,0,open,flags);
 
         boolean available=estimate!=null&&estimate.running&&estimate.isAvailable();
-        boolean charging=isPluggedIn();
-        String action=charging?"Charged":"Used";
+        BatteryReader.PowerState powerState=BatteryReader.getPowerState(this);
+        String action=powerState.notificationLabel();
         String title=available
-                ?String.format(java.util.Locale.US,"Calculated %.2f%% • %s %.1f mAh",
+                ?String.format(java.util.Locale.US,"Calculated %.2f%% • %s • %.1f mAh",
                         estimate.percentExact,action,usedMah)
-                :String.format(java.util.Locale.US,"Battery • %s %.1f mAh",action,usedMah);
+                :String.format(java.util.Locale.US,"Battery • %s • %.1f mAh",action,usedMah);
         String measuredPercentage=available
                 ?String.format(java.util.Locale.US,"%.2f%%",estimate.percentExact):"--";
 
         Notification.Builder builder=Build.VERSION.SDK_INT>=26
                 ?new Notification.Builder(this,CHANNEL_ID)
                 :new Notification.Builder(this);
-        if(available&&Build.VERSION.SDK_INT>=23){
-            builder.setSmallIcon(createBatteryIcon(estimate.percentExact));
+        int iconPercent=available?(int)Math.round(estimate.percentExact):getAndroidBatteryPercent();
+        if(Build.VERSION.SDK_INT>=23&&iconPercent>=0){
+            builder.setSmallIcon(createPercentageIcon(iconPercent));
         }else{
             builder.setSmallIcon(R.drawable.ic_battery_percentage);
         }
@@ -275,24 +276,32 @@ public class BatteryNotificationService extends Service {
         return builder.build();
     }
 
-    private boolean isPluggedIn(){
+    private int getAndroidBatteryPercent(){
         Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        return battery!=null&&battery.getIntExtra(BatteryManager.EXTRA_PLUGGED,0)!=0;
+        if(battery==null)return -1;
+        int level=battery.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
+        int scale=battery.getIntExtra(BatteryManager.EXTRA_SCALE,100);
+        if(level<0||scale<=0)return -1;
+        return Math.max(0,Math.min(100,Math.round(level*100.0f/scale)));
     }
 
-    private Icon createBatteryIcon(double percentage){
+    private Icon createPercentageIcon(int percentage){
+        int value=Math.max(0,Math.min(100,percentage));
         Bitmap bitmap=Bitmap.createBitmap(48,48,Bitmap.Config.ARGB_8888);
         Canvas canvas=new Canvas(bitmap);
         Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.WHITE);
-        paint.setStrokeWidth(3.5f);
         paint.setStyle(Paint.Style.STROKE);
-        canvas.drawRoundRect(new RectF(5,8,39,40),4,4,paint);
+        paint.setStrokeWidth(2.4f);
+        canvas.drawCircle(24.0f,24.0f,20.0f,paint);
+
         paint.setStyle(Paint.Style.FILL);
-        canvas.drawRoundRect(new RectF(40,18,46,30),2,2,paint);
-        float clamped=(float)Math.max(0.0,Math.min(100.0,percentage));
-        float fillWidth=26.0f*clamped/100.0f;
-        if(fillWidth>0)canvas.drawRect(9,12,9+fillWidth,36,paint);
+        paint.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTextSize(value>=100?14.5f:(value>=10?19.0f:24.0f));
+        Paint.FontMetrics metrics=paint.getFontMetrics();
+        float baseline=24.0f-(metrics.ascent+metrics.descent)/2.0f;
+        canvas.drawText(String.valueOf(value),24.0f,baseline,paint);
         return Icon.createWithBitmap(bitmap);
     }
 
