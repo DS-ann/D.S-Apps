@@ -3661,6 +3661,7 @@ public class MainActivity extends Activity {
 
     private FrameLayout createAppGroupLogo(String groupId, int iconSizePx) {
         FrameLayout logo = new FrameLayout(this);
+        logo.setTag("launcher_app_group_logo");
         logo.setBackground(appGroupGradient(true));
         logo.setClipChildren(true);
         logo.setClipToPadding(true);
@@ -3714,6 +3715,13 @@ public class MainActivity extends Activity {
             plus.setIncludeFontPadding(false);
             logo.addView(plus, new FrameLayout.LayoutParams(-1, -1));
         }
+        View moveOverlay = new View(this);
+        moveOverlay.setTag("launcher_app_group_move_highlight");
+        moveOverlay.setClickable(false);
+        moveOverlay.setFocusable(false);
+        moveOverlay.setBackground(appGroupMoveHighlight());
+        moveOverlay.setVisibility(View.GONE);
+        logo.addView(moveOverlay, new FrameLayout.LayoutParams(-1, -1));
         return logo;
     }
 
@@ -4319,7 +4327,6 @@ public class MainActivity extends Activity {
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
-        title.setAlpha(0f);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
@@ -4328,7 +4335,6 @@ public class MainActivity extends Activity {
         scroll.setClipChildren(false);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
-        rows.setAlpha(0f);
         rows.setClipChildren(false);
         rows.setClipToPadding(false);
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
@@ -4410,7 +4416,6 @@ public class MainActivity extends Activity {
         manage.setTextSize(12f);
         manage.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 3));
-        manage.setAlpha(0f);
         manage.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
                 morphProgress, morphSnapshotRef, morphAnimator, title, rows, manage,
@@ -4605,10 +4610,14 @@ public class MainActivity extends Activity {
             float pivotY = Math.max(0f, Math.min(lp.height, iconY - panelBounds.top));
             panel.setPivotX(pivotX);
             panel.setPivotY(pivotY);
-            float startScaleX = Math.min(1f,
-                    iconW / (float) Math.max(1, lp.width));
-            float startScaleY = Math.min(1f,
-                    iconH / (float) Math.max(1, lp.height));
+            // One common scale keeps the rounded-rectangle corner radius circular
+            // throughout the morph. Separate X/Y scales stretched the rounded icon into
+            // an ellipse while the panel grew from its square source.
+            float startScale = Math.min(1f, Math.min(
+                    iconW / (float) Math.max(1, lp.width),
+                    iconH / (float) Math.max(1, lp.height)));
+            float startScaleX = startScale;
+            float startScaleY = startScale;
             float panelCenterX = panelBounds.left + lp.width * 0.5f;
             float panelCenterY = panelBounds.top + lp.height * 0.5f;
             // Final panel position is unchanged; translation simply begins with its centre
@@ -4671,8 +4680,13 @@ public class MainActivity extends Activity {
                 snapshot.setTranslationY(0f);
                 snapshot.bringToFront();
                 morphSnapshotRef[0] = snapshot;
-                iconScale[2] = lp.width / (float) Math.max(1, iconW);
-                iconScale[3] = lp.height / (float) Math.max(1, iconH);
+                // Fade/scale the source icon uniformly; stretching it to the taller
+                // popup shape made the logo itself appear oval before disappearing.
+                float snapshotScale = Math.min(
+                        lp.width / (float) Math.max(1, iconW),
+                        lp.height / (float) Math.max(1, iconH));
+                iconScale[2] = snapshotScale;
+                iconScale[3] = snapshotScale;
                 if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
             }
 
@@ -4693,12 +4707,9 @@ public class MainActivity extends Activity {
                 panel.setTranslationX(tx);
                 panel.setTranslationY(ty);
 
-                // Panel, title, members, dim layer and icon snapshot follow one progress
-                // curve instead of appearing in separate, delayed stages.
-                float contentFade = progress;
-                title.setAlpha(contentFade);
-                rows.setAlpha(contentFade);
-                manage.setAlpha(contentFade);
+                // Transform the cached panel and its static content together. Changing
+                // child alpha on each frame invalidated the hardware layer and caused
+                // the popup content to appear in visible steps.
                 android.widget.ImageView snapshot = morphSnapshotRef[0];
                 if (snapshot != null) {
                     snapshot.setVisibility(View.VISIBLE);
@@ -4719,9 +4730,6 @@ public class MainActivity extends Activity {
                     panel.setScaleY(1f);
                     panel.setTranslationX(0f);
                     panel.setTranslationY(0f);
-                    title.setAlpha(1f);
-                    rows.setAlpha(1f);
-                    manage.setAlpha(1f);
                     dimLayer.setAlpha(0.36f);
                     android.widget.ImageView snapshot = morphSnapshotRef[0];
                     if (snapshot != null) {
@@ -4775,11 +4783,8 @@ public class MainActivity extends Activity {
             panel.setScaleY(sy);
             panel.setTranslationX(tx);
             panel.setTranslationY(ty);
-            // Keep the reverse content fade synchronized with the panel morph.
-            float contentFade = progress;
-            if (title != null) title.setAlpha(contentFade);
-            if (rows != null) rows.setAlpha(contentFade);
-            if (manage != null) manage.setAlpha(contentFade);
+            // Keep panel content cached during close as well; the panel transform and
+            // source-icon snapshot are the only animated foreground surfaces.
             if (snapshot != null) {
                 snapshot.setScaleX(1f + ((iconScale != null && iconScale.length > 2
                         ? iconScale[2] : 1f) - 1f) * progress);
@@ -5067,6 +5072,28 @@ public class MainActivity extends Activity {
             if (cell.getBackground() != null) cell.setBackground(null);
             if (Build.VERSION.SDK_INT >= 21 && cell.getElevation() != 0f) {
                 cell.setElevation(0f);
+            }
+        }
+        // The cell-wide highlight can be hidden behind the logo artwork. Add the same
+        // blue state directly over the logo, using a translucent fill so its mini-icons
+        // remain visible. refreshAppGroupMoveModeHighlights() applies this to every group
+        // while a workspace/group move mode is active.
+        if (cell instanceof ViewGroup) {
+            ViewGroup groupCell = (ViewGroup) cell;
+            for (int i = 0; i < groupCell.getChildCount(); i++) {
+                View child = groupCell.getChildAt(i);
+                if (!(child instanceof ViewGroup)
+                        || !"launcher_app_group_logo".equals(child.getTag())) continue;
+                ViewGroup logo = (ViewGroup) child;
+                for (int j = 0; j < logo.getChildCount(); j++) {
+                    View overlay = logo.getChildAt(j);
+                    if ("launcher_app_group_move_highlight".equals(overlay.getTag())) {
+                        int visibility = active ? View.VISIBLE : View.GONE;
+                        if (overlay.getVisibility() != visibility) {
+                            overlay.setVisibility(visibility);
+                        }
+                    }
+                }
             }
         }
     }
