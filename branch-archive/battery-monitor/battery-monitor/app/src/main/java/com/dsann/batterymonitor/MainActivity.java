@@ -31,6 +31,8 @@ public class MainActivity extends Activity {
     private static final String KEY_USE_ANDROID_PERCENT="my_battery_use_android_percent";
     private static final String KEY_ANDROID_PERCENT_RESET_PENDING="my_battery_android_percent_reset_pending";
     private static final String KEY_LAST_ANDROID_PERCENT="my_battery_last_android_percent";
+    private static final String KEY_LAST_ANDROID_POWER_STATUS="my_battery_last_android_power_status";
+    private static final String KEY_LAST_ANDROID_POWER_SOURCE="my_battery_last_android_power_source";
     private static final long MIN_MY_BATTERY_INTERVAL_MS=50L;
     private static final long MAX_MY_BATTERY_INTERVAL_MS=1500L;
     private static final long MY_BATTERY_INTERVAL_STEP_MS=10L;
@@ -238,7 +240,8 @@ public class MainActivity extends Activity {
             String value=percentInput.getText().toString().trim();
             if(value.isEmpty()){percentStatus.setText("Enter a value from 0 to 100.");return;}
             try{
-                BatteryPercentOverride.Result result=BatteryPercentOverride.set(Integer.parseInt(value));
+                BatteryPercentOverride.Result result=BatteryPercentOverride.set(
+                        Integer.parseInt(value),BatteryReader.getPowerInfo(this));
                 percentStatus.setText(result.message);
             }catch(NumberFormatException e){percentStatus.setText("Enter a value from 0 to 100.");}
         });
@@ -644,13 +647,16 @@ public class MainActivity extends Activity {
         if(androidPercentStatus!=null)androidPercentStatus.setText("Applying calculated percentage with root…");
         final int percent=estimate.percent;
         new Thread(()->{
-            BatteryPercentOverride.Result result=BatteryPercentOverride.set(percent);
+            final BatteryReader.PowerInfo powerInfo=BatteryReader.getPowerInfo(MainActivity.this);
+            BatteryPercentOverride.Result result=BatteryPercentOverride.set(percent,powerInfo);
             runOnUiThread(()->{
                 if(result.success){
                     getSharedPreferences(PREFS,0).edit()
                             .putBoolean(KEY_USE_ANDROID_PERCENT,true)
                             .putBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
                             .putInt(KEY_LAST_ANDROID_PERCENT,percent)
+                            .putInt(KEY_LAST_ANDROID_POWER_STATUS,powerInfo.androidStatus)
+                            .putInt(KEY_LAST_ANDROID_POWER_SOURCE,powerInfo.sourceMask())
                             .apply();
                     if(useAndroidPercentButton!=null)useAndroidPercentButton.setText("Stop using app percentage");
                     if(androidPercentStatus!=null)androidPercentStatus.setText("Android battery level: "+percent+"%");
