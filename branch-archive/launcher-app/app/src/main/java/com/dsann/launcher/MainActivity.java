@@ -5018,9 +5018,10 @@ public class MainActivity extends Activity {
                 View child = page.getChildAt(i);
                 if (!isAppGroupItem(child)) continue;
                 String id = appGroupId(child);
+                boolean anyGroupMoveMode = activeAppGroupMoveModeId != null;
                 boolean ownMoveMode = id != null && id.equals(activeAppGroupMoveModeId);
                 applyAppGroupMoveModeBackground(child,
-                        workspaceMoveModeHighlightActive || ownMoveMode);
+                        workspaceMoveModeHighlightActive || anyGroupMoveMode || ownMoveMode);
             }
         }
     }
@@ -5029,7 +5030,9 @@ public class MainActivity extends Activity {
         if (cell == null) return;
         String id = appGroupId(cell);
         boolean ownMoveMode = id != null && id.equals(activeAppGroupMoveModeId);
-        boolean highlighted = active || workspaceMoveModeHighlightActive || ownMoveMode;
+        boolean anyGroupMoveMode = activeAppGroupMoveModeId != null;
+        boolean highlighted = active || workspaceMoveModeHighlightActive
+                || anyGroupMoveMode || ownMoveMode;
         applyAppGroupMoveModeBackground(cell, highlighted);
         if (!highlighted) cell.setAlpha(1f);
         cell.invalidate();
