@@ -515,6 +515,7 @@ public class MainActivity extends Activity {
     private int clockWidgetStartLength, clockWidgetStartBreadth;
     private int clockWidgetStartScreenX, clockWidgetStartScreenY;
     private int clockWidgetStartPanelWidth, clockWidgetStartPanelHeight;
+    private int clockWidgetStartRowHeight, clockWidgetStartNonRowHeight;
     private float clockWidgetStartTextScaleY = 1f;
     private int clockWidgetLiveResizeLength, clockWidgetLiveResizeBreadth;
     private int clockWidgetStartVisualX, clockWidgetStartVisualY;
@@ -1397,6 +1398,10 @@ public class MainActivity extends Activity {
                     clockWidgetStartScreenY = clockStartLocation[1];
                     clockWidgetStartPanelWidth = clockPanel.getWidth();
                     clockWidgetStartPanelHeight = clockPanel.getHeight();
+                    clockWidgetStartRowHeight = clockRow != null && clockRow.getHeight() > 0
+                            ? clockRow.getHeight() : LauncherUiUtils.dp(this, 114);
+                    clockWidgetStartNonRowHeight = Math.max(0,
+                            clockWidgetStartPanelHeight - clockWidgetStartRowHeight);
                     clockWidgetStartPanelScaleX = clockPanel.getScaleX();
                     clockWidgetStartTextScaleY = clockText == null ? 1f : clockText.getScaleY();
                     clockWidgetLiveResizeLength = clockWidgetStartLength;
@@ -2014,9 +2019,11 @@ public class MainActivity extends Activity {
     private boolean clockDragDisplacementPreviewActive = false;
     private int clockDragLastDisplacementX = Integer.MIN_VALUE;
     private int clockDragLastDisplacementY = Integer.MIN_VALUE;
+    private int clockDragLastCollisionCheckX = Integer.MIN_VALUE;
+    private int clockDragLastCollisionCheckY = Integer.MIN_VALUE;
     private final Runnable clockDragFrame = () -> {
         clockDragFramePending = false;
-        applyClockDragMove(clockDragPendingRawX, clockDragPendingRawY);
+        applyClockDragMove(clockDragPendingRawX, clockDragPendingRawY, false);
     };
 
     private void scheduleClockDragMove(float rawX, float rawY) {
@@ -2027,7 +2034,7 @@ public class MainActivity extends Activity {
         View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
         if (target == null) {
             clockDragFramePending = false;
-            applyClockDragMove(rawX, rawY);
+            applyClockDragMove(rawX, rawY, false);
             return;
         }
         target.postOnAnimation(clockDragFrame);
@@ -2039,7 +2046,9 @@ public class MainActivity extends Activity {
         clockDragFramePending = false;
         clockDragPendingRawX = rawX;
         clockDragPendingRawY = rawY;
-        applyClockDragMove(rawX, rawY);
+        // Always run collision restoration against the actual final coordinates before
+        // committing displaced neighbours on ACTION_UP.
+        applyClockDragMove(rawX, rawY, true);
     }
 
     private void cancelClockDragMoveFrame() {
@@ -2048,7 +2057,7 @@ public class MainActivity extends Activity {
         clockDragFramePending = false;
     }
 
-    private void applyClockDragMove(float rawX, float rawY) {
+    private void applyClockDragMove(float rawX, float rawY, boolean forceCollisionCheck) {
         boolean moveReady = clockWidgetMoving && !clockWidgetEditing;
         boolean editingBody = clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0;
         if (!moveReady && !editingBody) return;
@@ -2073,6 +2082,8 @@ public class MainActivity extends Activity {
             clockDragDisplacementPreviewActive = false;
             clockDragLastDisplacementX = Integer.MIN_VALUE;
             clockDragLastDisplacementY = Integer.MIN_VALUE;
+            clockDragLastCollisionCheckX = Integer.MIN_VALUE;
+            clockDragLastCollisionCheckY = Integer.MIN_VALUE;
         }
         clockWidgetDragging = true;
         if (moveReady) handler.removeCallbacks(clockWidgetEditLongPress);
@@ -2082,15 +2093,25 @@ public class MainActivity extends Activity {
         if (movingPanel.getParent() instanceof FrameLayout) {
             FrameLayout page = (FrameLayout) movingPanel.getParent();
             int[] geometry = itemGeometry(movingPanel);
-            boolean overlapping = clockDragOverlapsWorkspaceItems(page, movingPanel, geometry);
-            // Every collision-free position becomes a safe rollback point. If the
-            // collision resolver cannot move a neighbour, the clock now stops at the
-            // nearest actual obstruction instead of snapping back to the drag origin.
-            if (!overlapping) {
-                liveDragLastSafeGeometry.put(movingPanel,
-                        new int[]{geometry[0], geometry[1]});
+            int collisionStep = LauncherUiUtils.dp(this, 4);
+            boolean scanCollisions = forceCollisionCheck
+                    || clockDragLastCollisionCheckX == Integer.MIN_VALUE
+                    || Math.abs(geometry[0] - clockDragLastCollisionCheckX) >= collisionStep
+                    || Math.abs(geometry[1] - clockDragLastCollisionCheckY) >= collisionStep;
+            // Moving the panel itself is updated every display frame, but collision
+            // discovery is throttled to 4dp movement increments. Running a full item
+            // geometry scan for every tiny MOVE event made the clock lag on older phones.
+            if (scanCollisions) {
+                boolean overlapping =
+                        clockDragOverlapsWorkspaceItems(page, movingPanel, geometry);
+                if (!overlapping) {
+                    liveDragLastSafeGeometry.put(movingPanel,
+                            new int[]{geometry[0], geometry[1]});
+                }
+                updateClockDragDisplacementPreview(page, movingPanel, geometry, overlapping);
+                clockDragLastCollisionCheckX = geometry[0];
+                clockDragLastCollisionCheckY = geometry[1];
             }
-            updateClockDragDisplacementPreview(page, movingPanel, geometry, overlapping);
         }
         // The grips are hidden in move-ready mode; only reposition them when edit mode
         // is active, avoiding four root-overlay updates on every ordinary drag frame.
@@ -2327,8 +2348,13 @@ public class MainActivity extends Activity {
                         Math.max(1, clockWidgetStartVisualWidth));
                 int breadthFloorHeight =
                         (LauncherUiUtils.dp(this, 114) * 80 + 99) / 100;
-                int minH = Math.min(Math.min(Math.max(LauncherUiUtils.dp(this, 90),
-                        breadthFloorHeight), pageHeight),
+                int minRowHeight = Math.max(LauncherUiUtils.dp(this, 90),
+                        breadthFloorHeight);
+                // The visible panel includes a fixed date line and its insets. Apply the
+                // 80% floor to the clock row, then add that fixed chrome back to the
+                // minimum total height so date/AM-PM never gets pushed beyond the panel.
+                int minH = Math.min(Math.min(
+                        minRowHeight + clockWidgetStartNonRowHeight, pageHeight),
                         Math.max(1, clockWidgetStartVisualHeight));
                 boolean horizontalResize = clockResizeEdge == 1 || clockResizeEdge == 2;
                 if (horizontalResize) {
@@ -2406,16 +2432,15 @@ public class MainActivity extends Activity {
                 int lengthPercent = Math.round((right - left) * 100f
                         / (float) Math.max(1, clockWidgetStartPanelWidth));
                 int breadthPercent;
-                // The visible panel height is the actual row height for every
-                // clock style. Avoid style-specific proportional math: it drifted
-                // after relayout and made top/bottom resizing behave differently.
                 int naturalRowHeight = LauncherUiUtils.dp(this, 114);
+                int targetPanelHeight = Math.max(1, bottom - top);
+                int targetRowHeight = Math.max(1,
+                        targetPanelHeight - clockWidgetStartNonRowHeight);
                 // A left/right grip is strictly a width operation. Preserve the
-                // saved height percentage rather than recalculating it from the
-                // visible rectangle, which can be shorter than the 80% floor and
-                // would otherwise jump taller when a width drag reaches its limit.
+                // stored breadth percentage. Top/bottom resize maps only the clock row;
+                // the date line and panel insets retain their original height.
                 breadthPercent = horizontalResize ? clockWidgetStartBreadth
-                        : Math.round((bottom - top) * 100f / Math.max(1, naturalRowHeight));
+                        : Math.round(targetRowHeight * 100f / Math.max(1, naturalRowHeight));
                 // Match widget-resizer minimums in workspace pixels rather than
                 // imposing an unrelated 80% natural-width floor on the clock.
                 // The latter made left/right handles appear stuck on wide clocks.
@@ -2426,12 +2451,17 @@ public class MainActivity extends Activity {
                 // All clock styles use the same real panel row height. Map its
                 // target height directly to the natural 114dp row, just as a
                 // widget resize maps its rectangle to layout width/height.
+                int maxAvailableRowHeight = Math.max(minRowHeight,
+                        pageHeight - clockWidgetStartNonRowHeight);
                 int maxBreadthPercent = Math.max(80, Math.min(600, (int) Math.ceil(
-                        pageHeight * 100f / Math.max(1, naturalRowHeight))));
+                        maxAvailableRowHeight * 100f / Math.max(1, naturalRowHeight))));
                 breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
-                if (!(resizePanel.getParent() instanceof FrameLayout)
-                        || !canApplyClockResizeCandidate(activePage, resizePanel,
-                                new android.graphics.Rect(left, top, right, bottom), clockResizeEdge)) {
+                // Bounds/collision validation already ran above. The candidate rectangle
+                // has not changed since then; repeating the full page scan here cost another
+                // frame on every resize event and caused visible handle stutter.
+                if (resizePanel.getParent() != activePage
+                        || left < 0 || top < 0 || right > pageWidth || bottom > pageHeight
+                        || right <= left || bottom <= top) {
                     clockGeometryRejectedAtLastMove = true;
                     return;
                 }
@@ -2444,6 +2474,8 @@ public class MainActivity extends Activity {
                 final int targetRight = right;
                 final int targetBottom = bottom;
                 final int targetHeight = Math.max(1, targetBottom - targetTop);
+                final int targetRowHeight = Math.max(1,
+                        targetHeight - clockWidgetStartNonRowHeight);
                 final int naturalRowHeightForResize = LauncherUiUtils.dp(this, 114);
                 boolean sevenSegmentResize = clockTextsByPage[resizePage]
                         instanceof SevenSegmentClockTextView
@@ -2464,14 +2496,14 @@ public class MainActivity extends Activity {
                     if (clockRow != null) {
                         ViewGroup.LayoutParams rowHeightParams = clockRow.getLayoutParams();
                         if (rowHeightParams != null) {
-                            rowHeightParams.height = targetHeight;
+                            rowHeightParams.height = targetRowHeight;
                             clockRow.setLayoutParams(rowHeightParams);
                         }
                     }
                     if (clockGroup != null) {
                         ViewGroup.LayoutParams groupHeightParams = clockGroup.getLayoutParams();
                         if (groupHeightParams != null) {
-                            groupHeightParams.height = targetHeight;
+                            groupHeightParams.height = targetRowHeight;
                             clockGroup.setLayoutParams(groupHeightParams);
                         }
                     }
@@ -2480,14 +2512,14 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams textHeightParams = resizeText.getLayoutParams();
                         if (textHeightParams != null) {
                             textHeightParams.height = sevenSegmentResize
-                                    ? naturalRowHeightForResize : targetHeight;
+                                    ? naturalRowHeightForResize : targetRowHeight;
                             resizeText.setLayoutParams(textHeightParams);
                         }
-                        resizeText.setPivotY(sevenSegmentResize ? 0f : targetHeight / 2f);
+                        resizeText.setPivotY(sevenSegmentResize ? 0f : targetRowHeight / 2f);
                         resizeText.setScaleY(sevenSegmentResize
-                                ? targetHeight / (float) Math.max(1, naturalRowHeightForResize)
-                                : clockWidgetStartTextScaleY * targetHeight
-                                        / (float) Math.max(1, clockWidgetStartPanelHeight));
+                                ? targetRowHeight / (float) Math.max(1, naturalRowHeightForResize)
+                                : clockWidgetStartTextScaleY * targetRowHeight
+                                        / (float) Math.max(1, clockWidgetStartRowHeight));
                     }
                     syncClockColonVerticalCenter();
                 }
@@ -3889,8 +3921,8 @@ public class MainActivity extends Activity {
         int[] palette = appGroupPalette();
         GradientDrawable drawable = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR, palette);
-        drawable.setShape(round ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
-        if (!round) drawable.setCornerRadius(LauncherUiUtils.dp(this, 24));
+        drawable.setShape(GradientDrawable.RECTANGLE);
+        drawable.setCornerRadius(LauncherUiUtils.dp(this, round ? 4f : 24f));
         return drawable;
     }
 
@@ -3918,7 +3950,11 @@ public class MainActivity extends Activity {
     private FrameLayout createAppGroupLogo(String groupId, int iconSizePx) {
         FrameLayout logo = new FrameLayout(this);
         logo.setTag("launcher_app_group_logo");
-        logo.setBackground(appGroupGradient(true));
+        GradientDrawable logoBackground = appGroupGradient(true);
+        // Match the expanded panel's 24dp corner radius at the icon's starting scale.
+        // Keeping the same rounded-square silhouette avoids an oval-to-square morph.
+        logoBackground.setCornerRadius(Math.max(1f, iconSizePx * 0.08f));
+        logo.setBackground(logoBackground);
         logo.setClipChildren(true);
         logo.setClipToPadding(true);
         if (android.os.Build.VERSION.SDK_INT >= 21) {
@@ -4932,6 +4968,7 @@ public class MainActivity extends Activity {
                 snapshot.setClickable(false);
                 snapshot.setFocusable(false);
                 snapshot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                 // Keep the image view at the real icon bounds. Its independent scale
                 // and translation then expand the actual rounded icon into the panel,
                 // instead of stretching it over the panel before scaling it down.
@@ -4958,7 +4995,16 @@ public class MainActivity extends Activity {
                 if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
             }
 
-            final long duration = animationDuration(200L);
+            // Prewarm the static popup surface before its first visible frame. On older
+            // GPUs a lazy hardware-layer allocation at animation start caused a visible
+            // pause, making the icon-to-panel morph appear as separate steps.
+            panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            if (panel.getWidth() > 0 && panel.getHeight() > 0) panel.buildLayer();
+            android.widget.ImageView preparedSnapshot = morphSnapshotRef[0];
+            if (preparedSnapshot != null && preparedSnapshot.getWidth() > 0
+                    && preparedSnapshot.getHeight() > 0) preparedSnapshot.buildLayer();
+
+            final long duration = animationDuration(240L);
             android.animation.ValueAnimator transition =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
             transition.setDuration(duration);
@@ -4980,7 +5026,6 @@ public class MainActivity extends Activity {
                 // the popup content to appear in visible steps.
                 android.widget.ImageView snapshot = morphSnapshotRef[0];
                 if (snapshot != null) {
-                    snapshot.setVisibility(View.VISIBLE);
                     snapshot.setScaleX(1f + (iconScale[2] - 1f) * progress);
                     snapshot.setScaleY(1f + (iconScale[3] - 1f) * progress);
                     snapshot.setTranslationX(-morphStartTranslation[0] * progress);
@@ -5414,6 +5459,7 @@ public class MainActivity extends Activity {
             armed[0] = true;
             activeAppGroupMoveModeId = groupId;
             setWorkspaceGridVisible(true, cell);
+            refreshAppGroupMoveModeHighlights();
             setAppGroupMoveModeVisual(cell, true);
             LauncherUiUtils.startScaleHint(cell, 1.08f);
         };
@@ -5421,6 +5467,7 @@ public class MainActivity extends Activity {
             if (!dragging[0] && !movedTooEarly[0]) {
                 optionsShown[0] = true;
                 activeAppGroupMoveModeId = null;
+                refreshAppGroupMoveModeHighlights();
                 LauncherUiUtils.stopMoveHint(cell);
                 setAppGroupMoveModeVisual(cell, false);
                 setWorkspaceGridVisible(false, null);
@@ -5469,7 +5516,9 @@ public class MainActivity extends Activity {
                 if (pastSlop && armed[0] && !optionsShown[0]) {
                     boolean firstFrame = !dragging[0];
                     dragging[0] = true;
-                    activeAppGroupMoveModeId = null;
+                    // Keep the active group ID set during the live drag so every group
+                    // remains visibly blue until the move transaction finishes.
+                    refreshAppGroupMoveModeHighlights();
                     groupHandler.removeCallbacks(showOptions);
                     if (firstFrame) {
                         LauncherUiUtils.stopMoveHint(cell);
@@ -5637,6 +5686,7 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(false, null);
                     activeAppGroupMoveModeId = null;
                     setAppGroupMoveModeVisual(cell, false);
+                    refreshAppGroupMoveModeHighlights();
                     if (appGroupRenderDeferred) {
                         // The previous render was intentionally skipped during the
                         // gesture. It is now safe to rebuild after ACTION_UP has committed
@@ -5662,17 +5712,20 @@ public class MainActivity extends Activity {
                 if (commit && !optionsShown[0] && !movedTooEarly[0]) {
                     if (armed[0]) {
                         activeAppGroupMoveModeId = groupId;
+                        refreshAppGroupMoveModeHighlights();
                         setAppGroupMoveModeVisual(cell, true);
                         Toast.makeText(MainActivity.this,
                                 "Move mode active. Touch and drag this group to move it.",
                                 Toast.LENGTH_SHORT).show();
                     } else {
                         setAppGroupMoveModeVisual(cell, false);
+                        refreshAppGroupMoveModeHighlights();
                         openAppGroup(groupId);
                     }
                 } else if (!commit) {
                     activeAppGroupMoveModeId = null;
                     setAppGroupMoveModeVisual(cell, false);
+                    refreshAppGroupMoveModeHighlights();
                     setWorkspaceGridVisible(false, null);
                 }
                 if (armed[0] || optionsShown[0]) setWorkspaceGridVisible(false, null);
@@ -14987,6 +15040,11 @@ public class MainActivity extends Activity {
         if (clockPanel == null || clockText == null) return;
         final LinearLayout targetPanel = clockPanel;
         final int targetPage = Math.max(0, Math.min(1, activeClockPage));
+        // A live drag/resize owns the panel transform until UP/CANCEL. A normal
+        // typography/layout pass here would reset its scale/pivot and make the clock
+        // jump away from the anchored edge while the user is resizing it.
+        if (clockWidgetDragging && clockGesturePanel == targetPanel
+                && clockGesturePage == targetPage) return;
         final boolean resizeTransactionOwnsGeometry = clockWidgetEditing
                 && clockWidgetDragging && clockResizeEdge != 0
                 && clockPanel == targetPanel && activeClockPage == targetPage;
