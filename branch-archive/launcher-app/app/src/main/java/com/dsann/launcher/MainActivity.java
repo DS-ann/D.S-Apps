@@ -9420,19 +9420,35 @@ public class MainActivity extends Activity {
 
             boolean useNothingInnerBorder = nothingArtworkMatch && !neonCircuit;
             boolean useGradientInnerBorder = useClockWhiteInnerBorder;
-            // Artwork matching also gets the thin white inner contour: LED segments use
-            // 0.5dp directly; normal glyph text doubles the centered stroke before masking.
+            // Ordinary typography clocks draw their white contour with the same per-glyph
+            // spans used by the working one-digit path. Do not run the whole-TextView
+            // outline over those spans: its second DST_IN pass can erase or double-render
+            // the first hour digit after a two-digit text rebuild.
+            boolean nativeTwoDigitTextFallback = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                    && !sevenSegment;
+            if (nativeTwoDigitTextFallback) {
+                String nativeValue = clockText.getText() == null
+                        ? "" : clockText.getText().toString();
+                int nativeColon = nativeValue.indexOf(':');
+                int nativeHourDigits = 0;
+                for (int i = 0; nativeColon >= 0 && i < nativeColon; i++) {
+                    if (Character.digit(nativeValue.charAt(i), 10) >= 0) nativeHourDigits++;
+                }
+                nativeTwoDigitTextFallback = nativeHourDigits >= 2;
+            }
+            boolean useRendererTextBorder = sevenSegment || nativeTwoDigitTextFallback;
+            // Centered strokes are masked to the glyph, so 2dp yields a 1dp inner rim
+            // for typography text; the custom LED segments keep their established 1dp.
             float innerBorderWidth = useClockWhiteInnerBorder
                     ? (sevenSegment ? 1f : 2f) * borderDensity
                     : (useNothingInnerBorder ? 3f * borderDensity
                             : (sevenSegment ? 1f : 2f) * borderDensity);
-            // The border renderer is shared by all clock styles. Let it also border
-            // the colon rather than restricting the contour to numeric segments only.
             clockRenderer.setDigitOnlyInnerBorder(false);
             boolean useAnyInnerBorder = useNothingInnerBorder || useGradientInnerBorder;
+            boolean drawRendererBorder = useAnyInnerBorder && useRendererTextBorder;
             clockRenderer.setContrastInnerBorderEnabled(
-                    useAnyInnerBorder, digitColours, innerBorderWidth,
-                    useAnyInnerBorder ? CLOCK_WHITE_BORDER_COLORS : null);
+                    drawRendererBorder, digitColours, innerBorderWidth,
+                    drawRendererBorder ? CLOCK_WHITE_BORDER_COLORS : null);
         }
 
         if (sevenSegment) {
