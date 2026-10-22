@@ -1,7 +1,8 @@
 package com.dsann.batterymonitor;
 
 /**
- * Low-memory, one-minute time-weighted average of the battery's net charge rate.
+ * Low-memory, time-weighted battery charge-rate estimate updated as samples arrive
+ * within one-minute averaging windows.
  *
  * Device convention: negative current enters the battery (charging), while positive current
  * leaves the battery (discharging). The rate is the signed change in battery percentage per
@@ -12,6 +13,8 @@ final class BatteryRateAverager {
     private static final long MAX_SAMPLE_GAP_MS = 3_000L;
     private static final double MIN_CAPACITY_MAH = 100.0;
     private static final double MAX_CAPACITY_MAH = 100_000.0;
+    // BatteryHealthReader uses this same rated capacity when the kernel exposes no design value.
+    private static final double DEFAULT_CAPACITY_MAH = 4050.0;
 
     private static double activeCapacityMah = Double.NaN;
     private static long windowStartMs;
@@ -24,16 +27,15 @@ final class BatteryRateAverager {
     private BatteryRateAverager() {}
 
     /**
-     * Feed one signed current sample and return the most recently completed one-minute average.
+     * Feed one signed current sample and return the latest time-weighted rate estimate.
      * Positive rates mean net charge entering the battery; negative rates mean net discharge.
      */
     static synchronized double ratePerHour(BatteryReader.Reading reading, double capacityMah) {
         long now = android.os.SystemClock.elapsedRealtime();
 
-        if (!isValidCapacity(capacityMah)) {
-            reset(Double.NaN, 0L);
-            return Double.NaN;
-        }
+        // Rate display must work before the optional My Battery mAh estimator is configured.
+        // Prefer its custom capacity when valid; otherwise use the Lenovo rated design capacity.
+        if (!isValidCapacity(capacityMah)) capacityMah = DEFAULT_CAPACITY_MAH;
 
         if (capacityChanged(capacityMah) || windowStartMs == 0L) {
             reset(capacityMah, now);
@@ -80,15 +82,9 @@ final class BatteryRateAverager {
                 integrate(lastCurrentMa, currentMa, segmentMs);
             }
 
-            // Require at least 45 seconds of observed integration to publish this minute.
-            if (integratedDurationMs >= WINDOW_MS * 3L / 4L) {
-                double averageCurrentMa = integratedCurrentMaMs / integratedDurationMs;
-                // Negative current means charging, so invert current sign for battery % change.
-                publishedRatePercentPerHour =
-                        -averageCurrentMa * 100.0 / activeCapacityMah;
-            } else {
-                publishedRatePercentPerHour = Double.NaN;
-            }
+            // Publish any observed part of the window. The rate therefore appears promptly;
+            // missed sampling gaps are still discarded above rather than invented.
+            publishObservedRate();
 
             windowStartMs = now;
             integratedCurrentMaMs = 0.0;
@@ -99,9 +95,19 @@ final class BatteryRateAverager {
         }
 
         integrate(lastCurrentMa, currentMa, gapMs);
+        publishObservedRate();
         lastSampleAtMs = now;
         lastCurrentMa = currentMa;
         return publishedRatePercentPerHour;
+    }
+
+    private static void publishObservedRate() {
+        if (integratedDurationMs <= 0L || !isValidCapacity(activeCapacityMah)) return;
+        double averageCurrentMa = integratedCurrentMaMs / integratedDurationMs;
+        if (Double.isNaN(averageCurrentMa) || Double.isInfinite(averageCurrentMa)) return;
+        // Negative current means charging, so invert current sign for battery % change.
+        publishedRatePercentPerHour =
+                -averageCurrentMa * 100.0 / activeCapacityMah;
     }
 
     private static void integrate(double previousMa, double currentMa, long durationMs) {

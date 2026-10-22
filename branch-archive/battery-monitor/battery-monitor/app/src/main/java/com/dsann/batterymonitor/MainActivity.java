@@ -306,9 +306,10 @@ public class MainActivity extends Activity {
         percentRow.setGravity(Gravity.CENTER_VERTICAL);
         EditText percentInput=new EditText(this);
         styleInput(percentInput);
-        percentInput.setHint("0–100");
+        percentInput.setHint("Integer value");
         percentInput.setSingleLine(true);
-        percentInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        percentInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
         percentRow.addView(percentInput,new LinearLayout.LayoutParams(0,-2,1));
         Button setPercent=primaryButton("Set");
         Button resetPercent=actionButton("Reset");
@@ -326,10 +327,10 @@ public class MainActivity extends Activity {
         
         setPercent.setOnClickListener(v->{
             String value=percentInput.getText().toString().trim();
-            if(value.isEmpty()){percentStatus.setText("Enter a value from 0 to 100.");return;}
+            if(value.isEmpty()){percentStatus.setText("Enter an integer value.");return;}
             final int requested;
             try{requested=Integer.parseInt(value);}
-            catch(NumberFormatException e){percentStatus.setText("Enter a value from 0 to 100.");return;}
+            catch(NumberFormatException e){percentStatus.setText("Enter a valid integer value.");return;}
             setPercent.setEnabled(false);
             try{
                 sensorExecutor.execute(()->{
@@ -491,7 +492,7 @@ public class MainActivity extends Activity {
         myBatteryRateLabel=text("Charging rate: --%/h\nDischarging rate: --%/h",12);
         myBatteryRateLabel.setTextColor(0xFF9AA0AA);
         calculator.addView(myBatteryRateLabel,top(3));
-        TextView rateAverageHint=text("1-minute average • updated every minute",11);
+        TextView rateAverageHint=text("Live current-based estimate • improves as samples accumulate",11);
         rateAverageHint.setTextColor(0xFF7F8B9B);
         calculator.addView(rateAverageHint,top(2));
         calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
@@ -837,11 +838,9 @@ public class MainActivity extends Activity {
         try{
             sensorExecutor.execute(()->{
                 BatteryReader.Reading reading=null;
-                BatteryReader.PowerState powerState=BatteryReader.PowerState.UNKNOWN;
                 BatteryPercentCalculator.Estimate estimate=BatteryPercentCalculator.current(MainActivity.this);
                 try{
                     reading=BatteryReader.read(MainActivity.this);
-                    powerState=BatteryReader.getPowerState(MainActivity.this);
                     android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
                     boolean serviceActive=prefs.getBoolean("notification_enabled",false)
                             ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
@@ -854,7 +853,6 @@ public class MainActivity extends Activity {
                     estimate=BatteryPercentCalculator.current(MainActivity.this);
                 }
                 final BatteryReader.Reading readingResult=reading;
-                final BatteryReader.PowerState powerStateResult=powerState;
                 final BatteryPercentCalculator.Estimate estimateResult=estimate;
                 try{
                     runOnUiThread(()->{
@@ -863,7 +861,7 @@ public class MainActivity extends Activity {
                             myBatteryCurrentLabel.setText("Current: "
                                     +(readingResult==null?"N/A":readingResult.currentText()));
                         }
-                        updateBatteryRates(readingResult,estimateResult,powerStateResult);
+                        updateBatteryRates(readingResult,estimateResult);
                         updateCalculatedLevel(estimateResult);
                     });
                 }finally{
@@ -876,8 +874,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateBatteryRates(BatteryReader.Reading reading,
-                                    BatteryPercentCalculator.Estimate estimate,
-                                    BatteryReader.PowerState state){
+                                    BatteryPercentCalculator.Estimate estimate){
         if(myBatteryRateLabel==null)return;
         String chargingRate="--";
         String dischargingRate="--";
@@ -885,19 +882,16 @@ public class MainActivity extends Activity {
         if(Double.isNaN(capacityMah)||Double.isInfinite(capacityMah)||capacityMah<100.0){
             capacityMah=BatteryPercentCalculator.getCustomCapacityMah(this);
         }
-        // The signed rate follows actual current, not Android's charger-connected state.
+        // Route the value by signed fuel-gauge current, not Android's possibly simulated
+        // charger status. Positive rate means charge entering the battery; negative means
+        // discharge. Each row shows a positive magnitude because direction is in its label.
         double rate=BatteryRateAverager.ratePerHour(reading,capacityMah);
-        boolean validRate=!Double.isNaN(rate)&&!Double.isInfinite(rate);
-        if(state==BatteryReader.PowerState.CHARGING){
-            if(validRate)chargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
-        }else if(state==BatteryReader.PowerState.DISCHARGING
-                ||state==BatteryReader.PowerState.NOT_CHARGING){
-            if(validRate)dischargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
-        }else if(state==BatteryReader.PowerState.FULL){
-            if(validRate)chargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
-        }else if(validRate){
-            if(rate>=0.0)chargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
-            else dischargingRate=String.format(java.util.Locale.US,"%+.2f",rate);
+        if(!Double.isNaN(rate)&&!Double.isInfinite(rate)){
+            if(rate>=0.0){
+                chargingRate=String.format(java.util.Locale.US,"%.2f",rate);
+            }else{
+                dischargingRate=String.format(java.util.Locale.US,"%.2f",-rate);
+            }
         }
         myBatteryRateLabel.setText("Charging rate: "+chargingRate+"%/h\n"
                 +"Discharging rate: "+dischargingRate+"%/h");

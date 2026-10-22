@@ -4,9 +4,6 @@ final class BatteryPercentOverride {
     private BatteryPercentOverride() {}
 
     static Result set(int percent) {
-        if (percent < 0 || percent > 100) {
-            return new Result(false, "Enter a value from 0 to 100.");
-        }
         return runRoot("dumpsys battery set level " + percent,
                 "Battery percentage set to " + percent + "%.");
     }
@@ -26,9 +23,6 @@ final class BatteryPercentOverride {
      */
     static Result set(int percent, BatteryReader.PowerInfo powerInfo, int previousPercent,
                       int previousStatus, int previousSourceMask) {
-        if (percent < 0 || percent > 100) {
-            return new Result(false, "Enter a value from 0 to 100.");
-        }
         if (powerInfo == null) return set(percent);
 
         java.util.ArrayList<String> commands = new java.util.ArrayList<>();
