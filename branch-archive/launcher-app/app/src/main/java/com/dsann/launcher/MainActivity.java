@@ -1500,68 +1500,22 @@ public class MainActivity extends Activity {
                     pageSwipeChildCancelled = true;
                 }
             }
-            // The one-second move-ready state is the ONLY state that can move the
-            // clock. Edit mode is reserved for resizing/customization and must not
-            // turn a normal touch into a drag.
+            // Coalesce high-frequency input into one clock transform per display frame.
+            // This keeps movement locked to the finger without flooding layout/collision
+            // work when the device reports multiple MOVE events within a single frame.
             LinearLayout moveReadyClock = clockGesturePanel != null
                     ? clockGesturePanel : clockPanel;
-            int moveReadyPage = clockGesturePage >= 0 ? clockGesturePage : activeClockPage;
             if (clockWidgetMoving && !clockWidgetEditing && moveReadyClock != null) {
-                if (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
-                        || Math.abs(dy) > LauncherUiUtils.dp(this, 5)) {
-                    boolean firstMoveFrame = !clockWidgetDragging;
-                    if (firstMoveFrame) {
-                        int[] safeClockGeometry = itemGeometry(clockPanel);
-                        liveDragLastSafeGeometry.put(clockPanel,
-                                new int[]{safeClockGeometry[0], safeClockGeometry[1]});
-                    }
-                    clockWidgetDragging = true;
-                    handler.removeCallbacks(clockWidgetEditLongPress);
-                    // Android translation values and raw touch coordinates are both pixels.
-                    // Dividing the touch delta by density made the clock lag behind the finger.
-                    float moveX = event.getRawX() - clockWidgetDownRawX;
-                    float moveY = event.getRawY() - clockWidgetDownRawY;
-                    // Keep gesture coordinates transient while the finger is moving.
-                    // ACTION_UP already commits the final position; cancellation restores
-                    // the start position. Writing preferences for every MOVE was wasteful.
-                    setClampedClockTranslationForPanel(moveReadyClock, moveReadyPage,
-                            clockWidgetStartX + moveX, clockWidgetStartY + moveY, false);
-                    scheduleClockResizeHandlesUpdate();
-                    if (firstMoveFrame) setWorkspaceGridVisible(true, moveReadyClock);
-                    if (moveReadyClock.getParent() instanceof FrameLayout) {
-                        scheduleLiveDisplacementUpdate(
-                                (FrameLayout) moveReadyClock.getParent(), moveReadyClock);
-                    }
-                }
+                scheduleClockDragMove(event.getRawX(), event.getRawY());
                 return true;
             }
-            // In edit mode, the clock body is a move handle. Keep edge-grip gestures
-            // exclusively in the resize branch below.
+            // In edit mode, the clock body is a move handle. Edge grips stay isolated
+            // in the resize branch below.
             LinearLayout editingClock = clockGesturePanel != null
                     ? clockGesturePanel : clockPanel;
-            int editingClockPage = clockGesturePage >= 0 ? clockGesturePage : activeClockPage;
             if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0
                     && editingClock != null) {
-                float moveX = event.getRawX() - clockWidgetDownRawX;
-                float moveY = event.getRawY() - clockWidgetDownRawY;
-                if (Math.abs(moveX) > LauncherUiUtils.dp(this, 5)
-                        || Math.abs(moveY) > LauncherUiUtils.dp(this, 5)) {
-                    boolean firstMoveFrame = !clockWidgetDragging;
-                    if (firstMoveFrame) {
-                        int[] safeClockGeometry = itemGeometry(clockPanel);
-                        liveDragLastSafeGeometry.put(clockPanel,
-                                new int[]{safeClockGeometry[0], safeClockGeometry[1]});
-                    }
-                    clockWidgetDragging = true;
-                    setClampedClockTranslationForPanel(editingClock, editingClockPage,
-                            clockWidgetStartX + moveX, clockWidgetStartY + moveY, false);
-                    scheduleClockResizeHandlesUpdate();
-                    if (firstMoveFrame) setWorkspaceGridVisible(true, editingClock);
-                    if (editingClock.getParent() instanceof FrameLayout) {
-                        scheduleLiveDisplacementUpdate(
-                                (FrameLayout) editingClock.getParent(), editingClock);
-                    }
-                }
+                scheduleClockDragMove(event.getRawX(), event.getRawY());
                 return true;
             }
             if (clockResizeEdge != 0 && clockWidgetDragging) {
@@ -1722,6 +1676,7 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_CANCEL) {
+            cancelClockDragMoveFrame();
             if (clockGesturePanel != null && clockGesturePage >= 0) {
                 activateClockForPage(clockGesturePage);
             }
@@ -1803,6 +1758,9 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_UP) {
+            if (clockDragFramePending || clockWidgetDragging) {
+                flushClockDragMove(event.getRawX(), event.getRawY());
+            }
             if (clockGesturePanel != null && clockGesturePage >= 0) {
                 activateClockForPage(clockGesturePage);
             }
@@ -2037,6 +1995,77 @@ public class MainActivity extends Activity {
      * edge-anchor correction after layout; cancellation restores the complete
      * starting geometry and invalidates any queued frame from the abandoned drag.
      */
+    private boolean clockDragFramePending = false;
+    private float clockDragPendingRawX;
+    private float clockDragPendingRawY;
+    private final Runnable clockDragFrame = () -> {
+        clockDragFramePending = false;
+        applyClockDragMove(clockDragPendingRawX, clockDragPendingRawY);
+    };
+
+    private void scheduleClockDragMove(float rawX, float rawY) {
+        clockDragPendingRawX = rawX;
+        clockDragPendingRawY = rawY;
+        if (clockDragFramePending) return;
+        clockDragFramePending = true;
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target == null) {
+            clockDragFramePending = false;
+            applyClockDragMove(rawX, rawY);
+            return;
+        }
+        target.postOnAnimation(clockDragFrame);
+    }
+
+    private void flushClockDragMove(float rawX, float rawY) {
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target != null) target.removeCallbacks(clockDragFrame);
+        clockDragFramePending = false;
+        clockDragPendingRawX = rawX;
+        clockDragPendingRawY = rawY;
+        applyClockDragMove(rawX, rawY);
+    }
+
+    private void cancelClockDragMoveFrame() {
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target != null) target.removeCallbacks(clockDragFrame);
+        clockDragFramePending = false;
+    }
+
+    private void applyClockDragMove(float rawX, float rawY) {
+        boolean moveReady = clockWidgetMoving && !clockWidgetEditing;
+        boolean editingBody = clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0;
+        if (!moveReady && !editingBody) return;
+
+        final LinearLayout movingPanel = clockGesturePanel != null
+                ? clockGesturePanel : clockPanel;
+        final int movingPage = clockGesturePage >= 0 ? clockGesturePage : activeClockPage;
+        if (movingPanel == null || movingPage < 0 || movingPage >= clockPanelsByPage.length
+                || movingPanel != clockPanelsByPage[movingPage]
+                || !(movingPanel.getParent() instanceof FrameLayout)) return;
+
+        float moveX = rawX - clockWidgetDownRawX;
+        float moveY = rawY - clockWidgetDownRawY;
+        float slop = LauncherUiUtils.dp(this, 5);
+        if (!clockWidgetDragging && Math.abs(moveX) <= slop && Math.abs(moveY) <= slop) return;
+
+        boolean firstMoveFrame = !clockWidgetDragging;
+        if (firstMoveFrame) {
+            int[] safeGeometry = itemGeometry(movingPanel);
+            liveDragLastSafeGeometry.put(movingPanel,
+                    new int[]{safeGeometry[0], safeGeometry[1]});
+        }
+        clockWidgetDragging = true;
+        if (moveReady) handler.removeCallbacks(clockWidgetEditLongPress);
+        setClampedClockTranslationForPanel(movingPanel, movingPage,
+                clockWidgetStartX + moveX, clockWidgetStartY + moveY, false);
+        scheduleClockResizeHandlesUpdate();
+        if (firstMoveFrame) setWorkspaceGridVisible(true, movingPanel);
+        if (movingPanel.getParent() instanceof FrameLayout) {
+            scheduleLiveDisplacementUpdate((FrameLayout) movingPanel.getParent(), movingPanel);
+        }
+    }
+
     private boolean clockResizeFramePending = false;
     private float clockResizePendingRawX;
     private float clockResizePendingRawY;
@@ -4266,11 +4295,14 @@ public class MainActivity extends Activity {
                     outline.setEmpty();
                     return;
                 }
-                // Keep the popup a rounded rectangle for the full morph. Animating from
-                // half the panel height made it look like an oval and needlessly invalidated
-                // the outline during every animation frame on older Android hardware.
-                float radius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
-                        Math.min(width, height) * 0.5f);
+                // Morph the clipping edge from the source icon's circular silhouette
+                // to the final rounded square. The shared progress value makes opening
+                // and closing traverse exactly the same continuous shape transition.
+                float circleRadius = Math.min(width, height) * 0.5f;
+                float squareRadius = Math.min(
+                        LauncherUiUtils.dp(MainActivity.this, 24), circleRadius);
+                float progress = Math.max(0f, Math.min(1f, morphProgress[0]));
+                float radius = circleRadius + (squareRadius - circleRadius) * progress;
                 outline.setRoundRect(0, 0, Math.round(width), Math.round(height), radius);
             }
         };
@@ -4297,9 +4329,9 @@ public class MainActivity extends Activity {
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         GradientDrawable panelBackground = appGroupGradient(false);
-        // Match the drawable to the panel outline. A large pill radius clamps to half
-        // the short side and makes the opened group appear oval rather than square.
-        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 24));
+        // The dynamic outline below owns the rounded shape. Keep the gradient drawable
+        // square so the animated outline can continuously morph its visible corners.
+        panelBackground.setCornerRadius(0f);
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
@@ -4329,14 +4361,22 @@ public class MainActivity extends Activity {
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
+        View groupDivider = new View(this);
+        groupDivider.setBackgroundColor(Color.argb(170, 255, 255, 255));
+        panel.addView(groupDivider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, LauncherUiUtils.dp(this, 1)));
+
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(false);
-        scroll.setClipToPadding(false);
-        scroll.setClipChildren(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        // The separator stays fixed while the app rows scroll underneath it. Clip the
+        // scrolling viewport and content so child icons/labels cannot paint over the line.
+        scroll.setClipToPadding(true);
+        scroll.setClipChildren(true);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
-        rows.setClipChildren(false);
-        rows.setClipToPadding(false);
+        rows.setClipChildren(true);
+        rows.setClipToPadding(true);
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int miniIconPx = Math.max(LauncherUiUtils.dp(this, 18),
                 Math.round(LauncherUiUtils.dp(this, iconSizeDp) * 0.8f));
@@ -4409,26 +4449,13 @@ public class MainActivity extends Activity {
                 Math.max(LauncherUiUtils.dp(this, 120), targetRowHeight * 2));
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
-        TextView manage = new TextView(this);
-        manage.setText("Manage group");
-        manage.setTextColor(Color.WHITE);
-        manage.setGravity(Gravity.CENTER);
-        manage.setTextSize(12f);
-        manage.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8),
-                LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 3));
-        manage.setOnClickListener(v -> closeAppGroupWithAnimation(
-                dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
-                morphProgress, morphSnapshotRef, morphAnimator, title, rows, manage,
-                () -> showAppGroupOptions(groupId)));
-        panel.addView(manage, new LinearLayout.LayoutParams(-1, -2));
-
-        final int panelWidthLimit = Math.max(LauncherUiUtils.dp(this, 240),
+remove manage group action        final int panelWidthLimit = Math.max(LauncherUiUtils.dp(this, 240),
                 Math.min(getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 380)));
         final int panelHeightLimit = Math.max(LauncherUiUtils.dp(this, 180),
                 Math.min(getResources().getDisplayMetrics().heightPixels
                         - LauncherUiUtils.dp(this, 64),
-                        scrollHeight + LauncherUiUtils.dp(this, 100)));
+                        scrollHeight + LauncherUiUtils.dp(this, 84)));
         // Folder content is a compact three-column grid. Use a square panel rather
         // than an elongated capsule; the ScrollView handles extra rows.
         final int panelSide = Math.max(1, Math.min(panelWidthLimit, panelHeightLimit));
@@ -4441,13 +4468,13 @@ public class MainActivity extends Activity {
 
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
-                morphProgress, morphSnapshotRef, morphAnimator, title, rows, manage, null));
+                morphProgress, morphSnapshotRef, morphAnimator, null));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
                         morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
-                        title, rows, manage, null);
+                        null);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -4521,7 +4548,7 @@ public class MainActivity extends Activity {
             ViewGroup.LayoutParams safeScrollParams = scroll.getLayoutParams();
             safeScrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
                     Math.min(scrollHeight,
-                            safeSquareSide - LauncherUiUtils.dp(this, 112)));
+                            safeSquareSide - LauncherUiUtils.dp(this, 76)));
             scroll.setLayoutParams(safeScrollParams);
 
             int iconLeft = iconX - Math.max(1, iconW) / 2;
@@ -4591,7 +4618,7 @@ public class MainActivity extends Activity {
                 lp.width = fallbackSquareSide;
                 lp.height = fallbackSquareSide;
                 ViewGroup.LayoutParams scrollParams = scroll.getLayoutParams();
-                int fixedHeight = LauncherUiUtils.dp(this, 112);
+                int fixedHeight = LauncherUiUtils.dp(this, 76);
                 scrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
                         Math.min(scrollHeight, lp.height - fixedHeight));
                 scroll.setLayoutParams(scrollParams);
@@ -4713,6 +4740,7 @@ public class MainActivity extends Activity {
             transition.addUpdateListener(animation -> {
                 float progress = (Float) animation.getAnimatedValue();
                 morphProgress[0] = progress;
+                panel.invalidateOutline();
                 float sx = startScaleX + (1f - startScaleX) * progress;
                 float sy = startScaleY + (1f - startScaleY) * progress;
                 float tx = morphStartTranslation[0] * (1f - progress);
@@ -4763,7 +4791,7 @@ public class MainActivity extends Activity {
             boolean[] closing, float[] iconScale, float[] startTranslation,
             float[] morphProgress, android.widget.ImageView[] snapshotRef,
             android.animation.ValueAnimator[] morphAnimator,
-            View title, View rows, View manage, Runnable afterClose) {
+            Runnable afterClose) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -4790,6 +4818,7 @@ public class MainActivity extends Activity {
         transition.addUpdateListener(animation -> {
             float progress = (Float) animation.getAnimatedValue();
             if (morphProgress != null) morphProgress[0] = progress;
+            panel.invalidateOutline();
             float sx = targetScaleX + (1f - targetScaleX) * progress;
             float sy = targetScaleY + (1f - targetScaleY) * progress;
             float tx = offsetX * (1f - progress);
@@ -14929,8 +14958,21 @@ public class MainActivity extends Activity {
         // the LED digit-group width can allow a scaled background to exceed the page, after
         // which drag/resize clamps and handle positions disagree at the screen edge.
         float widthForScaleCap = naturalPanelWidth;
-        final float lengthScale = Math.min(requestedLengthScale,
+        final float stylePreservedScale = clockStyleChanged
+                && previousClockPanelGeometry[2] > 0
+                ? previousClockPanelGeometry[2] / (float) Math.max(1, naturalPanelWidth)
+                : requestedLengthScale;
+        final float lengthScale = Math.min(stylePreservedScale,
                 Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
+        if (clockStyleChanged && previousClockPanelGeometry[2] > 0 && prefs != null) {
+            // A preset can have a different intrinsic width because of tracking,
+            // marker clearance, or typography. Save the compensating scale so later
+            // refreshes do not restore the old percentage and make the clock jump again.
+            int stableLengthPercent = Math.max(20, Math.min(600,
+                    Math.round(lengthScale * 100f)));
+            prefs.edit().putInt(clockPrefKey(KEY_CLOCK_LENGTH, targetPage),
+                    stableLengthPercent).apply();
+        }
         // Neon Circuit's glyphs must keep the scale they would have without the date
         // controlling the panel's width cap. The full panel still stays inside the page;
         // only this style compensates the extra horizontal reduction caused by the date.
@@ -15029,7 +15071,9 @@ public class MainActivity extends Activity {
                     && clockWidgetEditing && clockResizeEdge != 0;
             boolean anotherDragOwnsPage = pendingLiveDisplacementPage == targetPanel.getParent()
                     && pendingLiveDisplacementMover != null;
-            if (!activeClockResize && !anotherDragOwnsPage) {
+            if (!activeClockResize && !anotherDragOwnsPage && !clockStyleChanged) {
+                // A style switch preserves the existing footprint; don't run collision
+                // relocation for that transaction and unexpectedly move the clock away.
                 moveClockToNearestFreePosition(targetPanel);
             }
             if (activeClockPage == targetPage && clockPanel == targetPanel) {
