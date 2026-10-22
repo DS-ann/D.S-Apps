@@ -9642,8 +9642,12 @@ public class MainActivity extends Activity {
                 if (clockText.getVisibility() != View.VISIBLE) clockText.setVisibility(View.VISIBLE);
                 if (clockText.getAlpha() != 1f) clockText.setAlpha(1f);
             }
+            // Two-digit standard clocks always keep a thin white inner contour. On API 23
+            // the renderer draws this over native TextView glyphs; newer versions draw it
+            // inside each digit/colon span. Seven-segment rendering remains unchanged.
             boolean useWhiteDigitInnerBorder = prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
-                    || isClockIconArtworkActive();
+                    || isClockIconArtworkActive()
+                    || (!sevenSegmentClock && fallbackHourDigits >= 2);
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
             if (!sevenSegmentClock && !clockValue.isEmpty()
@@ -9867,16 +9871,13 @@ public class MainActivity extends Activity {
 
     /**
      * Android 6 uses native TextView glyphs for two-digit standard hours to avoid a
-     * ReplacementSpan rendering failure. Reassert the white inner contour after the
-     * general colour pass, but only for a two-digit hour with gradient/artwork matching.
+     * ReplacementSpan rendering failure. Reassert the 1dp effective white inner contour
+     * after the general colour pass for every two-digit non-7-segment clock.
      */
     private void enforceApi23TwoDigitWhiteInnerBorder() {
         if (Build.VERSION.SDK_INT != Build.VERSION_CODES.M) return;
         int restorePage = Math.max(0, Math.min(1, activeClockPage));
         float borderWidth = 2f * getResources().getDisplayMetrics().density;
-        boolean colourEffectEnabled = prefs != null
-                && (prefs.getBoolean(KEY_CLOCK_DIGIT_GRADIENT, false)
-                        || isClockIconArtworkActive());
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
         for (int page = 0; page < clockTextsByPage.length; page++) {
             TextView target = clockTextsByPage[page];
@@ -9889,7 +9890,7 @@ public class MainActivity extends Activity {
             for (int i = 0; colonAt >= 0 && i < colonAt; i++) {
                 if (Character.digit(value.charAt(i), 10) >= 0) hourDigits++;
             }
-            boolean drawWhiteBorder = !sevenSegment && hourDigits >= 2 && colourEffectEnabled;
+            boolean drawWhiteBorder = !sevenSegment && hourDigits >= 2;
             SevenSegmentClockTextView renderer = (SevenSegmentClockTextView) target;
             if (drawWhiteBorder) {
                 renderer.setDigitOnlyInnerBorder(false);
@@ -14220,6 +14221,58 @@ public class MainActivity extends Activity {
         return position == 0 ? Gravity.LEFT : (position == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.RIGHT);
     }
 
+    /**
+     * Computes a translation that centers actual native API-23 glyph ink inside the
+     * existing clock group. This avoids changing background size or widget geometry.
+     */
+    private float getApi23VisibleClockCenteringOffset(int groupWidth) {
+        if (clockText == null || groupWidth <= 0) return 0f;
+        android.text.Layout layout = clockText.getLayout();
+        CharSequence value = clockText.getText();
+        if (layout == null || value == null || value.length() == 0
+                || layout.getLineCount() == 0) return 0f;
+
+        String plainText = value.toString();
+        android.text.Spanned spanned = value instanceof android.text.Spanned
+                ? (android.text.Spanned) value : null;
+        int start = layout.getLineStart(0);
+        int end = Math.min(plainText.length(), layout.getLineEnd(0));
+        float inkLeft = Float.POSITIVE_INFINITY;
+        float inkRight = Float.NEGATIVE_INFINITY;
+        android.graphics.Rect glyphBounds = new android.graphics.Rect();
+
+        for (int index = start; index < end; index++) {
+            char ch = plainText.charAt(index);
+            if (Character.isWhitespace(ch) || Character.isSpaceChar(ch)) continue;
+
+            android.text.TextPaint glyphPaint = new android.text.TextPaint(clockText.getPaint());
+            if (spanned != null) {
+                android.text.style.CharacterStyle[] styles = spanned.getSpans(
+                        index, index + 1, android.text.style.CharacterStyle.class);
+                for (android.text.style.CharacterStyle span : styles) {
+                    span.updateDrawState(glyphPaint);
+                }
+            }
+            glyphBounds.setEmpty();
+            glyphPaint.getTextBounds(plainText, index, index + 1, glyphBounds);
+            if (glyphBounds.isEmpty()) continue;
+
+            float glyphX = layout.getPrimaryHorizontal(index);
+            inkLeft = Math.min(inkLeft, glyphX + glyphBounds.left);
+            inkRight = Math.max(inkRight, glyphX + glyphBounds.right);
+        }
+
+        if (Float.isNaN(inkLeft) || Float.isInfinite(inkLeft)
+                || Float.isNaN(inkRight) || Float.isInfinite(inkRight)
+                || inkRight <= inkLeft) return 0f;
+        float inkCenter = (inkLeft + inkRight) * 0.5f;
+        float pivotX = clockText.getPivotX();
+        float displayedInkCenter = pivotX
+                + (inkCenter - pivotX) * clockText.getScaleX();
+        float target = groupWidth * 0.5f - displayedInkCenter;
+        return Float.isNaN(target) || Float.isInfinite(target) ? 0f : target;
+    }
+
     private void updateClockDigitHorizontalOffset() {
         if (clockPanel == null || clockText == null) return;
         int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
@@ -14242,7 +14295,19 @@ public class MainActivity extends Activity {
             float textScaleX = Math.max(0.01f, Math.abs(clockText.getScaleX()));
             if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M && !sevenSegment
                     && hourDigits >= 2) {
-                targetX = 0f;
+                // API 23 uses native TextView glyphs for a two-digit hour. Center the
+                // actual visible glyph bounds (including the compact native colon), not
+                // merely the layout advances. This changes only the glyph translation;
+                // the panel/background geometry is intentionally left untouched.
+                int groupWidth = 0;
+                ViewGroup.LayoutParams groupParams = clockGroup == null
+                        ? null : clockGroup.getLayoutParams();
+                if (groupParams != null && groupParams.width > 0) {
+                    groupWidth = groupParams.width;
+                } else if (clockGroup != null) {
+                    groupWidth = clockGroup.getWidth();
+                }
+                targetX = getApi23VisibleClockCenteringOffset(groupWidth);
             } else if (hourDigits == 1) {
                 // The invisible leading figure-space equalizes 9:xx and 10:xx widths.
                 // Shift by half that reserved cell so the *visible* one-digit clock is
