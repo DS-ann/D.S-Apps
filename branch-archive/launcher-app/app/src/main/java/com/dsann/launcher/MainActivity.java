@@ -4422,13 +4422,18 @@ public class MainActivity extends Activity {
                 () -> showAppGroupOptions(groupId)));
         panel.addView(manage, new LinearLayout.LayoutParams(-1, -2));
 
-        final int panelWidth = Math.max(LauncherUiUtils.dp(this, 240),
+        final int panelWidthLimit = Math.max(LauncherUiUtils.dp(this, 240),
                 Math.min(getResources().getDisplayMetrics().widthPixels
                         - LauncherUiUtils.dp(this, 32), LauncherUiUtils.dp(this, 380)));
-        final int panelHeight = Math.max(LauncherUiUtils.dp(this, 180),
+        final int panelHeightLimit = Math.max(LauncherUiUtils.dp(this, 180),
                 Math.min(getResources().getDisplayMetrics().heightPixels
                         - LauncherUiUtils.dp(this, 64),
                         scrollHeight + LauncherUiUtils.dp(this, 100)));
+        // Folder content is a compact three-column grid. Use a square panel rather
+        // than an elongated capsule; the ScrollView handles extra rows.
+        final int panelSide = Math.max(1, Math.min(panelWidthLimit, panelHeightLimit));
+        final int panelWidth = panelSide;
+        final int panelHeight = panelSide;
         FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
                 panelWidth, panelHeight, Gravity.TOP | Gravity.LEFT);
         overlay.addView(panel, panelParams);
@@ -4472,8 +4477,11 @@ public class MainActivity extends Activity {
             int availableW = Math.max(1, overlay.getWidth());
             int availableH = Math.max(1, overlay.getHeight());
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) panel.getLayoutParams();
-            lp.width = Math.min(panelWidth, Math.max(1, availableW - LauncherUiUtils.dp(this, 16)));
-            lp.height = Math.min(panelHeight, Math.max(1, availableH - LauncherUiUtils.dp(this, 16)));
+            int availableSide = Math.max(1, Math.min(panelSide,
+                    Math.min(availableW - LauncherUiUtils.dp(this, 16),
+                            availableH - LauncherUiUtils.dp(this, 16))));
+            lp.width = availableSide;
+            lp.height = availableSide;
 
             int iconX = availableW / 2;
             int iconY = availableH / 2;
@@ -4505,8 +4513,16 @@ public class MainActivity extends Activity {
             int safeTop = Math.min(availableH - 1, statusBarHeight + safe);
             int safeBottom = Math.max(safeTop + 1, availableH - navigationBarHeight - safe);
             int safeRight = Math.max(safe + 1, availableW - safe);
-            lp.width = Math.max(1, Math.min(lp.width, safeRight - safe));
-            lp.height = Math.max(1, Math.min(lp.height, safeBottom - safeTop));
+            int safeSquareSide = Math.max(1, Math.min(
+                    Math.min(lp.width, lp.height),
+                    Math.min(safeRight - safe, safeBottom - safeTop)));
+            lp.width = safeSquareSide;
+            lp.height = safeSquareSide;
+            ViewGroup.LayoutParams safeScrollParams = scroll.getLayoutParams();
+            safeScrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
+                    Math.min(scrollHeight,
+                            safeSquareSide - LauncherUiUtils.dp(this, 112)));
+            scroll.setLayoutParams(safeScrollParams);
 
             int iconLeft = iconX - Math.max(1, iconW) / 2;
             int iconTop = iconY - Math.max(1, iconH) / 2;
@@ -4570,16 +4586,15 @@ public class MainActivity extends Activity {
                 // the panel along its placement axis and shorten its scroll area too, so
                 // it remains entirely on-screen while leaving the launcher icon exposed.
                 chosenDirection = directionOrder[0];
-                if (chosenDirection < 2) {
-                    lp.height = Math.max(1, Math.min(lp.height, freeSpace[chosenDirection]));
-                    ViewGroup.LayoutParams scrollParams = scroll.getLayoutParams();
-                    int fixedHeight = LauncherUiUtils.dp(this, 112);
-                    scrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
-                            Math.min(scrollHeight, lp.height - fixedHeight));
-                    scroll.setLayoutParams(scrollParams);
-                } else {
-                    lp.width = Math.max(1, Math.min(lp.width, freeSpace[chosenDirection]));
-                }
+                int fallbackSquareSide = Math.max(1, Math.min(
+                        Math.min(lp.width, lp.height), freeSpace[chosenDirection]));
+                lp.width = fallbackSquareSide;
+                lp.height = fallbackSquareSide;
+                ViewGroup.LayoutParams scrollParams = scroll.getLayoutParams();
+                int fixedHeight = LauncherUiUtils.dp(this, 112);
+                scrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
+                        Math.min(scrollHeight, lp.height - fixedHeight));
+                scroll.setLayoutParams(scrollParams);
                 int candidateLeft;
                 int candidateTop;
                 if (chosenDirection == 0) {
