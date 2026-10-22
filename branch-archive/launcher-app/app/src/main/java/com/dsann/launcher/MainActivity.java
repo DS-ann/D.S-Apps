@@ -59,6 +59,8 @@ public class MainActivity extends Activity {
     private static final String KEY_APP_GROUP_IDS = "home_app_group_ids";
     private static final String APP_GROUP_TAG_PREFIX = "launcher_app_group:";
     private static final String KEY_COLUMNS = "home_columns";
+    // Stable reference size used to anchor home-grid rows while the visible icon size changes.
+    private static final String KEY_HOME_GRID_ANCHOR_ICON_SIZE = "home_grid_anchor_icon_size_v1";
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
     private static final String KEY_ICON_BACKGROUND_COLOR = "icon_background_color";
@@ -3590,28 +3592,46 @@ public class MainActivity extends Activity {
         return isHomeGridBottomAligned() ? LauncherUiUtils.dp(this, 45) : 0;
     }
 
-    /** Returns the row capacity after reserving any label-enabled dock clearance. */
+    /**
+     * Keep the first row's origin stable while icon-size changes alter row height/capacity.
+     * The reference size is captured from the user's existing layout once, so adopting this
+     * row flow does not immediately jump an already-customized home screen on upgrade.
+     */
+    private int homeGridTopInsetPx(int pageHeightPx) {
+        if (!isHomeGridBottomAligned()) return 0;
+        int height = Math.max(1, pageHeightPx);
+        int bottomGap = homeGridBottomGapPx();
+        int currentSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
+        int anchorSize = prefs == null ? currentSize
+                : prefs.getInt(KEY_HOME_GRID_ANCHOR_ICON_SIZE, currentSize);
+        anchorSize = Math.max(32, Math.min(74, anchorSize));
+        int anchorCellHeight = Math.max(1,
+                LauncherUiUtils.dp(this, homeCellHeightDp(anchorSize)));
+        int referenceRows = Math.max(1,
+                Math.max(1, height - bottomGap) / anchorCellHeight);
+        return Math.max(0, height - bottomGap - referenceRows * anchorCellHeight);
+    }
+
+    /** Returns row capacity after reserving the stable top origin and dock clearance. */
     private int homeGridRowsForHeight(int pageHeightPx, int cellHeightPx) {
-        int usableHeight = Math.max(1, pageHeightPx - homeGridBottomGapPx());
+        int usableHeight = Math.max(1,
+                pageHeightPx - homeGridBottomGapPx() - homeGridTopInsetPx(pageHeightPx));
         return Math.max(1, usableHeight / Math.max(1, cellHeightPx));
     }
 
-    /** Returns a legal app-row top in page pixels, bottom-anchored only with labels on. */
+    /** Returns a row top from a fixed origin, like the app drawer's top-to-bottom grid. */
     private int homeGridRowTop(int row, int rowCount, int pageHeightPx, int cellHeightPx) {
         int rows = Math.max(1, rowCount);
         int cellHeight = Math.max(1, cellHeightPx);
         int safeRow = Math.max(0, Math.min(rows - 1, row));
-        int topInset = isHomeGridBottomAligned()
-                ? Math.max(0, pageHeightPx - rows * cellHeight - homeGridBottomGapPx()) : 0;
-        return topInset + safeRow * cellHeight;
+        return homeGridTopInsetPx(pageHeightPx) + safeRow * cellHeight;
     }
 
     /** Maps a pixel top coordinate back to the nearest legal row for the current mode. */
     private int homeGridRowFromTop(float topPx, int rowCount, int pageHeightPx, int cellHeightPx) {
         int rows = Math.max(1, rowCount);
         int cellHeight = Math.max(1, cellHeightPx);
-        int topInset = isHomeGridBottomAligned()
-                ? Math.max(0, pageHeightPx - rows * cellHeight - homeGridBottomGapPx()) : 0;
+        int topInset = homeGridTopInsetPx(pageHeightPx);
         return Math.max(0, Math.min(rows - 1,
                 Math.round((topPx - topInset) / (float) cellHeight)));
     }
@@ -13892,6 +13912,11 @@ public class MainActivity extends Activity {
         }
         if (homeFont < 8 || homeFont > 15) edit.putInt(KEY_HOME_FONT_SIZE, Math.max(8, Math.min(15, homeFont)));
         if (drawerFont < 8 || drawerFont > 15) edit.putInt(KEY_DRAWER_FONT_SIZE, Math.max(8, Math.min(15, drawerFont)));
+        // Capture the current layout's row origin once. Later icon-size changes keep this
+        // anchor stable, like the drawer grid, rather than moving every row to re-fill the page.
+        if (!prefs.contains(KEY_HOME_GRID_ANCHOR_ICON_SIZE)) {
+            edit.putInt(KEY_HOME_GRID_ANCHOR_ICON_SIZE, homeSize);
+        }
         // Keep every icon inside its slot at the selected size. Preserve normalized
         // positions instead of clearing them when a large size reduces column capacity.
         if (homeSize > 64 && homeColumns > 5) {
@@ -14054,22 +14079,31 @@ public class MainActivity extends Activity {
             SharedPreferences.Editor edit = prefs.edit();
             for (View item : slotItems) {
                 int[] slot = assigned.get(item);
-                if (slot == null) continue;
+                int[] oldSlot = oldSlots.get(item);
+                if (slot == null || oldSlot == null) continue;
                 float normalizedX = slot[0] / (float) Math.max(1, newColumns - 1);
                 float normalizedY = slot[1] / (float) Math.max(1, rows - 1);
+                // A size-only change must not rewrite a still-valid item's coordinates.
+                // Re-encode only an axis whose grid capacity changed or whose slot moved.
+                boolean updateX = oldColumns != newColumns || slot[0] != oldSlot[0];
+                boolean updateY = oldRows != rows || slot[1] != oldSlot[1];
                 if (isAppGroupItem(item)) {
                     String groupId = appGroupId(item);
                     if (groupId != null) {
-                        edit.putInt(appGroupKey("page", groupId), pageIndex)
-                                .putFloat(appGroupKey("x", groupId), normalizedX)
-                                .putFloat(appGroupKey("y", groupId), normalizedY);
+                        if (prefs.getInt(appGroupKey("page", groupId), pageIndex) != pageIndex) {
+                            edit.putInt(appGroupKey("page", groupId), pageIndex);
+                        }
+                        if (updateX) edit.putFloat(appGroupKey("x", groupId), normalizedX);
+                        if (updateY) edit.putFloat(appGroupKey("y", groupId), normalizedY);
                     }
                 } else if (isWorkspaceAppIcon(item)) {
                     String tag = String.valueOf(item.getTag());
                     String packageName = tag.substring("launcher_app:".length());
-                    edit.putInt(KEY_ICON_PAGE + packageName, pageIndex)
-                            .putFloat(KEY_ICON_X + packageName, normalizedX)
-                            .putFloat(KEY_ICON_Y + packageName, normalizedY);
+                    if (prefs.getInt(KEY_ICON_PAGE + packageName, pageIndex) != pageIndex) {
+                        edit.putInt(KEY_ICON_PAGE + packageName, pageIndex);
+                    }
+                    if (updateX) edit.putFloat(KEY_ICON_X + packageName, normalizedX);
+                    if (updateY) edit.putFloat(KEY_ICON_Y + packageName, normalizedY);
                 }
             }
             edit.apply();
@@ -14093,19 +14127,16 @@ public class MainActivity extends Activity {
                             ? pageViewport.getHeight() : fallbackHeight);
             int oldRows = Math.max(1, homeGridRowsForHeight(pageHeight, oldCellHeight));
             int rows = Math.max(1, homeGridRowsForHeight(pageHeight, newCellHeight));
-            float savedX = getFloatPreferenceCompat(
-                    shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), -1f);
+            // A row-preserving resize should leave a shortcut's stored X untouched.
+            if (oldRows == rows) continue;
             float savedY = getFloatPreferenceCompat(
                     shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), -1f);
-            if (savedX < 0f || savedY < 0f) continue;
-            int col = Math.max(0, Math.min(3, Math.round(
-                    Math.min(1f, savedX) * 3f)));
+            if (savedY < 0f) continue;
             int oldRow = Math.max(0, Math.min(oldRows - 1, Math.round(
                     Math.min(1f, savedY) * Math.max(1, oldRows - 1))));
             int row = Math.max(0, Math.min(rows - 1, oldRow));
-            shortcutEdit.putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), col / 3f)
-                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
-                            row / (float) Math.max(1, rows - 1));
+            shortcutEdit.putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId),
+                    row / (float) Math.max(1, rows - 1));
             changedShortcuts = true;
         }
         if (changedShortcuts) shortcutEdit.apply();
