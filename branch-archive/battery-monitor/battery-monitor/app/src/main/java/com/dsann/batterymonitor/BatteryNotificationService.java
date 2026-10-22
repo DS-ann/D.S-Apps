@@ -45,14 +45,15 @@ public class BatteryNotificationService extends Service {
     private static final long MIN_MY_BATTERY_INTERVAL_MS = 50L;
     private static final long MAX_MY_BATTERY_INTERVAL_MS = 1500L;
     private static final long DEFAULT_MY_BATTERY_INTERVAL_MS = 500L;
-    private static final long NOTIFICATION_MIN_REFRESH_MS = 500L;
+    private static final long NOTIFICATION_REFRESH_INTERVAL_MS = 1000L;
     private static final long ROOT_RETRY_GAP_MS = 5000L;
     private static final long RECOVERY_DELAY_MS = 15000L;
 
     private final Handler handler = new Handler();
     private long lastHistorySampleMs;
     private long lastCalculatorSampleMs;
-    private long lastNotificationUpdateMs;
+    private long lastNotificationUpdateUptimeMs;
+    private long nextNotificationUpdateUptimeMs;
     private long lastRootCommandMs;
     private int lastAttemptedPowerStatus = -1;
     private int lastAttemptedPowerSource = -1;
@@ -70,7 +71,6 @@ public class BatteryNotificationService extends Service {
             try {
                 if (shouldRunService()) {
                     requestSampleUpdate();
-                    publishNotification();
                 } else {
                     stopSelf();
                 }
@@ -78,6 +78,34 @@ public class BatteryNotificationService extends Service {
                 // A failed sample must not cancel the notification refresh loop.
             } finally {
                 if (shouldRunService()) handler.postDelayed(this, getNextSamplingInterval());
+            }
+        }
+    };
+
+    private final Runnable notificationUpdater = new Runnable() {
+        @Override public void run() {
+            try {
+                if (shouldRunService()) {
+                    publishNotification();
+                } else {
+                    stopSelf();
+                }
+            } catch (Throwable ignored) {
+                // A notification failure must not cancel the next refresh.
+            } finally {
+                if (shouldRunService()) {
+                    long now = SystemClock.uptimeMillis();
+                    if (nextNotificationUpdateUptimeMs == 0L) {
+                        nextNotificationUpdateUptimeMs = now;
+                    }
+                    nextNotificationUpdateUptimeMs += NOTIFICATION_REFRESH_INTERVAL_MS;
+                    if (nextNotificationUpdateUptimeMs <= now) {
+                        nextNotificationUpdateUptimeMs = now + NOTIFICATION_REFRESH_INTERVAL_MS;
+                    }
+                    handler.postAtTime(this, nextNotificationUpdateUptimeMs);
+                } else {
+                    nextNotificationUpdateUptimeMs = 0L;
+                }
             }
         }
     };
@@ -90,8 +118,14 @@ public class BatteryNotificationService extends Service {
         acquireCpuLock();
         requestSampleUpdate();
         publishNotification();
-        if (shouldRunService()) handler.postDelayed(updater, getNextSamplingInterval());
-        else stopSelf();
+        if (shouldRunService()) {
+            handler.postDelayed(updater, getNextSamplingInterval());
+            nextNotificationUpdateUptimeMs = SystemClock.uptimeMillis()
+                    + NOTIFICATION_REFRESH_INTERVAL_MS;
+            handler.postAtTime(notificationUpdater, nextNotificationUpdateUptimeMs);
+        } else {
+            stopSelf();
+        }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -99,6 +133,10 @@ public class BatteryNotificationService extends Service {
             if (wakeLock == null || !wakeLock.isHeld()) acquireCpuLock();
             handler.removeCallbacks(updater);
             handler.post(updater);
+            handler.removeCallbacks(notificationUpdater);
+            nextNotificationUpdateUptimeMs = SystemClock.uptimeMillis()
+                    + NOTIFICATION_REFRESH_INTERVAL_MS;
+            handler.postAtTime(notificationUpdater, nextNotificationUpdateUptimeMs);
             return START_STICKY;
         }
         stopSelf();
@@ -238,11 +276,10 @@ public class BatteryNotificationService extends Service {
         if (!recordingEnabled && !usePercent && !resetPending && !estimating) return;
 
         long now = System.currentTimeMillis();
-        long myBatteryInterval = getMyBatterySamplingInterval();
-        long sessionInterval = getSamplingInterval();
-        long notifyEvery = Math.max(NOTIFICATION_MIN_REFRESH_MS,
-                Math.min(1000L, recordingEnabled ? sessionInterval : myBatteryInterval));
-        if (now - lastNotificationUpdateMs < notifyEvery && lastNotificationUpdateMs != 0L) return;
+        long notificationUptime = SystemClock.uptimeMillis();
+        if (lastNotificationUpdateUptimeMs != 0L
+                && notificationUptime - lastNotificationUpdateUptimeMs
+                < NOTIFICATION_REFRESH_INTERVAL_MS) return;
 
         BatteryReader.Reading reading = latestReading;
         String liveText = reading.compact();
@@ -261,7 +298,7 @@ public class BatteryNotificationService extends Service {
                             SessionStore.getActiveScreenOnMs(this),
                             BatteryPercentCalculator.current(this)));
         }
-        lastNotificationUpdateMs = now;
+        lastNotificationUpdateUptimeMs = notificationUptime;
     }
 
     private void applyCalculatedAndroidPercentage(BatteryPercentCalculator.Estimate estimate, long now) {
@@ -457,6 +494,8 @@ public class BatteryNotificationService extends Service {
 
     @Override public void onDestroy() {
         handler.removeCallbacks(updater);
+        handler.removeCallbacks(notificationUpdater);
+        nextNotificationUpdateUptimeMs = 0L;
         if (wakeLock != null && wakeLock.isHeld()) {
             try { wakeLock.release(); } catch (RuntimeException ignored) { }
         }
