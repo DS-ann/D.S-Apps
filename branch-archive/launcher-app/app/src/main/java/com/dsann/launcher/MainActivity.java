@@ -10117,7 +10117,8 @@ public class MainActivity extends Activity {
                 if (clockWidgetMoving && !clockWidgetEditing
                         && (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5))) {
-                    if (!clockWidgetDragging) {
+                    boolean firstMoveFrame = !clockWidgetDragging;
+                    if (firstMoveFrame) {
                         int[] safeClockGeometry = itemGeometry(clockPanel);
                         liveDragLastSafeGeometry.put(clockPanel,
                                 new int[]{safeClockGeometry[0], safeClockGeometry[1]});
@@ -10125,9 +10126,9 @@ public class MainActivity extends Activity {
                     clockWidgetDragging = true;
                     float targetX = clockWidgetStartX + dx;
                     float targetY = clockWidgetStartY + dy;
-                    setClampedClockTranslation(targetX, targetY, true);
-                    updateClockResizeHandles();
-                    setWorkspaceGridVisible(true, clockPanel);
+                    setClampedClockTranslation(targetX, targetY, false);
+                    scheduleClockResizeHandlesUpdate();
+                    if (firstMoveFrame) setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
                         scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
                     }
@@ -14774,10 +14775,9 @@ public class MainActivity extends Activity {
         // across the full page, but never beyond the page's horizontal bounds.
         // The cap is based on the actual page width (not half-width/grid columns),
         // so normal typography clocks can expand all the way to either screen edge.
-        // Keep the seven-segment cap unchanged because its renderer's width is already
-        // tuned. Typography clocks must also fit their full background width: if the
-        // date makes the panel wider than the digit group, capping against only the
-        // digits lets the panel overflow the page and the boundary clamp snaps it sideways.
+        // The cap must use the full background panel, not only the glyph group. Otherwise
+        // the LED digit-group width can allow a scaled background to exceed the page, after
+        // which drag/resize clamps and handle positions disagree at the screen edge.
         float widthForScaleCap = naturalPanelWidth;
         final float lengthScale = Math.min(requestedLengthScale,
                 Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
