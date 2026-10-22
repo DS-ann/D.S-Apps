@@ -4323,7 +4323,7 @@ public class MainActivity extends Activity {
                 morphSnapshotRef[0] = snapshot;
             }
 
-            final long duration = animationDuration(220L);
+            final long duration = animationDuration(180L);
             panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             android.animation.ValueAnimator transition =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
@@ -4341,7 +4341,7 @@ public class MainActivity extends Activity {
                 panel.setTranslationX(tx);
                 panel.setTranslationY(ty);
 
-                float contentFade = Math.max(0f, Math.min(1f, (progress - 0.20f) / 0.60f));
+                float contentFade = Math.max(0f, Math.min(1f, (progress - 0.10f) / 0.50f));
                 title.setAlpha(contentFade);
                 rows.setAlpha(contentFade);
                 manage.setAlpha(contentFade);
@@ -4353,7 +4353,7 @@ public class MainActivity extends Activity {
                     snapshot.setTranslationX(tx);
                     snapshot.setTranslationY(ty);
                     snapshot.setAlpha(1f - Math.max(0f,
-                            Math.min(1f, (progress - 0.12f) / 0.48f)));
+                            Math.min(1f, (progress - 0.30f) / 0.40f)));
                     snapshot.invalidateOutline();
                 }
                 dimLayer.setAlpha(0.36f * progress);
@@ -4412,7 +4412,7 @@ public class MainActivity extends Activity {
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
-        transition.setDuration(animationDuration(175L));
+        transition.setDuration(animationDuration(145L));
         transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
         transition.addUpdateListener(animation -> {
             float progress = (Float) animation.getAnimatedValue();
@@ -4425,7 +4425,7 @@ public class MainActivity extends Activity {
             panel.setScaleY(sy);
             panel.setTranslationX(tx);
             panel.setTranslationY(ty);
-            float contentFade = Math.max(0f, Math.min(1f, (progress - 0.20f) / 0.60f));
+            float contentFade = Math.max(0f, Math.min(1f, (progress - 0.10f) / 0.50f));
             if (title != null) title.setAlpha(contentFade);
             if (rows != null) rows.setAlpha(contentFade);
             if (manage != null) manage.setAlpha(contentFade);
@@ -4435,7 +4435,7 @@ public class MainActivity extends Activity {
                 snapshot.setTranslationX(tx);
                 snapshot.setTranslationY(ty);
                 snapshot.setAlpha(1f - Math.max(0f,
-                        Math.min(1f, (progress - 0.12f) / 0.48f)));
+                        Math.min(1f, (progress - 0.30f) / 0.40f)));
                 snapshot.invalidateOutline();
             }
             if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
@@ -9547,6 +9547,20 @@ public class MainActivity extends Activity {
             }
             boolean api23TwoDigitTextFallback = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
                     && !sevenSegmentClock && fallbackHourDigits >= 2;
+            int styleForClockSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+            float baseClockLetterSpacing = clockPresetLetterSpacing(styleForClockSpacing);
+            boolean api23CompactTwoDigitClock = api23TwoDigitTextFallback
+                    && styleForClockSpacing != 2;
+            if (api23CompactTwoDigitClock) {
+                // API 23 keeps ordinary TextView text for the two-digit-hour fallback;
+                // compact its total advances by 15dp without introducing ReplacementSpans.
+                float advanceCount = Math.max(1f, clockValue.length() - 1f);
+                float spacingReduction = LauncherUiUtils.dp(this, 15f)
+                        / Math.max(1f, clockText.getTextSize() * advanceCount);
+                clockText.setLetterSpacing(baseClockLetterSpacing - spacingReduction);
+            } else if (Math.abs(clockText.getLetterSpacing() - baseClockLetterSpacing) > 0.001f) {
+                clockText.setLetterSpacing(baseClockLetterSpacing);
+            }
             if (clockText instanceof SevenSegmentClockTextView) {
                 ((SevenSegmentClockTextView) clockText).setSevenSegmentMode(sevenSegmentClock);
             }
@@ -9599,14 +9613,28 @@ public class MainActivity extends Activity {
                     }
                     hourStart++;
                     int hourDigitCount = hourEnd - hourStart + 1;
+                    int styleForSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+                    boolean tightenHourMinuteGroups = hourDigitCount >= 2
+                            && !sevenSegmentClock && styleForSpacing != 2;
+                    float halfGroupTightenPx = tightenHourMinuteGroups
+                            ? LauncherUiUtils.dp(this, 7.5f) : 0f;
                     float innerWhiteBorderPx = LauncherUiUtils.dp(this, 1f);
                     for (int digitAt = 0; digitAt < displayClock.length(); digitAt++) {
                         if (Character.digit(displayClock.charAt(digitAt), 10) < 0) continue;
                         boolean moveFirstHourDigitRight = digitAt == hourStart && hourDigitCount >= 2;
                         float gap = digitAt == minuteFirst && hasMinutePair
                                 ? tightenedDigitGap : 0f;
+                        float glyphOffsetX = 0f;
+                        if (tightenHourMinuteGroups) {
+                            if (digitAt >= hourStart && digitAt <= hourEnd) {
+                                glyphOffsetX = halfGroupTightenPx;
+                            } else if (digitAt >= minuteFirst && hasMinutePair
+                                    && digitAt <= minuteFirst + 1) {
+                                glyphOffsetX = -halfGroupTightenPx;
+                            }
+                        }
                         displayClock.setSpan(new TightDigitSpan(
-                                        moveFirstHourDigitRight, gap,
+                                        moveFirstHourDigitRight, gap, glyphOffsetX,
                                         useWhiteDigitInnerBorder, innerWhiteBorderPx),
                                 digitAt, digitAt + 1,
                                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -9615,6 +9643,16 @@ public class MainActivity extends Activity {
                                     getClockColonCenterY(),
                                     useWhiteDigitInnerBorder, innerWhiteBorderPx),
                             colonAt, colonAt + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+            }
+            if (api23TwoDigitTextFallback) {
+                int nativeColonAt = displayClock.toString().indexOf(':');
+                if (nativeColonAt >= 0) {
+                    int shiftPx = getNativeClockColonBaselineShift(
+                            displayClock.toString(), nativeColonAt);
+                    displayClock.setSpan(new ClockColonBaselineSpan(shiftPx),
+                            nativeColonAt, nativeColonAt + 1,
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
             Boolean previousDigitBorderMode = clockDigitInnerBorderModeApplied.get(clockText);
@@ -9630,6 +9668,16 @@ public class MainActivity extends Activity {
                             oldSpanned.getSpans(0, oldSpanned.length(), TightDigitSpan.class).length > 0
                             || oldSpanned.getSpans(0, oldSpanned.length(),
                                     CenteredColonSpan.class).length > 0;
+                    int existingColonAt = oldSpanned.toString().indexOf(':');
+                    if (existingColonAt >= 0) {
+                        ClockColonBaselineSpan[] oldBaseline = oldSpanned.getSpans(
+                                existingColonAt, existingColonAt + 1, ClockColonBaselineSpan.class);
+                        int requiredShift = getNativeClockColonBaselineShift(
+                                oldSpanned.toString(), existingColonAt);
+                        staleApi23ReplacementSpans = staleApi23ReplacementSpans
+                                || oldBaseline.length != 1
+                                || oldBaseline[0].getShiftPx() != requiredShift;
+                    }
                 }
             }
             int expectedColon = displayClock.toString().indexOf(':');
@@ -10280,8 +10328,6 @@ public class MainActivity extends Activity {
         addAppShiftDirection(directions, seen, 0, 1);
         addAppShiftDirection(directions, seen, 0, -1);
 
-        android.graphics.Rect movingVisible = collisionRectForInteraction(
-                movingView, moverGeometry, seed);
         for (int[] direction : directions) {
             int dxCells = direction[0];
             int dyCells = direction[1];
@@ -10314,10 +10360,6 @@ public class MainActivity extends Activity {
                     int[] candidateSlot = homeGridIconSlot(page, candidate, cellHeight, rows);
                     if (candidateSlot == null || candidateSlot[0] != nextCol
                             || candidateSlot[1] != nextRow) continue;
-                    if (candidate == movingView) {
-                        blocked = true;
-                        break;
-                    }
                     boolean sameGridFamily = isWorkspaceContactShortcut(candidate)
                             == isWorkspaceContactShortcut(seed);
                     if (!sameGridFamily || cohortSet.containsKey(candidate)) {
@@ -10364,10 +10406,6 @@ public class MainActivity extends Activity {
                 }
                 android.graphics.Rect targetVisible = appIconVisualRectAt(
                         member, targetX, targetY, geometry[2], geometry[3]);
-                if (android.graphics.Rect.intersects(targetVisible, movingVisible)) {
-                    blocked = true;
-                    break;
-                }
                 android.graphics.Rect sweep = appIconVisualRectAt(
                         member, geometry[0], geometry[1], geometry[2], geometry[3]);
                 sweep.union(targetVisible);
@@ -13747,37 +13785,50 @@ public class MainActivity extends Activity {
     }
 
     private float getClockColonCenterY() {
-        // ReplacementSpan draws in TextView Layout coordinates, not the outer
-        // TextView's coordinates. Convert the clock row's scaling pivot into the
-        // Layout's coordinate space; using pivotY directly can place the dots
-        // outside the rendered line and make the colon disappear.
+        // Center the custom colon inside the rendered clock line itself. The span uses
+        // Layout coordinates, so midpoint-of-line avoids font-specific baseline drift
+        // in Neon Circuit as well as the other non-seven-segment presets.
         if (clockText != null) {
-            float viewCenterY = clockText.getPivotY();
-            if (viewCenterY <= 0f) {
-                int measuredHeight = clockText.getHeight();
-                if (measuredHeight > 0) {
-                    viewCenterY = measuredHeight / 2f;
-                } else {
-                    ViewGroup.LayoutParams params = clockText.getLayoutParams();
-                    if (params != null && params.height > 0) {
-                        viewCenterY = params.height / 2f;
-                    } else {
-                        viewCenterY = LauncherUiUtils.dp(this, 114) / 2f;
-                    }
-                }
-            }
-
             android.text.Layout layout = clockText.getLayout();
             if (layout != null && layout.getLineCount() > 0) {
-                int baseline = clockText.getBaseline();
-                if (baseline >= 0) {
-                    float layoutToViewOffset = baseline - layout.getLineBaseline(0);
-                    return Math.max(0f, viewCenterY - layoutToViewOffset);
-                }
+                return (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
             }
-            return viewCenterY;
+
+            Paint.FontMetricsInt metrics = new Paint.FontMetricsInt();
+            clockText.getPaint().getFontMetricsInt(metrics);
+            if (metrics.bottom > metrics.top) {
+                return (metrics.bottom + metrics.top) * 0.5f;
+            }
+            int measuredHeight = clockText.getHeight();
+            if (measuredHeight > 0) return measuredHeight * 0.5f;
+            ViewGroup.LayoutParams params = clockText.getLayoutParams();
+            if (params != null && params.height > 0) return params.height * 0.5f;
         }
         return LauncherUiUtils.dp(this, 114) / 2f;
+    }
+
+    private int getNativeClockColonBaselineShift(String text, int colonAt) {
+        if (clockText == null || text == null || colonAt < 0 || colonAt >= text.length()) return 0;
+        android.text.Layout layout = clockText.getLayout();
+        if (layout == null || layout.getLineCount() <= 0) return 0;
+        Paint glyphPaint = new Paint(clockText.getPaint());
+        android.graphics.Rect inkBounds = new android.graphics.Rect();
+        glyphPaint.getTextBounds(text, colonAt, colonAt + 1, inkBounds);
+        float baseline = layout.getLineBaseline(0);
+        float glyphInkCenter = baseline + (inkBounds.top + inkBounds.bottom) * 0.5f;
+        float lineCenter = (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
+        return Math.round(glyphInkCenter - lineCenter);
+    }
+
+    private float clockPresetLetterSpacing(int style) {
+        switch (style) {
+            case 1: return 0.12f;
+            case 2: return 0.035f;
+            case 3: return 0.16f;
+            case 4: return 0.015f;
+            case 5: return 0f;
+            default: return 0.04f;
+        }
     }
 
     private void syncClockColonVerticalCenter() {
@@ -14358,13 +14409,15 @@ public class MainActivity extends Activity {
     private static final class TightDigitSpan extends android.text.style.ReplacementSpan {
         private final boolean moveDigitRight;
         private final float gap;
+        private final float glyphOffsetX;
         private final boolean drawWhiteInnerBorder;
         private final float innerWhiteBorderPx;
 
-        TightDigitSpan(boolean moveDigitRight, float gap, boolean drawWhiteInnerBorder,
-                float innerWhiteBorderPx) {
+        TightDigitSpan(boolean moveDigitRight, float gap, float glyphOffsetX,
+                boolean drawWhiteInnerBorder, float innerWhiteBorderPx) {
             this.moveDigitRight = moveDigitRight;
             this.gap = Math.max(0f, gap);
+            this.glyphOffsetX = glyphOffsetX;
             this.drawWhiteInnerBorder = drawWhiteInnerBorder;
             this.innerWhiteBorderPx = Math.max(0f, innerWhiteBorderPx);
         }
@@ -14380,12 +14433,31 @@ public class MainActivity extends Activity {
             // For minutes, the first digit stays put and its reduced advance pulls
             // the second digit left. For hours, shift the first digit right while
             // preserving the second digit's original position.
-            float glyphX = x + (moveDigitRight ? gap : 0f);
+            float glyphX = x + (moveDigitRight ? gap : 0f) + glyphOffsetX;
             canvas.drawText(text, start, end, glyphX, y, paint);
             if (drawWhiteInnerBorder && innerWhiteBorderPx > 0f) {
                 drawClockGlyphInnerWhiteBorder(canvas, text, start, end,
                         glyphX, top, y, bottom, paint, innerWhiteBorderPx);
             }
+        }
+    }
+
+    private static final class ClockColonBaselineSpan
+            extends android.text.style.MetricAffectingSpan {
+        private final int shiftPx;
+
+        ClockColonBaselineSpan(int shiftPx) {
+            this.shiftPx = shiftPx;
+        }
+
+        int getShiftPx() { return shiftPx; }
+
+        @Override public void updateMeasureState(android.text.TextPaint paint) {
+            paint.baselineShift += shiftPx;
+        }
+
+        @Override public void updateDrawState(android.text.TextPaint paint) {
+            paint.baselineShift += shiftPx;
         }
     }
 
