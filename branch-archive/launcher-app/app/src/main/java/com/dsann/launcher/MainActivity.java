@@ -14181,22 +14181,31 @@ public class MainActivity extends Activity {
         final float nonLedDigitScale = 1.12f;
         String widthClockValue = clockText.getText() == null
                 ? "" : clockText.getText().toString();
-        int widthColonAt = widthClockValue.indexOf(':');
-        int widthHourDigits = 0;
-        for (int i = 0; widthColonAt >= 0 && i < widthColonAt; i++) {
-            if (Character.digit(widthClockValue.charAt(i), 10) >= 0) widthHourDigits++;
-        }
-        // Standard clocks draw 1.12x glyphs inside a group sized from unscaled Paint
-        // measurements. When the hour has two digits, reserve the scaled glyph width
-        // and positive tracking too; otherwise the first/last digits can be clipped
-        // against the panel edges. Keep Neon Circuit and seven-segment sizing unchanged.
+        // Keep this reservation stable even while the hour is one digit. The live
+        // clock has the same character count because its leading figure-space reserves
+        // the second hour cell, so switching to 10–12 never changes the panel geometry.
         final boolean reserveTwoDigitStandardWidth = !sevenSegment
-                && selectedClockStyle != 2 && widthHourDigits >= 2;
-        float measuredTrackingWidth = clockText.getTextSize()
-                * clockText.getLetterSpacing() * Math.max(0, widthClockValue.length() - 1);
+                && selectedClockStyle != 2;
+        float baseTrackingWidth = clockText.getTextSize()
+                * clockPresetLetterSpacing(selectedClockStyle)
+                * Math.max(0, widthClockValue.length() - 1);
+        boolean api23NativeClockPath = Build.VERSION.SDK_INT == Build.VERSION_CODES.M;
+        float api23GapCompression = api23NativeClockPath
+                ? LauncherUiUtils.dp(this, 15f) : 0f;
+        float customColonAdvanceReduction = api23NativeClockPath ? 0f
+                : clockText.getPaint().measureText(":") * 0.55f;
+        float customDigitGroupReduction = api23NativeClockPath
+                ? 0f : LauncherUiUtils.dp(this, 15f);
+        // Paint.measureText excludes TextView letter spacing, and the standard renderer
+        // enlarges glyphs horizontally by 1.12x. Reserve the net width after the 15dp
+        // hour/minute tightening and compact custom colon. On Android 6 the same 15dp
+        // compression is applied through letter spacing and the colon remains native.
+        float requiredExtraWidth = naturalClockWidth * (nonLedDigitScale - 1f)
+                + nonLedDigitScale * (baseTrackingWidth - api23GapCompression)
+                - nonLedDigitScale * customColonAdvanceReduction
+                - customDigitGroupReduction - markerWidth - LauncherUiUtils.dp(this, 5f);
         final int twoDigitStandardWidthClearance = reserveTwoDigitStandardWidth
-                ? Math.max(0, (int) Math.ceil(naturalClockWidth * (nonLedDigitScale - 1f)
-                        + nonLedDigitScale * measuredTrackingWidth))
+                ? Math.max(0, (int) Math.ceil(requiredExtraWidth))
                 : 0;
         final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
