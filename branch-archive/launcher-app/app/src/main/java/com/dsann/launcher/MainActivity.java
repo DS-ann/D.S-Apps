@@ -836,6 +836,15 @@ public class MainActivity extends Activity {
      * A fresh SpannableStringBuilder plus a second-frame alignment pass drops those stale
      * measurements without changing the selected font, colours, spacing or saved geometry.
      */
+    /**
+     * Rebuild clock text only after TextView has had a layout pass. On Android 6,
+     * refreshing a two-digit clock before the first Layout exists can leave its
+     * ReplacementSpan advances stale; the digits then remain misplaced or invisible
+     * until a time-change broadcast happens to rebuild the view.
+     *
+     * Standard clocks use the same digit and centered-colon spans for one- and
+     * two-digit hours. Seven-segment rendering is not rewritten by this recovery.
+     */
     private void scheduleClockRendererPostLayoutRecovery(final int page) {
         if (page < 0 || page >= clockPanelsByPage.length) return;
         final LinearLayout targetPanel = clockPanelsByPage[page];
@@ -852,51 +861,62 @@ public class MainActivity extends Activity {
             int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
             boolean standardClockStyle = !(targetClock instanceof SevenSegmentClockTextView
                     && style == 5);
-            String currentValue = targetClock.getText() == null
-                    ? "" : targetClock.getText().toString();
-            int colonAt = currentValue.indexOf(':');
-            int hourDigits = 0;
-            for (int i = 0; colonAt >= 0 && i < colonAt; i++) {
-                if (Character.digit(currentValue.charAt(i), 10) >= 0) hourDigits++;
-            }
 
-            if (standardClockStyle && hourDigits >= 2) {
-                if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M) {
-                    // Rebuild with the API-23-safe native-glyph path. It uses no
-                    // ReplacementSpan for two-digit hours but retains a metric-only
-                    // colon baseline span so the separator can still be vertically centered.
-                    forceClockTextRefresh = true;
-                    updateClock();
-                    activateClockForPage(page);
-                } else {
-                    CharSequence currentText = targetClock.getText();
-                    if (currentText != null) {
-                        targetClock.setText(
-                                new android.text.SpannableStringBuilder(currentText),
-                                TextView.BufferType.SPANNABLE);
-                    }
-                }
-            }
             targetClock.setVisibility(View.VISIBLE);
             targetClock.setAlpha(1f);
             targetClock.requestLayout();
             targetClock.invalidate();
 
+            // Wait one frame so the initial/retained TextView Layout is not reused
+            // while reconstructing the spans. Rebuilding the Android 6 text before
+            // this point is the startup path that could make a two-digit clock vanish.
             targetClock.postOnAnimation(() -> {
                 if (isFinishing() || targetPanel.getParent() == null
                         || clockPanelsByPage[page] != targetPanel
                         || clockTextsByPage[page] != targetClock) return;
-                int callbackRestorePage = Math.max(0, Math.min(1, activeClockPage));
+
+                int refreshRestorePage = Math.max(0, Math.min(1, activeClockPage));
                 activateClockForPage(page);
+                if (standardClockStyle) {
+                    if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M) {
+                        // updateClock() rebuilds the same per-digit and centered-colon
+                        // spans used for every standard hour, then updates both pages.
+                        forceClockTextRefresh = true;
+                        updateClock();
+                        activateClockForPage(page);
+                    } else {
+                        CharSequence currentText = targetClock.getText();
+                        if (currentText != null) {
+                            targetClock.setText(
+                                    new android.text.SpannableStringBuilder(currentText),
+                                    TextView.BufferType.SPANNABLE);
+                        }
+                    }
+                }
+
                 targetClock.setVisibility(View.VISIBLE);
                 targetClock.setAlpha(1f);
-                syncClockColonVerticalCenter();
-                
-                updateClockDigitHorizontalOffset();
-                applyClockColorEffectsToActivePage(clockColorPhase);
                 targetClock.requestLayout();
-                targetClock.postInvalidateOnAnimation();
-                activateClockForPage(callbackRestorePage);
+                targetClock.invalidate();
+
+                // Let the refreshed spans participate in a completed layout before
+                // centering the visible glyphs within the unchanged clock background.
+                targetClock.postOnAnimation(() -> {
+                    if (isFinishing() || targetPanel.getParent() == null
+                            || clockPanelsByPage[page] != targetPanel
+                            || clockTextsByPage[page] != targetClock) return;
+                    int finalRestorePage = Math.max(0, Math.min(1, activeClockPage));
+                    activateClockForPage(page);
+                    targetClock.setVisibility(View.VISIBLE);
+                    targetClock.setAlpha(1f);
+                    syncClockColonVerticalCenter();
+                    updateClockDigitHorizontalOffset();
+                    applyClockColorEffectsToActivePage(clockColorPhase);
+                    targetClock.requestLayout();
+                    targetClock.postInvalidateOnAnimation();
+                    activateClockForPage(finalRestorePage);
+                });
+                activateClockForPage(refreshRestorePage);
             });
             activateClockForPage(restorePage);
         });
