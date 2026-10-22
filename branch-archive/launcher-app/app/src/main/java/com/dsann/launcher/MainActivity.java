@@ -4469,7 +4469,7 @@ public class MainActivity extends Activity {
             panel.setScaleY(sy);
             panel.setTranslationX(tx);
             panel.setTranslationY(ty);
-            float contentFade = Math.max(0f, Math.min(1f, (progress - 0.10f) / 0.50f));
+            float contentFade = Math.max(0f, Math.min(1f, (progress - 0.32f) / 0.42f));
             if (title != null) title.setAlpha(contentFade);
             if (rows != null) rows.setAlpha(contentFade);
             if (manage != null) manage.setAlpha(contentFade);
