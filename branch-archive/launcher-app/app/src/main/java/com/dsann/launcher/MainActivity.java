@@ -9624,7 +9624,8 @@ public class MainActivity extends Activity {
                             : (sevenSegment ? 1f : 2f) * borderDensity);
             clockRenderer.setDigitOnlyInnerBorder(false);
             boolean useAnyInnerBorder = useNothingInnerBorder || useGradientInnerBorder;
-            boolean drawRendererBorder = useAnyInnerBorder && useRendererTextBorder;
+            boolean drawRendererBorder = useRendererTextBorder
+                    && (useAnyInnerBorder || nativeTwoDigitTextFallback);
             clockRenderer.setContrastInnerBorderEnabled(
                     drawRendererBorder, digitColours, innerBorderWidth,
                     drawRendererBorder ? CLOCK_WHITE_BORDER_COLORS : null);
@@ -9781,6 +9782,12 @@ public class MainActivity extends Activity {
             for (int i = 0; fallbackColonAt >= 0 && i < fallbackColonAt; i++) {
                 if (Character.digit(clockValue.charAt(i), 10) >= 0) fallbackHourDigits++;
             }
+            // Android 6 can retain a blank/stale TextView Layout when adjacent
+            // ReplacementSpans are first installed for a two-digit hour. Use native
+            // TextView glyphs for that one API/style combination; one-digit clocks,
+            // newer Android releases, and the custom seven-segment renderer are unchanged.
+            boolean api23NativeTwoDigitClock = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                    && !sevenSegmentClock && fallbackHourDigits >= 2;
             int styleForClockSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
             float baseClockLetterSpacing = clockPresetLetterSpacing(styleForClockSpacing);
             if (Math.abs(clockText.getLetterSpacing() - baseClockLetterSpacing) > 0.001f) {
@@ -9801,7 +9808,8 @@ public class MainActivity extends Activity {
                     || (!sevenSegmentClock && fallbackHourDigits >= 2);
             android.text.SpannableStringBuilder displayClock =
                     new android.text.SpannableStringBuilder(clockValue);
-            if (!sevenSegmentClock && !clockValue.isEmpty()) {
+            if (!sevenSegmentClock && !clockValue.isEmpty()
+                    && !api23NativeTwoDigitClock) {
                 // Reserve a leading invisible '1' when the hour has one digit.
                 int firstDigit = -1;
                 for (int i = 0; i < clockValue.length(); i++) {
@@ -9885,7 +9893,8 @@ public class MainActivity extends Activity {
                     || previousDigitBorderMode.booleanValue() != useWhiteDigitInnerBorder;
             boolean missingDisplaySpans = false;
             int expectedColon = displayClock.toString().indexOf(':');
-            if (!sevenSegmentClock && !clockValue.isEmpty() && expectedColon >= 0) {
+            if (!sevenSegmentClock && !clockValue.isEmpty() && expectedColon >= 0
+                    && !api23NativeTwoDigitClock) {
                 CharSequence existingText = clockText.getText();
                 if (!(existingText instanceof android.text.Spanned)) {
                     missingDisplaySpans = true;
@@ -9985,10 +9994,24 @@ public class MainActivity extends Activity {
             if (!(target instanceof SevenSegmentClockTextView)) continue;
             activateClockForPage(page);
             if (style != 5) {
-                // Standard clocks now use per-glyph spans on Android 6 too. A
-                // TextView-wide contour would double-outline the visible glyphs.
-                ((SevenSegmentClockTextView) target).setContrastInnerBorderEnabled(
-                        false, null, 0f, null);
+                String value = target.getText() == null ? "" : target.getText().toString();
+                int colonAt = value.indexOf(':');
+                int hourDigits = 0;
+                for (int i = 0; colonAt > 0 && i < colonAt; i++) {
+                    if (Character.digit(value.charAt(i), 10) >= 0) hourDigits++;
+                }
+                if (hourDigits >= 2) {
+                    // This is the API-23 native-text fallback: no per-digit
+                    // ReplacementSpans are installed, so draw the 1dp inner contour
+                    // from the actual native glyph outlines instead.
+                    ((SevenSegmentClockTextView) target).setContrastInnerBorderEnabled(
+                            true, null, LauncherUiUtils.dp(this, 2f),
+                            CLOCK_WHITE_BORDER_COLORS);
+                } else {
+                    // One-digit typography clocks retain their existing span renderer.
+                    ((SevenSegmentClockTextView) target).setContrastInnerBorderEnabled(
+                            false, null, 0f, null);
+                }
             }
             target.invalidate();
         }
@@ -14686,11 +14709,16 @@ public class MainActivity extends Activity {
         float baseTrackingWidth = clockText.getTextSize()
                 * clockPresetLetterSpacing(selectedClockStyle)
                 * Math.max(0, widthClockValue.length() - 1);
-        float customColonAdvanceReduction = clockText.getPaint().measureText(":") * 0.55f;
-        // The standard-clock width follows the shared per-glyph spans on every Android
-        // release. The reserved width is stable across one- and two-digit hours.
-        float customDigitGroupReduction = LauncherUiUtils.dp(this,
-                Build.VERSION.SDK_INT >= 36 ? -15f : 15f);
+        // Android 6's native two-digit fallback does not use the compact replacement
+        // colon or the 15dp digit-group adjustment. Keep the reserved panel width large
+        // enough for native glyph advances so a cold start cannot clip the whole clock.
+        boolean api23NativeClockWidth = Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                && !sevenSegment;
+        float customColonAdvanceReduction = api23NativeClockWidth
+                ? 0f : clockText.getPaint().measureText(":") * 0.55f;
+        // The reserved width is stable across one- and two-digit hours.
+        float customDigitGroupReduction = api23NativeClockWidth ? 0f
+                : LauncherUiUtils.dp(this, Build.VERSION.SDK_INT >= 36 ? -15f : 15f);
         // Paint.measureText excludes TextView letter spacing, and the standard renderer
         // enlarges glyphs horizontally by 1.12x. Reserve the net width after digit-gap
         // tightening and the compact centered-colon advance.
