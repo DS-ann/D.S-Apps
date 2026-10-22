@@ -9786,6 +9786,17 @@ public class MainActivity extends Activity {
                 }
                 clockDigitInnerBorderModeApplied.put(clockText, useWhiteDigitInnerBorder);
             }
+            // Android 6's two-digit-hour fallback uses native TextView glyphs rather
+            // than per-digit ReplacementSpans. Reassert the white inner contour after
+            // that text buffer is installed; only enable it for gradient/artwork modes.
+            if (api23TwoDigitTextFallback && useWhiteDigitInnerBorder
+                    && clockText instanceof SevenSegmentClockTextView) {
+                ((SevenSegmentClockTextView) clockText).setContrastInnerBorderEnabled(
+                        true, CLOCK_DIGIT_GRADIENT_COLORS,
+                        2f * getResources().getDisplayMetrics().density,
+                        CLOCK_WHITE_BORDER_COLORS);
+                clockText.invalidate();
+            }
             // Keep the separator aligned with the active clock's vertical transform
             // after every text refresh, independently of the date/AM-PM typography.
             syncClockColonVerticalCenter();
@@ -14098,15 +14109,31 @@ public class MainActivity extends Activity {
     }
 
     private float getClockColonCenterY() {
-        // Center the custom colon inside the rendered clock line itself. The span uses
-        // Layout coordinates, so midpoint-of-line avoids font-specific baseline drift
-        // in Neon Circuit as well as the other non-seven-segment presets.
+        // Center the custom colon on the visible digit ink, not the font's full line box.
+        // This keeps its dots vertically aligned in Neon Circuit and every other standard
+        // clock preset despite their different baselines, ascenders, and descenders.
         if (clockText != null) {
             android.text.Layout layout = clockText.getLayout();
             if (layout != null && layout.getLineCount() > 0) {
+                Paint digitPaint = new Paint(clockText.getPaint());
+                android.graphics.Rect digitBounds = new android.graphics.Rect();
+                digitPaint.getTextBounds("8", 0, 1, digitBounds);
+                if (digitBounds.bottom > digitBounds.top) {
+                    return layout.getLineBaseline(0)
+                            + (digitBounds.top + digitBounds.bottom) * 0.5f;
+                }
                 return (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
             }
 
+            Paint digitPaint = new Paint(clockText.getPaint());
+            android.graphics.Rect digitBounds = new android.graphics.Rect();
+            digitPaint.getTextBounds("8", 0, 1, digitBounds);
+            if (digitBounds.bottom > digitBounds.top) {
+                Paint.FontMetricsInt metrics = new Paint.FontMetricsInt();
+                digitPaint.getFontMetricsInt(metrics);
+                return (metrics.bottom + metrics.top) * 0.5f
+                        + (digitBounds.top + digitBounds.bottom) * 0.5f;
+            }
             Paint.FontMetricsInt metrics = new Paint.FontMetricsInt();
             clockText.getPaint().getFontMetricsInt(metrics);
             if (metrics.bottom > metrics.top) {
@@ -14136,10 +14163,15 @@ public class MainActivity extends Activity {
         glyphPaint.getTextBounds(text, colonAt, colonAt + 1, inkBounds);
         float baseline = layout.getLineBaseline(0);
         float glyphInkCenter = baseline + (inkBounds.top + inkBounds.bottom) * 0.5f;
-        float lineCenter = (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
-        // TextLine draws the run at baseline + baselineShift. Invert the offset
-        // so a low native colon moves UP to the line midpoint, not farther down.
-        return Math.round(lineCenter - glyphInkCenter);
+        Paint digitPaint = new Paint(clockText.getPaint());
+        android.graphics.Rect digitBounds = new android.graphics.Rect();
+        digitPaint.getTextBounds("8", 0, 1, digitBounds);
+        float digitInkCenter = digitBounds.bottom > digitBounds.top
+                ? baseline + (digitBounds.top + digitBounds.bottom) * 0.5f
+                : (layout.getLineTop(0) + layout.getLineBottom(0)) * 0.5f;
+        // TextLine draws at baseline + baselineShift. Center the scaled colon's visible
+        // ink on the digit's ink center rather than on the font's line-box midpoint.
+        return Math.round(digitInkCenter - glyphInkCenter);
     }
 
     private float clockPresetLetterSpacing(int style) {
