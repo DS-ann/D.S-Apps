@@ -15290,6 +15290,11 @@ public class MainActivity extends Activity {
                 : new FrameLayout.LayoutParams(naturalPanelWidth, rowHeight, alignment | Gravity.TOP);
         panelParams.gravity = alignment | Gravity.TOP;
         panelParams.width = naturalPanelWidth;
+        // The complete widget includes the date/AM-PM line below the clock row.
+        // A fixed row-height panel clips that line on the first home screen and makes
+        // vertical resizing calculate a zero-height date allowance. Let the panel wrap
+        // its children; an active resize temporarily sets an explicit target height.
+        panelParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
         clockPanel.setLayoutParams(panelParams);
         // Scale from the selected alignment anchor so left, center, and right
         // positioning remain visually stable while changing the clock length.
