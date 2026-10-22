@@ -3,6 +3,7 @@ package com.dsann.batterymonitor;
 import android.content.Context;
 import android.content.Intent;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -19,12 +20,24 @@ final class SessionStore {
             KEY_ON_END_PERCENT="on_end_percent", KEY_OFF_MS="off_ms", KEY_OFF_MAH="off_mah",
             KEY_OFF_MIN="off_min", KEY_OFF_MAX="off_max", KEY_OFF_START_PERCENT="off_start_percent",
             KEY_LAST_CURRENT="last_current",
-            KEY_OFF_END_PERCENT="off_end_percent";
-    // Any interval longer than this is an unobserved gap (for example, while
-    // the phone is powered off). Close the old record at its last real sample
-    // and start a new segment rather than spanning the missing time.
+            KEY_OFF_END_PERCENT="off_end_percent",
+            KEY_UNOBSERVED_GAP_MS="unobserved_gap_ms",
+            KEY_LAST_ELAPSED_REALTIME="last_elapsed_realtime_ms",
+            KEY_DOZE_GAP_MARKED_AT="doze_gap_marked_at";
+    // Energy and screen-time integration is still limited to closely spaced samples.
+    // A marked, bounded Doze gap may keep one visible history record, but is excluded
+    // from measured duration and consumption totals.
     private static final long MAX_INTEGRATION_GAP=2*60*1000L;
+    private static final long MAX_DOZE_SESSION_GAP=30*60*1000L;
+    private static final long MAX_BOOT_CLOCK_SKEW_MS=2*60*1000L;
     private SessionStore(){}
+
+    /** Mark a known Doze interval for the next real sample. */
+    static synchronized void markDozeGapExpected(Context c) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(KEY_DOZE_GAP_MARKED_AT, System.currentTimeMillis())
+                .apply();
+    }
 
     static synchronized void sample(Context c, BatteryReader.Reading r){
         if(r.currentUa==Long.MIN_VALUE)return;
@@ -34,6 +47,19 @@ final class SessionStore {
         boolean screenOn=isScreenOn(c);
         android.content.SharedPreferences p=c.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
         long start=p.getLong(KEY_START,0), last=p.getLong(KEY_LAST,0);
+        long nowElapsed=SystemClock.elapsedRealtime();
+        long lastElapsed=p.getLong(KEY_LAST_ELAPSED_REALTIME,-1L);
+        long elapsedRealtimeGap=lastElapsed>=0L ? nowElapsed-lastElapsed : -1L;
+        long wallGap=now-last;
+        long dozeGapMarkedAt=p.getLong(KEY_DOZE_GAP_MARKED_AT,0L);
+        boolean dozeGapMarked=dozeGapMarkedAt>last && dozeGapMarkedAt<=now;
+        boolean sameBoot=lastElapsed>=0L && elapsedRealtimeGap>=0L
+                && Math.abs(wallGap-elapsedRealtimeGap)<=MAX_BOOT_CLOCK_SKEW_MS;
+        boolean mayKeepRecordAcrossDozeGap=dozeGapMarked && sameBoot
+                && elapsedRealtimeGap<=MAX_DOZE_SESSION_GAP;
+        boolean splitForLongGap=wallGap>MAX_INTEGRATION_GAP
+                && !mayKeepRecordAcrossDozeGap;
+        long unobservedGapMs=p.getLong(KEY_UNOBSERVED_GAP_MS,0L);
         boolean oldCharging=p.getBoolean(KEY_CHARGING,charging);
         boolean oldScreen=p.getBoolean(KEY_SCREEN_ON,screenOn);
         double mah=readDouble(p,KEY_MAH,0);
@@ -51,17 +77,18 @@ final class SessionStore {
         int onStartPercent=p.getInt(KEY_ON_START_PERCENT,-1), onEndPercent=p.getInt(KEY_ON_END_PERCENT,-1);
         int offStartPercent=p.getInt(KEY_OFF_START_PERCENT,-1), offEndPercent=p.getInt(KEY_OFF_END_PERCENT,-1);
 
-        // Never include an unobserved interval in a session's duration, mAh,
-        // screen-on/off totals, or capacity-estimation percentage delta.
-        // The previous record ends at 'last'; this sample starts a new segment.
-        if(start==0||last==0||now<last||now-last>MAX_INTEGRATION_GAP||oldCharging!=charging){
+        // Long intervals split History unless an explicit Doze marker, same-boot
+        // monotonic timing, and a 30-minute upper bound confirm an expected idle gap.
+        // Charging changes and backwards wall-clock movement always split the record.
+        if(start==0||last==0||now<last||splitForLongGap||oldCharging!=charging){
             if(start!=0&&last!=0){
                 addRecord(p,start,last,oldCharging,mah,minCurrent,maxCurrent,startPercent,lastPercent,
                         onMs,onMah,onMin,onMax,onStartPercent,onEndPercent,
-                        offMs,offMah,offMin,offMax,offStartPercent,offEndPercent);
+                        offMs,offMah,offMin,offMax,offStartPercent,offEndPercent,unobservedGapMs);
             }
             start=last=now;
             mah=0;
+            unobservedGapMs=0L;
             previousCurrentMa=Double.NaN;
             minCurrent=maxCurrent=currentMa;
             startPercent=percent;
@@ -72,6 +99,9 @@ final class SessionStore {
             if (screenOn) onStartPercent=percent; else offStartPercent=percent;
         } else {
             long elapsed=Math.max(0,now-last);
+            if(elapsed>MAX_INTEGRATION_GAP && mayKeepRecordAcrossDozeGap){
+                unobservedGapMs+=elapsed;
+            }
             // Integrate only intervals for which we have sufficiently recent samples.
             // Use the trapezoidal rule so the interval is based on both endpoints,
             // rather than assuming the newest current held for the whole interval.
@@ -119,6 +149,9 @@ final class SessionStore {
                 .putLong(KEY_OFF_MIN,Double.doubleToLongBits(offMin)).putLong(KEY_OFF_MAX,Double.doubleToLongBits(offMax))
                 .putInt(KEY_ON_START_PERCENT,onStartPercent).putInt(KEY_ON_END_PERCENT,onEndPercent)
                 .putInt(KEY_OFF_START_PERCENT,offStartPercent).putInt(KEY_OFF_END_PERCENT,offEndPercent)
+                .putLong(KEY_UNOBSERVED_GAP_MS,unobservedGapMs)
+                .putLong(KEY_LAST_ELAPSED_REALTIME,nowElapsed)
+                .remove(KEY_DOZE_GAP_MARKED_AT)
                 .apply();
     }
 
@@ -131,12 +164,14 @@ final class SessionStore {
         double minCurrent=readDouble(p,KEY_MIN_CURRENT,Double.NaN);
         double maxCurrent=readDouble(p,KEY_MAX_CURRENT,Double.NaN);
         int startPercent=p.getInt(KEY_START_PERCENT,-1), endPercent=p.getInt(KEY_LAST_PERCENT,-1);
+        long unobservedGapMs=p.getLong(KEY_UNOBSERVED_GAP_MS,0L);
         addRecord(p,start,last,charging,mah,minCurrent,maxCurrent,startPercent,endPercent,
                 p.getLong(KEY_ON_MS,0),readDouble(p,KEY_ON_MAH,0),readDouble(p,KEY_ON_MIN,Double.NaN),readDouble(p,KEY_ON_MAX,Double.NaN),
                 p.getInt(KEY_ON_START_PERCENT,-1),p.getInt(KEY_ON_END_PERCENT,-1),
                 p.getLong(KEY_OFF_MS,0),readDouble(p,KEY_OFF_MAH,0),readDouble(p,KEY_OFF_MIN,Double.NaN),readDouble(p,KEY_OFF_MAX,Double.NaN),
-                p.getInt(KEY_OFF_START_PERCENT,-1),p.getInt(KEY_OFF_END_PERCENT,-1));
+                p.getInt(KEY_OFF_START_PERCENT,-1),p.getInt(KEY_OFF_END_PERCENT,-1),unobservedGapMs);
         p.edit().remove(KEY_START).remove(KEY_LAST).remove(KEY_LAST_CURRENT).remove(KEY_MAH).remove(KEY_MIN_CURRENT).remove(KEY_MAX_CURRENT)
+                .remove(KEY_UNOBSERVED_GAP_MS).remove(KEY_LAST_ELAPSED_REALTIME).remove(KEY_DOZE_GAP_MARKED_AT)
                 .remove(KEY_START_PERCENT).remove(KEY_LAST_PERCENT).remove(KEY_CHARGING).remove(KEY_SCREEN_ON)
                 .remove(KEY_ON_MS).remove(KEY_ON_MAH).remove(KEY_ON_MIN).remove(KEY_ON_MAX).remove(KEY_ON_START_PERCENT).remove(KEY_ON_END_PERCENT)
                 .remove(KEY_OFF_MS).remove(KEY_OFF_MAH).remove(KEY_OFF_MIN).remove(KEY_OFF_MAX).remove(KEY_OFF_START_PERCENT).remove(KEY_OFF_END_PERCENT).apply();
@@ -206,7 +241,8 @@ final class SessionStore {
                 p.getInt(KEY_ON_START_PERCENT,-1),p.getInt(KEY_ON_END_PERCENT,-1),
                 p.getLong(KEY_OFF_MS,0),readDouble(p,KEY_OFF_MAH,0),
                 readDouble(p,KEY_OFF_MIN,Double.NaN),readDouble(p,KEY_OFF_MAX,Double.NaN),
-                p.getInt(KEY_OFF_START_PERCENT,-1),p.getInt(KEY_OFF_END_PERCENT,-1));
+                p.getInt(KEY_OFF_START_PERCENT,-1),p.getInt(KEY_OFF_END_PERCENT,-1),
+                p.getLong(KEY_UNOBSERVED_GAP_MS,0L));
     }
 
     private static ArrayList<Record> parseRecords(String raw){
@@ -215,29 +251,31 @@ final class SessionStore {
         String[] lines=raw.split("\\n");
         for(int i=lines.length-1;i>=0;i--){
             String[] x=lines[i].split("\\|");
-            if(x.length!=4&&x.length!=8&&x.length!=20)continue;
+            if(x.length!=4&&x.length!=8&&x.length!=20&&x.length!=21)continue;
             try{
                 if(x.length==4)out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),
                         "1".equals(x[2]),Double.parseDouble(x[3]),Double.NaN,Double.NaN,-1,-1,
-                        0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1));
+                        0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1,0L));
                 else if(x.length==8)out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),
                         "1".equals(x[2]),Double.parseDouble(x[3]),Double.parseDouble(x[5]),
                         Double.parseDouble(x[4]),Integer.parseInt(x[6]),Integer.parseInt(x[7]),
-                        0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1));
+                        0,0,Double.NaN,Double.NaN,-1,-1,0,0,Double.NaN,Double.NaN,-1,-1,0L));
                 else out.add(new Record(Long.parseLong(x[0]),Long.parseLong(x[1]),
                         "1".equals(x[2]),Double.parseDouble(x[3]),Double.parseDouble(x[5]),
                         Double.parseDouble(x[4]),Integer.parseInt(x[6]),Integer.parseInt(x[7]),
                         Long.parseLong(x[8]),Double.parseDouble(x[9]),Double.parseDouble(x[10]),
                         Double.parseDouble(x[11]),Integer.parseInt(x[12]),Integer.parseInt(x[13]),
                         Long.parseLong(x[14]),Double.parseDouble(x[15]),Double.parseDouble(x[16]),
-                        Double.parseDouble(x[17]),Integer.parseInt(x[18]),Integer.parseInt(x[19])));
+                        Double.parseDouble(x[17]),Integer.parseInt(x[18]),Integer.parseInt(x[19]),
+                        x.length==21?Long.parseLong(x[20]):0L));
             }catch(Exception ignored){}
         }
         return out;
     }
 
     private static boolean qualifiesForCapacity(Record rec){
-        return rec!=null&&rec.charging&&rec.startPercent>=0&&rec.endPercent>=0
+        return rec!=null&&rec.unobservedGapMs==0L&&rec.charging
+                &&rec.startPercent>=0&&rec.endPercent>=0
                 &&rec.endPercent-rec.startPercent>=40&&rec.mah>0.0;
     }
 
@@ -256,7 +294,7 @@ final class SessionStore {
                 rec.onStartPercent+"|"+rec.onEndPercent+"|"+
                 rec.offMs+"|"+String.format(Locale.US,"%.1f",rec.offMah)+"|"+
                 String.format(Locale.US,"%.1f",rec.offMin)+"|"+String.format(Locale.US,"%.1f",rec.offMax)+"|"+
-                rec.offStartPercent+"|"+rec.offEndPercent;
+                rec.offStartPercent+"|"+rec.offEndPercent+"|"+rec.unobservedGapMs;
     }
 
     private static String appendRecord(String existing,String record,int maxRecords){
@@ -288,10 +326,10 @@ final class SessionStore {
         String rec=start+"|"+end+"|"+(charging?"1":"0")+"|"+String.format(Locale.US,"%.1f",mah)+"|"+
                 String.format(Locale.US,"%.1f",maxCurrent)+"|"+String.format(Locale.US,"%.1f",minCurrent)+"|"+startPercent+"|"+endPercent+"|"+
                 onMs+"|"+String.format(Locale.US,"%.1f",onMah)+"|"+String.format(Locale.US,"%.1f",onMin)+"|"+String.format(Locale.US,"%.1f",onMax)+"|"+onStartPercent+"|"+onEndPercent+"|"+
-                offMs+"|"+String.format(Locale.US,"%.1f",offMah)+"|"+String.format(Locale.US,"%.1f",offMin)+"|"+String.format(Locale.US,"%.1f",offMax)+"|"+offStartPercent+"|"+offEndPercent;
+                offMs+"|"+String.format(Locale.US,"%.1f",offMah)+"|"+String.format(Locale.US,"%.1f",offMin)+"|"+String.format(Locale.US,"%.1f",offMax)+"|"+offStartPercent+"|"+offEndPercent+"|"+unobservedGapMs;
         String historyValue=appendRecord(p.getString(KEY_HISTORY,""),rec,100);
         android.content.SharedPreferences.Editor editor=p.edit().putString(KEY_HISTORY,historyValue);
-        if(charging&&startPercent>=0&&endPercent>=0&&endPercent-startPercent>=40&&mah>0.0){
+        if(unobservedGapMs==0L&&charging&&startPercent>=0&&endPercent>=0&&endPercent-startPercent>=40&&mah>0.0){
             String capacityRaw=p.getString(KEY_CAPACITY_HISTORY,"");
             if(!containsRecord(parseRecords(capacityRaw),start,end)){
                 editor.putString(KEY_CAPACITY_HISTORY,appendRecord(capacityRaw,rec,0));
@@ -320,14 +358,16 @@ final class SessionStore {
         final long start,end; final boolean charging; final double mah,minCurrent,maxCurrent;
         final int startPercent,endPercent; final long onMs,offMs; final double onMah,onMin,onMax,offMah,offMin,offMax;
         final int onStartPercent,onEndPercent,offStartPercent,offEndPercent;
+        final long unobservedGapMs;
         Record(long s,long e,boolean c,double m,double min,double max,int sp,int ep,long oms,double oma,double omin,double omax,int osp,int oep,
-               long fms,double fma,double fmin,double fmax,int fsp,int fep){
+               long fms,double fma,double fmin,double fmax,int fsp,int fep,long gapMs){
             start=s;end=e;charging=c;mah=m;minCurrent=min;maxCurrent=max;startPercent=sp;endPercent=ep;
             onMs=oms;onMah=oma;onMin=omin;onMax=omax;onStartPercent=osp;onEndPercent=oep;
             offMs=fms;offMah=fma;offMin=fmin;offMax=fmax;offStartPercent=fsp;offEndPercent=fep;
+            unobservedGapMs=Math.max(0L,gapMs);
         }
         String date(){return new SimpleDateFormat("dd MMM yyyy, HH:mm",Locale.US).format(new Date(start));}
-        String duration(){return SessionStore.formatDuration(end-start);}
+        String duration(){return SessionStore.formatDuration(Math.max(0L,end-start-unobservedGapMs));}
         String screenOnDuration(){return SessionStore.formatDuration(onMs);}
     }
 }

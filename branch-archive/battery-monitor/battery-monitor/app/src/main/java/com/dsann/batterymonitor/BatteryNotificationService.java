@@ -153,6 +153,7 @@ public class BatteryNotificationService extends Service {
 
         if (shouldUseDozeSamplingMode()) {
             dozeSamplingMode = true;
+            SessionStore.markDozeGapExpected(this);
             cancelRecoveryAlarm();
             scheduleDozeWakeup();
             publishNotification();
@@ -233,6 +234,7 @@ public class BatteryNotificationService extends Service {
     private void enterDozeMode(boolean sampleImmediately) {
         if (!dozeSamplingMode) {
             dozeSamplingMode = true;
+            SessionStore.markDozeGapExpected(this);
             handler.removeCallbacks(updater);
             handler.removeCallbacks(notificationUpdater);
             nextNotificationUpdateUptimeMs = 0L;
@@ -265,6 +267,7 @@ public class BatteryNotificationService extends Service {
     private void runDozeWakeCycle() {
         if (!dozeSamplingMode || !shouldRunService() || dozeWakeCycleInFlight) return;
 
+        SessionStore.markDozeGapExpected(this);
         dozeWakeCycleInFlight = true;
         final long cycleToken = ++dozeWakeCycleToken;
         acquireCpuLock(DOZE_WAKE_WINDOW_MS);
