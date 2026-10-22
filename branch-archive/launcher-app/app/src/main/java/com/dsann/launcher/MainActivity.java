@@ -3932,9 +3932,6 @@ public class MainActivity extends Activity {
         final float[] morphProgress = new float[]{0f};
         final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
-        final android.graphics.Path morphOutlinePath = new android.graphics.Path();
-        final android.graphics.RectF morphOutlineBounds = new android.graphics.RectF();
-        final float[] morphOutlineRadii = new float[8];
         final android.view.ViewOutlineProvider morphOutlineProvider =
                 new android.view.ViewOutlineProvider() {
             @Override public void getOutline(View view, android.graphics.Outline outline) {
@@ -3945,19 +3942,16 @@ public class MainActivity extends Activity {
                     return;
                 }
                 float progress = Math.max(0f, Math.min(1f, morphProgress[0]));
+                float minDimension = Math.min(width, height);
                 float targetRadius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
-                        Math.min(width, height) * 0.5f);
-                float radiusX = width * 0.5f + (targetRadius - width * 0.5f) * progress;
-                float radiusY = height * 0.5f + (targetRadius - height * 0.5f) * progress;
-                for (int i = 0; i < morphOutlineRadii.length; i += 2) {
-                    morphOutlineRadii[i] = radiusX;
-                    morphOutlineRadii[i + 1] = radiusY;
-                }
-                morphOutlineBounds.set(0f, 0f, width, height);
-                morphOutlinePath.reset();
-                morphOutlinePath.addRoundRect(morphOutlineBounds, morphOutlineRadii,
-                        android.graphics.Path.Direction.CW);
-                outline.setConvexPath(morphOutlinePath);
+                        minDimension * 0.5f);
+                // Contract the silhouette slightly faster than the panel expands.
+                // Rounded-rectangle outlines are substantially cheaper than rebuilding
+                // and clipping a custom Path every frame on the Android 6 GPU pipeline.
+                float shapeProgress = (float) Math.sqrt(progress);
+                float startRadius = minDimension * 0.5f;
+                float radius = startRadius + (targetRadius - startRadius) * shapeProgress;
+                outline.setRoundRect(0, 0, Math.round(width), Math.round(height), radius);
             }
         };
         dialog.setOnDismissListener(ignored -> {
@@ -3983,9 +3977,9 @@ public class MainActivity extends Activity {
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         GradientDrawable panelBackground = appGroupGradient(false);
-        // Keep the panel shape static during motion. Animating a GradientDrawable radius
-        // invalidates the hardware layer every frame on older GPUs and causes visible jank.
-        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 24));
+        // Keep the drawable itself pill-shaped; the cheaper animated outline above
+        // contracts it to the final 24dp radius while the panel expands from the icon.
+        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 180));
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
@@ -4370,7 +4364,7 @@ public class MainActivity extends Activity {
                 if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
             }
 
-            final long duration = animationDuration(180L);
+            final long duration = animationDuration(145L);
             android.animation.ValueAnimator transition =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
             transition.setDuration(duration);
@@ -4456,7 +4450,7 @@ public class MainActivity extends Activity {
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
-        transition.setDuration(animationDuration(145L));
+        transition.setDuration(animationDuration(115L));
         transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
         transition.addUpdateListener(animation -> {
             float progress = (Float) animation.getAnimatedValue();
@@ -12024,9 +12018,18 @@ public class MainActivity extends Activity {
 
             if ((!alreadyDisplaced || targetCollides)
                     && isHomeGridDragMover(movingView)
-                    && isHomeGridIcon(other)
-                    && tryShiftHomeIconCohort(page, movingView, other, bestX, bestY, pushDx, pushDy)) {
-                continue;
+                    && isHomeGridIcon(other)) {
+                // Prefer moving the occupied row/column as one transaction. The helper
+                // reserves every lane member's destination before animation; only fall
+                // back to the minimum contiguous chain when no complete lane shift is safe.
+                if (tryShiftHomeIconLaneCohort(
+                        page, movingView, other, bestX, bestY, pushDx, pushDy)) {
+                    continue;
+                }
+                if (tryShiftHomeIconCohort(
+                        page, movingView, other, bestX, bestY, pushDx, pushDy)) {
+                    continue;
+                }
             }
 
             {
