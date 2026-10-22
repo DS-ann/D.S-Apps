@@ -1991,9 +1991,8 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Finalize one clock resize transaction. A normal release applies the last
-     * edge-anchor correction after layout; cancellation restores the complete
-     * starting geometry and invalidates any queued frame from the abandoned drag.
+     * Apply at most one move transform per rendered frame. Raw touch events are
+     * coalesced, while ACTION_UP flushes the final coordinates before committing.
      */
     private boolean clockDragFramePending = false;
     private float clockDragPendingRawX;
@@ -2064,6 +2063,62 @@ public class MainActivity extends Activity {
         if (movingPanel.getParent() instanceof FrameLayout) {
             scheduleLiveDisplacementUpdate((FrameLayout) movingPanel.getParent(), movingPanel);
         }
+    }
+
+    /**
+     * Resize validation checks only the strip added beyond the original rectangle.
+     * Rechecking the full rectangle can freeze every frame if a neighbouring item
+     * already intersects the clock's fixed portion; shrinking that edge should still
+     * remain possible, and expansion is blocked only by newly occupied space.
+     */
+    private boolean canApplyClockResizeCandidate(FrameLayout page, View clock,
+            android.graphics.Rect candidate, int edge) {
+        if (page == null || clock == null || candidate == null || edge < 1 || edge > 4
+                || candidate.left < 0 || candidate.top < 0
+                || candidate.right > page.getWidth() || candidate.bottom > page.getHeight()
+                || candidate.width() <= 0 || candidate.height() <= 0) return false;
+
+        int startLeft = clockWidgetStartVisualX;
+        int startTop = clockWidgetStartVisualY;
+        int startRight = startLeft + clockWidgetStartVisualWidth;
+        int startBottom = startTop + clockWidgetStartVisualHeight;
+        android.graphics.Rect addedArea = null;
+        if (edge == 1 && candidate.left < startLeft) {
+            addedArea = new android.graphics.Rect(candidate.left, candidate.top,
+                    startLeft, candidate.bottom);
+        } else if (edge == 2 && candidate.right > startRight) {
+            addedArea = new android.graphics.Rect(startRight, candidate.top,
+                    candidate.right, candidate.bottom);
+        } else if (edge == 3 && candidate.top < startTop) {
+            addedArea = new android.graphics.Rect(candidate.left, candidate.top,
+                    candidate.right, startTop);
+        } else if (edge == 4 && candidate.bottom > startBottom) {
+            addedArea = new android.graphics.Rect(candidate.left, startBottom,
+                    candidate.right, candidate.bottom);
+        }
+        // Moving an edge inward only frees space and remains legal if screen and
+        // minimum bounds are valid. Do not freeze it because an old portion of the
+        // clock already intersects another item's footprint.
+        if (addedArea == null || addedArea.isEmpty()) return true;
+
+        int gap = Math.max(1, LauncherUiUtils.dp(this, 5));
+        addedArea.inset(-gap, -gap);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == clock || other == workspaceTransferProxy
+                    || other.getVisibility() != View.VISIBLE || !isWorkspaceItem(other)) continue;
+            int[] geometry = itemGeometry(other);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            android.graphics.Rect obstacle = collisionRectForInteraction(other, geometry, clock);
+            if (android.graphics.Rect.intersects(addedArea, obstacle)) return false;
+            int[] reserved = liveDisplacementTargets.get(other);
+            if (reserved != null) {
+                android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
+                        other, reserved[0], reserved[1], geometry[2], geometry[3], clock);
+                if (android.graphics.Rect.intersects(addedArea, reservedBounds)) return false;
+            }
+        }
+        return true;
     }
 
     private boolean clockResizeFramePending = false;
@@ -2203,8 +2258,8 @@ public class MainActivity extends Activity {
                         pageHeight * 100f / Math.max(1, naturalRowHeight))));
                 breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
                 if (!(resizePanel.getParent() instanceof FrameLayout)
-                        || !canPlaceWorkspaceItem((FrameLayout) resizePanel.getParent(), resizePanel,
-                                new android.graphics.Rect(left, top, right, bottom))) {
+                        || !canApplyClockResizeCandidate(activePage, resizePanel,
+                                new android.graphics.Rect(left, top, right, bottom), clockResizeEdge)) {
                     clockGeometryRejectedAtLastMove = true;
                     return;
                 }
