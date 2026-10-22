@@ -11732,21 +11732,31 @@ public class MainActivity extends Activity {
                 : KEY_RESIZE_AUTO_SCALE_Y_PREFIX) + tag;
     }
 
-    /** Start each icon-size transaction with the configured artwork size, then persist
-     * only those neighbours which must yield space for the new size. */
+    /** Restore automatic shrink scales before applying a new home icon size. */
     private void clearAutoShrunkHomeGridItems() {
         if (prefs == null) return;
+        if (pagesStrip != null) {
+            for (int p = 0; p < pagesStrip.getChildCount(); p++) {
+                View pv = pagesStrip.getChildAt(p);
+                if (!(pv instanceof ViewGroup)) continue;
+                ViewGroup page = (ViewGroup) pv;
+                for (int i = 0; i < page.getChildCount(); i++) {
+                    View item = page.getChildAt(i);
+                    if (!isWorkspaceItem(item)) continue;
+                    float ax = clampWorkspaceAutoScale(
+                            getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(item, true), 1f));
+                    float ay = clampWorkspaceAutoScale(
+                            getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(item, false), 1f));
+                    if (Math.abs(ax - 1f) > 0.001f) item.setScaleX(item.getScaleX() / ax);
+                    if (Math.abs(ay - 1f) > 0.001f) item.setScaleY(item.getScaleY() / ay);
+                }
+            }
+        }
         SharedPreferences.Editor edit = prefs.edit();
         boolean changed = false;
         for (String key : prefs.getAll().keySet()) {
-            if (!(key.startsWith(KEY_RESIZE_AUTO_SCALE_X_PREFIX)
-                    || key.startsWith(KEY_RESIZE_AUTO_SCALE_Y_PREFIX))) continue;
-            String tag = key.startsWith(KEY_RESIZE_AUTO_SCALE_X_PREFIX)
-                    ? key.substring(KEY_RESIZE_AUTO_SCALE_X_PREFIX.length())
-                    : key.substring(KEY_RESIZE_AUTO_SCALE_Y_PREFIX.length());
-            if (tag.startsWith("launcher_app:")
-                    || tag.startsWith(APP_GROUP_TAG_PREFIX)
-                    || tag.startsWith("launcher_contact_shortcut:")) {
+            if (key.startsWith(KEY_RESIZE_AUTO_SCALE_X_PREFIX)
+                    || key.startsWith(KEY_RESIZE_AUTO_SCALE_Y_PREFIX)) {
                 edit.remove(key);
                 changed = true;
             }
@@ -14610,16 +14620,17 @@ public class MainActivity extends Activity {
     private boolean tryShrinkResizeItemInPlace(FrameLayout page, View item) {
         float oldX = item.getScaleX();
         float oldY = item.getScaleY();
-        Object rawTag = item.getTag();
-        String tag = rawTag instanceof String ? (String) rawTag : "";
+        String keyX = workspaceAutoShrinkScaleKey(item, true);
+        String keyY = workspaceAutoShrinkScaleKey(item, false);
+        float priorX = clampWorkspaceAutoScale(getFloatPreferenceCompat(keyX, 1f));
+        float priorY = clampWorkspaceAutoScale(getFloatPreferenceCompat(keyY, 1f));
         for (float factor = 0.95f; factor >= 0.50f; factor -= 0.05f) {
+            if (priorX * factor < 0.25f || priorY * factor < 0.25f) continue;
             item.setScaleX(oldX * factor);
             item.setScaleY(oldY * factor);
             if (resizeItemFitsAtCurrentPosition(page, item)) {
-                if (!tag.isEmpty()) {
-                    prefs.edit().putFloat("workspace_scale_x_" + tag, item.getScaleX())
-                            .putFloat("workspace_scale_y_" + tag, item.getScaleY()).apply();
-                }
+                prefs.edit().putFloat(keyX, clampWorkspaceAutoScale(priorX * factor))
+                        .putFloat(keyY, clampWorkspaceAutoScale(priorY * factor)).apply();
                 return true;
             }
         }
@@ -14763,6 +14774,7 @@ public class MainActivity extends Activity {
 
             for (int percent = 95; percent >= 50; percent -= 5) {
                 float factor = percent / 100f;
+                if (storedAutoX * factor < 0.25f || storedAutoY * factor < 0.25f) continue;
                 candidate.setScaleX(originalX * factor);
                 candidate.setScaleY(originalY * factor);
                 selectedFactor = factor;
@@ -14796,8 +14808,10 @@ public class MainActivity extends Activity {
 
             // This item alone was not enough; keep it provisionally at its minimum so
             // the next neighbour can also yield space. The preference is not written yet.
-            provisional.put(candidate, new float[]{originalX, originalY,
-                    storedAutoX, storedAutoY, 0.50f});
+            if (selectedFactor < 1f) {
+                provisional.put(candidate, new float[]{originalX, originalY,
+                        storedAutoX, storedAutoY, selectedFactor});
+            }
         }
 
         // No valid placement resulted from the shrink attempt. Roll all visual changes back.
