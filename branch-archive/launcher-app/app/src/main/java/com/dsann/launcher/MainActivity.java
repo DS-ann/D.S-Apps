@@ -1498,7 +1498,8 @@ public class MainActivity extends Activity {
             if (clockWidgetMoving && !clockWidgetEditing && clockPanel != null) {
                 if (Math.abs(dx) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(dy) > LauncherUiUtils.dp(this, 5)) {
-                    if (!clockWidgetDragging) {
+                    boolean firstMoveFrame = !clockWidgetDragging;
+                    if (firstMoveFrame) {
                         int[] safeClockGeometry = itemGeometry(clockPanel);
                         liveDragLastSafeGeometry.put(clockPanel,
                                 new int[]{safeClockGeometry[0], safeClockGeometry[1]});
@@ -1514,7 +1515,7 @@ public class MainActivity extends Activity {
                     // the start position. Writing preferences for every MOVE was wasteful.
                     setClampedClockTranslation(clockWidgetStartX + moveX,
                             clockWidgetStartY + moveY, false);
-                    updateClockResizeHandles();
+                    scheduleClockResizeHandlesUpdate()
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
                         scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
@@ -1530,7 +1531,8 @@ public class MainActivity extends Activity {
                 float moveY = event.getRawY() - clockWidgetDownRawY;
                 if (Math.abs(moveX) > LauncherUiUtils.dp(this, 5)
                         || Math.abs(moveY) > LauncherUiUtils.dp(this, 5)) {
-                    if (!clockWidgetDragging) {
+                    boolean firstMoveFrame = !clockWidgetDragging;
+                    if (firstMoveFrame) {
                         int[] safeClockGeometry = itemGeometry(clockPanel);
                         liveDragLastSafeGeometry.put(clockPanel,
                                 new int[]{safeClockGeometry[0], safeClockGeometry[1]});
@@ -1538,7 +1540,7 @@ public class MainActivity extends Activity {
                     clockWidgetDragging = true;
                     setClampedClockTranslation(clockWidgetStartX + moveX,
                             clockWidgetStartY + moveY, false);
-                    updateClockResizeHandles();
+                    scheduleClockResizeHandlesUpdate()
                     setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
                         scheduleLiveDisplacementUpdate(
@@ -1548,142 +1550,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (clockResizeEdge != 0 && clockWidgetDragging) {
-                // Use the widget resizer's pixel-space rules: page boundaries are hard
-                // limits, the opposite edge stays fixed, and overlapping candidates are rejected.
-                if (!(clockPanel.getParent() instanceof FrameLayout)) return true;
-                FrameLayout activePage = (FrameLayout) clockPanel.getParent();
-                float resizeDeltaX = event.getRawX() - clockWidgetDownRawX;
-                float resizeDeltaY = event.getRawY() - clockWidgetDownRawY;
-                int pageWidth = activePage.getWidth();
-                int pageHeight = activePage.getHeight();
-                if (pageWidth <= 0 || pageHeight <= 0) return true;
-
-                int left = clockWidgetStartVisualX;
-                int top = clockWidgetStartVisualY;
-                int right = left + clockWidgetStartVisualWidth;
-                int bottom = top + clockWidgetStartVisualHeight;
-                int minW = Math.min(LauncherUiUtils.dp(this, 140), pageWidth);
-                int minH = Math.min(LauncherUiUtils.dp(this, 90), pageHeight);
-                // Horizontal grips must change width only. Do not force the height
-                // back up to the vertical minimum when the user deliberately makes
-                // a seven-segment clock very short.
-                boolean horizontalResize = clockResizeEdge == 1 || clockResizeEdge == 2;
-                if (clockResizeEdge == 1) {
-                    left = Math.round(clockWidgetStartVisualX + resizeDeltaX);
-                    left = Math.max(0, Math.min(left, right - minW));
-                } else if (clockResizeEdge == 2) {
-                    right = Math.round(clockWidgetStartVisualX + clockWidgetStartVisualWidth + resizeDeltaX);
-                    right = Math.max(left + minW, Math.min(right, pageWidth));
-                } else if (clockResizeEdge == 3) {
-                    top = Math.round(clockWidgetStartVisualY + resizeDeltaY);
-                    top = Math.max(0, Math.min(top, bottom - minH));
-                } else if (clockResizeEdge == 4) {
-                    bottom = Math.round(clockWidgetStartVisualY + clockWidgetStartVisualHeight + resizeDeltaY);
-                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
-                }
-                left = Math.max(0, Math.min(left, pageWidth - minW));
-                right = Math.max(left + minW, Math.min(right, pageWidth));
-                if (horizontalResize) {
-                    // Preserve the exact vertical bounds for left/right resizing.
-                    top = clockWidgetStartVisualY;
-                    bottom = clockWidgetStartVisualY + clockWidgetStartVisualHeight;
-                } else {
-                    top = Math.max(0, Math.min(top, pageHeight - minH));
-                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
-                }
-                // Clamp the moving edge to the nearest workspace boundary. A clock resize
-                // is not a displacement gesture: apps, groups, shortcuts and widgets keep
-                // their full layout rectangles and the clock edge stops before touching them.
-                android.graphics.Rect constrainedBounds = constrainClockResizeBounds(
-                        activePage, clockPanel, left, top, right, bottom, clockResizeEdge,
-                        minW, minH);
-                constrainedBounds = settleClockResizeBounds(activePage, clockPanel,
-                        constrainedBounds, clockResizeEdge, minW, minH);
-                left = constrainedBounds.left;
-                top = constrainedBounds.top;
-                right = constrainedBounds.right;
-                bottom = constrainedBounds.bottom;
-
-                // The panel's measured width is its unscaled natural width; scaleX
-                // is the saved length percentage. Convert the requested visible width
-                // directly to that scale. Do not multiply the old preference by a ratio
-                // of visible widths: when the old clock is capped at the page edge, its
-                // visible width no longer represents the saved scale and shrinking stalls.
-                int lengthPercent = Math.round((right - left) * 100f
-                        / (float) Math.max(1, clockWidgetStartPanelWidth));
-                int breadthPercent;
-                // The visible panel height is the actual row height for every
-                // clock style. Avoid style-specific proportional math: it drifted
-                // after relayout and made top/bottom resizing behave differently.
-                int naturalRowHeight = LauncherUiUtils.dp(this, 114);
-                // A left/right grip is strictly a width operation. Preserve the
-                // saved height percentage rather than recalculating it from the
-                // visible rectangle, which can be shorter than the 80% floor and
-                // would otherwise jump taller when a width drag reaches its limit.
-                breadthPercent = horizontalResize ? clockWidgetStartBreadth
-                        : Math.round((bottom - top) * 100f / Math.max(1, naturalRowHeight));
-                // Match widget-resizer minimums in workspace pixels rather than
-                // imposing an unrelated 80% natural-width floor on the clock.
-                // The latter made left/right handles appear stuck on wide clocks.
-                int minLengthPercent = Math.max(20, (int) Math.ceil(
-                        LauncherUiUtils.dp(this, 140) * 100f
-                                / Math.max(1, clockWidgetStartPanelWidth)));
-                lengthPercent = Math.max(minLengthPercent, Math.min(600, lengthPercent));
-                // All clock styles use the same real panel row height. Map its
-                // target height directly to the natural 114dp row, just as a
-                // widget resize maps its rectangle to layout width/height.
-                int maxBreadthPercent = Math.max(80, Math.min(600, (int) Math.ceil(
-                        pageHeight * 100f / Math.max(1, naturalRowHeight))));
-                breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
-                if (!(clockPanel.getParent() instanceof FrameLayout)
-                        || !canPlaceWorkspaceItem((FrameLayout) clockPanel.getParent(), clockPanel,
-                                new android.graphics.Rect(left, top, right, bottom))) {
-                    clockGeometryRejectedAtLastMove = true;
-                    return true;
-                }
-                clockGeometryRejectedAtLastMove = false;
-                prefs.edit()
-                        .putInt(clockPrefKey(KEY_CLOCK_LENGTH, activeClockPage), lengthPercent)
-                        .putInt(clockPrefKey(KEY_CLOCK_BREADTH, activeClockPage), breadthPercent)
-                        .apply();
-                applyClockPositionAndSize();
-                final int resizingEdge = clockResizeEdge;
-                final int targetLeft = left;
-                final int targetTop = top;
-                final int targetRight = right;
-                final int targetBottom = bottom;
-                final int resizeGeneration = ++clockResizeGeneration;
-                clockPanel.post(() -> {
-                    if (resizeGeneration != clockResizeGeneration || clockPanel == null
-                            || !(clockPanel.getParent() instanceof FrameLayout)) return;
-                    int[] actual = itemGeometry(clockPanel);
-                    float adjustX = 0f;
-                    float adjustY = 0f;
-                    if (resizingEdge == 1) {
-                        // A left-edge resize must keep the RIGHT edge fixed for every
-                        // clock style. Anchor using the measured visual rectangle after
-                        // relayout, not the unscaled panel width; otherwise typography
-                        // clocks drift and appear to resize from the wrong side.
-                        adjustX = targetRight - (actual[0] + actual[2]);
-                    } else if (resizingEdge == 2) {
-                        // A right-edge resize keeps the LEFT edge fixed.
-                        adjustX = targetLeft - actual[0];
-                    }
-                    if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
-                    else if (resizingEdge == 4) adjustY = targetTop - actual[1];
-                    // The proposed rectangle already passed page and collision checks.
-                    // Apply only the opposite-edge correction; re-clamping here can move
-                    // the entire clock after a valid resize and break the fixed-edge anchor.
-                    float correctedX = clockPanel.getTranslationX() + adjustX;
-                    float correctedY = clockPanel.getTranslationY() + adjustY;
-                    clockPanel.setTranslationX(correctedX);
-                    clockPanel.setTranslationY(correctedY);
-                    prefs.edit()
-                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, activeClockPage), correctedX)
-                            .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, activeClockPage), correctedY)
-                            .apply();
-                    updateClockResizeHandles();
-                });
+                scheduleClockResizeMove(event.getRawX(), event.getRawY());
                 return true;
             }
             // Do not allow page/drawer/control-center gestures during clock move/edit
@@ -1874,6 +1741,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (clockResizeEdge != 0) {
+                cancelClockResizeMoveFrame();
                 finishClockResize(true);
                 return true;
             }
@@ -1977,6 +1845,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (clockResizeEdge != 0) {
+                flushClockResizeMove(event.getRawX(), event.getRawY());
                 finishClockResize(false);
                 return true;
             }
@@ -2147,6 +2016,180 @@ public class MainActivity extends Activity {
      * edge-anchor correction after layout; cancellation restores the complete
      * starting geometry and invalidates any queued frame from the abandoned drag.
      */
+    private boolean clockResizeFramePending = false;
+    private float clockResizePendingRawX;
+    private float clockResizePendingRawY;
+    private final Runnable clockResizeFrame = () -> {
+        clockResizeFramePending = false;
+        applyClockResizeMove(clockResizePendingRawX, clockResizePendingRawY);
+    };
+
+    private void scheduleClockResizeMove(float rawX, float rawY) {
+        clockResizePendingRawX = rawX;
+        clockResizePendingRawY = rawY;
+        if (clockResizeFramePending) return;
+        clockResizeFramePending = true;
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target == null) {
+            clockResizeFramePending = false;
+            applyClockResizeMove(rawX, rawY);
+            return;
+        }
+        target.postOnAnimation(clockResizeFrame);
+    }
+
+    private void flushClockResizeMove(float rawX, float rawY) {
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target != null) target.removeCallbacks(clockResizeFrame);
+        clockResizeFramePending = false;
+        clockResizePendingRawX = rawX;
+        clockResizePendingRawY = rawY;
+        applyClockResizeMove(rawX, rawY);
+    }
+
+    private void cancelClockResizeMoveFrame() {
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target != null) target.removeCallbacks(clockResizeFrame);
+        clockResizeFramePending = false;
+    }
+
+    private void applyClockResizeMove(float rawX, float rawY) {
+        if (clockResizeEdge == 0 || !clockWidgetDragging) return;
+        final LinearLayout resizePanel = clockGesturePanel != null
+                ? clockGesturePanel : clockPanel;
+        final int resizePage = clockGesturePage >= 0 ? clockGesturePage : activeClockPage;
+        if (resizePanel == null || resizePanel != clockPanelsByPage[resizePage]
+                || !(resizePanel.getParent() instanceof FrameLayout)) return;
+        activateClockForPage(resizePage);
+
+                // Use the widget resizer's pixel-space rules: page boundaries are hard
+                // limits, the opposite edge stays fixed, and overlapping candidates are rejected.
+                if (!(resizePanel.getParent() instanceof FrameLayout)) return;
+                FrameLayout activePage = (FrameLayout) resizePanel.getParent();
+                float resizeDeltaX = rawX - clockWidgetDownRawX;
+                float resizeDeltaY = rawY - clockWidgetDownRawY;
+                int pageWidth = activePage.getWidth();
+                int pageHeight = activePage.getHeight();
+                if (pageWidth <= 0 || pageHeight <= 0) return;
+
+                int left = clockWidgetStartVisualX;
+                int top = clockWidgetStartVisualY;
+                int right = left + clockWidgetStartVisualWidth;
+                int bottom = top + clockWidgetStartVisualHeight;
+                int minW = Math.min(LauncherUiUtils.dp(this, 140), pageWidth);
+                int minH = Math.min(LauncherUiUtils.dp(this, 90), pageHeight);
+                // Horizontal grips must change width only. Do not force the height
+                // back up to the vertical minimum when the user deliberately makes
+                // a seven-segment clock very short.
+                boolean horizontalResize = clockResizeEdge == 1 || clockResizeEdge == 2;
+                if (clockResizeEdge == 1) {
+                    left = Math.round(clockWidgetStartVisualX + resizeDeltaX);
+                    left = Math.max(0, Math.min(left, right - minW));
+                } else if (clockResizeEdge == 2) {
+                    right = Math.round(clockWidgetStartVisualX + clockWidgetStartVisualWidth + resizeDeltaX);
+                    right = Math.max(left + minW, Math.min(right, pageWidth));
+                } else if (clockResizeEdge == 3) {
+                    top = Math.round(clockWidgetStartVisualY + resizeDeltaY);
+                    top = Math.max(0, Math.min(top, bottom - minH));
+                } else if (clockResizeEdge == 4) {
+                    bottom = Math.round(clockWidgetStartVisualY + clockWidgetStartVisualHeight + resizeDeltaY);
+                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                }
+                left = Math.max(0, Math.min(left, pageWidth - minW));
+                right = Math.max(left + minW, Math.min(right, pageWidth));
+                if (horizontalResize) {
+                    // Preserve the exact vertical bounds for left/right resizing.
+                    top = clockWidgetStartVisualY;
+                    bottom = clockWidgetStartVisualY + clockWidgetStartVisualHeight;
+                } else {
+                    top = Math.max(0, Math.min(top, pageHeight - minH));
+                    bottom = Math.max(top + minH, Math.min(bottom, pageHeight));
+                }
+                // Clamp the moving edge to the nearest workspace boundary. A clock resize
+                // is not a displacement gesture: apps, groups, shortcuts and widgets keep
+                // their full layout rectangles and the clock edge stops before touching them.
+                android.graphics.Rect constrainedBounds = constrainClockResizeBounds(
+                        activePage, resizePanel, left, top, right, bottom, clockResizeEdge,
+                        minW, minH);
+                constrainedBounds = settleClockResizeBounds(activePage, resizePanel,
+                        constrainedBounds, clockResizeEdge, minW, minH);
+                left = constrainedBounds.left;
+                top = constrainedBounds.top;
+                right = constrainedBounds.right;
+                bottom = constrainedBounds.bottom;
+
+                // The panel's measured width is its unscaled natural width; scaleX
+                // is the saved length percentage. Convert the requested visible width
+                // directly to that scale. Do not multiply the old preference by a ratio
+                // of visible widths: when the old clock is capped at the page edge, its
+                // visible width no longer represents the saved scale and shrinking stalls.
+                int lengthPercent = Math.round((right - left) * 100f
+                        / (float) Math.max(1, clockWidgetStartPanelWidth));
+                int breadthPercent;
+                // The visible panel height is the actual row height for every
+                // clock style. Avoid style-specific proportional math: it drifted
+                // after relayout and made top/bottom resizing behave differently.
+                int naturalRowHeight = LauncherUiUtils.dp(this, 114);
+                // A left/right grip is strictly a width operation. Preserve the
+                // saved height percentage rather than recalculating it from the
+                // visible rectangle, which can be shorter than the 80% floor and
+                // would otherwise jump taller when a width drag reaches its limit.
+                breadthPercent = horizontalResize ? clockWidgetStartBreadth
+                        : Math.round((bottom - top) * 100f / Math.max(1, naturalRowHeight));
+                // Match widget-resizer minimums in workspace pixels rather than
+                // imposing an unrelated 80% natural-width floor on the clock.
+                // The latter made left/right handles appear stuck on wide clocks.
+                int minLengthPercent = Math.max(20, (int) Math.ceil(
+                        LauncherUiUtils.dp(this, 140) * 100f
+                                / Math.max(1, clockWidgetStartPanelWidth)));
+                lengthPercent = Math.max(minLengthPercent, Math.min(600, lengthPercent));
+                // All clock styles use the same real panel row height. Map its
+                // target height directly to the natural 114dp row, just as a
+                // widget resize maps its rectangle to layout width/height.
+                int maxBreadthPercent = Math.max(80, Math.min(600, (int) Math.ceil(
+                        pageHeight * 100f / Math.max(1, naturalRowHeight))));
+                breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
+                if (!(resizePanel.getParent() instanceof FrameLayout)
+                        || !canPlaceWorkspaceItem((FrameLayout) resizePanel.getParent(), resizePanel,
+                                new android.graphics.Rect(left, top, right, bottom))) {
+                    clockGeometryRejectedAtLastMove = true;
+                    return;
+                }
+                clockGeometryRejectedAtLastMove = false;
+                prefs.edit()
+                        .putInt(clockPrefKey(KEY_CLOCK_LENGTH, resizePage), lengthPercent)
+                        .putInt(clockPrefKey(KEY_CLOCK_BREADTH, resizePage), breadthPercent)
+                        .apply();
+                applyClockPositionAndSize();
+                final int resizingEdge = clockResizeEdge;
+                final int targetLeft = left;
+                final int targetTop = top;
+                final int targetRight = right;
+                final int targetBottom = bottom;
+
+                // Anchor synchronously from the pending LayoutParams geometry. The old
+                // per-MOVE post callback was invalidated by the next finger event, causing
+                // the opposite edge to fluctuate and the resize to stall at page edges.
+                int[] actual = itemGeometry(resizePanel);
+                float adjustX = 0f;
+                float adjustY = 0f;
+                if (resizingEdge == 1) adjustX = targetRight - (actual[0] + actual[2]);
+                else if (resizingEdge == 2) adjustX = targetLeft - actual[0];
+                if (resizingEdge == 3) adjustY = targetBottom - (actual[1] + actual[3]);
+                else if (resizingEdge == 4) adjustY = targetTop - actual[1];
+                float correctedX = resizePanel.getTranslationX() + adjustX;
+                float correctedY = resizePanel.getTranslationY() + adjustY;
+                resizePanel.setTranslationX(correctedX);
+                resizePanel.setTranslationY(correctedY);
+                prefs.edit()
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, resizePage), correctedX)
+                        .putFloat(clockPrefKey(KEY_CLOCK_WIDGET_Y, resizePage), correctedY)
+                        .apply();
+                scheduleClockResizeHandlesUpdate();
+
+
+    }
+
     private void finishClockResize(boolean cancelled) {
         if (clockResizeEdge == 0 || clockPanel == null) return;
         // On release, let the newest MOVE's queued edge-anchor correction finish after
@@ -2219,15 +2262,10 @@ public class MainActivity extends Activity {
     }
 
     private void updateClockResizeHandles() {
-        if (clockPanel == null || root == null || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
+        if (clockPanel == null || root == null
+                || clockPanel.getWidth() <= 0 || clockPanel.getHeight() <= 0) return;
         if (!(clockPanel.getParent() instanceof View)) return;
-        // Use the exact same visual-rectangle calculation as widget collision,
-        // clamping, and resize transactions. Mixing getLocationOnScreen() with
-        // itemGeometry() caused the handles and the resize math to disagree when
-        // a panel had pending layout params, a non-central pivot, or translation.
-        View pageView = clockPanel.getParent() instanceof View
-                ? (View) clockPanel.getParent() : null;
-        if (pageView == null) return;
+        View pageView = (View) clockPanel.getParent();
         int[] geometry = itemGeometry(clockPanel);
         int[] rootOnScreen = new int[2];
         int[] pageOnScreen = new int[2];
@@ -2237,7 +2275,6 @@ public class MainActivity extends Activity {
         int visualTop = pageOnScreen[1] - rootOnScreen[1] + geometry[1];
         int w = Math.max(1, geometry[2]);
         int h = Math.max(1, geometry[3]);
-        // Match the widget resizer: 18dp-thick grips, 40dp long.
         int side = LauncherUiUtils.dp(this, 40);
         int thin = LauncherUiUtils.dp(this, 18);
         int edgeGap = LauncherUiUtils.dp(this, 1);
@@ -2247,18 +2284,39 @@ public class MainActivity extends Activity {
                 {visualLeft + w / 2 - side / 2, visualTop + edgeGap},
                 {visualLeft + w / 2 - side / 2, visualTop + h - thin - edgeGap}
         };
+        boolean visible = clockWidgetEditing;
         for (int i = 0; i < clockEdgeHandles.length; i++) {
             View grip = clockEdgeHandles[i];
             if (grip == null) continue;
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) grip.getLayoutParams();
-            lp.width = i < 2 ? thin : side;
-            lp.height = i < 2 ? side : thin;
-            lp.leftMargin = positions[i][0];
-            lp.topMargin = positions[i][1];
-            grip.setLayoutParams(lp);
-            grip.bringToFront();
-            grip.setVisibility(clockWidgetEditing ? View.VISIBLE : View.GONE);
+            // These grips are fixed-size root overlays. Translation moves them without
+            // triggering a full root measure/layout on every MOVE event.
+            grip.setX(positions[i][0]);
+            grip.setY(positions[i][1]);
+            if (visible && grip.getVisibility() != View.VISIBLE) {
+                grip.bringToFront();
+                grip.setVisibility(View.VISIBLE);
+            } else if (!visible && grip.getVisibility() != View.GONE) {
+                grip.setVisibility(View.GONE);
+            }
         }
+    }
+
+    private boolean clockResizeHandlesFramePending = false;
+    private final Runnable clockResizeHandlesFrame = () -> {
+        clockResizeHandlesFramePending = false;
+        updateClockResizeHandles();
+    };
+
+    private void scheduleClockResizeHandlesUpdate() {
+        if (clockResizeHandlesFramePending) return;
+        clockResizeHandlesFramePending = true;
+        View target = clockGesturePanel != null ? clockGesturePanel : clockPanel;
+        if (target == null) {
+            clockResizeHandlesFramePending = false;
+            updateClockResizeHandles();
+            return;
+        }
+        target.postOnAnimation(clockResizeHandlesFrame);
     }
 
     private int hitClockResizeEdge(float rawX, float rawY) {
@@ -10014,10 +10072,11 @@ public class MainActivity extends Activity {
             grip.setBackground(gripBg);
             grip.setVisibility(View.GONE);
             clockEdgeHandles[i] = grip;
-            int size = LauncherUiUtils.dp(this, 28);
+            int side = LauncherUiUtils.dp(this, 40);
+            int thin = LauncherUiUtils.dp(this, 18);
             FrameLayout.LayoutParams gripLp = new FrameLayout.LayoutParams(
-                    i < 2 ? size : LauncherUiUtils.dp(this, 8),
-                    i < 2 ? LauncherUiUtils.dp(this, 8) : size);
+                    i < 2 ? thin : side, i < 2 ? side : thin,
+                    Gravity.LEFT | Gravity.TOP);
             root.addView(grip, gripLp);
         }
         updateClockResizeHandles();
@@ -11473,35 +11532,12 @@ public class MainActivity extends Activity {
      */
     private android.graphics.Rect clockVisualBoundsAt(
             View panel, int x, int y, int width, int height) {
-        android.graphics.Rect bounds = new android.graphics.Rect(
+        // Workspace interaction bounds describe the widget/background itself. Unioning
+        // transformed text/date descendants creates an invisible rectangle that clamps
+        // dragging early, rejects valid edge resizes, and adds unnecessary geometry work.
+        // Panel width is measured to contain its rendered clock and date.
+        return new android.graphics.Rect(
                 x, y, x + Math.max(1, width), y + Math.max(1, height));
-        if (!isClockWorkspaceItem(panel)
-                || (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5)) return bounds;
-
-        int page = panel == clockPanelsByPage[0] ? 0
-                : (panel == clockPanelsByPage[1] ? 1 : -1);
-        if (page < 0) return bounds;
-        float panelScaleX = panel.getWidth() > 0
-                ? Math.max(0.01f, width / (float) panel.getWidth())
-                : Math.max(0.01f, Math.abs(panel.getScaleX()));
-        float panelScaleY = panel.getHeight() > 0
-                ? Math.max(0.01f, height / (float) panel.getHeight())
-                : Math.max(0.01f, Math.abs(panel.getScaleY()));
-
-        View[] renderedChildren = new View[] {
-                clockTextsByPage[page], amPmTextsByPage[page], dateTextsByPage[page]
-        };
-        for (View child : renderedChildren) {
-            if (child == null || child.getVisibility() != View.VISIBLE) continue;
-            android.graphics.RectF local = clockDescendantBoundsInPanel(panel, child);
-            if (local == null) continue;
-            int childLeft = x + (int) Math.floor(local.left * panelScaleX);
-            int childTop = y + (int) Math.floor(local.top * panelScaleY);
-            int childRight = x + (int) Math.ceil(local.right * panelScaleX);
-            int childBottom = y + (int) Math.ceil(local.bottom * panelScaleY);
-            bounds.union(childLeft, childTop, childRight, childBottom);
-        }
-        return bounds;
     }
 
     /**
@@ -14742,7 +14778,7 @@ public class MainActivity extends Activity {
         // tuned. Typography clocks must also fit their full background width: if the
         // date makes the panel wider than the digit group, capping against only the
         // digits lets the panel overflow the page and the boundary clamp snaps it sideways.
-        float widthForScaleCap = sevenSegment ? clockWithMarkerWidth : naturalPanelWidth;
+        float widthForScaleCap = naturalPanelWidth;
         final float lengthScale = Math.min(requestedLengthScale,
                 Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
         // Neon Circuit's glyphs must keep the scale they would have without the date
