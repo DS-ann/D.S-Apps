@@ -1957,16 +1957,30 @@ public class MainActivity extends Activity {
         // misclassify a touch on the visible clock as a workspace gesture.
         if (clockPanel != null && clockPanel.getVisibility() == View.VISIBLE
                 && clockPanel.getWidth() > 0 && clockPanel.getHeight() > 0) {
-            View page = clockPanel.getParent() instanceof View ? (View) clockPanel.getParent() : null;
-            if (page != null) {
-                int[] geometry = itemGeometry(clockPanel);
-                android.graphics.Rect rendered = clockVisualBoundsAt(clockPanel,
-                        geometry[0], geometry[1], geometry[2], geometry[3]);
-                int[] pageLocation = new int[2];
-                page.getLocationOnScreen(pageLocation);
-                rendered.offset(pageLocation[0], pageLocation[1]);
-                if (rawX >= rendered.left && rawX < rendered.right
-                        && rawY >= rendered.top && rawY < rendered.bottom) return true;
+            // Keep the established seven-segment hit region untouched. Typography clocks
+            // include their overhanging digits and date because both are visible workspace ink.
+            if (prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5) {
+                int[] location = new int[2];
+                clockPanel.getLocationOnScreen(location);
+                float visualWidth = clockPanel.getWidth()
+                        * Math.max(0.01f, clockPanel.getScaleX());
+                float visualHeight = clockPanel.getHeight()
+                        * Math.max(0.01f, clockPanel.getScaleY());
+                if (rawX >= location[0] && rawX < location[0] + visualWidth
+                        && rawY >= location[1] && rawY < location[1] + visualHeight) return true;
+            } else {
+                View page = clockPanel.getParent() instanceof View
+                        ? (View) clockPanel.getParent() : null;
+                if (page != null) {
+                    int[] geometry = itemGeometry(clockPanel);
+                    android.graphics.Rect rendered = clockVisualBoundsAt(clockPanel,
+                            geometry[0], geometry[1], geometry[2], geometry[3]);
+                    int[] pageLocation = new int[2];
+                    page.getLocationOnScreen(pageLocation);
+                    rendered.offset(pageLocation[0], pageLocation[1]);
+                    if (rawX >= rendered.left && rawX < rendered.right
+                            && rawY >= rendered.top && rawY < rendered.bottom) return true;
+                }
             }
         }
         for (View grip : clockEdgeHandles) {
