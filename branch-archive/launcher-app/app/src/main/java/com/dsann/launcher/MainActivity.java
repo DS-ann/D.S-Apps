@@ -861,15 +861,20 @@ public class MainActivity extends Activity {
             }
 
             if (standardClockStyle && hourDigits >= 2) {
-                CharSequence currentText = targetClock.getText();
                 if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M) {
-                    // Android 6 must not inherit the old per-digit/colon replacement spans.
-                    // Install plain text so TextView uses its native glyph layout for this case.
-                    targetClock.setText(currentValue, TextView.BufferType.NORMAL);
-                } else if (currentText != null) {
-                    // Newer TextView implementations can safely rebuild the existing span buffer.
-                    targetClock.setText(new android.text.SpannableStringBuilder(currentText),
-                            TextView.BufferType.SPANNABLE);
+                    // Rebuild with the API-23-safe native-glyph path. It uses no
+                    // ReplacementSpan for two-digit hours but retains a metric-only
+                    // colon baseline span so the separator can still be vertically centered.
+                    forceClockTextRefresh = true;
+                    updateClock();
+                    activateClockForPage(page);
+                } else {
+                    CharSequence currentText = targetClock.getText();
+                    if (currentText != null) {
+                        targetClock.setText(
+                                new android.text.SpannableStringBuilder(currentText),
+                                TextView.BufferType.SPANNABLE);
+                    }
                 }
             }
             targetClock.setVisibility(View.VISIBLE);
@@ -886,6 +891,7 @@ public class MainActivity extends Activity {
                 targetClock.setVisibility(View.VISIBLE);
                 targetClock.setAlpha(1f);
                 syncClockColonVerticalCenter();
+                syncNativeClockColonVerticalCenter();
                 updateClockDigitHorizontalOffset();
                 applyClockColorEffectsToActivePage(clockColorPhase);
                 targetClock.requestLayout();
@@ -3890,6 +3896,8 @@ public class MainActivity extends Activity {
         ArrayList<String> members = getAppGroupMembers(groupId);
         final View openingGroupIcon = findAppGroupLogoView(groupId);
         final View openingGroupCell = findAppGroupView(groupId);
+        final float openingGroupCellAlpha = openingGroupCell == null
+                ? 1f : openingGroupCell.getAlpha();
         final Dialog dialog = new Dialog(this);
         final boolean[] closing = new boolean[]{false};
         final float[] iconScale = new float[]{0.12f, 0.12f};
@@ -3926,6 +3934,7 @@ public class MainActivity extends Activity {
             }
         };
         dialog.setOnDismissListener(ignored -> {
+            if (openingGroupCell != null) openingGroupCell.setAlpha(openingGroupCellAlpha);
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
         });
 
@@ -3959,6 +3968,9 @@ public class MainActivity extends Activity {
         panel.setPivotY(0f);
         panel.setOutlineProvider(morphOutlineProvider);
         panel.setClipToOutline(true);
+        // Keep the transformed panel cached from its first visible frame through close.
+        // Releasing the layer after opening forces another allocation on older GPUs.
+        panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         panel.setClickable(true);
         panel.setOnClickListener(v -> { /* Consume blank-panel taps; only outside taps close. */ });
         panel.setClipChildren(false);
@@ -4316,15 +4328,15 @@ public class MainActivity extends Activity {
                 snapshot.setScaleY(startScaleY);
                 snapshot.setTranslationX(morphStartTranslation[0]);
                 snapshot.setTranslationY(morphStartTranslation[1]);
-                snapshot.setOutlineProvider(morphOutlineProvider);
-                snapshot.setClipToOutline(true);
+                // This bitmap is already rasterized from the rounded launcher icon;
+                // animating a second clipping outline adds work without changing its shape.
                 snapshot.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                 snapshot.bringToFront();
                 morphSnapshotRef[0] = snapshot;
+                if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
             }
 
             final long duration = animationDuration(180L);
-            panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             android.animation.ValueAnimator transition =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
             transition.setDuration(duration);
@@ -4354,7 +4366,7 @@ public class MainActivity extends Activity {
                     snapshot.setTranslationY(ty);
                     snapshot.setAlpha(1f - Math.max(0f,
                             Math.min(1f, (progress - 0.30f) / 0.40f)));
-                    snapshot.invalidateOutline();
+                    
                 }
                 dimLayer.setAlpha(0.36f * progress);
                 panel.invalidateOutline();
@@ -4367,16 +4379,15 @@ public class MainActivity extends Activity {
                     panel.setScaleY(1f);
                     panel.setTranslationX(0f);
                     panel.setTranslationY(0f);
-                    panel.setLayerType(View.LAYER_TYPE_NONE, null);
                     title.setAlpha(1f);
                     rows.setAlpha(1f);
                     manage.setAlpha(1f);
                     dimLayer.setAlpha(0.36f);
                     android.widget.ImageView snapshot = morphSnapshotRef[0];
                     if (snapshot != null) {
+                        // Keep the icon texture cached for the reverse morph.
                         snapshot.setAlpha(0f);
-                        snapshot.setVisibility(View.INVISIBLE);
-                        snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                        snapshot.setVisibility(View.VISIBLE);
                     }
                     panel.invalidateOutline();
                 }
@@ -4436,7 +4447,7 @@ public class MainActivity extends Activity {
                 snapshot.setTranslationY(ty);
                 snapshot.setAlpha(1f - Math.max(0f,
                         Math.min(1f, (progress - 0.30f) / 0.40f)));
-                snapshot.invalidateOutline();
+                
             }
             if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
             panel.invalidateOutline();
@@ -9555,7 +9566,10 @@ public class MainActivity extends Activity {
                 // API 23 keeps ordinary TextView text for the two-digit-hour fallback;
                 // compact its total advances by 15dp without introducing ReplacementSpans.
                 float advanceCount = Math.max(1f, clockValue.length() - 1f);
-                float spacingReduction = LauncherUiUtils.dp(this, 15f)
+                float renderScaleX = Math.max(0.25f,
+                        Math.abs(clockText.getScaleX())
+                                * Math.abs(clockPanel == null ? 1f : clockPanel.getScaleX()));
+                float spacingReduction = (LauncherUiUtils.dp(this, 15f) / renderScaleX)
                         / Math.max(1f, clockText.getTextSize() * advanceCount);
                 clockText.setLetterSpacing(baseClockLetterSpacing - spacingReduction);
             } else if (Math.abs(clockText.getLetterSpacing() - baseClockLetterSpacing) > 0.001f) {
@@ -9616,8 +9630,11 @@ public class MainActivity extends Activity {
                     int styleForSpacing = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
                     boolean tightenHourMinuteGroups = hourDigitCount >= 2
                             && !sevenSegmentClock && styleForSpacing != 2;
+                    float renderScaleX = Math.max(0.25f,
+                            Math.abs(clockText.getScaleX())
+                                    * Math.abs(clockPanel == null ? 1f : clockPanel.getScaleX()));
                     float halfGroupTightenPx = tightenHourMinuteGroups
-                            ? LauncherUiUtils.dp(this, 7.5f) : 0f;
+                            ? LauncherUiUtils.dp(this, 7.5f) / renderScaleX : 0f;
                     float innerWhiteBorderPx = LauncherUiUtils.dp(this, 1f);
                     for (int digitAt = 0; digitAt < displayClock.length(); digitAt++) {
                         if (Character.digit(displayClock.charAt(digitAt), 10) < 0) continue;
@@ -9701,7 +9718,8 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            if (forceTextRefresh || missingDisplaySpans || staleApi23ReplacementSpans
+            if (forceTextRefresh || api23TwoDigitTextFallback
+                    || missingDisplaySpans || staleApi23ReplacementSpans
                     || !displayClock.toString().contentEquals(clockText.getText())
                     || digitBorderModeChanged) {
                 // The seven-segment renderer owns its glyph geometry; standard styles
@@ -9722,10 +9740,18 @@ public class MainActivity extends Activity {
             // after every text refresh, independently of the date/AM-PM typography.
             syncClockColonVerticalCenter();
             // TextView may not have rebuilt its Layout yet during initial creation.
-            // Re-sync once the posted layout work has had a chance to complete.
+            // Re-sync each page after its own layout completes. The inactive page's
+            // clock must not be skipped because the mutable active clock points elsewhere.
             final TextView pendingColonSyncTarget = clockText;
-            pendingColonSyncTarget.post(() -> {
-                if (clockText == pendingColonSyncTarget) syncClockColonVerticalCenter();
+            final int pendingColonSyncPage = page;
+            pendingColonSyncTarget.postOnAnimation(() -> {
+                if (clockTextsByPage[pendingColonSyncPage] != pendingColonSyncTarget) return;
+                int restoreColonPage = Math.max(0, Math.min(1, activeClockPage));
+                activateClockForPage(pendingColonSyncPage);
+                syncClockColonVerticalCenter();
+                syncNativeClockColonVerticalCenter();
+                updateClockDigitHorizontalOffset();
+                activateClockForPage(restoreColonPage);
             });
             updateClockDigitHorizontalOffset();
             int dateVisibility = prefs.getBoolean(KEY_SHOW_DATE, true) ? View.VISIBLE : View.GONE;
@@ -10272,6 +10298,112 @@ public class MainActivity extends Activity {
      * Slot-based push for contiguous app rows/columns. When icon artwork leaves gaps inside grid
      * cells, the visual sweep can miss neighbours; this moves an occupied lane as one transaction.
      */
+    /**
+     * First-choice row/column displacement. Move the entire lane by one grid cell,
+     * including icons separated by empty slots, so their relative positions do not change
+     * just because a different member happened to be the first collision. When the full
+     * lane cannot move safely, the caller falls back to the minimum contiguous chain.
+     */
+    private boolean tryShiftWholeHomeIconLaneDirection(FrameLayout page, View movingView,
+            View seed, int dxCells, int dyCells, int columns, int cellWidth,
+            int rows, int cellHeight) {
+        if (page == null || movingView == null || seed == null
+                || ((dxCells == 0) == (dyCells == 0))) return false;
+        int[] seedSlot = homeGridIconSlot(page, seed, cellHeight, rows);
+        if (seedSlot == null) return false;
+        final boolean horizontal = dxCells != 0;
+        final boolean shortcutLane = isWorkspaceContactShortcut(seed);
+
+        java.util.ArrayList<View> lane = new java.util.ArrayList<View>();
+        java.util.IdentityHashMap<View, Boolean> laneSet =
+                new java.util.IdentityHashMap<View, Boolean>();
+        java.util.IdentityHashMap<View, int[]> laneSlots =
+                new java.util.IdentityHashMap<View, int[]>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View candidate = page.getChildAt(i);
+            if (candidate == movingView || candidate.getVisibility() != View.VISIBLE
+                    || !isHomeGridIcon(candidate)
+                    || isWorkspaceContactShortcut(candidate) != shortcutLane) continue;
+            int[] slot = homeGridIconSlot(page, candidate, cellHeight, rows);
+            if (slot == null) continue;
+            boolean sameLane = horizontal ? slot[1] == seedSlot[1] : slot[0] == seedSlot[0];
+            if (!sameLane) continue;
+            lane.add(candidate);
+            laneSet.put(candidate, Boolean.TRUE);
+            laneSlots.put(candidate, slot);
+        }
+        if (lane.size() < 2 || !laneSet.containsKey(seed)) return false;
+
+        int[] moverGeometry = itemGeometry(movingView);
+        java.util.IdentityHashMap<View, int[]> targets =
+                new java.util.IdentityHashMap<View, int[]>();
+        java.util.IdentityHashMap<View, int[]> geometries =
+                new java.util.IdentityHashMap<View, int[]>();
+        for (View member : lane) {
+            int[] originSlot = laneSlots.get(member);
+            int targetCol = originSlot[0] + dxCells;
+            int targetRow = originSlot[1] + dyCells;
+            int[] geometry = itemGeometry(member);
+            if (targetCol < 0 || targetCol >= columns || targetRow < 0 || targetRow >= rows
+                    || geometry[2] <= 0 || geometry[3] <= 0) return false;
+            int originX = homeGridIconLeftAt(member, originSlot[0], cellWidth, geometry[2]);
+            int originY = homeGridIconTopAt(page, member, originSlot[1], rows, cellHeight);
+            int targetX = homeGridIconLeftAt(member, targetCol, cellWidth, geometry[2]);
+            int targetY = homeGridIconTopAt(page, member, targetRow, rows, cellHeight);
+            if (targetX < 0 || targetY < 0
+                    || targetX + geometry[2] > page.getWidth()
+                    || targetY + geometry[3] > page.getHeight()) return false;
+
+            android.graphics.Rect startVisible = appIconVisualRectAt(
+                    member, originX, originY, geometry[2], geometry[3]);
+            android.graphics.Rect targetVisible = appIconVisualRectAt(
+                    member, targetX, targetY, geometry[2], geometry[3]);
+            android.graphics.Rect movingVisible = collisionRectForInteraction(
+                    movingView, moverGeometry, member);
+            if (android.graphics.Rect.intersects(targetVisible, movingVisible)) return false;
+            android.graphics.Rect swept = new android.graphics.Rect(startVisible);
+            swept.union(targetVisible);
+
+            for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                View blocker = page.getChildAt(childIndex);
+                if (blocker == member || blocker == movingView || laneSet.containsKey(blocker)
+                        || blocker.getVisibility() != View.VISIBLE
+                        || !isWorkspaceItem(blocker)) continue;
+                int[] blockerGeometry = itemGeometry(blocker);
+                if (blockerGeometry[2] <= 0 || blockerGeometry[3] <= 0) continue;
+                android.graphics.Rect blockerBounds = collisionRectForInteraction(
+                        blocker, blockerGeometry, member);
+                if (android.graphics.Rect.intersects(swept, blockerBounds)) return false;
+                int[] blockerTarget = liveDisplacementTargets.get(blocker);
+                if (blockerTarget != null) {
+                    android.graphics.Rect reservedBounds = collisionRectAtForInteraction(
+                            blocker, blockerTarget[0], blockerTarget[1],
+                            blockerGeometry[2], blockerGeometry[3], member);
+                    if (android.graphics.Rect.intersects(swept, reservedBounds)) return false;
+                }
+            }
+            targets.put(member, new int[]{targetX, targetY});
+            geometries.put(member, geometry);
+        }
+
+        // Reserve all targets first so no member is planned against another member's old
+        // frame or a destination that its animation has not reached yet.
+        for (View member : lane) {
+            int[] geometry = geometries.get(member);
+            int[] target = targets.get(member);
+            if (!liveDisplacedItems.containsKey(member)) {
+                liveDisplacedItems.put(member, new int[]{geometry[0], geometry[1]});
+            }
+            liveDisplacementTargets.put(member, new int[]{target[0], target[1]});
+            liveDragGeometryCache.remove(member);
+        }
+        for (View member : lane) {
+            int[] target = targets.get(member);
+            animateDisplacedItemTo(member, target[0], target[1]);
+        }
+        return true;
+    }
+
     private boolean tryShiftHomeIconLaneCohort(FrameLayout page, View movingView, View seed,
             int preferredX, int preferredY, int pushDx, int pushDy) {
         if (page == null || movingView == null || seed == null
@@ -10332,6 +10464,9 @@ public class MainActivity extends Activity {
             int dxCells = direction[0];
             int dyCells = direction[1];
             if (dxCells == 0 && dyCells == 0) continue;
+
+            if (tryShiftWholeHomeIconLaneDirection(page, movingView, seed,
+                    dxCells, dyCells, columns, cellWidth, rows, cellHeight)) return true;
 
             java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
             java.util.IdentityHashMap<View, Boolean> cohortSet =
@@ -13843,6 +13978,37 @@ public class MainActivity extends Activity {
         for (CenteredColonSpan span : spans) {
             span.setRowCenterY(centerY);
         }
+        clockText.invalidate();
+    }
+
+    /**
+     * API 23 fallback for the two-digit standard clock. The digits use TextView's native
+     * renderer; only the colon receives a metric-affecting baseline adjustment. Recompute
+     * the adjustment after a real Layout exists, rather than carrying a stale pre-update
+     * baseline through package replacement.
+     */
+    private void syncNativeClockColonVerticalCenter() {
+        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.M || clockText == null) return;
+        CharSequence value = clockText.getText();
+        if (!(value instanceof android.text.Spanned)) return;
+        String plain = value.toString();
+        int colonAt = plain.indexOf(':');
+        if (colonAt < 0) return;
+        int shift = getNativeClockColonBaselineShift(plain, colonAt);
+        android.text.Spanned spanned = (android.text.Spanned) value;
+        ClockColonBaselineSpan[] current = spanned.getSpans(
+                colonAt, colonAt + 1, ClockColonBaselineSpan.class);
+        if (current.length == 1 && current[0].getShiftPx() == shift) return;
+
+        android.text.SpannableStringBuilder rebuilt =
+                new android.text.SpannableStringBuilder(value);
+        ClockColonBaselineSpan[] old = rebuilt.getSpans(
+                0, rebuilt.length(), ClockColonBaselineSpan.class);
+        for (ClockColonBaselineSpan span : old) rebuilt.removeSpan(span);
+        rebuilt.setSpan(new ClockColonBaselineSpan(shift), colonAt, colonAt + 1,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        clockText.setText(rebuilt, TextView.BufferType.SPANNABLE);
+        clockText.requestLayout();
         clockText.invalidate();
     }
 
