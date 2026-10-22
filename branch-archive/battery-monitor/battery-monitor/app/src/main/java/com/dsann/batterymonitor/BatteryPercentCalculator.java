@@ -237,6 +237,7 @@ final class BatteryPercentCalculator {
 
     static final class Estimate {
         final int percent;
+        final double percentExact;
         final double remainingMah;
         final double capacityMah;
         final boolean running;
@@ -244,6 +245,9 @@ final class BatteryPercentCalculator {
 
         Estimate(int percent, double remainingMah, double capacityMah, boolean running, String status) {
             this.percent = percent;
+            this.percentExact = isPositive(capacityMah) && isAmount(remainingMah)
+                    ? Math.max(0.0, Math.min(100.0, remainingMah * 100.0 / capacityMah))
+                    : Double.NaN;
             this.remainingMah = remainingMah;
             this.capacityMah = capacityMah;
             this.running = running;

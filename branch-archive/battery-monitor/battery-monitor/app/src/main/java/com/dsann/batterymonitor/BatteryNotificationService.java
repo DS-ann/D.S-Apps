@@ -8,12 +8,20 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Color;
+import android.graphics.drawable.Icon;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class BatteryNotificationService extends Service {
     private static final int NOTIFICATION_ID = 1001;
@@ -42,6 +50,8 @@ public class BatteryNotificationService extends Service {
     private long lastCalculatorSampleMs;
     private long lastNotificationUpdateMs;
     private long lastRootCommandMs;
+    private boolean rootCommandInFlight;
+    private final ExecutorService rootExecutor=Executors.newSingleThreadExecutor();
     private PowerManager.WakeLock wakeLock;
 
     private final Runnable updater = new Runnable() {
@@ -186,72 +196,104 @@ public class BatteryNotificationService extends Service {
     }
 
     private void applyCalculatedAndroidPercentage(BatteryPercentCalculator.Estimate estimate, long now) {
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        int requested = estimate.percent;
-        int lastApplied = prefs.getInt(KEY_LAST_ANDROID_PERCENT, -1);
-        int currentAndroidLevel = getAndroidReportedPercent();
-        if (lastApplied == requested && currentAndroidLevel == requested) return;
-        if (lastRootCommandMs > 0L && now >= lastRootCommandMs
-                && now - lastRootCommandMs < ROOT_RETRY_GAP_MS) return;
-
-        lastRootCommandMs = now;
-        BatteryPercentOverride.Result result = BatteryPercentOverride.set(requested);
-        if (result.success) {
-            prefs.edit().putInt(KEY_LAST_ANDROID_PERCENT, requested)
-                    .putBoolean(KEY_RESET_PENDING, false).apply();
-        }
+        if(rootCommandInFlight)return;
+        android.content.SharedPreferences prefs=getSharedPreferences(PREFS,MODE_PRIVATE);
+        int requested=(int)Math.round(estimate.percentExact);
+        if(prefs.getInt(KEY_LAST_ANDROID_PERCENT,-1)==requested)return;
+        if(lastRootCommandMs>0L&&now>=lastRootCommandMs&&now-lastRootCommandMs<ROOT_RETRY_GAP_MS)return;
+        lastRootCommandMs=now;
+        rootCommandInFlight=true;
+        rootExecutor.execute(()->{
+            BatteryPercentOverride.Result result=BatteryPercentOverride.set(requested);
+            handler.post(()->{
+                rootCommandInFlight=false;
+                android.content.SharedPreferences current=getSharedPreferences(PREFS,MODE_PRIVATE);
+                if(result.success){
+                    current.edit().putInt(KEY_LAST_ANDROID_PERCENT,requested)
+                            .putBoolean(KEY_RESET_PENDING,false).apply();
+                }else{
+                    current.edit().remove(KEY_LAST_ANDROID_PERCENT).apply();
+                }
+            });
+        });
     }
 
     private void retryPendingAndroidPercentageReset(long now) {
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        if (!prefs.getBoolean(KEY_RESET_PENDING, false)) return;
-        if (lastRootCommandMs > 0L && now >= lastRootCommandMs
-                && now - lastRootCommandMs < ROOT_RETRY_GAP_MS) return;
-        lastRootCommandMs = now;
-        BatteryPercentOverride.Result result = BatteryPercentOverride.reset();
-        if (result.success) {
-            prefs.edit().putBoolean(KEY_RESET_PENDING, false)
-                    .remove(KEY_LAST_ANDROID_PERCENT).apply();
-        }
-    }
-
-    private int getAndroidReportedPercent() {
-        Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        if (battery == null) return -1;
-        int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-        int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
-        return level < 0 || scale <= 0 ? -1
-                : Math.max(0, Math.min(100, Math.round(level * 100f / scale)));
+        if(rootCommandInFlight)return;
+        android.content.SharedPreferences prefs=getSharedPreferences(PREFS,MODE_PRIVATE);
+        if(!prefs.getBoolean(KEY_RESET_PENDING,false))return;
+        if(lastRootCommandMs>0L&&now>=lastRootCommandMs&&now-lastRootCommandMs<ROOT_RETRY_GAP_MS)return;
+        lastRootCommandMs=now;
+        rootCommandInFlight=true;
+        rootExecutor.execute(()->{
+            BatteryPercentOverride.Result result=BatteryPercentOverride.reset();
+            handler.post(()->{
+                rootCommandInFlight=false;
+                if(result.success){
+                    getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+                            .putBoolean(KEY_RESET_PENDING,false).remove(KEY_LAST_ANDROID_PERCENT).apply();
+                }
+            });
+        });
     }
 
     private Notification buildNotification(String liveText, double usedMah, long screenOnMs,
                                            BatteryPercentCalculator.Estimate estimate) {
-        Intent open = new Intent(this, MainActivity.class);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, open, flags);
-        boolean available = estimate != null && estimate.running && estimate.isAvailable();
-        String title = available
-                ? String.format(java.util.Locale.US, "Calculated %d%% • Used %.1f mAh",
-                        estimate.percent, usedMah)
-                : String.format(java.util.Locale.US, "Battery • Used %.1f mAh", usedMah);
-        String measuredPercentage = available ? estimate.percent + "%" : "--";
-        String details = measuredPercentage + " • Screen ON: "
-                + SessionStore.formatDuration(screenOnMs) + " • " + liveText;
+        Intent open=new Intent(this,MainActivity.class);
+        int flags=PendingIntent.FLAG_UPDATE_CURRENT;
+        if(Build.VERSION.SDK_INT>=23)flags|=PendingIntent.FLAG_IMMUTABLE;
+        PendingIntent pending=PendingIntent.getActivity(this,0,open,flags);
 
-        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
-                ? new Notification.Builder(this, CHANNEL_ID)
-                : new Notification.Builder(this);
-        builder.setSmallIcon(R.drawable.ic_battery_percentage)
-                .setVisibility(Notification.VISIBILITY_PUBLIC)
+        boolean available=estimate!=null&&estimate.running&&estimate.isAvailable();
+        boolean charging=isPluggedIn();
+        String action=charging?"Charged":"Used";
+        String title=available
+                ?String.format(java.util.Locale.US,"Calculated %.2f%% • %s %.1f mAh",
+                        estimate.percentExact,action,usedMah)
+                :String.format(java.util.Locale.US,"Battery • %s %.1f mAh",action,usedMah);
+        String measuredPercentage=available
+                ?String.format(java.util.Locale.US,"%.2f%%",estimate.percentExact):"--";
+
+        Notification.Builder builder=Build.VERSION.SDK_INT>=26
+                ?new Notification.Builder(this,CHANNEL_ID)
+                :new Notification.Builder(this);
+        if(available&&Build.VERSION.SDK_INT>=23){
+            builder.setSmallIcon(createBatteryIcon(estimate.percentExact));
+        }else{
+            builder.setSmallIcon(R.drawable.ic_battery_percentage);
+        }
+        String details=measuredPercentage+" • Screen ON: "
+                +SessionStore.formatDuration(screenOnMs)+" • "+liveText;
+        builder.setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setContentTitle(title)
                 .setContentText(details)
-                .setContentIntent(pendingIntent)
+                .setContentIntent(pending)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setCategory(Notification.CATEGORY_STATUS);
         return builder.build();
+    }
+
+    private boolean isPluggedIn(){
+        Intent battery=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        return battery!=null&&battery.getIntExtra(BatteryManager.EXTRA_PLUGGED,0)!=0;
+    }
+
+    private Icon createBatteryIcon(double percentage){
+        Bitmap bitmap=Bitmap.createBitmap(48,48,Bitmap.Config.ARGB_8888);
+        Canvas canvas=new Canvas(bitmap);
+        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.WHITE);
+        paint.setStrokeWidth(3.5f);
+        paint.setStyle(Paint.Style.STROKE);
+        canvas.drawRoundRect(new RectF(5,8,39,40),4,4,paint);
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawRoundRect(new RectF(40,18,46,30),2,2,paint);
+        float clamped=(float)Math.max(0.0,Math.min(100.0,percentage));
+        float fillWidth=26.0f*clamped/100.0f;
+        if(fillWidth>0)canvas.drawRect(9,12,9+fillWidth,36,paint);
+        return Icon.createWithBitmap(bitmap);
     }
 
     private void createChannel() {
@@ -275,11 +317,11 @@ public class BatteryNotificationService extends Service {
         if (!shouldRunService()) return;
         try {
             AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
-            Intent recovery = new Intent(this, BootReceiver.class);
-            recovery.setAction(BootReceiver.ACTION_RECOVER_SERVICE);
+            Intent recovery = new Intent(this, BatteryNotificationService.class);
+            recovery.setAction("com.dsann.batterymonitor.RECOVER_MEASUREMENT");
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
-            PendingIntent pending = PendingIntent.getBroadcast(this, 9381, recovery, flags);
+            PendingIntent pending = PendingIntent.getService(this, 9381, recovery, flags);
             long trigger = SystemClock.elapsedRealtime() + RECOVERY_DELAY_MS;
             if (alarm != null) {
                 if (Build.VERSION.SDK_INT >= 23) alarm.setExactAndAllowWhileIdle(
@@ -295,6 +337,7 @@ public class BatteryNotificationService extends Service {
             try { wakeLock.release(); } catch (RuntimeException ignored) { }
         }
         if (shouldRunService()) scheduleRecovery();
+        rootExecutor.shutdown();
         stopForeground(true);
         super.onDestroy();
     }

@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
     private static final long DEFAULT_RECORDING_INTERVAL_MS=1000L;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private TextView voltage,current;
-    private TextView calculatedPercent,calculatedMah,androidPercentStatus;
+    private TextView calculatedPercent,calculatedMah,myBatteryCurrentLabel,androidPercentStatus;
     private EditText customCapacityInput,startingChargeInput;
     private Button useAndroidPercentButton;
     private Switch notificationSwitch;
@@ -301,10 +301,13 @@ public class MainActivity extends Activity {
         TextView calculatorTitle=text("Current estimate",16);
         calculatorTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         calculator.addView(calculatorTitle,full());
-        calculatedPercent=text("--%",38);
+        calculatedPercent=text("--",34);
         calculatedPercent.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         calculatedPercent.setTextColor(0xFF63E6A8);
         calculator.addView(calculatedPercent,top(4));
+        myBatteryCurrentLabel=text("Current: N/A",12);
+        myBatteryCurrentLabel.setTextColor(0xFF9AA0AA);
+        calculator.addView(myBatteryCurrentLabel,top(1));
         calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
         calculatedMah.setTextColor(0xFFD2D8E0);
         calculator.addView(calculatedMah,top(2));
@@ -547,14 +550,17 @@ public class MainActivity extends Activity {
     private void updateMyBatteryEstimate(){
         try{
             BatteryReader.Reading reading=BatteryReader.read(this);
+            if(myBatteryCurrentLabel!=null)myBatteryCurrentLabel.setText("Current: "+reading.currentText());
             android.content.SharedPreferences prefs=getSharedPreferences(PREFS,0);
             boolean serviceActive=prefs.getBoolean("notification_enabled",false)
                     ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                    ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
                     ||BatteryPercentCalculator.isRunning(this);
             updateCalculatedLevel(serviceActive
                     ?BatteryPercentCalculator.current(this)
                     :BatteryPercentCalculator.sample(this,reading));
         }catch(Throwable ignored){
+            if(myBatteryCurrentLabel!=null)myBatteryCurrentLabel.setText("Current: N/A");
             updateCalculatedLevel(BatteryPercentCalculator.current(this));
         }
     }
@@ -567,7 +573,7 @@ public class MainActivity extends Activity {
                     ? "Remaining charge: 0 mAh" : "Remaining charge: -- mAh");
             return;
         }
-        calculatedPercent.setText(estimate.percent+"%");
+        calculatedPercent.setText(String.format(java.util.Locale.US,"%.2f%%",estimate.percentExact));
         calculatedMah.setText(String.format(java.util.Locale.US,
                 "Remaining charge: %.1f / %.0f mAh",estimate.remainingMah,estimate.capacityMah));
     }
@@ -672,26 +678,8 @@ public class MainActivity extends Activity {
                 .putBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,true).apply();
         if(useAndroidPercentButton!=null)useAndroidPercentButton.setText("Use this as Android %");
         if(androidPercentStatus!=null)androidPercentStatus.setText(message);
+        // The foreground service performs the root reset off the UI thread and retries failures.
         startNotificationService();
-        if(useAndroidPercentButton!=null)useAndroidPercentButton.setEnabled(false);
-        new Thread(()->{
-            BatteryPercentOverride.Result result=BatteryPercentOverride.reset();
-            runOnUiThread(()->{
-                if(result.success){
-                    getSharedPreferences(PREFS,0).edit()
-                            .putBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
-                            .remove(KEY_LAST_ANDROID_PERCENT).apply();
-                    if(androidPercentStatus!=null)androidPercentStatus.setText("Android battery level restored.");
-                    if(!getSharedPreferences(PREFS,0).getBoolean("notification_enabled",false)
-                            &&!BatteryPercentCalculator.isRunning(this)){
-                        stopService(new Intent(this,BatteryNotificationService.class));
-                    }
-                }else if(androidPercentStatus!=null){
-                    androidPercentStatus.setText("Root reset pending; background recovery will retry. "+result.message);
-                }
-                if(useAndroidPercentButton!=null)useAndroidPercentButton.setEnabled(true);
-            });
-        }).start();
     }
 
     private void requestBatteryOptimizationExemption(){
