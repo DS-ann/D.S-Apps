@@ -23,6 +23,7 @@ public class BootReceiver extends BroadcastReceiver {
         android.content.SharedPreferences settings =
                 context.getSharedPreferences("settings", Context.MODE_PRIVATE);
         boolean recording = settings.getBoolean("notification_enabled", false);
+        boolean alwaysBackground = settings.getBoolean("always_run_background", false);
         boolean useAppPercent =
                 settings.getBoolean("my_battery_use_android_percent", false);
         boolean resetPending =
@@ -30,7 +31,7 @@ public class BootReceiver extends BroadcastReceiver {
         boolean estimatorRunning = context.getSharedPreferences(
                 "battery_percent_calculator_state", Context.MODE_PRIVATE)
                 .getBoolean("running", false);
-        if (!recording && !useAppPercent && !resetPending && !estimatorRunning) return;
+        if (!recording && !alwaysBackground && !useAppPercent && !resetPending && !estimatorRunning) return;
 
         Intent service = new Intent(context, BatteryNotificationService.class);
         if (ACTION_DOZE_WAKE.equals(action)) service.setAction(ACTION_DOZE_WAKE);

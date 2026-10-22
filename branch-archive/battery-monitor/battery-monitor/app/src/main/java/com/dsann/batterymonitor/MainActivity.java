@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
     private static final String KEY_MY_BATTERY_INTERVAL_MS="my_battery_sampling_interval_ms";
     private static final String KEY_USE_ANDROID_PERCENT="my_battery_use_android_percent";
     private static final String KEY_ANDROID_PERCENT_RESET_PENDING="my_battery_android_percent_reset_pending";
+    private static final String KEY_ALWAYS_BACKGROUND="always_run_background";
     private static final String KEY_LAST_ANDROID_PERCENT="my_battery_last_android_percent";
     private static final String KEY_LAST_ANDROID_POWER_STATUS="my_battery_last_android_power_status";
     private static final String KEY_LAST_ANDROID_POWER_SOURCE="my_battery_last_android_power_source";
@@ -56,6 +57,7 @@ public class MainActivity extends Activity {
     private EditText customCapacityInput,startingChargeInput;
     private Button useAndroidPercentButton;
     private Switch notificationSwitch;
+    private Switch alwaysRunningSwitch;
     private Switch fakeChargingSwitch;
     private TextView fakeChargingStatus;
     private SeekBar samplingBar,myBatterySamplingBar;
@@ -148,10 +150,7 @@ public class MainActivity extends Activity {
         
         setContentView(root);
         android.content.SharedPreferences initialPrefs=getSharedPreferences(PREFS,0);
-        if (notificationSwitch.isChecked()
-                || initialPrefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
-                || initialPrefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
-                || BatteryPercentCalculator.isRunning(this)) {
+        if (shouldKeepServiceRunning(initialPrefs)) {
             startNotificationService();
         }
         if (BatteryChargingOverride.isEnabled(this)) {
@@ -202,9 +201,25 @@ public class MainActivity extends Activity {
         notificationSwitch=new Switch(this);
         recordingTop.addView(notificationSwitch,new LinearLayout.LayoutParams(-2,-2));
         recording.addView(recordingTop,full());
-        TextView recordingSub=text("Keeps the session updated while the app is closed.",13);
+
+        LinearLayout alwaysRunningRow=new LinearLayout(this);
+        alwaysRunningRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView alwaysRunningTitle=text("Keep running in background",15);
+        alwaysRunningRow.addView(alwaysRunningTitle,new LinearLayout.LayoutParams(0,-2,1));
+        alwaysRunningSwitch=new Switch(this);
+        alwaysRunningSwitch.setChecked(getSharedPreferences(PREFS,0)
+                .getBoolean(KEY_ALWAYS_BACKGROUND,false));
+        alwaysRunningRow.addView(alwaysRunningSwitch,new LinearLayout.LayoutParams(-2,-2));
+        recording.addView(alwaysRunningRow,top(10));
+        TextView alwaysRunningSub=text(
+                "Keeps the service active after leaving the app and resumes after reboot. "
+                +"Doze switches to scheduled low-power sampling.",12);
+        alwaysRunningSub.setTextColor(0xFF9AA0AA);
+        recording.addView(alwaysRunningSub,top(2));
+
+        TextView recordingSub=text("Records session history while enabled.",13);
         recordingSub.setTextColor(0xFF9AA0AA);
-        recording.addView(recordingSub,top(2));
+        recording.addView(recordingSub,top(8));
         
         LinearLayout sampling=new LinearLayout(this);
         sampling.setOrientation(LinearLayout.VERTICAL);
@@ -373,6 +388,19 @@ public class MainActivity extends Activity {
             }catch(RejectedExecutionException ignored){resetPercent.setEnabled(true);}
         });
         
+        alwaysRunningSwitch.setOnCheckedChangeListener((b,on)->{
+            android.content.SharedPreferences servicePrefs=getSharedPreferences(PREFS,0);
+            servicePrefs.edit().putBoolean(KEY_ALWAYS_BACKGROUND,on).apply();
+            if(on){
+                startNotificationService();
+                requestBatteryOptimizationExemption();
+            }else if(shouldKeepServiceRunning(servicePrefs)){
+                startNotificationService();
+            }else{
+                stopService(new Intent(this,BatteryNotificationService.class));
+            }
+        });
+
         notificationSwitch.setOnCheckedChangeListener((b,on)->{
             getSharedPreferences(PREFS,0).edit().putBoolean("notification_enabled",on).apply();
             if(on){
@@ -381,9 +409,7 @@ public class MainActivity extends Activity {
             }else{
                 SessionStore.finish(this);
                 android.content.SharedPreferences recordingPrefs=getSharedPreferences(PREFS,0);
-                if(recordingPrefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
-                        ||recordingPrefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
-                        ||BatteryPercentCalculator.isRunning(this)){
+                if(shouldKeepServiceRunning(recordingPrefs)){
                     startNotificationService();
                 }else{
                     stopService(new Intent(this,BatteryNotificationService.class));
@@ -1264,6 +1290,14 @@ public class MainActivity extends Activity {
     }
     
     private String formatSigned(double value){return String.format(java.util.Locale.US,"%+.1f",value);}
+    private boolean shouldKeepServiceRunning(android.content.SharedPreferences prefs){
+        return prefs.getBoolean(KEY_ALWAYS_BACKGROUND,false)
+                ||prefs.getBoolean("notification_enabled",false)
+                ||prefs.getBoolean(KEY_USE_ANDROID_PERCENT,false)
+                ||prefs.getBoolean(KEY_ANDROID_PERCENT_RESET_PENDING,false)
+                ||BatteryPercentCalculator.isRunning(this);
+    }
+
     private void startNotificationService(){Intent i=new Intent(this,BatteryNotificationService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);}
     private TextView text(String s,int size){TextView v=new TextView(this);v.setText(s);v.setTextSize(size);v.setTextColor(0xFFE8EBF0);return v;}
     private LinearLayout.LayoutParams full(){return new LinearLayout.LayoutParams(-1,-2);}

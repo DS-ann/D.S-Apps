@@ -40,6 +40,7 @@ public class BatteryNotificationService extends Service {
     private static final String KEY_LAST_ANDROID_POWER_SOURCE = "my_battery_last_android_power_source";
     private static final String KEY_CALCULATOR_RUNNING = "running";
     private static final String KEY_NOTIFICATION_ENABLED = "notification_enabled";
+    private static final String KEY_ALWAYS_BACKGROUND = "always_run_background";
     private static final long MIN_INTERVAL_MS = 100L;
     private static final long MAX_INTERVAL_MS = 2000L;
     private static final long DEFAULT_INTERVAL_MS = 1000L;
@@ -158,6 +159,7 @@ public class BatteryNotificationService extends Service {
             scheduleDozeWakeup();
             publishNotification();
         } else {
+            cancelDozeWakeup();
             acquireCpuLock();
             requestSampleUpdate();
             publishNotification();
@@ -189,6 +191,8 @@ public class BatteryNotificationService extends Service {
         nextNotificationUpdateUptimeMs = SystemClock.uptimeMillis()
                 + NOTIFICATION_REFRESH_INTERVAL_MS;
         handler.postAtTime(notificationUpdater, nextNotificationUpdateUptimeMs);
+        // If an OEM kills the process without invoking onDestroy(), this alarm retries startup.
+        scheduleBackgroundWatchdog();
     }
 
     private boolean shouldUseDozeSamplingMode() {
@@ -378,11 +382,12 @@ public class BatteryNotificationService extends Service {
     private boolean shouldRunService() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean recording = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
         boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean resetPending = settings.getBoolean(KEY_RESET_PENDING, false);
         boolean estimatorRunning = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_CALCULATOR_RUNNING, false);
-        return recording || usePercent || resetPending || estimatorRunning;
+        return recording || alwaysBackground || usePercent || resetPending || estimatorRunning;
     }
 
     private long getSamplingInterval() {
@@ -401,12 +406,14 @@ public class BatteryNotificationService extends Service {
     private long getNextSamplingInterval() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean recording = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
         boolean appPercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_CALCULATOR_RUNNING, false);
-        if (recording && (appPercent || estimating))
+        if ((recording || alwaysBackground) && (appPercent || estimating))
             return Math.min(getSamplingInterval(), getMyBatterySamplingInterval());
-        return recording ? getSamplingInterval() : getMyBatterySamplingInterval();
+        return (recording || alwaysBackground)
+                ? getSamplingInterval() : getMyBatterySamplingInterval();
     }
 
     /**
@@ -463,10 +470,11 @@ public class BatteryNotificationService extends Service {
             settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         }
         boolean recordingEnabled = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
         boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_CALCULATOR_RUNNING, false);
-        if (!recordingEnabled && !usePercent
+        if (!recordingEnabled && !alwaysBackground && !usePercent
                 && !settings.getBoolean(KEY_RESET_PENDING, false) && !estimating) return;
 
         BatteryReader.Reading reading = BatteryReader.read(this);
@@ -511,11 +519,12 @@ public class BatteryNotificationService extends Service {
     private void publishNotification() {
         android.content.SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean recordingEnabled = settings.getBoolean(KEY_NOTIFICATION_ENABLED, false);
+        boolean alwaysBackground = settings.getBoolean(KEY_ALWAYS_BACKGROUND, false);
         boolean usePercent = settings.getBoolean(KEY_USE_ANDROID_PERCENT, false);
         boolean resetPending = settings.getBoolean(KEY_RESET_PENDING, false);
         boolean estimating = getSharedPreferences(CALC_PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_CALCULATOR_RUNNING, false);
-        if (!recordingEnabled && !usePercent && !resetPending && !estimating) return;
+        if (!recordingEnabled && !alwaysBackground && !usePercent && !resetPending && !estimating) return;
 
         long now = System.currentTimeMillis();
         long myBatteryInterval = getMyBatterySamplingInterval();
@@ -709,6 +718,25 @@ public class BatteryNotificationService extends Service {
     @Override public void onTaskRemoved(Intent rootIntent) {
         scheduleRecovery();
         super.onTaskRemoved(rootIntent);
+    }
+
+    private void scheduleBackgroundWatchdog() {
+        if (!shouldRunService() || dozeSamplingMode) return;
+        try {
+            AlarmManager alarm = (AlarmManager) getSystemService(ALARM_SERVICE);
+            if (alarm == null) return;
+            Intent recovery = new Intent(this, BootReceiver.class);
+            recovery.setAction(ACTION_RECOVER);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent pending = PendingIntent.getBroadcast(this, 9381, recovery, flags);
+            long trigger = SystemClock.elapsedRealtime() + 15L * 60L * 1000L;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarm.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+            } else {
+                alarm.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending);
+            }
+        } catch (Throwable ignored) { }
     }
 
     private void scheduleRecovery() {
