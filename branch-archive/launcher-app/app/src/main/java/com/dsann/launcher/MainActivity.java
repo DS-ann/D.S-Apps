@@ -4522,14 +4522,11 @@ public class MainActivity extends Activity {
                     outline.setEmpty();
                     return;
                 }
-                // Morph the clipping edge from the source icon's circular silhouette
-                // to the final rounded square. The shared progress value makes opening
-                // and closing traverse exactly the same continuous shape transition.
-                float circleRadius = Math.min(width, height) * 0.5f;
-                float squareRadius = Math.min(
-                        LauncherUiUtils.dp(MainActivity.this, 24), circleRadius);
-                float progress = Math.max(0f, Math.min(1f, morphProgress[0]));
-                float radius = circleRadius + (squareRadius - circleRadius) * progress;
+                // Keep one static rounded-square outline throughout the animation.
+                // Invalidating a changing clip outline every frame forced expensive
+                // redraws on Android 6 and made the popup morph look like separate steps.
+                float radius = Math.min(LauncherUiUtils.dp(MainActivity.this, 24),
+                        Math.min(width, height) * 0.5f);
                 outline.setRoundRect(0, 0, Math.round(width), Math.round(height), radius);
             }
         };
@@ -4549,6 +4546,9 @@ public class MainActivity extends Activity {
         View dimLayer = new View(this);
         dimLayer.setBackgroundColor(Color.BLACK);
         dimLayer.setAlpha(0f);
+        // Cache the full-screen dim surface so animating its alpha does not repaint
+        // the dialog's entire software content on every animation tick.
+        dimLayer.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         overlay.addView(dimLayer, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout panel = new LinearLayout(this);
@@ -4556,9 +4556,8 @@ public class MainActivity extends Activity {
         panel.setPadding(LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12),
                 LauncherUiUtils.dp(this, 14), LauncherUiUtils.dp(this, 12));
         GradientDrawable panelBackground = appGroupGradient(false);
-        // The dynamic outline below owns the rounded shape. Keep the gradient drawable
-        // square so the animated outline can continuously morph its visible corners.
-        panelBackground.setCornerRadius(0f);
+        // The panel and its clipping outline use the same permanent rounded-square shape.
+        panelBackground.setCornerRadius(LauncherUiUtils.dp(this, 24));
         panel.setBackground(panelBackground);
         panel.setScaleX(0.12f);
         panel.setScaleY(0.12f);
@@ -4963,11 +4962,10 @@ public class MainActivity extends Activity {
             android.animation.ValueAnimator transition =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
             transition.setDuration(duration);
-            transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
             transition.addUpdateListener(animation -> {
                 float progress = (Float) animation.getAnimatedValue();
                 morphProgress[0] = progress;
-                panel.invalidateOutline();
                 float sx = startScaleX + (1f - startScaleX) * progress;
                 float sy = startScaleY + (1f - startScaleY) * progress;
                 float tx = morphStartTranslation[0] * (1f - progress);
@@ -5041,11 +5039,10 @@ public class MainActivity extends Activity {
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
         transition.setDuration(animationDuration(175L));
-        transition.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+        transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
         transition.addUpdateListener(animation -> {
             float progress = (Float) animation.getAnimatedValue();
             if (morphProgress != null) morphProgress[0] = progress;
-            panel.invalidateOutline();
             float sx = targetScaleX + (1f - targetScaleX) * progress;
             float sy = targetScaleY + (1f - targetScaleY) * progress;
             float tx = offsetX * (1f - progress);
