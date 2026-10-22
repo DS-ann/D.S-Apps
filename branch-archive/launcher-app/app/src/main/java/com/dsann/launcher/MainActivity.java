@@ -1515,8 +1515,8 @@ public class MainActivity extends Activity {
                     // the start position. Writing preferences for every MOVE was wasteful.
                     setClampedClockTranslation(clockWidgetStartX + moveX,
                             clockWidgetStartY + moveY, false);
-                    scheduleClockResizeHandlesUpdate()
-                    setWorkspaceGridVisible(true, clockPanel);
+                    scheduleClockResizeHandlesUpdate();
+                    if (firstMoveFrame) setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
                         scheduleLiveDisplacementUpdate((FrameLayout) clockPanel.getParent(), clockPanel);
                     }
@@ -1540,8 +1540,8 @@ public class MainActivity extends Activity {
                     clockWidgetDragging = true;
                     setClampedClockTranslation(clockWidgetStartX + moveX,
                             clockWidgetStartY + moveY, false);
-                    scheduleClockResizeHandlesUpdate()
-                    setWorkspaceGridVisible(true, clockPanel);
+                    scheduleClockResizeHandlesUpdate();
+                    if (firstMoveFrame) setWorkspaceGridVisible(true, clockPanel);
                     if (clockPanel.getParent() instanceof FrameLayout) {
                         scheduleLiveDisplacementUpdate(
                                 (FrameLayout) clockPanel.getParent(), clockPanel);
