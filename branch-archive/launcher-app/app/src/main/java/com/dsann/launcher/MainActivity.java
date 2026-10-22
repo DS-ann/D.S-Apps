@@ -1424,21 +1424,10 @@ public class MainActivity extends Activity {
                     setWorkspaceGridVisible(true, clockPanel);
                     return true;
                 }
-            // Once edit mode is open, dragging the clock body moves the widget while
-            // dragging one of the four edge grips resizes it. Start the body gesture here
-            // at the activity level so scaled text/date overhangs work even when the finger
-            // is outside the panel's untransformed hit rectangle.
-            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0
-                    && clockPanel != null && clockPanel.getParent() instanceof FrameLayout) {
-                clockWidgetDownRawX = event.getRawX();
-                clockWidgetDownRawY = event.getRawY();
-                clockWidgetStartX = clockPanel.getTranslationX();
-                clockWidgetStartY = clockPanel.getTranslationY();
+            // Edit mode is resize-only. A touch on the clock body keeps the editor
+            // open, but must never start a drag or change the clock's saved position.
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0) {
                 clockWidgetDragging = false;
-                int[] safeClockGeometry = itemGeometry(clockPanel);
-                liveDragLastSafeGeometry.put(clockPanel,
-                        new int[]{safeClockGeometry[0], safeClockGeometry[1]});
-                clockGeometryRejectedAtLastMove = false;
                 setWorkspaceGridVisible(true, clockPanel);
                 return true;
             }
@@ -1521,13 +1510,9 @@ public class MainActivity extends Activity {
                 scheduleClockDragMove(event.getRawX(), event.getRawY());
                 return true;
             }
-            // In edit mode, the clock body is a move handle. Edge grips stay isolated
-            // in the resize branch below.
-            LinearLayout editingClock = clockGesturePanel != null
-                    ? clockGesturePanel : clockPanel;
-            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0
-                    && editingClock != null) {
-                scheduleClockDragMove(event.getRawX(), event.getRawY());
+            // The clock body is intentionally inert while the resize editor is open.
+            // Only the four explicit edge grips may change geometry in this mode.
+            if (clockWidgetEditing && gestureStartedOnClock && clockResizeEdge == 0) {
                 return true;
             }
             if (clockResizeEdge != 0 && clockWidgetDragging) {
@@ -2381,7 +2366,9 @@ public class MainActivity extends Activity {
                         Math.max(1, clockWidgetStartVisualWidth));
                 int breadthFloorHeight =
                         (LauncherUiUtils.dp(this, 114) * 80 + 99) / 100;
-                int minRowHeight = Math.max(LauncherUiUtils.dp(this, 90),
+                // Keep the full native clock row intact. Shrinking its measured height
+                // below the glyph line made the AM/PM/date row disappear or clip on API 23.
+                int minRowHeight = Math.max(LauncherUiUtils.dp(this, 114),
                         breadthFloorHeight);
                 // The visible panel includes a fixed date line and its insets. Apply the
                 // 80% floor to the clock row, then add that fixed chrome back to the
@@ -2534,15 +2521,14 @@ public class MainActivity extends Activity {
                     if (resizeText != null) {
                         ViewGroup.LayoutParams textHeightParams = resizeText.getLayoutParams();
                         if (textHeightParams != null) {
-                            textHeightParams.height = sevenSegmentResize
-                                    ? naturalRowHeightForResize : targetRowHeight;
+                            // Resize the panel/row background only. Keep the actual glyph
+                            // view at its natural height so digits, AM/PM and date typography
+                            // do not scale, clip, or vanish during a vertical resize.
+                            textHeightParams.height = naturalRowHeightForResize;
                             resizeText.setLayoutParams(textHeightParams);
                         }
-                        resizeText.setPivotY(sevenSegmentResize ? 0f : targetRowHeight / 2f);
-                        resizeText.setScaleY(sevenSegmentResize
-                                ? targetRowHeight / (float) Math.max(1, naturalRowHeightForResize)
-                                : clockWidgetStartTextScaleY * targetRowHeight
-                                        / (float) Math.max(1, clockWidgetStartRowHeight));
+                        resizeText.setPivotY(naturalRowHeightForResize / 2f);
+                        resizeText.setScaleY(1f);
                     }
                     syncClockColonVerticalCenter();
                 }
@@ -4043,7 +4029,7 @@ public class MainActivity extends Activity {
         moveOverlay.setTag("launcher_app_group_move_highlight");
         moveOverlay.setClickable(false);
         moveOverlay.setFocusable(false);
-        moveOverlay.setBackground(appGroupMoveHighlight());
+        moveOverlay.setBackground(appGroupMoveHighlight(iconSizePx * 0.08f));
         moveOverlay.setVisibility(View.GONE);
         logo.addView(moveOverlay, new FrameLayout.LayoutParams(-1, -1));
         return logo;
@@ -5406,9 +5392,13 @@ public class MainActivity extends Activity {
     }
 
     private GradientDrawable appGroupMoveHighlight() {
+        return appGroupMoveHighlight(LauncherUiUtils.dp(this, 14));
+    }
+
+    private GradientDrawable appGroupMoveHighlight(float cornerRadiusPx) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(Color.argb(112, 25, 105, 210));
-        d.setCornerRadius(LauncherUiUtils.dp(this, 14));
+        d.setCornerRadius(Math.max(0f, cornerRadiusPx));
         d.setStroke(LauncherUiUtils.dp(this, 2), Color.rgb(84, 176, 255));
         return d;
     }
