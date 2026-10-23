@@ -14140,15 +14140,28 @@ public class MainActivity extends Activity {
      */
     private void remapHomeIconSlotsForColumnChange(int oldColumns, int newColumns,
             int oldIconSize, int targetIconSize) {
+        remapHomeIconSlotsForLayoutChange(oldColumns, newColumns, oldIconSize,
+                targetIconSize, -1, -1);
+    }
+
+    private void remapHomeIconSlotsForLayoutChange(int oldColumns, int newColumns,
+            int oldIconSize, int targetIconSize, int oldCellHeightDpOverride,
+            int newCellHeightDpOverride) {
         oldColumns = Math.max(3, Math.min(6, oldColumns));
         newColumns = Math.max(3, Math.min(6, newColumns));
         oldIconSize = Math.max(32, Math.min(74, oldIconSize));
         targetIconSize = Math.max(32, Math.min(74, targetIconSize));
+        boolean explicitCellHeights = oldCellHeightDpOverride > 0
+                && newCellHeightDpOverride > 0;
         if (pagesStrip == null
-                || (oldColumns == newColumns && oldIconSize == targetIconSize)) return;
+                || (oldColumns == newColumns && oldIconSize == targetIconSize
+                        && (!explicitCellHeights
+                                || oldCellHeightDpOverride == newCellHeightDpOverride))) return;
 
-        int oldCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(oldIconSize));
-        int newCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(targetIconSize));
+        int oldCellHeight = LauncherUiUtils.dp(this, explicitCellHeights
+                ? oldCellHeightDpOverride : homeCellHeightDp(oldIconSize));
+        int newCellHeight = LauncherUiUtils.dp(this, explicitCellHeights
+                ? newCellHeightDpOverride : homeCellHeightDp(targetIconSize));
         int fallbackWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels
                 - LauncherUiUtils.dp(this, 40));
         int fallbackHeight = Math.max(LauncherUiUtils.dp(this, 360),
@@ -14316,6 +14329,10 @@ public class MainActivity extends Activity {
      * page for widgets, and remove the widget only when both pages are full.
      */
     private void validateWorkspacePagesAfterIconResize() {
+        validateWorkspacePagesAfterIconResize("icon-size change");
+    }
+
+    private void validateWorkspacePagesAfterIconResize(String changeReason) {
         if (pagesStrip == null) {
             homeIconResizeRepairPending = false;
             return;
@@ -14350,13 +14367,21 @@ public class MainActivity extends Activity {
                         if (--remaining[0] == 0) homeIconResizeRepairPending = false;
                         return;
                     }
+                    boolean collisionBeforeRepair = hasWorkspaceVisualOverlaps(page);
+                    int collisionsBeforePage = resizeRepairCollisionCount;
                     snapAppGroupsToGridAfterIconResize(page);
                     repairResizeCollisionsOnPage(page);
+                    resolveAllWorkspaceOverlaps(page, null);
+                    repairResizeCollisionsOnPage(page);
+                    if (collisionBeforeRepair
+                            && resizeRepairCollisionCount == collisionsBeforePage) {
+                        resizeRepairCollisionCount++;
+                    }
                     if (--remaining[0] == 0) {
                         homeIconResizeRepairPending = false;
                         ensureShortcutLabelsNotClipped();
                         refreshWorkspaceGrid();
-                        showIconResizeRecoveryPrompt();
+                        showIconResizeRecoveryPrompt(changeReason);
                     }
                 });
             }
@@ -14364,13 +14389,15 @@ public class MainActivity extends Activity {
     }
 
 
-    private void showIconResizeRecoveryPrompt() {
+    private void showIconResizeRecoveryPrompt(String changeReason) {
         if (resizeRepairCollisionCount == 0 && resizeRepairGroupRepositionCount == 0) return;
         StringBuilder message = new StringBuilder();
         if (resizeRepairClockBackgroundCollisionCount > 0) {
-            message.append("Clock background collision detected. ");
+            message.append("Clock background collision detected after ")
+                    .append(changeReason).append(". ");
         } else if (resizeRepairCollisionCount > 0) {
-            message.append("Workspace overlap detected after icon resize. ");
+            message.append("Workspace collision detected after ")
+                    .append(changeReason).append(". ");
         }
         if (resizeRepairSpecialShrinkCount > 0) {
             message.append("Shrunk ").append(resizeRepairSpecialShrinkCount)
@@ -15485,18 +15512,36 @@ public class MainActivity extends Activity {
         });
         addSliderRowOnStop(content, "Home app font size", 8, 15,
                 homeFontSizeSp(), " sp", value -> {
+            int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
+            int columns = getHomeColumns();
+            int oldCellHeight = homeCellHeightDp(iconSize);
+            if (value == Math.round(homeFontSizeSp())) return;
+            homeIconResizeRepairPending = true;
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
+            int newCellHeight = homeCellHeightDp(iconSize);
+            remapHomeIconSlotsForLayoutChange(columns, columns, iconSize, iconSize,
+                    oldCellHeight, newCellHeight);
             renderHomePages(false);
             rebuildContactShortcutViews();
-            validateWorkspacePagesAfterLayout();
+            ensureShortcutLabelsNotClipped();
+            validateWorkspacePagesAfterIconResize("label-size change");
         });
         addChoiceRow(content, "App and shortcut label font",
                 Math.max(0, Math.min(3, prefs.getInt(KEY_HOME_LABEL_FONT, 0))),
                 new String[]{"Sans Serif", "Serif", "Monospace", "Cursive"}, value -> {
+            int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
+            int columns = getHomeColumns();
+            int oldCellHeight = homeCellHeightDp(iconSize);
+            if (value == prefs.getInt(KEY_HOME_LABEL_FONT, 0)) return;
+            homeIconResizeRepairPending = true;
             prefs.edit().putInt(KEY_HOME_LABEL_FONT, value).apply();
+            int newCellHeight = homeCellHeightDp(iconSize);
+            remapHomeIconSlotsForLayoutChange(columns, columns, iconSize, iconSize,
+                    oldCellHeight, newCellHeight);
             renderHomePages(false);
+            rebuildContactShortcutViews();
             refreshWorkspaceLabelAppearance();
-            validateWorkspacePagesAfterLayout();
+            validateWorkspacePagesAfterIconResize("label-font change");
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addColorSliderRow(content, "App and shortcut label colour",
@@ -15511,9 +15556,18 @@ public class MainActivity extends Activity {
             applyShortcutIconSizeToWorkspace();
         });
         addSettingRow(content, "Aa", "App labels on Home", prefs.getBoolean(KEY_SHOW_HOME_LABELS, true) ? "Visible" : "Hidden", () -> {
-            prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS, !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
+            int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
+            int columns = getHomeColumns();
+            int oldCellHeight = homeCellHeightDp(iconSize);
+            homeIconResizeRepairPending = true;
+            prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS,
+                    !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
+            int newCellHeight = homeCellHeightDp(iconSize);
+            remapHomeIconSlotsForLayoutChange(columns, columns, iconSize, iconSize,
+                    oldCellHeight, newCellHeight);
             renderHomePages(false);
             rebuildContactShortcutViews();
+            validateWorkspacePagesAfterIconResize("label visibility change");
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSettingRow(content, "◷", "Date under the clock", prefs.getBoolean(KEY_SHOW_DATE, true) ? "Visible" : "Hidden", () -> {
