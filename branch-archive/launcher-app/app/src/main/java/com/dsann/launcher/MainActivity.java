@@ -10349,13 +10349,8 @@ public class MainActivity extends Activity {
             }
         };
 
-        // Home long-press is an editing interaction: use a compact card without a dim
-        // scrim. App-drawer actions retain the established larger Studio dialog.
-        if (fromHome) {
-            showCompactAppOptionsDialog(title, iconItems, labelItems, optionListener);
-        } else {
-            showActionDialog(title, iconItems, labelItems, optionListener);
-        }
+        // Home and app-drawer long-press use the same compact, transparent Studio card.
+        showCompactAppOptionsDialog(title, iconItems, labelItems, optionListener);
     }
 
     private void showCompactAppOptionsDialog(String title, String[] icons, String[] labels,
