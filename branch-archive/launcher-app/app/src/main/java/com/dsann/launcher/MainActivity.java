@@ -6561,6 +6561,7 @@ public class MainActivity extends Activity {
         if (!foundShortcut) return;
         page.post(() -> {
             if (page.getParent() == pagesStrip && !homeIconResizeRepairPending) {
+                repairContactShortcutGridPositions(page);
                 resolveAllWorkspaceOverlaps(page, null);
             }
             ensureShortcutLabelsNotClipped();
@@ -6645,24 +6646,21 @@ public class MainActivity extends Activity {
         if (chosenPage == null && desiredPage < pagesStrip.getChildCount()
                 && pagesStrip.getChildAt(desiredPage) instanceof FrameLayout) {
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(desiredPage);
-            int[] free = findFreeContactShortcutGridPosition(page, shortcutId,
-                    lastSavedLeft >= 0 ? lastSavedLeft : 0,
-                    lastSavedTop >= 0 ? lastSavedTop : 0, null);
-            if (free != null) {
+            int preferredX = lastSavedLeft >= 0 ? lastSavedLeft : 0;
+            int preferredY = lastSavedTop >= 0 ? lastSavedTop : 0;
+            // Keep the saved slot/row when possible. If a widget blocks that slot,
+            // progressively shrink the blocker before considering another grid cell.
+            int[] resolved = findContactShortcutGridPositionWithWidgetShrink(
+                    page, shortcutId, preferredX, preferredY, null);
+            if (resolved != null) {
                 chosenPage = page;
-                chosenLeft = free[0];
-                chosenTop = free[1];
+                chosenLeft = resolved[0];
+                chosenTop = resolved[1];
             }
         }
 
-        if (chosenPage == null && lastSavedLeft >= 0 && lastSavedTop >= 0
-                && desiredPage < pagesStrip.getChildCount()
-                && pagesStrip.getChildAt(desiredPage) instanceof FrameLayout) {
-            // Never discard a saved shortcut because its old position is temporarily blocked.
-            chosenPage = (FrameLayout) pagesStrip.getChildAt(desiredPage);
-            chosenLeft = Math.max(0, Math.min(pageViewport.getWidth() - cellW, lastSavedLeft));
-            chosenTop = Math.max(0, Math.min(pageViewport.getHeight() - cellH, lastSavedTop));
-        }
+        // Never render a shortcut on top of a widget just because the old saved slot
+        // is blocked and the page has no currently available placement.
         if (chosenPage == null || pagesStrip.indexOfChild(chosenPage) != desiredPage) return;
 
         int chosenCol = Math.max(0, Math.min(columns - 1,
@@ -6927,12 +6925,12 @@ public class MainActivity extends Activity {
                             int shortcutCol = Math.max(0, Math.min(3,
                                     Math.round((left + tile.getWidth() / 2f) / shortcutCellWidth - 0.5f)));
                             int shortcutRow = homeGridRowFromTop(
-                                    top - LauncherUiUtils.dp(this, 14), shortcutRows,
-                                    targetPage.getHeight(), shortcutCellHeight);
+                                    top, shortcutRows, targetPage.getHeight(), shortcutCellHeight);
                             left = homeGridIconLeftAt(null, shortcutCol, shortcutCellWidth, tile.getWidth());
+                            // The shortcut tile fills its grid cell; its 14dp inset belongs
+                            // to the icon child, not the cell origin.
                             top = homeGridRowTop(shortcutRow, shortcutRows,
-                                    targetPage.getHeight(), shortcutCellHeight)
-                                    + LauncherUiUtils.dp(this, 14);
+                                    targetPage.getHeight(), shortcutCellHeight);
                         }
                         if (commit) {
                             lp.leftMargin = left;
@@ -7125,7 +7123,12 @@ public class MainActivity extends Activity {
                 if (x + cellWidth > page.getWidth()) continue;
                 if (!isContactShortcutPositionFree(page, ignore, x, y,
                         cellWidth, cellHeight, shortcutId)) continue;
-                long distance = Math.abs((long) x - preferredX) + Math.abs((long) y - preferredY);
+                int preferredRow = homeGridRowFromTop(preferredY, rows,
+                        page.getHeight(), cellHeight);
+                // Keep a shortcut on its current row whenever any column there is free.
+                long distance = Math.abs((long) row - preferredRow)
+                        * (page.getWidth() + 1L)
+                        + Math.abs((long) x - preferredX);
                 if (distance < bestDistance) { bestDistance = distance; bestX = x; bestY = y; }
             }
         }
@@ -7167,6 +7170,226 @@ public class MainActivity extends Activity {
             }
         }
         return true;
+    }
+
+    /**
+     * Finds a legal four-column shortcut slot. Prefer the requested row, shrinking widgets
+     * that block the preferred slot before considering another cell. If the whole grid is
+     * occupied, test other cells with the same widget-shrink policy before giving up.
+     */
+    private int[] findContactShortcutGridPositionWithWidgetShrink(
+            FrameLayout page, String shortcutId, int preferredX, int preferredY, View ignore) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
+        final int cellWidth = Math.max(1, page.getWidth() / 4);
+        final int cellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+        final int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        final int preferredCol = Math.max(0, Math.min(3,
+                Math.round(preferredX / (float) cellWidth)));
+        final int preferredRow = homeGridRowFromTop(preferredY, rows,
+                page.getHeight(), cellHeight);
+        final int preferredLeft = preferredCol * cellWidth;
+        final int preferredTop = homeGridRowTop(preferredRow, rows,
+                page.getHeight(), cellHeight);
+
+        if (isContactShortcutPositionFree(page, ignore, preferredLeft, preferredTop,
+                cellWidth, cellHeight, shortcutId)
+                || shrinkWidgetsForContactShortcutSlot(page, shortcutId, preferredLeft,
+                        preferredTop, cellWidth, cellHeight, ignore)) {
+            return new int[]{preferredLeft, preferredTop, cellWidth, cellHeight};
+        }
+
+        int[] free = findFreeContactShortcutGridPosition(page, shortcutId,
+                preferredLeft, preferredTop, ignore);
+        if (free != null) return free;
+
+        java.util.ArrayList<int[]> candidates = new java.util.ArrayList<int[]>();
+        for (int row = 0; row < rows; row++) {
+            int top = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            if (top + cellHeight > page.getHeight()) continue;
+            for (int col = 0; col < 4; col++) {
+                int left = col * cellWidth;
+                if (left + cellWidth > page.getWidth()) continue;
+                candidates.add(new int[]{left, top, row, col});
+            }
+        }
+        java.util.Collections.sort(candidates, (a, b) -> {
+            int rowDistance = Integer.compare(Math.abs(a[2] - preferredRow),
+                    Math.abs(b[2] - preferredRow));
+            if (rowDistance != 0) return rowDistance;
+            return Integer.compare(Math.abs(a[3] - preferredCol),
+                    Math.abs(b[3] - preferredCol));
+        });
+        for (int[] candidate : candidates) {
+            if (isContactShortcutPositionFree(page, ignore, candidate[0], candidate[1],
+                    cellWidth, cellHeight, shortcutId)
+                    || shrinkWidgetsForContactShortcutSlot(page, shortcutId,
+                            candidate[0], candidate[1], cellWidth, cellHeight, ignore)) {
+                return new int[]{candidate[0], candidate[1], cellWidth, cellHeight};
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Shrinks only widgets which actually block the requested shortcut slot. Scale changes
+     * stay provisional until the slot is free, then persist as automatic shrink factors so
+     * normal redraws do not silently restore the old overlapping size.
+     */
+    private boolean shrinkWidgetsForContactShortcutSlot(FrameLayout page, String shortcutId,
+            int left, int top, int cellWidth, int cellHeight, View ignore) {
+        if (page == null || shortcutId == null || prefs == null
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+        if (isContactShortcutPositionFree(page, ignore, left, top,
+                cellWidth, cellHeight, shortcutId)) return true;
+
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        int col = Math.max(0, Math.min(3,
+                Math.round(left / (float) Math.max(1, cellWidth))));
+        int row = homeGridRowFromTop(top, rows, page.getHeight(), cellHeight);
+        int snappedLeft = col * cellWidth;
+        int snappedTop = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+        android.graphics.Rect protectedBounds = contactShortcutVisualRectAt(
+                shortcutId, snappedLeft, snappedTop, cellWidth, cellHeight);
+        protectedBounds.inset(-LauncherUiUtils.dp(this, 2), -LauncherUiUtils.dp(this, 2));
+
+        java.util.ArrayList<View> blockers = new java.util.ArrayList<View>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View candidate = page.getChildAt(i);
+            if (candidate == ignore || candidate == workspaceGridOverlays[0]
+                    || candidate == workspaceGridOverlays[1]
+                    || candidate.getVisibility() != View.VISIBLE
+                    || !isWorkspaceItem(candidate)
+                    || !(candidate.getTag() instanceof String)
+                    || !((String) candidate.getTag()).startsWith("launcher_widget:")) continue;
+            int[] geometry = itemGeometry(candidate);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            if (android.graphics.Rect.intersects(
+                    protectedBounds, collisionRect(candidate, geometry))) blockers.add(candidate);
+        }
+        if (blockers.isEmpty()) return false;
+        java.util.Collections.sort(blockers, (a, b) -> {
+            int[] ga = itemGeometry(a);
+            int[] gb = itemGeometry(b);
+            long targetX = (long) protectedBounds.left + protectedBounds.width() / 2;
+            long targetY = (long) protectedBounds.top + protectedBounds.height() / 2;
+            long da = Math.abs((long) ga[0] + ga[2] / 2 - targetX)
+                    + Math.abs((long) ga[1] + ga[3] / 2 - targetY);
+            long db = Math.abs((long) gb[0] + gb[2] / 2 - targetX)
+                    + Math.abs((long) gb[1] + gb[3] / 2 - targetY);
+            return Long.compare(da, db);
+        });
+
+        java.util.IdentityHashMap<View, float[]> provisional =
+                new java.util.IdentityHashMap<View, float[]>();
+        for (View blocker : blockers) {
+            float originalX = blocker.getScaleX();
+            float originalY = blocker.getScaleY();
+            String autoXKey = workspaceAutoShrinkScaleKey(blocker, true);
+            String autoYKey = workspaceAutoShrinkScaleKey(blocker, false);
+            float storedAutoX = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoXKey, 1f));
+            float storedAutoY = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoYKey, 1f));
+            float minimumFactor = Math.max(0.25f / storedAutoX, 0.25f / storedAutoY);
+            java.util.ArrayList<Float> factors = new java.util.ArrayList<Float>();
+            float[] steps = new float[]{0.8f, 0.6f, 0.4f, 0.25f, minimumFactor};
+            for (float factor : steps) {
+                if (factor < minimumFactor - 0.0001f || factor >= 0.999f) continue;
+                boolean duplicate = false;
+                for (Float existing : factors) {
+                    if (Math.abs(existing.floatValue() - factor) < 0.0001f) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) factors.add(factor);
+            }
+            java.util.Collections.sort(factors, java.util.Collections.reverseOrder());
+            float selectedFactor = 1f;
+            for (Float boxedFactor : factors) {
+                float factor = boxedFactor.floatValue();
+                blocker.setScaleX(originalX * factor);
+                blocker.setScaleY(originalY * factor);
+                selectedFactor = factor;
+                if (isContactShortcutPositionFree(page, ignore, snappedLeft, snappedTop,
+                        cellWidth, cellHeight, shortcutId)) {
+                    provisional.put(blocker, new float[]{originalX, originalY,
+                            storedAutoX, storedAutoY, selectedFactor});
+                    SharedPreferences.Editor edit = prefs.edit();
+                    for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
+                        View changed = entry.getKey();
+                        float[] values = entry.getValue();
+                        edit.putFloat(workspaceAutoShrinkScaleKey(changed, true),
+                                        clampWorkspaceAutoScale(values[2] * values[4]))
+                                .putFloat(workspaceAutoShrinkScaleKey(changed, false),
+                                        clampWorkspaceAutoScale(values[3] * values[4]));
+                    }
+                    edit.apply();
+                    return true;
+                }
+            }
+            if (selectedFactor < 1f) {
+                provisional.put(blocker, new float[]{originalX, originalY,
+                        storedAutoX, storedAutoY, selectedFactor});
+            }
+        }
+
+        // A different item still blocks the slot, or every widget reached its minimum.
+        // Roll back every tentative scale so failed placement changes nothing.
+        for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
+            entry.getKey().setScaleX(entry.getValue()[0]);
+            entry.getKey().setScaleY(entry.getValue()[1]);
+        }
+        return false;
+    }
+
+    /**
+     * After a page geometry change, revalidate each shortcut's saved slot and keep its
+     * column/row persisted in the same four-column grid. Widgets can shrink to preserve it.
+     */
+    private void repairContactShortcutGridPositions(FrameLayout page) {
+        if (page == null || prefs == null || pagesStrip == null
+                || page.getParent() != pagesStrip || page.getWidth() <= 0
+                || page.getHeight() <= 0) return;
+        java.util.ArrayList<View> shortcuts = new java.util.ArrayList<View>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (isWorkspaceContactShortcut(child)) shortcuts.add(child);
+        }
+        if (shortcuts.isEmpty()) return;
+
+        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
+        for (View tile : shortcuts) {
+            if (tile.getParent() != page
+                    || !(tile.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            String id = shortcutIdFromTile(tile);
+            if (id.isEmpty()) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
+            int[] slot = findContactShortcutGridPositionWithWidgetShrink(
+                    page, id, lp.leftMargin, lp.topMargin, tile);
+            if (slot == null) continue;
+
+            int col = Math.max(0, Math.min(3,
+                    Math.round(slot[0] / (float) Math.max(1, cellWidth))));
+            int row = homeGridRowFromTop(slot[1], rows, page.getHeight(), cellHeight);
+            lp.width = cellWidth;
+            lp.height = cellHeight;
+            lp.leftMargin = col * cellWidth;
+            lp.topMargin = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            lp.gravity = Gravity.TOP | Gravity.LEFT;
+            tile.setLayoutParams(lp);
+            prefs.edit()
+                    .putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, id), pageIndex)
+                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, id),
+                            col / (float) Math.max(1, 4 - 1))
+                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, id),
+                            row / (float) Math.max(1, rows - 1))
+                    .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, id), true)
+                    .apply();
+        }
     }
 
     private void applyShortcutIconSizeToWorkspace() {
@@ -7224,7 +7447,10 @@ public class MainActivity extends Activity {
             }
             page.post(() -> {
                 if (pagesStrip == null || page.getParent() != pagesStrip) return;
-                if (!homeIconResizeRepairPending) resolveAllWorkspaceOverlaps(page, null);
+                if (!homeIconResizeRepairPending) {
+                    repairContactShortcutGridPositions(page);
+                    resolveAllWorkspaceOverlaps(page, null);
+                }
                 ensureShortcutLabelsNotClipped();
                 refreshWorkspaceGrid();
             });
