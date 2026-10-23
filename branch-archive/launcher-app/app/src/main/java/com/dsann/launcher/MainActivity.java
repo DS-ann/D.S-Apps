@@ -4841,19 +4841,21 @@ public class MainActivity extends Activity {
                         }
                         closeHandoffSnapshot.setImageDrawable(null);
                         closeHandoffSnapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                        // Restore the live cell in the same UI traversal that removes the
+                        // opaque snapshot. Restoring it one frame earlier caused Android 6
+                        // to draw the live logo/label over the bitmap, producing the final flash.
+                        openingGroupCell.setAlpha(openingGroupCellAlpha);
+                        openingGroupCell.invalidate();
+                        finalHandoffParent.invalidate();
                     };
                     final Runnable finishCloseHandoff = () -> {
                         if (handoffFinished[0]) return;
                         handoffFinished[0] = true;
-                        // Keep the full-cell snapshot opaque while the restored live cell gets
-                        // a covered draw. Android 6 can flash when the two nearly-identical
-                        // surfaces are crossfaded during the last frame of the close morph.
-                        openingGroupCell.setAlpha(openingGroupCellAlpha);
                         if (Build.VERSION.SDK_INT <= 23
                                 && closeHandoffSnapshot.getParent() instanceof ViewGroup) {
                             closeHandoffSnapshot.animate().cancel();
                             closeHandoffSnapshot.setAlpha(1f);
-                            // Swap surfaces only after another traversal, avoiding the fade.
+                            // Keep only the bitmap visible until the atomic surface swap.
                             finalHandoffParent.postOnAnimation(removeCloseHandoffSnapshot);
                         } else {
                             removeCloseHandoffSnapshot.run();
@@ -7444,6 +7446,7 @@ public class MainActivity extends Activity {
 
     private void applyShortcutIconSizeToWorkspace() {
         if (pagesStrip == null) return;
+        homeIconResizeRepairPending = true;
         for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
@@ -7507,6 +7510,8 @@ public class MainActivity extends Activity {
         }
         ensureShortcutLabelsNotClipped();
         refreshWorkspaceGrid();
+        // Keep shortcut rows/columns intact unless a true visual collision requires recovery.
+        validateWorkspacePagesAfterIconResize("contact shortcut icon-size change");
     }
 
     private void rebuildContactShortcutViews() {
@@ -15295,6 +15300,9 @@ public class MainActivity extends Activity {
                 homeIconResizeRepairPending = false;
                 return;
             }
+
+            // Let the updated layout settle and detect collisions before changing widget
+            // sizes. The user must see recovery choices before a widget is shrunk or removed.
             final int[] remaining = {targetPages.size()};
             for (FrameLayout page : targetPages) {
                 page.post(() -> {
@@ -15302,31 +15310,130 @@ public class MainActivity extends Activity {
                         if (--remaining[0] == 0) homeIconResizeRepairPending = false;
                         return;
                     }
-                    boolean collisionBeforeRepair = hasWorkspaceVisualOverlaps(page);
-                    int collisionsBeforePage = resizeRepairCollisionCount;
                     snapAppGroupsToGridAfterIconResize(page);
-                    // Relocate conflicting workspace items before any automatic shrink.
-                    // This gives widgets and the clock first claim to their intended size.
-                    resolveAllWorkspaceOverlaps(page, null);
-                    repairResizeCollisionsOnPage(page);
-                    resolveAllWorkspaceOverlaps(page, null);
-                    repairResizeCollisionsOnPage(page);
-                    // Commit collision shrink into native widget bounds so providers reflow
-                    // their content instead of only scaling the entire widget container.
-                    commitAutoShrunkWidgetsToLayout(page);
-                    if (collisionBeforeRepair
-                            && resizeRepairCollisionCount == collisionsBeforePage) {
-                        resizeRepairCollisionCount++;
+                    if (--remaining[0] != 0) return;
+
+                    boolean collisionFound = false;
+                    for (FrameLayout candidate : targetPages) {
+                        if (candidate.getParent() == pagesStrip
+                                && hasWorkspaceVisualOverlaps(candidate)) {
+                            collisionFound = true;
+                            break;
+                        }
                     }
-                    if (--remaining[0] == 0) {
-                        homeIconResizeRepairPending = false;
-                        ensureShortcutLabelsNotClipped();
-                        refreshWorkspaceGrid();
-                        showIconResizeRecoveryPrompt(changeReason);
+                    if (collisionFound) {
+                        showResizeCollisionChoiceDialog(changeReason, targetPages);
+                    } else {
+                        runWorkspaceCollisionRepair(targetPages, changeReason);
                     }
                 });
             }
         });
+    }
+
+    private void showResizeCollisionChoiceDialog(String changeReason,
+            java.util.ArrayList<FrameLayout> targetPages) {
+        if (isFinishing()) {
+            homeIconResizeRepairPending = false;
+            return;
+        }
+        String message = "Changing " + changeReason
+                + " makes items on Home overlap or extend beyond the screen. "
+                + "Choose how to recover. The clock will remain visible.";
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Home layout collision")
+                .setMessage(message)
+                .setPositiveButton("Shrink / move", (dialog, which) ->
+                        runWorkspaceCollisionRepair(targetPages, changeReason))
+                .setNeutralButton("Remove widgets", (dialog, which) -> {
+                    removeOverlappingResizeWidgets(targetPages);
+                    runWorkspaceCollisionRepair(targetPages, changeReason);
+                })
+                .setNegativeButton("Not now", (dialog, which) -> {
+                    homeIconResizeRepairPending = false;
+                    ensureShortcutLabelsNotClipped();
+                    refreshWorkspaceGrid();
+                })
+                .setOnCancelListener(dialog -> {
+                    homeIconResizeRepairPending = false;
+                    ensureShortcutLabelsNotClipped();
+                    refreshWorkspaceGrid();
+                })
+                .show();
+    }
+
+    private void removeOverlappingResizeWidgets(
+            java.util.ArrayList<FrameLayout> targetPages) {
+        if (targetPages == null) return;
+        for (FrameLayout page : targetPages) {
+            if (page == null || page.getParent() != pagesStrip) continue;
+            java.util.ArrayList<View> widgetsToRemove = new java.util.ArrayList<View>();
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View candidate = page.getChildAt(i);
+                if (!(candidate.getTag() instanceof String)
+                        || !((String) candidate.getTag()).startsWith("launcher_widget:")
+                        || candidate.getVisibility() != View.VISIBLE) continue;
+                int[] candidateGeometry = itemGeometry(candidate);
+                if (candidateGeometry[2] <= 0 || candidateGeometry[3] <= 0) continue;
+                for (int j = 0; j < page.getChildCount(); j++) {
+                    View other = page.getChildAt(j);
+                    if (other == candidate || !isWorkspaceItem(other)
+                            || other.getVisibility() != View.VISIBLE) continue;
+                    int[] otherGeometry = itemGeometry(other);
+                    if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
+                    android.graphics.Rect candidateBounds =
+                            collisionRectForInteraction(candidate, candidateGeometry, other);
+                    android.graphics.Rect otherBounds =
+                            collisionRectForInteraction(other, otherGeometry, candidate);
+                    if (android.graphics.Rect.intersects(candidateBounds, otherBounds)) {
+                        widgetsToRemove.add(candidate);
+                        break;
+                    }
+                }
+            }
+            for (View widget : widgetsToRemove) {
+                if (widget.getParent() == page) removeResizeOverflowWidget(page, widget);
+            }
+        }
+    }
+
+    private void runWorkspaceCollisionRepair(
+            java.util.ArrayList<FrameLayout> targetPages, String changeReason) {
+        if (pagesStrip == null || targetPages == null || targetPages.isEmpty()) {
+            homeIconResizeRepairPending = false;
+            return;
+        }
+        final int[] remaining = {targetPages.size()};
+        for (FrameLayout page : targetPages) {
+            page.post(() -> {
+                if (pagesStrip == null || page.getParent() != pagesStrip) {
+                    if (--remaining[0] == 0) homeIconResizeRepairPending = false;
+                    return;
+                }
+                boolean collisionBeforeRepair = hasWorkspaceVisualOverlaps(page);
+                int collisionsBeforePage = resizeRepairCollisionCount;
+
+                // Move conflicts before shrinking wherever a legal placement exists.
+                resolveAllWorkspaceOverlaps(page, null);
+                repairResizeCollisionsOnPage(page);
+                resolveAllWorkspaceOverlaps(page, null);
+                repairResizeCollisionsOnPage(page);
+
+                // Commit automatic widget shrink into real AppWidgetHostView dimensions so
+                // provider content reflows rather than only scaling the outer container.
+                commitAutoShrunkWidgetsToLayout(page);
+                if (collisionBeforeRepair
+                        && resizeRepairCollisionCount == collisionsBeforePage) {
+                    resizeRepairCollisionCount++;
+                }
+                if (--remaining[0] == 0) {
+                    homeIconResizeRepairPending = false;
+                    ensureShortcutLabelsNotClipped();
+                    refreshWorkspaceGrid();
+                    showIconResizeRecoveryPrompt(changeReason);
+                }
+            });
+        }
     }
 
 
@@ -16621,11 +16728,17 @@ public class MainActivity extends Activity {
             int oldColumns = getHomeColumns();
             int iconSize = prefs.getInt(KEY_ICON_SIZE, 48);
             int newColumns = value + 3;
+            if (newColumns == oldColumns) return;
+            clearAutoShrunkHomeGridItems();
+            homeIconResizeRepairPending = true;
             remapHomeIconSlotsForColumnChange(oldColumns, newColumns, iconSize, iconSize);
             prefs.edit().putInt(KEY_COLUMNS, newColumns).apply();
             currentPage = Math.max(0, Math.min(1, currentPage));
             rebuildPages();
             renderHomePages(false);
+            rebuildContactShortcutViews();
+            ensureShortcutLabelsNotClipped();
+            validateWorkspacePagesAfterIconResize("home-column change");
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSliderRowOnStop(content, "Home icon size", 32, 74,
