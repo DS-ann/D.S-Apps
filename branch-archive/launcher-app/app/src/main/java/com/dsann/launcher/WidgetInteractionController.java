@@ -241,6 +241,54 @@ final class WidgetInteractionController {
         if (view.hasFocus()) view.clearFocus();
     }
 
+    /**
+     * Clamp a widget's stored layout rectangle to the measured workspace. This is used
+     * after restore (when the page may initially be unmeasured) and before move mode so an
+     * off-edge widget cannot strand its resize handles outside the touchable screen area.
+     */
+    private boolean clampWidgetGeometryToPage(FrameLayout page, FrameLayout container,
+            int widgetId, int fallbackPageIndex) {
+        if (page == null || container == null || container.getParent() != page
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+        ViewGroup.LayoutParams raw = container.getLayoutParams();
+        if (!(raw instanceof FrameLayout.LayoutParams)) return false;
+
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
+        int oldWidth = params.width > 0 ? params.width : container.getWidth();
+        int oldHeight = params.height > 0 ? params.height : container.getHeight();
+        if (oldWidth <= 0 || oldHeight <= 0) return false;
+
+        int availableWidth = Math.max(1,
+                page.getWidth() - page.getPaddingLeft() - page.getPaddingRight());
+        int availableHeight = Math.max(1,
+                page.getHeight() - page.getPaddingTop() - page.getPaddingBottom());
+        int width = Math.min(oldWidth, availableWidth);
+        int height = Math.min(oldHeight, availableHeight);
+        int maxLeft = Math.max(0, availableWidth - width);
+        int maxTop = Math.max(0, availableHeight - height);
+        int left = Math.max(0, Math.min(maxLeft, params.leftMargin));
+        int top = Math.max(0, Math.min(maxTop, params.topMargin));
+        boolean sizeChanged = width != oldWidth || height != oldHeight;
+        boolean changed = sizeChanged || left != params.leftMargin || top != params.topMargin;
+        if (!changed) return false;
+
+        params.leftMargin = left;
+        params.topMargin = top;
+        params.width = width;
+        params.height = height;
+        container.setLayoutParams(params);
+        if (sizeChanged) {
+            container.setPivotX(width * 0.5f);
+            container.setPivotY(height * 0.5f);
+            listener.updatePlacedWidgetSize(widgetId, container);
+        }
+        LinearLayout strip = listener.getPagesStrip();
+        int actualPageIndex = strip == null ? -1 : strip.indexOfChild(page);
+        listener.saveWidgetGeometry(widgetId,
+                actualPageIndex >= 0 ? actualPageIndex : Math.max(0, fallbackPageIndex), container);
+        return true;
+    }
+
     void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
                             int x, int y, int width, int height) {
         addWidgetContainer(page, widget, widgetId, pageIndex, x, y, width, height, true);
@@ -296,9 +344,22 @@ final class WidgetInteractionController {
             container.addView(handle, handleLp);
             resizeHandles[edge] = handle;
         }
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.max(1, width), Math.max(1, height), Gravity.TOP | Gravity.LEFT);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                Math.max(1, width), Math.max(1, height), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = x;
         lp.topMargin = y;
+        final boolean[] initialSizeConstrained = {false};
+        if (page.getWidth() > 0 && page.getHeight() > 0) {
+            int availableWidth = Math.max(1,
+                    page.getWidth() - page.getPaddingLeft() - page.getPaddingRight());
+            int availableHeight = Math.max(1,
+                    page.getHeight() - page.getPaddingTop() - page.getPaddingBottom());
+            int boundedWidth = Math.min(lp.width, availableWidth);
+            int boundedHeight = Math.min(lp.height, availableHeight);
+            initialSizeConstrained[0] = boundedWidth != lp.width || boundedHeight != lp.height;
+            lp.width = boundedWidth;
+            lp.height = boundedHeight;
+        }
         // Choose a free rectangle before the widget becomes visible. The post-layout
         // collision pass remains as a safety net, but initial placement must not flash
         // or persist on top of an app, another widget, shortcut, or clock.
@@ -433,17 +494,41 @@ final class WidgetInteractionController {
                 return;
             }
         }
+        if (page.getWidth() <= 0 || page.getHeight() <= 0) {
+            // Never render a saved off-screen rectangle for one frame while waiting for
+            // the workspace's final measured size.
+            container.setVisibility(View.INVISIBLE);
+        }
         page.addView(container, lp);
         container.bringToFront();
-        // First placement needs the same collision pass as a completed drag/resize.
-        // Post it so the page and widget have measured geometry before bounds are tested.
-        page.post(() -> {
-            // Restoration must not run the placement resolver: provider updates can
-            // temporarily change measured bounds and otherwise overwrite saved geometry.
-            if (!preserveGeometry && container.getParent() == page) {
-                listener.resolveWidgetCollisions(page, container);
+
+        // The two workspace pages can be unmeasured during widget restoration. Wait until
+        // their real dimensions are available, then repair both position and oversized
+        // layout bounds before showing the widget or exposing its resize handles.
+        final Runnable[] normalizeWidgetBounds = new Runnable[1];
+        normalizeWidgetBounds[0] = () -> {
+            if (container.getParent() != page) return;
+            if (page.getWidth() <= 0 || page.getHeight() <= 0) {
+                page.postDelayed(normalizeWidgetBounds[0], 16L);
+                return;
             }
-        });
+            boolean normalized = clampWidgetGeometryToPage(
+                    page, container, widgetId, pageIndex);
+            if (initialSizeConstrained[0]) {
+                listener.updatePlacedWidgetSize(widgetId, container);
+                listener.saveWidgetGeometry(widgetId, pageIndex, container);
+                initialSizeConstrained[0] = false;
+            } else if (normalized) {
+                initialSizeConstrained[0] = false;
+            }
+            if (container.getVisibility() != View.VISIBLE) {
+                container.setVisibility(View.VISIBLE);
+            }
+            // Restoration preserves its clamped rectangle; only new placement enters the
+            // collision resolver after final size and page geometry are known.
+            if (!preserveGeometry) listener.resolveWidgetCollisions(page, container);
+        };
+        page.post(normalizeWidgetBounds[0]);
 
         // A transparent interaction layer observes long presses across the full widget.
         // Ordinary touch events are forwarded to the AppWidgetHostView so its controls still work.
@@ -505,6 +590,16 @@ final class WidgetInteractionController {
         // not expose resize handles or run any wobble/bobbing animation.
         movePress[0] = () -> {
             if (menuShown[0] || dragging[0] || reparenting[0]) return;
+            FrameLayout activePage = container.getParent() instanceof FrameLayout
+                    ? (FrameLayout) container.getParent() : page;
+            if (clampWidgetGeometryToPage(
+                    activePage, container, widgetId, widgetPage[0])) {
+                // The clamp may move a partly off-screen widget back under the same finger.
+                int[] correctedLocation = new int[2];
+                container.getLocationOnScreen(correctedLocation);
+                fingerOffset[0] = down[0] - correctedLocation[0];
+                fingerOffset[1] = down[1] - correctedLocation[1];
+            }
             editMode[0] = 1;
             // Preserve the widget's actual collision-recovery scale in move-ready mode.
             // A 10% hint enlarged a widget that had just been auto-shrunk for a nearby

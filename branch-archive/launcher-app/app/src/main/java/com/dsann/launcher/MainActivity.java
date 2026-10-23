@@ -5702,6 +5702,12 @@ public class MainActivity extends Activity {
                     sourceCell.invalidate();
                 }
                 if (root != null) root.invalidate();
+
+                // Keep the transparent Dialog window alive until the transferred root overlay
+                // has completed its close morph. Dismissing it immediately after reparenting
+                // can clear the dialog surface one frame before the activity root presents its
+                // first overlay frame, creating a visible flash before the animation starts.
+                if (dialog.isShowing()) dialog.dismiss();
                 if (rootCloseTransition != null && rootCloseTransition.length > 0) {
                     rootCloseTransition[0] = false;
                 }
@@ -5724,7 +5730,9 @@ public class MainActivity extends Activity {
             rootCloseTransition[0] = true;
         }
         if (sourceCell != null) sourceCell.setAlpha(0f);
-        dialog.dismiss();
+        // Keep the transparent Dialog window attached during the root overlay's close
+        // animation. Its empty transparent content allows the launcher-root overlay to
+        // become visible without the one-frame surface gap caused by immediate dismissal.
         transition.start();
     }
 

@@ -57,15 +57,52 @@ final class LauncherUiUtils {
             view.setTranslationY(previousBase[1]);
             view.setScaleX(previousBase[2]);
             view.setScaleY(previousBase[3]);
+            if (previousBase.length > 4) view.setTranslationX(previousBase[4]);
         }
         float baseRotation = view.getRotation();
         float baseTranslationY = view.getTranslationY();
+        float baseTranslationX = view.getTranslationX();
         float baseScaleX = view.getScaleX();
         float baseScaleY = view.getScaleY();
+        float hintedScaleX = baseScaleX * 1.05f;
+        float hintedScaleY = baseScaleY * 1.05f;
+
+        // Keep the 5% move-ready enlargement inside the workspace. Near an edge,
+        // cap only the axis that has insufficient room and compensate its position.
+        android.view.ViewParent parent = view.getParent();
+        if (parent instanceof android.view.ViewGroup) {
+            android.view.ViewGroup bounds = (android.view.ViewGroup) parent;
+            int width = Math.max(1, view.getWidth());
+            int height = Math.max(1, view.getHeight());
+            if (bounds.getWidth() > 0) {
+                hintedScaleX = Math.min(hintedScaleX, bounds.getWidth() / (float) width);
+            }
+            if (bounds.getHeight() > 0) {
+                hintedScaleY = Math.min(hintedScaleY, bounds.getHeight() / (float) height);
+            }
+        }
+
         MOVE_HINT_BASES.put(view, new float[]{
-                baseRotation, baseTranslationY, baseScaleX, baseScaleY});
-        view.setScaleX(baseScaleX * 1.10f);
-        view.setScaleY(baseScaleY * 1.10f);
+                baseRotation, baseTranslationY, baseScaleX, baseScaleY, baseTranslationX});
+        view.setScaleX(hintedScaleX);
+        view.setScaleY(hintedScaleY);
+
+        if (parent instanceof android.view.ViewGroup
+                && view.getWidth() > 0 && view.getHeight() > 0) {
+            android.view.ViewGroup bounds = (android.view.ViewGroup) parent;
+            float left = view.getLeft() + baseTranslationX
+                    + view.getPivotX() * (1f - hintedScaleX);
+            float top = view.getTop() + baseTranslationY
+                    + view.getPivotY() * (1f - hintedScaleY);
+            float right = left + view.getWidth() * hintedScaleX;
+            float bottom = top + view.getHeight() * hintedScaleY;
+            float shiftX = left < 0f ? -left
+                    : right > bounds.getWidth() ? bounds.getWidth() - right : 0f;
+            float shiftY = top < 0f ? -top
+                    : bottom > bounds.getHeight() ? bounds.getHeight() - bottom : 0f;
+            view.setTranslationX(baseTranslationX + shiftX);
+            view.setTranslationY(baseTranslationY + shiftY);
+        }
     }
 
     /** Allows position-sensitive widgets (such as the clock) to dance without bobbing. */
@@ -112,6 +149,7 @@ final class LauncherUiUtils {
             view.setTranslationY(base[1]);
             view.setScaleX(base[2]);
             view.setScaleY(base[3]);
+            if (base.length > 4) view.setTranslationX(base[4]);
         } else {
             view.setRotation(0f);
             view.setTranslationY(0f);
