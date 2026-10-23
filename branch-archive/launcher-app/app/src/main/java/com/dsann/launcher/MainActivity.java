@@ -832,6 +832,15 @@ public class MainActivity extends Activity {
             // A fresh install or full uninstall invalidates only this package. PACKAGE_CHANGED
             // also covers component enable/disable, so preserve its cache for quick re-enable.
             if (packageAdded || packageRemoved) invalidatePackageArtwork(changedPackage, true);
+            if (packageRemoved && changedPackage != null
+                    && homePackages.remove(changedPackage)) {
+                prefs.edit().remove(KEY_ICON_X + changedPackage)
+                        .remove(KEY_ICON_Y + changedPackage)
+                        .remove(KEY_ICON_PAGE + changedPackage).apply();
+                persistHomeApps();
+                rebuildPages();
+                if (root != null) renderHomePages(false);
+            }
 
             // Debounce broadcasts so multi-component state changes cause only one PackageManager scan.
             scheduleAppDrawerRefresh();
@@ -1057,6 +1066,12 @@ public class MainActivity extends Activity {
                     @Override public void showActionDialog(String title, String[] icons, String[] labels,
                             android.content.DialogInterface.OnClickListener callback) {
                         MainActivity.this.showActionDialog(title, icons, labels, callback);
+                    }
+                    @Override public void showCompactActionCardNear(View anchor, String title,
+                            String[] icons, String[] labels,
+                            android.content.DialogInterface.OnClickListener callback) {
+                        MainActivity.this.showCompactContextActionCardNear(
+                                anchor, title, icons, labels, callback);
                     }
                     @Override public void setCurrentPage(int page) { currentPage = page; }
                     @Override public int getCurrentPage() { return currentPage; }
@@ -3104,20 +3119,9 @@ public class MainActivity extends Activity {
                 drawerApps.add(app);
             }
         }
-        boolean removedMissingApps = false;
-        // Avoid Collection.removeIf: it is not available on every Android 6 runtime.
-        for (int i = homePackages.size() - 1; i >= 0; i--) {
-            if (findApp(homePackages.get(i)) == null) {
-                homePackages.remove(i);
-                removedMissingApps = true;
-            }
-        }
-        if (removedMissingApps) {
-            persistHomeApps();
-            currentPage = Math.max(0, Math.min(1, currentPage));
-            rebuildPages();
-            if (root != null) renderHomePages(false);
-        }
+        // Keep saved home entries and position preferences stable if PackageManager
+        // temporarily omits launcher activities during an application update. A full
+        // uninstall is handled directly by packageChangesReceiver.
         if (drawerAdapter != null) {
             drawerAdapter.clearPackageCaches();
             drawerAdapter.seedLabelCache(preloadedAppLabels);
@@ -5043,7 +5047,7 @@ public class MainActivity extends Activity {
 
     private void showAppGroupOptions(String groupId) {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
-        showActionDialog(getAppGroupLabel(groupId),
+        showCompactContextActionCardNear(findAppGroupView(groupId), getAppGroupLabel(groupId),
                 new String[]{"+", "−", "✎", "↗", "×"},
                 new String[]{"Add apps", "Remove apps", "Rename group",
                         "Share group", "Delete group"}, (dialog, which) -> {
@@ -6897,10 +6901,8 @@ public class MainActivity extends Activity {
         }
         if (!foundShortcut) return;
         page.post(() -> {
-            if (page.getParent() == pagesStrip && !homeIconResizeRepairPending) {
-                repairContactShortcutGridPositions(page);
-                resolveAllWorkspaceOverlaps(page, null);
-            }
+            // Do not reassign saved shortcut slots or run widget auto-shrink because a page
+            // was remeasured during a package update. Explicit shortcut moves still repair.
             ensureShortcutLabelsNotClipped();
         });
     }
@@ -6991,7 +6993,7 @@ public class MainActivity extends Activity {
                     : homeGridRowTop(0, rows, page.getHeight(), cellH);
             // Keep the saved slot/row when possible. If a widget blocks that slot,
             // progressively shrink the blocker before considering another grid cell.
-            int[] resolved = findContactShortcutGridPositionWithWidgetShrink(
+            int[] resolved = findContactShortcutGridPosition(
                     page, shortcutId, preferredX, preferredY, null);
             if (resolved != null) {
                 chosenPage = page;
@@ -7275,7 +7277,7 @@ public class MainActivity extends Activity {
                         }
                         if (commit && targetPage.getWidth() > 0
                                 && targetPage.getHeight() > 0) {
-                            int[] safeShortcutSlot = findContactShortcutGridPositionWithWidgetShrink(
+                            int[] safeShortcutSlot = findContactShortcutGridPosition(
                                     targetPage, shortcutId, left, top, tile);
                             if (safeShortcutSlot != null) {
                                 left = safeShortcutSlot[0];
@@ -7570,7 +7572,7 @@ public class MainActivity extends Activity {
      * that block the preferred slot before considering another cell. If the whole grid is
      * occupied, test other cells with the same widget-shrink policy before giving up.
      */
-    private int[] findContactShortcutGridPositionWithWidgetShrink(
+    private int[] findContactShortcutGridPosition(
             FrameLayout page, String shortcutId, int preferredX, int preferredY, View ignore) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
         final int cellWidth = Math.max(1, page.getWidth() / 4);
@@ -7586,9 +7588,7 @@ public class MainActivity extends Activity {
                 page.getHeight(), cellHeight);
 
         if (isContactShortcutPositionFree(page, ignore, preferredLeft, preferredTop,
-                cellWidth, cellHeight, shortcutId)
-                || shrinkWidgetsForContactShortcutSlot(page, shortcutId, preferredLeft,
-                        preferredTop, cellWidth, cellHeight, ignore)) {
+                cellWidth, cellHeight, shortcutId)) {
             return new int[]{preferredLeft, preferredTop, cellWidth, cellHeight};
         }
 
@@ -7615,124 +7615,11 @@ public class MainActivity extends Activity {
         });
         for (int[] candidate : candidates) {
             if (isContactShortcutPositionFree(page, ignore, candidate[0], candidate[1],
-                    cellWidth, cellHeight, shortcutId)
-                    || shrinkWidgetsForContactShortcutSlot(page, shortcutId,
-                            candidate[0], candidate[1], cellWidth, cellHeight, ignore)) {
+                    cellWidth, cellHeight, shortcutId)) {
                 return new int[]{candidate[0], candidate[1], cellWidth, cellHeight};
             }
         }
         return null;
-    }
-
-    /**
-     * Shrinks only widgets which actually block the requested shortcut slot. Scale changes
-     * stay provisional until the slot is free, then persist as automatic shrink factors so
-     * normal redraws do not silently restore the old overlapping size.
-     */
-    private boolean shrinkWidgetsForContactShortcutSlot(FrameLayout page, String shortcutId,
-            int left, int top, int cellWidth, int cellHeight, View ignore) {
-        if (page == null || shortcutId == null || prefs == null
-                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
-        if (isContactShortcutPositionFree(page, ignore, left, top,
-                cellWidth, cellHeight, shortcutId)) return true;
-
-        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
-        int col = Math.max(0, Math.min(3,
-                Math.round(left / (float) Math.max(1, cellWidth))));
-        int row = homeGridRowFromTop(top, rows, page.getHeight(), cellHeight);
-        int snappedLeft = col * cellWidth;
-        int snappedTop = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
-        android.graphics.Rect protectedBounds = contactShortcutVisualRectAt(
-                shortcutId, snappedLeft, snappedTop, cellWidth, cellHeight);
-        protectedBounds.inset(-LauncherUiUtils.dp(this, 2), -LauncherUiUtils.dp(this, 2));
-
-        java.util.ArrayList<View> blockers = new java.util.ArrayList<View>();
-        for (int i = 0; i < page.getChildCount(); i++) {
-            View candidate = page.getChildAt(i);
-            if (candidate == ignore || candidate == workspaceGridOverlays[0]
-                    || candidate == workspaceGridOverlays[1]
-                    || candidate.getVisibility() != View.VISIBLE
-                    || !isWorkspaceItem(candidate)
-                    || !(candidate.getTag() instanceof String)
-                    || !((String) candidate.getTag()).startsWith("launcher_widget:")) continue;
-            int[] geometry = itemGeometry(candidate);
-            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
-            if (android.graphics.Rect.intersects(
-                    protectedBounds, collisionRect(candidate, geometry))) blockers.add(candidate);
-        }
-        if (blockers.isEmpty()) return false;
-        java.util.Collections.sort(blockers, (a, b) -> {
-            int[] ga = itemGeometry(a);
-            int[] gb = itemGeometry(b);
-            long targetX = (long) protectedBounds.left + protectedBounds.width() / 2;
-            long targetY = (long) protectedBounds.top + protectedBounds.height() / 2;
-            long da = Math.abs((long) ga[0] + ga[2] / 2 - targetX)
-                    + Math.abs((long) ga[1] + ga[3] / 2 - targetY);
-            long db = Math.abs((long) gb[0] + gb[2] / 2 - targetX)
-                    + Math.abs((long) gb[1] + gb[3] / 2 - targetY);
-            return Long.compare(da, db);
-        });
-
-        java.util.IdentityHashMap<View, float[]> provisional =
-                new java.util.IdentityHashMap<View, float[]>();
-        for (View blocker : blockers) {
-            float originalX = blocker.getScaleX();
-            float originalY = blocker.getScaleY();
-            String autoXKey = workspaceAutoShrinkScaleKey(blocker, true);
-            String autoYKey = workspaceAutoShrinkScaleKey(blocker, false);
-            float storedAutoX = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoXKey, 1f));
-            float storedAutoY = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoYKey, 1f));
-            float minimumFactor = Math.max(0.25f / storedAutoX, 0.25f / storedAutoY);
-            java.util.ArrayList<Float> factors = new java.util.ArrayList<Float>();
-            float[] steps = new float[]{0.8f, 0.6f, 0.4f, 0.25f, minimumFactor};
-            for (float factor : steps) {
-                if (factor < minimumFactor - 0.0001f || factor >= 0.999f) continue;
-                boolean duplicate = false;
-                for (Float existing : factors) {
-                    if (Math.abs(existing.floatValue() - factor) < 0.0001f) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (!duplicate) factors.add(factor);
-            }
-            java.util.Collections.sort(factors, java.util.Collections.reverseOrder());
-            float selectedFactor = 1f;
-            for (Float boxedFactor : factors) {
-                float factor = boxedFactor.floatValue();
-                blocker.setScaleX(originalX * factor);
-                blocker.setScaleY(originalY * factor);
-                selectedFactor = factor;
-                if (isContactShortcutPositionFree(page, ignore, snappedLeft, snappedTop,
-                        cellWidth, cellHeight, shortcutId)) {
-                    provisional.put(blocker, new float[]{originalX, originalY,
-                            storedAutoX, storedAutoY, selectedFactor});
-                    SharedPreferences.Editor edit = prefs.edit();
-                    for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
-                        View changed = entry.getKey();
-                        float[] values = entry.getValue();
-                        edit.putFloat(workspaceAutoShrinkScaleKey(changed, true),
-                                        clampWorkspaceAutoScale(values[2] * values[4]))
-                                .putFloat(workspaceAutoShrinkScaleKey(changed, false),
-                                        clampWorkspaceAutoScale(values[3] * values[4]));
-                    }
-                    edit.apply();
-                    return true;
-                }
-            }
-            if (selectedFactor < 1f) {
-                provisional.put(blocker, new float[]{originalX, originalY,
-                        storedAutoX, storedAutoY, selectedFactor});
-            }
-        }
-
-        // A different item still blocks the slot, or every widget reached its minimum.
-        // Roll back every tentative scale so failed placement changes nothing.
-        for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
-            entry.getKey().setScaleX(entry.getValue()[0]);
-            entry.getKey().setScaleY(entry.getValue()[1]);
-        }
-        return false;
     }
 
     /**
@@ -7761,7 +7648,7 @@ public class MainActivity extends Activity {
             String id = shortcutIdFromTile(tile);
             if (id.isEmpty()) continue;
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tile.getLayoutParams();
-            int[] slot = findContactShortcutGridPositionWithWidgetShrink(
+            int[] slot = findContactShortcutGridPosition(
                     page, id, lp.leftMargin, lp.topMargin, tile);
             if (slot == null) continue;
 
@@ -8913,7 +8800,7 @@ public class MainActivity extends Activity {
                         refreshAppGroupMoveModeHighlights();
                         longPressTriggered = true;
                         ResolveInfo app = findApp(packageName);
-                        if (app != null) showAppOptions(app, true);
+                        if (app != null) showAppOptions(app, true, view);
                     }
                 };
                 handler.postDelayed(iconArmDrag, 1000L);
@@ -10239,14 +10126,15 @@ public class MainActivity extends Activity {
     }
 
     private void showAppOptions(ResolveInfo app, boolean fromHome) {
+        showAppOptions(app, fromHome, null);
+    }
+
+    private void showAppOptions(ResolveInfo app, boolean fromHome, View anchor) {
         List<String> labels = new ArrayList<>();
         List<String> icons = new ArrayList<>();
         List<String> actions = new ArrayList<>();
         labels.add("App info"); icons.add("ⓘ"); actions.add("App info");
         labels.add("Uninstall"); icons.add("⌫"); actions.add("Uninstall");
-        int homeIndex = homePackages.indexOf(app.activityInfo.packageName);
-        if (fromHome && homeIndex > 0) { labels.add("Move earlier"); icons.add("↑"); actions.add("Move earlier"); }
-        if (fromHome && homeIndex >= 0 && homeIndex < homePackages.size() - 1) { labels.add("Move later"); icons.add("↓"); actions.add("Move later"); }
         if (fromHome) { labels.add("Remove from Home"); icons.add("−"); actions.add("Remove from Home"); }
         else { labels.add("Add to Home"); icons.add("+"); actions.add("Add to Home"); }
 
@@ -10262,19 +10150,10 @@ public class MainActivity extends Activity {
             } else if (action.equals("Uninstall")) {
                 try { startActivity(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + app.activityInfo.packageName))); }
                 catch (Exception e) { Toast.makeText(this, "Uninstall isn't available for this app", Toast.LENGTH_SHORT).show(); }
-            } else if (action.equals("Move earlier") || action.equals("Move later")) {
-                int from = homePackages.indexOf(app.activityInfo.packageName);
-                int to = from + (action.equals("Move earlier") ? -1 : 1);
-                if (from >= 0 && to >= 0 && to < homePackages.size()) {
-                    Collections.swap(homePackages, from, to);
-                    persistHomeApps();
-                    rebuildPages();
-                    currentPage = 0;
-                    renderHomePages(false);
-                }
             } else if (action.equals("Remove from Home")) {
                 homePackages.remove(app.activityInfo.packageName);
-                prefs.edit().remove(KEY_ICON_X + app.activityInfo.packageName).remove(KEY_ICON_Y + app.activityInfo.packageName).apply();
+                prefs.edit().remove(KEY_ICON_X + app.activityInfo.packageName)
+                        .remove(KEY_ICON_Y + app.activityInfo.packageName).apply();
                 currentPage = Math.max(0, Math.min(1, currentPage));
                 persistHomeApps(); rebuildPages(); renderHomePages(false);
             } else {
@@ -10282,25 +10161,83 @@ public class MainActivity extends Activity {
                 showHome();
             }
         };
-
-        // Home and app-drawer long-press use the same compact, transparent Studio card.
-        showCompactAppOptionsDialog(title, iconItems, labelItems, optionListener);
+        showCompactContextActionCardNear(anchor, title, iconItems, labelItems, optionListener);
     }
 
     private void showCompactAppOptionsDialog(String title, String[] icons, String[] labels,
             android.content.DialogInterface.OnClickListener listener) {
-        Dialog dialog = new Dialog(this);
-        LinearLayout panel = createStudioDialogPanel();
-        addStudioDialogHeader(panel, title, "Choose an action");
+        showCompactContextActionCardNear(null, title, icons, labels, listener);
+    }
+
+    private void showCompactContextActionCardNear(View anchor, String title, String[] icons,
+            String[] labels, android.content.DialogInterface.OnClickListener listener) {
+        if (labels == null || labels.length == 0) return;
+        final Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(LauncherUiUtils.dp(this, 7), LauncherUiUtils.dp(this, 7),
+                LauncherUiUtils.dp(this, 7), LauncherUiUtils.dp(this, 7));
+        panel.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.rgb(28, 33, 57), Color.rgb(10, 14, 27)},
+                LauncherUiUtils.dp(this, 16)));
+        panel.setClipToPadding(false);
+
+        TextView heading = LauncherUiUtils.text(this, title, 12.5f, Color.WHITE, true);
+        heading.setSingleLine(true);
+        heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        TextView subtitle = LauncherUiUtils.text(this, "Choose an action", 9f,
+                Color.rgb(190, 202, 226), false);
+        subtitle.setSingleLine(true);
+        subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
+        subtitleParams.topMargin = LauncherUiUtils.dp(this, 1);
+        panel.addView(subtitle, subtitleParams);
+
+        View accentLine = new View(this);
+        accentLine.setBackground(studioSolidRoundRect(homeStudioAccentColor, 1));
+        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, 1));
+        lineParams.topMargin = LauncherUiUtils.dp(this, 4);
+        lineParams.bottomMargin = LauncherUiUtils.dp(this, 4);
+        panel.addView(accentLine, lineParams);
+
         for (int i = 0; i < labels.length; i++) {
             final int index = i;
-            String icon = icons != null && i < icons.length ? icons[i] : "›";
-            LinearLayout row = createStudioDialogActionRow(icon, labels[i], v -> {
+            String glyphText = icons != null && i < icons.length ? icons[i] : "›";
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 3),
+                    LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 3));
+            row.setBackground(studioControlBackground());
+            View rail = new View(this);
+            rail.setBackground(studioSolidRoundRect(homeStudioAccentColor, 1.5f));
+            row.addView(rail, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 2), LauncherUiUtils.dp(this, 22)));
+            TextView glyph = LauncherUiUtils.text(this, glyphText, 13,
+                    homeStudioAccentColor, true);
+            glyph.setGravity(Gravity.CENTER);
+            glyph.setBackground(LauncherUiUtils.roundRect(this,
+                    new int[]{studioTint(homeStudioAccentColor, 55),
+                            studioTint(homeStudioAccentColor, 22)},
+                    LauncherUiUtils.dp(this, 7)));
+            LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 24), LauncherUiUtils.dp(this, 24));
+            glyphParams.leftMargin = LauncherUiUtils.dp(this, 4);
+            glyphParams.rightMargin = LauncherUiUtils.dp(this, 5);
+            row.addView(glyph, glyphParams);
+            TextView label = LauncherUiUtils.text(this, labels[i], 11.5f,
+                    Color.rgb(245, 247, 255), false);
+            label.setGravity(Gravity.CENTER_VERTICAL);
+            label.setMaxLines(2);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
+            row.setOnClickListener(v -> {
                 dialog.dismiss();
                 if (listener != null) listener.onClick(dialog, index);
             });
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = LauncherUiUtils.dp(this, 5);
+            if (i < labels.length - 1) rowParams.bottomMargin = LauncherUiUtils.dp(this, 3);
             panel.addView(row, rowParams);
         }
 
@@ -10313,26 +10250,54 @@ public class MainActivity extends Activity {
             android.view.WindowManager.LayoutParams attributes = window.getAttributes();
             attributes.dimAmount = 0f;
             window.setAttributes(attributes);
-            window.setSoftInputMode(
-                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+            window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         }
+
+        final int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        final int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        final int margin = LauncherUiUtils.dp(this, 8);
+        final int width = Math.max(1, Math.min(LauncherUiUtils.dp(this, 190),
+                screenWidth - margin * 2));
+        final int availableHeight = Math.max(1, screenHeight - margin * 2);
+        panel.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(availableHeight, View.MeasureSpec.AT_MOST));
+        final int cardHeight = Math.max(1, Math.min(availableHeight, panel.getMeasuredHeight()));
 
         dialog.show();
         window = dialog.getWindow();
         if (window != null) {
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int horizontalMargin = LauncherUiUtils.dp(this, 40);
-            int maxCardWidth = LauncherUiUtils.dp(this, 340);
-            int width = Math.min(maxCardWidth, Math.max(1, screenWidth - horizontalMargin));
-            window.setGravity(Gravity.CENTER);
             window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+            int x = Math.max(margin, (screenWidth - width) / 2);
+            int y = Math.max(margin, (screenHeight - cardHeight) / 2);
+            if (anchor != null && anchor.isShown()
+                    && anchor.getWidth() > 0 && anchor.getHeight() > 0) {
+                int[] position = new int[2];
+                anchor.getLocationOnScreen(position);
+                int gap = LauncherUiUtils.dp(this, 8);
+                int rightX = position[0] + anchor.getWidth() + gap;
+                int leftX = position[0] - width - gap;
+                if (rightX + width <= screenWidth - margin) {
+                    x = rightX;
+                } else if (leftX >= margin) {
+                    x = leftX;
+                } else {
+                    x = Math.max(margin, Math.min(screenWidth - width - margin,
+                            position[0] + (anchor.getWidth() - width) / 2));
+                }
+                y = position[1] + (anchor.getHeight() - cardHeight) / 2;
+                y = Math.max(margin, Math.min(screenHeight - cardHeight - margin, y));
+            }
+            android.view.WindowManager.LayoutParams attributes = window.getAttributes();
+            attributes.gravity = Gravity.TOP | Gravity.LEFT;
+            attributes.x = x;
+            attributes.y = y;
+            window.setAttributes(attributes);
         }
-
         panel.setAlpha(0f);
         panel.setScaleX(0.97f);
         panel.setScaleY(0.97f);
         panel.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                .setDuration(animationDuration(180L)).start();
+                .setDuration(animationDuration(150L)).start();
     }
 
     private void showActionDialog(String title, String[] icons, String[] labels,

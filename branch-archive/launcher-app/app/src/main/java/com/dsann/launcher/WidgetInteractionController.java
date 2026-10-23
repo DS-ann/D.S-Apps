@@ -30,6 +30,8 @@ final class WidgetInteractionController {
         void renderHomePages(boolean animate);
         void showActionDialog(String title, String[] icons, String[] labels,
                               DialogInterface.OnClickListener listener);
+        void showCompactActionCardNear(View anchor, String title, String[] icons,
+                String[] labels, DialogInterface.OnClickListener listener);
         void setCurrentPage(int page);
         int getCurrentPage();
         void showPage(int page, boolean animate);
@@ -262,19 +264,13 @@ final class WidgetInteractionController {
                 page.getWidth() - page.getPaddingLeft() - page.getPaddingRight());
         int availableHeight = Math.max(1,
                 page.getHeight() - page.getPaddingTop() - page.getPaddingBottom());
-        int width = Math.min(oldWidth, availableWidth);
-        int height = Math.min(oldHeight, availableHeight);
-        boolean sizeChanged = width != oldWidth || height != oldHeight;
-
+        // Keep the saved dimensions intact; only clamp position and stale transforms.
+        int width = oldWidth;
+        int height = oldHeight;
         float oldScaleX = container.getScaleX();
         float oldScaleY = container.getScaleY();
         float scaleX = Math.max(0.01f, Math.min(1f, oldScaleX));
         float scaleY = Math.max(0.01f, Math.min(1f, oldScaleY));
-        if (sizeChanged) {
-            // Re-centre the pivot on the bounded dimensions before checking visible bounds.
-            container.setPivotX(width * 0.5f);
-            container.setPivotY(height * 0.5f);
-        }
         float pivotX = container.getPivotX();
         float pivotY = container.getPivotY();
         float translationX = container.getTranslationX();
@@ -310,7 +306,7 @@ final class WidgetInteractionController {
                 || Math.abs(scaleY - oldScaleY) > 0.001f
                 || Math.abs(translationX - container.getTranslationX()) > 0.001f
                 || Math.abs(translationY - container.getTranslationY()) > 0.001f;
-        boolean changed = sizeChanged || left != params.leftMargin || top != params.topMargin
+        boolean changed = left != params.leftMargin || top != params.topMargin
                 || transformChanged;
         if (!changed) return false;
 
@@ -323,7 +319,6 @@ final class WidgetInteractionController {
         container.setTranslationX(translationX);
         container.setTranslationY(translationY);
         container.setLayoutParams(params);
-        if (sizeChanged) listener.updatePlacedWidgetSize(widgetId, container);
         LinearLayout strip = listener.getPagesStrip();
         int actualPageIndex = strip == null ? -1 : strip.indexOfChild(page);
         listener.saveWidgetGeometry(widgetId,
@@ -410,18 +405,6 @@ final class WidgetInteractionController {
                 Math.max(1, width), Math.max(1, height), Gravity.TOP | Gravity.LEFT);
         lp.leftMargin = x;
         lp.topMargin = y;
-        final boolean[] initialSizeConstrained = {false};
-        if (page.getWidth() > 0 && page.getHeight() > 0) {
-            int availableWidth = Math.max(1,
-                    page.getWidth() - page.getPaddingLeft() - page.getPaddingRight());
-            int availableHeight = Math.max(1,
-                    page.getHeight() - page.getPaddingTop() - page.getPaddingBottom());
-            int boundedWidth = Math.min(lp.width, availableWidth);
-            int boundedHeight = Math.min(lp.height, availableHeight);
-            initialSizeConstrained[0] = boundedWidth != lp.width || boundedHeight != lp.height;
-            lp.width = boundedWidth;
-            lp.height = boundedHeight;
-        }
         // Choose a free rectangle before the widget becomes visible. The post-layout
         // collision pass remains as a safety net, but initial placement must not flash
         // or persist on top of an app, another widget, shortcut, or clock.
@@ -565,8 +548,8 @@ final class WidgetInteractionController {
         container.bringToFront();
 
         // The two workspace pages can be unmeasured during widget restoration. Wait until
-        // their real dimensions are available, then repair both position and oversized
-        // layout bounds before showing the widget or exposing its resize handles.
+        // their real dimensions are available, then clamp position without mutating saved size
+        // before exposing the widget or its resize handles.
         final Runnable[] normalizeWidgetBounds = new Runnable[1];
         normalizeWidgetBounds[0] = () -> {
             if (container.getParent() != page) return;
@@ -574,15 +557,7 @@ final class WidgetInteractionController {
                 page.postDelayed(normalizeWidgetBounds[0], 16L);
                 return;
             }
-            boolean normalized = clampWidgetGeometryToPage(
-                    page, container, widgetId, pageIndex);
-            if (initialSizeConstrained[0]) {
-                listener.updatePlacedWidgetSize(widgetId, container);
-                listener.saveWidgetGeometry(widgetId, pageIndex, container);
-                initialSizeConstrained[0] = false;
-            } else if (normalized) {
-                initialSizeConstrained[0] = false;
-            }
+            clampWidgetGeometryToPage(page, container, widgetId, pageIndex);
             if (container.getVisibility() != View.VISIBLE) {
                 container.setVisibility(View.VISIBLE);
             }
@@ -680,7 +655,8 @@ final class WidgetInteractionController {
             clearEditChrome[0].run();
             String[] actions = {"Remove widget", "Resize widget"};
             String[] icons = {"×", "↘"};
-            listener.showActionDialog("Widget options", icons, actions, (dialog, which) -> {
+            listener.showCompactActionCardNear(container, "Widget options", icons, actions,
+                    (dialog, which) -> {
                 if (which == 0) {
                     reparenting[0] = true;
                     if (container.getParent() instanceof ViewGroup) ((ViewGroup) container.getParent()).removeView(container);
