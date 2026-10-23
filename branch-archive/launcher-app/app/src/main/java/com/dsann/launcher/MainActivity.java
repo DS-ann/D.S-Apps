@@ -4664,7 +4664,9 @@ public class MainActivity extends Activity {
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
         final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
         final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
-        final Runnable[] deferredMemberIconApply = new Runnable[1];
+        final boolean[] memberArtworkReady = {true};
+        final boolean[] transitionStartScheduled = {false};
+        final Runnable[] startTransitionWhenReady = new Runnable[1];
         final android.view.ViewOutlineProvider morphOutlineProvider =
                 new android.view.ViewOutlineProvider() {
             @Override public void getOutline(View view, android.graphics.Outline outline) {
@@ -4847,10 +4849,11 @@ public class MainActivity extends Activity {
                 Math.max(LauncherUiUtils.dp(this, 120), targetRowHeight * 2));
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
-        // PackageManager artwork and custom icon effects can be costly in large groups.
-        // Prepare artwork in parallel with dialog/window layout; apply it before animation
-        // when ready, or after the opening transition so icon updates cannot stall motion.
+        // Load all member artwork off the UI thread, then assign every drawable in one UI
+        // pass before animation starts. This prevents the folder from revealing icons in
+        // separate batches during or after its opening morph.
         if (!pendingMemberApps.isEmpty()) {
+            memberArtworkReady[0] = false;
             final ResolveInfo[] appsToLoad = pendingMemberApps.toArray(new ResolveInfo[0]);
             final ImageView[] iconTargets = pendingMemberIconViews.toArray(new ImageView[0]);
             Thread iconLoader = new Thread(() -> {
@@ -4863,36 +4866,13 @@ public class MainActivity extends Activity {
                     }
                 }
                 handler.post(() -> {
-                    if (!dialog.isShowing()) return;
-                    final int[] nextIconIndex = {0};
-                    final Runnable[] applyNextIconBatch = new Runnable[1];
-                    applyNextIconBatch[0] = () -> {
-                        if (!dialog.isShowing()) return;
-                        int end = Math.min(loaded.length, nextIconIndex[0] + 2);
-                        while (nextIconIndex[0] < end) {
-                            int iconIndex = nextIconIndex[0]++;
-                            ImageView target = iconTargets[iconIndex];
-                            if (target != null && target.getParent() != null) {
-                                target.setImageDrawable(loaded[iconIndex]);
-                            }
-                        }
-                        if (nextIconIndex[0] < loaded.length) {
-                            overlay.postOnAnimation(applyNextIconBatch[0]);
-                        }
-                    };
-                    Runnable applyLoadedIcons = () -> {
-                        nextIconIndex[0] = 0;
-                        // Spread texture uploads and invalidations over frames so a large
-                        // group cannot hitch when its member artwork becomes available.
-                        overlay.postOnAnimation(applyNextIconBatch[0]);
-                    };
-                    // If artwork finishes before the first animation frame, defer it too:
-                    // changing card children just before layer capture can reintroduce tap lag.
-                    if (morphProgress[0] < 1f) {
-                        deferredMemberIconApply[0] = applyLoadedIcons;
-                    } else {
-                        applyLoadedIcons.run();
+                    if (!dialog.isShowing() || isFinishing()) return;
+                    for (int i = 0; i < loaded.length; i++) {
+                        if (iconTargets[i] != null) iconTargets[i].setImageDrawable(loaded[i]);
                     }
+                    memberArtworkReady[0] = true;
+                    Runnable start = startTransitionWhenReady[0];
+                    if (start != null) start.run();
                 });
             }, "LauncherAppGroupIcons");
             iconLoader.setDaemon(true);
@@ -5126,7 +5106,7 @@ public class MainActivity extends Activity {
             panel.setScaleY(startScaleY);
             panel.setTranslationX(morphStartTranslation[0]);
             panel.setTranslationY(morphStartTranslation[1]);
-            panel.setAlpha(1f);
+            panel.setAlpha(0f);
             panel.setOutlineProvider(morphOutlineProvider);
             panel.setClipToOutline(true);
             panel.invalidateOutline();
@@ -5135,13 +5115,8 @@ public class MainActivity extends Activity {
             morphProgress[0] = 0f;
             dimLayer.setAlpha(0f);
 
-            // Hide the launcher cell while the single rounded card surface expands.
-            // Avoid per-tap bitmap rasterization and a second animated layer.
-            if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
-
-            // Keep the panel on a hardware layer, but don't force a synchronous raster
-            // of every inner icon immediately before animation starts; large groups stalled
-            // here despite artwork loading on a background thread.
+            // Keep the source icon visible and the panel hidden until member artwork and
+            // child layout are both ready for a single continuous transition.
             panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
             final long duration = animationDuration(240L);
@@ -5191,13 +5166,44 @@ public class MainActivity extends Activity {
                         snapshot.setVisibility(View.VISIBLE);
                     }
                     panel.invalidateOutline();
-                    Runnable deferredIcons = deferredMemberIconApply[0];
-                    deferredMemberIconApply[0] = null;
-                    if (deferredIcons != null) deferredIcons.run();
+                    // All member drawables were assigned before the transition started.
                 }
             });
             morphAnimator[0] = transition;
-            transition.start();        });
+            startTransitionWhenReady[0] = () -> {
+                if (!memberArtworkReady[0] || !dialog.isShowing() || closing[0]
+                        || transitionStartScheduled[0] || transition.isStarted()) return;
+                transitionStartScheduled[0] = true;
+                panel.post(() -> {
+                    if (!dialog.isShowing() || closing[0] || transition.isStarted()) {
+                        transitionStartScheduled[0] = false;
+                        return;
+                    }
+                    if (panel.getWidth() <= 0 || panel.getHeight() <= 0) {
+                        transitionStartScheduled[0] = false;
+                        overlay.postOnAnimation(startTransitionWhenReady[0]);
+                        return;
+                    }
+                    // Warm the card's static hardware layer after icons have been applied
+                    // and rows measured, before hiding the source icon or animating visibly.
+                    panel.setAlpha(1f);
+                    panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                    panel.buildLayer();
+                    panel.setAlpha(0f);
+                    overlay.postOnAnimation(() -> {
+                        if (!dialog.isShowing() || closing[0] || transition.isStarted()) {
+                            transitionStartScheduled[0] = false;
+                            return;
+                        }
+                        if (openingGroupCell != null) openingGroupCell.setAlpha(0f);
+                        panel.setAlpha(1f);
+                        transitionStartScheduled[0] = false;
+                        transition.start();
+                    });
+                });
+            };
+            startTransitionWhenReady[0].run();
+        });
     }
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
