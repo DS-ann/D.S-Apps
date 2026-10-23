@@ -12010,8 +12010,9 @@ public class MainActivity extends Activity {
     }
 
     private int homeGridIconTopAt(FrameLayout page, View item, int row, int rows, int cellHeight) {
-        int top = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
-        return isWorkspaceContactShortcut(item) ? top + LauncherUiUtils.dp(this, 14) : top;
+        // Grid item views now occupy the full measured cell. Shortcut artwork's 14dp
+        // inset is handled by the icon child, so collision and drag positions use cell origin.
+        return homeGridRowTop(row, rows, page.getHeight(), cellHeight);
     }
 
     private int[] homeGridIconSlot(FrameLayout page, View item, int cellHeight, int rows) {
