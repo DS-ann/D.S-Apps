@@ -4667,6 +4667,10 @@ public class MainActivity extends Activity {
         final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
         final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
         final boolean[] memberArtworkReady = {true};
+        final Drawable[][] loadedMemberDrawablesRef = new Drawable[1][];
+        final boolean[] groupTransitionFinished = {false};
+        final boolean[] groupContentRevealStarted = {false};
+        final Runnable[] revealGroupContents = new Runnable[1];
         final boolean[] transitionStartScheduled = {false};
         final Runnable[] startTransitionWhenReady = new Runnable[1];
         final android.view.ViewOutlineProvider morphOutlineProvider =
@@ -4723,7 +4727,7 @@ public class MainActivity extends Activity {
         panel.setPivotX(0f);
         panel.setPivotY(0f);
         panel.setOutlineProvider(morphOutlineProvider);
-        panel.setClipToOutline(true);
+        panel.setClipToOutline(false);
         // Keep the transformed panel cached from its first visible frame through close.
         // Releasing the layer after opening forces another allocation on older GPUs.
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -4759,6 +4763,10 @@ public class MainActivity extends Activity {
         // scrolling viewport and content so child icons/labels cannot paint over the line.
         scroll.setClipToPadding(true);
         scroll.setClipChildren(true);
+        // Hidden during the panel morph; this smaller layer fades in after the morph finishes.
+        // Deferring drawable binding prevents package-resource work invalidating its animation layer.
+        scroll.setTag("app_group_content_fade");
+        scroll.setAlpha(0f);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(true);
@@ -4851,13 +4859,36 @@ public class MainActivity extends Activity {
                 Math.max(LauncherUiUtils.dp(this, 120), targetRowHeight * 2));
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
-        // Load all member artwork off the UI thread, then assign every drawable in one UI
-        // pass before animation starts. This prevents the folder from revealing icons in
-        // separate batches during or after its opening morph.
+        revealGroupContents[0] = () -> {
+            if (!dialog.isShowing() || closing[0] || !groupTransitionFinished[0]
+                    || !memberArtworkReady[0] || groupContentRevealStarted[0]) return;
+            groupContentRevealStarted[0] = true;
+            Drawable[] loaded = loadedMemberDrawablesRef[0];
+            if (loaded != null) {
+                int count = Math.min(loaded.length, pendingMemberIconViews.size());
+                for (int i = 0; i < count; i++) {
+                    ImageView iconView = pendingMemberIconViews.get(i);
+                    if (iconView != null) iconView.setImageDrawable(loaded[i]);
+                }
+            }
+            // Release the full-card texture only after motion stops. The scroll viewport's
+            // smaller hardware layer can now fade independently without rebuilding the card.
+            panel.setLayerType(View.LAYER_TYPE_NONE, null);
+            scroll.setAlpha(0f);
+            scroll.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            scroll.buildLayer();
+            scroll.animate().cancel();
+            scroll.animate().alpha(1f)
+                    .setDuration(animationDuration(165L))
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.15f))
+                    .start();
+        };
+
+        // Load member artwork off the UI thread. The main panel animation starts as soon
+        // as layout is ready; the completed drawables are held until the morph has finished.
         if (!pendingMemberApps.isEmpty()) {
             memberArtworkReady[0] = false;
             final ResolveInfo[] appsToLoad = pendingMemberApps.toArray(new ResolveInfo[0]);
-            final ImageView[] iconTargets = pendingMemberIconViews.toArray(new ImageView[0]);
             Thread iconLoader = new Thread(() -> {
                 final Drawable[] loaded = new Drawable[appsToLoad.length];
                 for (int i = 0; i < appsToLoad.length; i++) {
@@ -4869,12 +4900,10 @@ public class MainActivity extends Activity {
                 }
                 handler.post(() -> {
                     if (!dialog.isShowing() || isFinishing()) return;
-                    for (int i = 0; i < loaded.length; i++) {
-                        if (iconTargets[i] != null) iconTargets[i].setImageDrawable(loaded[i]);
-                    }
+                    loadedMemberDrawablesRef[0] = loaded;
                     memberArtworkReady[0] = true;
-                    Runnable start = startTransitionWhenReady[0];
-                    if (start != null) start.run();
+                    Runnable reveal = revealGroupContents[0];
+                    if (reveal != null) reveal.run();
                 });
             }, "LauncherAppGroupIcons");
             iconLoader.setDaemon(true);
@@ -4980,7 +5009,7 @@ public class MainActivity extends Activity {
             // The icon uses an 8% corner radius. Scale the panel's drawable radius by
             // the same ratio for every safe-area size, so opening/closing keeps one shape.
             panelBackground.setCornerRadius(Math.min(lp.width, lp.height) * 0.08f);
-            panel.invalidateOutline();
+            /* no dynamic outline clipping */
             ViewGroup.LayoutParams safeScrollParams = scroll.getLayoutParams();
             safeScrollParams.height = Math.max(LauncherUiUtils.dp(this, 24),
                     Math.min(scrollHeight,
@@ -5110,8 +5139,8 @@ public class MainActivity extends Activity {
             panel.setTranslationY(morphStartTranslation[1]);
             panel.setAlpha(0f);
             panel.setOutlineProvider(morphOutlineProvider);
-            panel.setClipToOutline(true);
-            panel.invalidateOutline();
+            panel.setClipToOutline(false);
+            /* no dynamic outline clipping */
             iconScale[0] = startScaleX;
             iconScale[1] = startScaleY;
             morphProgress[0] = 0f;
@@ -5156,6 +5185,7 @@ public class MainActivity extends Activity {
                 @Override public void onAnimationEnd(android.animation.Animator animation) {
                     if (closing[0] || !dialog.isShowing()) return;
                     morphProgress[0] = 1f;
+                    groupTransitionFinished[0] = true;
                     panel.setScaleX(1f);
                     panel.setScaleY(1f);
                     panel.setTranslationX(0f);
@@ -5167,13 +5197,14 @@ public class MainActivity extends Activity {
                         snapshot.setAlpha(0f);
                         snapshot.setVisibility(View.VISIBLE);
                     }
-                    panel.invalidateOutline();
-                    // All member drawables were assigned before the transition started.
+                    /* no dynamic outline clipping */
+                    Runnable reveal = revealGroupContents[0];
+                    if (reveal != null) reveal.run();
                 }
             });
             morphAnimator[0] = transition;
             startTransitionWhenReady[0] = () -> {
-                if (!memberArtworkReady[0] || !dialog.isShowing() || closing[0]
+                if (!dialog.isShowing() || closing[0]
                         || transitionStartScheduled[0] || transition.isStarted()) return;
                 transitionStartScheduled[0] = true;
                 panel.post(() -> {
@@ -5216,6 +5247,8 @@ public class MainActivity extends Activity {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
+        View fadingContent = panel.findViewWithTag("app_group_content_fade");
+        if (fadingContent != null) fadingContent.animate().cancel();
         if (morphAnimator != null && morphAnimator.length > 0 && morphAnimator[0] != null) {
             morphAnimator[0].cancel();
         }
