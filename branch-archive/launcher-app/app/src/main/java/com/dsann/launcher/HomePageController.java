@@ -240,12 +240,17 @@ final class HomePageController {
                             }
                         }
                     }
-                    if (bestCol < 0) continue; // Never overlap another app or extend below the dock.
-                    col = bestCol; row = bestRow;
-                    savedX = col / (float) Math.max(1, columns - 1);
-                    savedY = row / (float) Math.max(1, rows - 1);
-                    prefs.edit().putFloat(iconXKey + packageName, savedX)
-                            .putFloat(iconYKey + packageName, savedY).apply();
+                    if (bestCol >= 0) {
+                        col = bestCol;
+                        row = bestRow;
+                        savedX = col / (float) Math.max(1, columns - 1);
+                        savedY = row / (float) Math.max(1, rows - 1);
+                        prefs.edit().putFloat(iconXKey + packageName, savedX)
+                                .putFloat(iconYKey + packageName, savedY).apply();
+                    }
+                    // If every slot is occupied, keep the app attached at its saved slot.
+                    // Size-change validation can then report/repair its real collision rather
+                    // than silently omitting this app from the rendered page.
                 }
                 occupiedSlots[row][col] = true;
                 lp.leftMargin = col * cellWidth;

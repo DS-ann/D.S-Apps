@@ -5298,6 +5298,8 @@ public class MainActivity extends Activity {
                     clearAppGroupMemberMoveMode();
                 }
                 if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
+                if (rootCloseCleanupRef[0] != null) rootCloseCleanupRef[0].run();
+                rootCloseTransition[0] = false;
                 return;
             }
 
@@ -6083,29 +6085,22 @@ public class MainActivity extends Activity {
                 panel.setScaleY(targetScaleY);
                 panel.setTranslationX(offsetX);
                 panel.setTranslationY(offsetY);
-                // Hide both temporary animation layers at the terminal frame. The live home
-                // icon is restored by onDismiss after the Dialog window has detached, avoiding
-                // a one-frame double image at the end of the reverse morph.
-                panel.setAlpha(0f);
+                // Keep the matching terminal icon frame visible until the Dialog detaches.
+                // Hiding both temporary layers first left one transparent Dialog frame while
+                // the real home cell was still hidden, causing the end-of-close flicker.
+                panel.setAlpha(1f);
                 if (snapshot != null) {
                     snapshot.setScaleX(1f);
                     snapshot.setScaleY(1f);
                     snapshot.setTranslationX(0f);
                     snapshot.setTranslationY(0f);
-                    snapshot.setAlpha(0f);
+                    snapshot.setAlpha(1f);
                 }
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
 
                 if (dialog.isShowing()) dialog.dismiss();
-                if (rootCloseTransition != null && rootCloseTransition.length > 0) {
-                    rootCloseTransition[0] = false;
-                }
-                if (rootCloseCleanupRef != null && rootCloseCleanupRef.length > 0
-                        && rootCloseCleanupRef[0] != null) {
-                    rootCloseCleanupRef[0].run();
-                }
             }
         });
         morphAnimator[0] = transition;
@@ -6941,6 +6936,8 @@ public class MainActivity extends Activity {
                 shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), false);
         int lastSavedLeft = -1;
         int lastSavedTop = -1;
+        final boolean deferShortcutCollisionRecovery = homeIconResizeRepairPending;
+        boolean provisionalCollisionFallback = false;
 
         if (savedX >= 0f && savedY >= 0f && desiredPage < pagesStrip.getChildCount()) {
             View savedPageView = pagesStrip.getChildAt(desiredPage);
@@ -6977,8 +6974,9 @@ public class MainActivity extends Activity {
                 int savedTop = homeGridRowTop(savedRow, rows, pageViewport.getHeight(), cellH);
                 lastSavedLeft = savedLeft;
                 lastSavedTop = savedTop;
-                if (isContactShortcutPositionFree(savedPage, null, savedLeft, savedTop,
-                        cellW, cellH, shortcutId)) {
+                if (deferShortcutCollisionRecovery
+                        || isContactShortcutPositionFree(savedPage, null, savedLeft, savedTop,
+                                cellW, cellH, shortcutId)) {
                     chosenPage = savedPage;
                     chosenLeft = savedLeft;
                     chosenTop = savedTop;
@@ -6992,20 +6990,36 @@ public class MainActivity extends Activity {
             int preferredX = lastSavedLeft >= 0 ? lastSavedLeft : 0;
             int preferredY = lastSavedTop >= 0 ? lastSavedTop
                     : homeGridRowTop(0, rows, page.getHeight(), cellH);
-            // Keep the saved slot/row when possible. If a widget blocks that slot,
-            // progressively shrink the blocker before considering another grid cell.
-            int[] resolved = findContactShortcutGridPosition(
-                    page, shortcutId, preferredX, preferredY, null);
+            // During a size change, leave recovery to the existing user-facing prompt.
+            // In normal rendering, prefer a free slot, but always render the shortcut view
+            // even when both pages are crowded rather than silently dropping it.
+            int[] resolved = deferShortcutCollisionRecovery ? null
+                    : findContactShortcutGridPosition(page, shortcutId, preferredX, preferredY, null);
             if (resolved != null) {
                 chosenPage = page;
                 chosenLeft = resolved[0];
                 chosenTop = resolved[1];
+            } else {
+                int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageViewport.getWidth();
+                int actualPageHeight = page.getHeight() > 0 ? page.getHeight() : pageViewport.getHeight();
+                int actualCellWidth = Math.max(1, actualPageWidth / columns);
+                int actualCellHeight = LauncherUiUtils.dp(this,
+                        homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+                int actualRows = homeGridRowsForHeight(actualPageHeight, actualCellHeight);
+                int fallbackColumn = Math.max(0, Math.min(columns - 1,
+                        Math.round(preferredX / (float) Math.max(1, actualCellWidth))));
+                int fallbackRow = homeGridRowFromTop(preferredY, actualRows,
+                        actualPageHeight, actualCellHeight);
+                chosenPage = page;
+                chosenLeft = fallbackColumn * actualCellWidth;
+                chosenTop = homeGridRowTop(fallbackRow, actualRows,
+                        actualPageHeight, actualCellHeight);
+                provisionalCollisionFallback = true;
             }
         }
 
-        // Never render a shortcut on top of a widget just because the old saved slot
-        // is blocked and the page has no currently available placement.
-        if (chosenPage == null || pagesStrip.indexOfChild(chosenPage) != desiredPage) return;
+        // If no unused slot exists, keep the shortcut visible at its previous/default slot.
+        // The resize validator will surface any real collision instead of hiding this item.
 
         int chosenCol = Math.max(0, Math.min(columns - 1,
                 Math.round(chosenLeft / (float) cellW)));
@@ -7016,11 +7030,13 @@ public class MainActivity extends Activity {
         ensureShortcutPageLayoutWatcher(chosenPage);
         float normalizedX = chosenCol / (float) Math.max(1, columns - 1);
         float normalizedY = chosenRow / (float) Math.max(1, rows - 1);
-        prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), desiredPage)
-                .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), normalizedX)
-                .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), normalizedY)
-                .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
-                .apply();
+        if (!deferShortcutCollisionRecovery && !provisionalCollisionFallback) {
+            prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), desiredPage)
+                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_X, shortcutId), normalizedX)
+                    .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, shortcutId), normalizedY)
+                    .putBoolean(shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), true)
+                    .apply();
+        }
 
         FrameLayout tile = new FrameLayout(this);
         tile.setTag("launcher_contact_shortcut");
