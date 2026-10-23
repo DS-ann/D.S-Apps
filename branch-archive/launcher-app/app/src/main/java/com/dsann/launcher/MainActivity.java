@@ -4906,7 +4906,6 @@ public class MainActivity extends Activity {
         TextView confirm = createStudioDialogButton(removeMode ? "Remove selected" : "Add selected", true);
         confirm.setEnabled(false);
         confirm.setAlpha(0.45f);
-        refreshSelection.run();
 
         for (int i = 0; i < choices.size(); i++) {
             final int index = i;
