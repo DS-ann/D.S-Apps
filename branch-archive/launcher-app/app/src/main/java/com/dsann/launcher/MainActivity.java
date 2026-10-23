@@ -5111,25 +5111,17 @@ public class MainActivity extends Activity {
         overlay.addView(panel, panelParams);
         panel.bringToFront();
 
+        // The real home icon remains hidden until Dialog.onDismiss restores it.
+        // This mirrors opening's icon-to-card handoff in exact reverse and prevents
+        // the launcher icon from appearing underneath the final shrinking card frame.
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
-                morphProgress, morphSnapshotRef, morphAnimator,
-                () -> {
-                    if (isCurrentAppGroupSession(sessionId, dialog) && openingGroupCell != null) {
-                        openingGroupCell.setAlpha(openingGroupCellAlpha);
-                    }
-                }));
+                morphProgress, morphSnapshotRef, morphAnimator));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
-                        morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
-                        () -> {
-                            if (isCurrentAppGroupSession(sessionId, dialog)
-                                    && openingGroupCell != null) {
-                                openingGroupCell.setAlpha(openingGroupCellAlpha);
-                            }
-                        });
+                        morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -5541,8 +5533,7 @@ public class MainActivity extends Activity {
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
             boolean[] closing, float[] iconScale, float[] startTranslation,
             float[] morphProgress, android.widget.ImageView[] snapshotRef,
-            android.animation.ValueAnimator[] morphAnimator,
-            Runnable beforeDismiss) {
+            android.animation.ValueAnimator[] morphAnimator) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -5656,16 +5647,8 @@ public class MainActivity extends Activity {
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
-                // Restore the source icon before the popup disappears to avoid a blank frame.
-                if (beforeDismiss != null) {
-                    try {
-                        beforeDismiss.run();
-                    } catch (RuntimeException callbackError) {
-                        android.util.Log.w("D.S Launcher",
-                                "Unable to restore the app-group icon before dismissal",
-                                callbackError);
-                    }
-                }
+                // Keep the real launcher icon hidden for this final popup frame.
+                // Dialog.onDismiss restores it immediately after the popup window is dismissed.
                 if (dialog.isShowing()) dialog.dismiss();
             }
         });
