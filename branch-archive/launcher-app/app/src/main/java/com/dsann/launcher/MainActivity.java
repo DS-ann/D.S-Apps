@@ -7056,11 +7056,12 @@ public class MainActivity extends Activity {
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                     setWorkspaceGridVisible(false, null);
                     refreshWorkspaceGrid();
-                    if (commit && targetPage.getParent() == pagesStrip) {
+                    if (commit && tile.getParent() instanceof FrameLayout
+                            && ((FrameLayout) tile.getParent()).getParent() == pagesStrip) {
                         // Repair the committed layout after the destination tile is attached
                         // and measured, so rounded saved coordinates can never leave two
                         // shortcuts occupying the same logical grid cell.
-                        final FrameLayout shortcutPageToRepair = targetPage;
+                        final FrameLayout shortcutPageToRepair = (FrameLayout) tile.getParent();
                         shortcutPageToRepair.post(() -> {
                             if (shortcutPageToRepair.getParent() == pagesStrip) {
                                 repairContactShortcutGridPositions(shortcutPageToRepair);
