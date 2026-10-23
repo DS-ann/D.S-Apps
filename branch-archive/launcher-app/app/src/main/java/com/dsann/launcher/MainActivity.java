@@ -16115,7 +16115,7 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
-        addSliderRowWithHint(content, "Animation speed", 20, 300,
+        addSliderRowWithHint(content, "Animation speed", 20, 150,
                 LauncherMotion.speedPercent(this), "%",
                 "Applies to timed launcher animations. Left = slower; 100% = normal; right = faster.",
                 value -> prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply());

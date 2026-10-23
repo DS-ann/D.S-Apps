@@ -15,7 +15,7 @@ final class LauncherMotion {
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
     private static final int DEFAULT_SPEED_PERCENT = 100;
     private static final int MIN_SPEED_PERCENT = 20;
-    private static final int MAX_SPEED_PERCENT = 300;
+    private static final int MAX_SPEED_PERCENT = 150;
 
     private LauncherMotion() {}
 
