@@ -4692,9 +4692,10 @@ public class MainActivity extends Activity {
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
         final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
         final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
+        final ArrayList<View> pendingMemberItemViews = new ArrayList<>();
+        final boolean[] memberInteractionsEnabled = {false};
         final boolean[] memberArtworkReady = {true};
         final Drawable[][] loadedMemberDrawablesRef = new Drawable[1][];
-        final boolean[] groupTransitionFinished = {false};
         final boolean[] groupContentRevealStarted = {false};
         final Runnable[] revealGroupContents = new Runnable[1];
         final boolean[] transitionStartScheduled = {false};
@@ -4774,9 +4775,13 @@ public class MainActivity extends Activity {
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
+        title.setAlpha(0f);
+        title.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         View groupDivider = new View(this);
+        groupDivider.setAlpha(0f);
+        groupDivider.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         groupDivider.setBackgroundColor(Color.argb(170, 255, 255, 255));
         panel.addView(groupDivider, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, LauncherUiUtils.dp(this, 1)));
@@ -4793,6 +4798,7 @@ public class MainActivity extends Activity {
         // Deferring drawable binding prevents package-resource work invalidating its animation layer.
         scroll.setTag("app_group_content_fade");
         scroll.setAlpha(0f);
+        scroll.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(true);
@@ -4823,6 +4829,8 @@ public class MainActivity extends Activity {
             // transforms at identity so every icon is not doing a second scale animation.
             item.setScaleX(1f);
             item.setScaleY(1f);
+            item.setEnabled(false);
+            pendingMemberItemViews.add(item);
             ImageView icon = new ImageView(this);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             // Artwork is loaded off the UI thread so the opening motion starts immediately.
@@ -4886,7 +4894,7 @@ public class MainActivity extends Activity {
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
         revealGroupContents[0] = () -> {
-            if (!dialog.isShowing() || closing[0] || !groupTransitionFinished[0]
+            if (!dialog.isShowing() || closing[0]
                     || !memberArtworkReady[0] || groupContentRevealStarted[0]) return;
             groupContentRevealStarted[0] = true;
             Drawable[] loaded = loadedMemberDrawablesRef[0];
@@ -4899,15 +4907,8 @@ public class MainActivity extends Activity {
             }
             // Release the full-card texture only after motion stops. The scroll viewport's
             // smaller hardware layer can now fade independently without rebuilding the card.
-            panel.setLayerType(View.LAYER_TYPE_NONE, null);
-            scroll.setAlpha(0f);
-            scroll.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            // Opening progress owns the grid fade; artwork binding must not start a second animation.
             scroll.buildLayer();
-            scroll.animate().cancel();
-            scroll.animate().alpha(1f)
-                    .setDuration(animationDuration(165L))
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.15f))
-                    .start();
         };
 
         // Load member artwork off the UI thread. The main panel animation starts as soon
@@ -5139,6 +5140,33 @@ public class MainActivity extends Activity {
             lp.topMargin = panelBounds.top;
             panel.setLayoutParams(lp);
 
+            if (openingGroupIcon != null && iconW > 0 && iconH > 0) {
+                try {
+                    android.graphics.Bitmap previewBitmap = android.graphics.Bitmap.createBitmap(
+                            iconW, iconH, android.graphics.Bitmap.Config.ARGB_8888);
+                    openingGroupIcon.draw(new android.graphics.Canvas(previewBitmap));
+                    android.widget.ImageView preview = new android.widget.ImageView(this);
+                    preview.setImageBitmap(previewBitmap);
+                    preview.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+                    preview.setFocusable(false);
+                    preview.setClickable(false);
+                    preview.setEnabled(false);
+                    preview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                    preview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                    FrameLayout.LayoutParams previewParams = new FrameLayout.LayoutParams(
+                            iconW, iconH, Gravity.TOP | Gravity.LEFT);
+                    previewParams.leftMargin = iconLeft;
+                    previewParams.topMargin = iconTop;
+                    overlay.addView(preview, previewParams);
+                    preview.bringToFront();
+                    morphSnapshotRef[0] = preview;
+                    iconScale[2] = 1f;
+                    iconScale[3] = 1f;
+                } catch (RuntimeException ignored) {
+                    morphSnapshotRef[0] = null;
+                }
+            }
+
             float pivotX = Math.max(0f, Math.min(lp.width, iconX - panelBounds.left));
             float pivotY = Math.max(0f, Math.min(lp.height, iconY - panelBounds.top));
             panel.setPivotX(pivotX);
@@ -5193,35 +5221,45 @@ public class MainActivity extends Activity {
                 panel.setTranslationX(tx);
                 panel.setTranslationY(ty);
 
-                // Transform the cached panel and its static content together. Changing
-                // child alpha on each frame invalidated the hardware layer and caused
-                // the popup content to appear in visible steps.
+                // Mini-icons fade out by the midpoint; title and grid fade in over the second half.
+                float contentAlpha = Math.max(0f, Math.min(1f, (progress - 0.5f) * 2f));
+                title.setAlpha(contentAlpha);
+                groupDivider.setAlpha(contentAlpha);
+                scroll.setAlpha(contentAlpha);
                 android.widget.ImageView snapshot = morphSnapshotRef[0];
                 if (snapshot != null) {
-                    snapshot.setScaleX(1f + (iconScale[2] - 1f) * progress);
-                    snapshot.setScaleY(1f + (iconScale[3] - 1f) * progress);
-                    snapshot.setTranslationX(-morphStartTranslation[0] * progress);
-                    snapshot.setTranslationY(-morphStartTranslation[1] * progress);
-                    snapshot.setAlpha(1f - progress);
-                    
+                    snapshot.setScaleX(1f);
+                    snapshot.setScaleY(1f);
+                    snapshot.setTranslationX(0f);
+                    snapshot.setTranslationY(0f);
+                    snapshot.setAlpha(1f - Math.min(1f, progress * 2f));
+                    snapshot.setVisibility(progress >= 0.5f ? View.GONE : View.VISIBLE);
                 }
-                dimLayer.setAlpha(0.36f * progress);
+                if (!memberInteractionsEnabled[0] && progress >= 0.9f) {
+                    memberInteractionsEnabled[0] = true;
+                    for (View memberItem : pendingMemberItemViews) memberItem.setEnabled(true);
+                }
+                // The area around the app-group card remains fully transparent.
+                dimLayer.setAlpha(0f);
             });
             transition.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator animation) {
                     if (closing[0] || !dialog.isShowing()) return;
                     morphProgress[0] = 1f;
-                    groupTransitionFinished[0] = true;
                     panel.setScaleX(1f);
                     panel.setScaleY(1f);
                     panel.setTranslationX(0f);
                     panel.setTranslationY(0f);
-                    dimLayer.setAlpha(0.36f);
+                    title.setAlpha(1f);
+                    groupDivider.setAlpha(1f);
+                    scroll.setAlpha(1f);
+                    dimLayer.setAlpha(0f);
+                    for (View memberItem : pendingMemberItemViews) memberItem.setEnabled(true);
+                    memberInteractionsEnabled[0] = true;
                     android.widget.ImageView snapshot = morphSnapshotRef[0];
                     if (snapshot != null) {
-                        // Keep the icon texture cached for the reverse morph.
                         snapshot.setAlpha(0f);
-                        snapshot.setVisibility(View.VISIBLE);
+                        snapshot.setVisibility(View.GONE);
                     }
                     /* no dynamic outline clipping */
                     Runnable reveal = revealGroupContents[0];
@@ -5243,11 +5281,13 @@ public class MainActivity extends Activity {
                         overlay.postOnAnimation(startTransitionWhenReady[0]);
                         return;
                     }
-                    // Warm the card's static hardware layer after icons have been applied
-                    // and rows measured, before hiding the source icon or animating visibly.
+                    // Warm the separately animated child surfaces; an offscreen parent layer
+                    // would need rebuilding while child alpha changes and cause stepped fades.
                     panel.setAlpha(1f);
-                    panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                    panel.buildLayer();
+                    title.buildLayer();
+                    groupDivider.buildLayer();
+                    scroll.buildLayer();
+                    panel.setLayerType(View.LAYER_TYPE_NONE, null);
                     panel.setAlpha(0f);
                     overlay.postOnAnimation(() -> {
                         if (!dialog.isShowing() || closing[0] || transition.isStarted()) {
@@ -5288,6 +5328,11 @@ public class MainActivity extends Activity {
                 ? snapshotRef[0] : null;
         if (snapshot != null) {
             snapshot.setVisibility(View.VISIBLE);
+            snapshot.setAlpha(1f - Math.min(1f, initialProgress * 2f));
+            snapshot.setScaleX(1f);
+            snapshot.setScaleY(1f);
+            snapshot.setTranslationX(0f);
+            snapshot.setTranslationY(0f);
             snapshot.bringToFront();
         }
         panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -5309,15 +5354,14 @@ public class MainActivity extends Activity {
             // Keep panel content cached during close as well; the panel transform and
             // source-icon snapshot are the only animated foreground surfaces.
             if (snapshot != null) {
-                snapshot.setScaleX(1f + ((iconScale != null && iconScale.length > 2
-                        ? iconScale[2] : 1f) - 1f) * progress);
-                snapshot.setScaleY(1f + ((iconScale != null && iconScale.length > 3
-                        ? iconScale[3] : 1f) - 1f) * progress);
-                snapshot.setTranslationX(-offsetX * progress);
-                snapshot.setTranslationY(-offsetY * progress);
-                snapshot.setAlpha(1f - progress);
+                snapshot.setScaleX(1f);
+                snapshot.setScaleY(1f);
+                snapshot.setTranslationX(0f);
+                snapshot.setTranslationY(0f);
+                snapshot.setAlpha(1f - Math.min(1f, progress * 2f));
+                snapshot.setVisibility(progress >= 0.5f ? View.GONE : View.VISIBLE);
             }
-            if (dimLayer != null) dimLayer.setAlpha(0.36f * progress);
+            if (dimLayer != null) dimLayer.setAlpha(0f);
         });
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
