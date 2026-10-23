@@ -4785,54 +4785,78 @@ public class MainActivity extends Activity {
         Dialog dialog = new Dialog(this);
         LinearLayout panel = createStudioDialogPanel();
         addStudioDialogHeader(panel, title, "Select an app to add to Home");
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(true);
-        scroll.setFillViewport(false);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        for (int i = 0; i < choices.size(); i++) {
-            final int index = i;
-            ResolveInfo app = choices.get(i);
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 7),
-                    LauncherUiUtils.dp(this, 9), LauncherUiUtils.dp(this, 7));
-            row.setBackground(studioControlBackground());
-            ImageView icon = new ImageView(this);
-            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            try { icon.setImageDrawable(app.loadIcon(packageManager)); }
-            catch (RuntimeException ignored) {}
-            icon.setBackground(LauncherUiUtils.roundRect(this,
-                    new int[]{studioTint(homeStudioAccentColor, 46),
-                            studioTint(homeStudioAccentColor, 20)},
-                    LauncherUiUtils.dp(this, 11)));
-            icon.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 5),
-                    LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 5));
-            row.addView(icon, new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(this, 42), LauncherUiUtils.dp(this, 42)));
-            TextView label = LauncherUiUtils.text(this,
-                    String.valueOf(app.loadLabel(packageManager)), 14.5f,
-                    Color.rgb(245, 247, 255), false);
-            label.setMaxLines(2);
-            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1f);
-            labelParams.leftMargin = LauncherUiUtils.dp(this, 11);
-            row.addView(label, labelParams);
-            TextView add = LauncherUiUtils.text(this, "+", 22, homeStudioAccentColor, true);
-            add.setGravity(Gravity.CENTER);
-            row.addView(add, new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(this, 30), LauncherUiUtils.dp(this, 38)));
-            row.setOnClickListener(v -> {
-                dialog.dismiss();
-                if (selection != null) selection.onSelect(index);
-            });
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
-            list.addView(row, rowParams);
-        }
-        scroll.addView(list, new android.widget.ScrollView.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        panel.addView(scroll, scrollParams);
+
+        android.widget.ListView listView = new android.widget.ListView(this);
+        listView.setDivider(null);
+        listView.setSelector(android.R.color.transparent);
+        listView.setCacheColorHint(Color.TRANSPARENT);
+        listView.setBackgroundColor(Color.TRANSPARENT);
+        listView.setVerticalScrollBarEnabled(true);
+        android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
+            @Override public int getCount() { return choices.size(); }
+            @Override public Object getItem(int position) { return choices.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                LinearLayout row;
+                if (convertView instanceof LinearLayout) {
+                    row = (LinearLayout) convertView;
+                } else {
+                    row = new LinearLayout(MainActivity.this);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    row.setPadding(LauncherUiUtils.dp(MainActivity.this, 8),
+                            LauncherUiUtils.dp(MainActivity.this, 7),
+                            LauncherUiUtils.dp(MainActivity.this, 9),
+                            LauncherUiUtils.dp(MainActivity.this, 7));
+                    ImageView icon = new ImageView(MainActivity.this);
+                    icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    icon.setPadding(LauncherUiUtils.dp(MainActivity.this, 5),
+                            LauncherUiUtils.dp(MainActivity.this, 5),
+                            LauncherUiUtils.dp(MainActivity.this, 5),
+                            LauncherUiUtils.dp(MainActivity.this, 5));
+                    row.addView(icon, new LinearLayout.LayoutParams(
+                            LauncherUiUtils.dp(MainActivity.this, 42),
+                            LauncherUiUtils.dp(MainActivity.this, 42)));
+                    TextView name = LauncherUiUtils.text(MainActivity.this, "", 14.5f,
+                            Color.rgb(245, 247, 255), false);
+                    name.setMaxLines(2);
+                    name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                    LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
+                    nameParams.leftMargin = LauncherUiUtils.dp(MainActivity.this, 11);
+                    row.addView(name, nameParams);
+                    TextView add = LauncherUiUtils.text(MainActivity.this, "+", 22,
+                            homeStudioAccentColor, true);
+                    add.setGravity(Gravity.CENTER);
+                    row.addView(add, new LinearLayout.LayoutParams(
+                            LauncherUiUtils.dp(MainActivity.this, 30),
+                            LauncherUiUtils.dp(MainActivity.this, 38)));
+                    row.setLayoutParams(new android.widget.AbsListView.LayoutParams(-1, -2));
+                }
+                ResolveInfo app = choices.get(position);
+                ImageView icon = (ImageView) row.getChildAt(0);
+                TextView name = (TextView) row.getChildAt(1);
+                TextView add = (TextView) row.getChildAt(2);
+                try { icon.setImageDrawable(app.loadIcon(packageManager)); }
+                catch (RuntimeException ignored) { icon.setImageDrawable(null); }
+                icon.setBackground(LauncherUiUtils.roundRect(MainActivity.this,
+                        new int[]{studioTint(homeStudioAccentColor, 46),
+                                studioTint(homeStudioAccentColor, 20)},
+                        LauncherUiUtils.dp(MainActivity.this, 11)));
+                name.setText(String.valueOf(app.loadLabel(packageManager)));
+                add.setTextColor(homeStudioAccentColor);
+                add.setBackground(LauncherUiUtils.roundRect(MainActivity.this,
+                        new int[]{studioTint(homeStudioAccentColor, 54),
+                                studioTint(homeStudioAccentColor, 22)},
+                        LauncherUiUtils.dp(MainActivity.this, 11)));
+                row.setBackground(studioControlBackground());
+                return row;
+            }
+        };
+        listView.setAdapter(adapter);
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            dialog.dismiss();
+            if (selection != null) selection.onSelect(position);
+        });
+        panel.addView(listView, new LinearLayout.LayoutParams(-1, 0, 1f));
         TextView cancel = createStudioDialogButton("Cancel", false);
         LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, -2);
         cancelParams.topMargin = LauncherUiUtils.dp(this, 9);
@@ -4869,114 +4893,121 @@ public class MainActivity extends Activity {
                 removeMode ? "Select apps to remove from this group"
                         : "Select apps to add to this group");
 
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(true);
-        scroll.setFillViewport(false);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
         ArrayList<String> selected = new ArrayList<String>();
-        TextView[] checks = new TextView[choices.size()];
-        LinearLayout[] rows = new LinearLayout[choices.size()];
-        boolean[] selectedFlags = new boolean[choices.size()];
-
-        Runnable refreshSelection = () -> {
-            for (int i = 0; i < choices.size(); i++) {
-                ResolveInfo app = choices.get(i);
-                String packageName = app.activityInfo.packageName;
-                selectedFlags[i] = selected.contains(packageName);
-                checks[i].setText(selectedFlags[i] ? "✓" : "");
-                checks[i].setTextColor(selectedFlags[i]
-                        ? Color.rgb(10, 15, 27) : Color.rgb(165, 177, 207));
-                checks[i].setBackground(selectedFlags[i]
-                        ? LauncherUiUtils.roundRect(this,
-                                new int[]{homeStudioAccentColor, studioDarken(homeStudioAccentColor)},
-                                LauncherUiUtils.dp(this, 10))
-                        : studioControlBackground());
-                rows[i].setBackground(selectedFlags[i]
-                        ? LauncherUiUtils.roundRect(this,
-                                new int[]{studioTint(homeStudioAccentColor, 58),
-                                        studioTint(homeStudioAccentColor, 23)},
-                                LauncherUiUtils.dp(this, 14))
-                        : studioControlBackground());
-            }
-        };
-
         TextView selectedCount = LauncherUiUtils.text(this, "0 selected", 12.5f,
                 Color.rgb(190, 202, 226), true);
-        TextView confirm = createStudioDialogButton(removeMode ? "Remove selected" : "Add selected", true);
+        TextView confirm = createStudioDialogButton(
+                removeMode ? "Remove selected" : "Add selected", true);
         confirm.setEnabled(false);
         confirm.setAlpha(0.45f);
 
-        for (int i = 0; i < choices.size(); i++) {
-            final int index = i;
-            ResolveInfo app = choices.get(i);
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 7),
-                    LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 7));
-            rows[i] = row;
+        android.widget.ListView listView = new android.widget.ListView(this);
+        listView.setDivider(null);
+        listView.setSelector(android.R.color.transparent);
+        listView.setCacheColorHint(Color.TRANSPARENT);
+        listView.setBackgroundColor(Color.TRANSPARENT);
+        listView.setVerticalScrollBarEnabled(true);
+        android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
+            @Override public int getCount() { return choices.size(); }
+            @Override public Object getItem(int position) { return choices.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                LinearLayout row;
+                if (convertView instanceof LinearLayout) {
+                    row = (LinearLayout) convertView;
+                } else {
+                    row = new LinearLayout(MainActivity.this);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    row.setPadding(LauncherUiUtils.dp(MainActivity.this, 8),
+                            LauncherUiUtils.dp(MainActivity.this, 7),
+                            LauncherUiUtils.dp(MainActivity.this, 8),
+                            LauncherUiUtils.dp(MainActivity.this, 7));
 
-            ImageView icon = new ImageView(this);
-            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            try { icon.setImageDrawable(app.loadIcon(packageManager)); }
-            catch (RuntimeException ignored) {}
-            icon.setBackground(LauncherUiUtils.roundRect(this,
-                    new int[]{studioTint(homeStudioAccentColor, 43),
-                            studioTint(homeStudioAccentColor, 18)},
-                    LauncherUiUtils.dp(this, 11)));
-            icon.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4),
-                    LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4));
-            row.addView(icon, new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(this, 42), LauncherUiUtils.dp(this, 42)));
+                    ImageView icon = new ImageView(MainActivity.this);
+                    icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    icon.setPadding(LauncherUiUtils.dp(MainActivity.this, 4),
+                            LauncherUiUtils.dp(MainActivity.this, 4),
+                            LauncherUiUtils.dp(MainActivity.this, 4),
+                            LauncherUiUtils.dp(MainActivity.this, 4));
+                    row.addView(icon, new LinearLayout.LayoutParams(
+                            LauncherUiUtils.dp(MainActivity.this, 42),
+                            LauncherUiUtils.dp(MainActivity.this, 42)));
 
-            LinearLayout copy = new LinearLayout(this);
-            copy.setOrientation(LinearLayout.VERTICAL);
-            copy.setGravity(Gravity.CENTER_VERTICAL);
-            TextView label = LauncherUiUtils.text(this,
-                    String.valueOf(app.loadLabel(packageManager)), 14.5f,
-                    Color.rgb(245, 247, 255), true);
-            label.setMaxLines(2);
-            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            copy.addView(label, new LinearLayout.LayoutParams(-1, -2));
-            TextView packageLabel = LauncherUiUtils.text(this,
-                    app.activityInfo.packageName, 10.5f, Color.rgb(159, 174, 204), false);
-            packageLabel.setSingleLine(true);
-            packageLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams packageParams = new LinearLayout.LayoutParams(-1, -2);
-            packageParams.topMargin = LauncherUiUtils.dp(this, 2);
-            copy.addView(packageLabel, packageParams);
-            LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
-            copyParams.leftMargin = LauncherUiUtils.dp(this, 10);
-            copyParams.rightMargin = LauncherUiUtils.dp(this, 8);
-            row.addView(copy, copyParams);
+                    LinearLayout copy = new LinearLayout(MainActivity.this);
+                    copy.setOrientation(LinearLayout.VERTICAL);
+                    copy.setGravity(Gravity.CENTER_VERTICAL);
+                    TextView label = LauncherUiUtils.text(MainActivity.this, "", 14.5f,
+                            Color.rgb(245, 247, 255), true);
+                    label.setMaxLines(2);
+                    label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                    copy.addView(label, new LinearLayout.LayoutParams(-1, -2));
+                    TextView packageLabel = LauncherUiUtils.text(MainActivity.this, "", 10.5f,
+                            Color.rgb(159, 174, 204), false);
+                    packageLabel.setSingleLine(true);
+                    packageLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                    LinearLayout.LayoutParams packageParams =
+                            new LinearLayout.LayoutParams(-1, -2);
+                    packageParams.topMargin = LauncherUiUtils.dp(MainActivity.this, 2);
+                    copy.addView(packageLabel, packageParams);
+                    LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
+                    copyParams.leftMargin = LauncherUiUtils.dp(MainActivity.this, 10);
+                    copyParams.rightMargin = LauncherUiUtils.dp(MainActivity.this, 8);
+                    row.addView(copy, copyParams);
 
-            TextView check = LauncherUiUtils.text(this, "", 17, Color.WHITE, true);
-            check.setGravity(Gravity.CENTER);
-            checks[i] = check;
-            row.addView(check, new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(this, 31), LauncherUiUtils.dp(this, 31)));
-            row.setOnClickListener(v -> {
-                String packageName = choices.get(index).activityInfo.packageName;
-                if (selected.contains(packageName)) selected.remove(packageName);
-                else selected.add(packageName);
-                refreshSelection.run();
-                selectedCount.setText(selected.size() + " selected");
-                confirm.setText((removeMode ? "Remove selected" : "Add selected")
-                        + " (" + selected.size() + ")");
-                confirm.setEnabled(!selected.isEmpty());
-                confirm.setAlpha(selected.isEmpty() ? 0.45f : 1f);
-            });
-
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
-            list.addView(row, rowParams);
-        }
-
-        // Selection views are all installed before the first draw; now normalize their state.
-        refreshSelection.run();
-        scroll.addView(list, new android.widget.ScrollView.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        panel.addView(scroll, scrollParams);
+                    TextView check = LauncherUiUtils.text(MainActivity.this, "", 17,
+                            Color.WHITE, true);
+                    check.setGravity(Gravity.CENTER);
+                    row.addView(check, new LinearLayout.LayoutParams(
+                            LauncherUiUtils.dp(MainActivity.this, 31),
+                            LauncherUiUtils.dp(MainActivity.this, 31)));
+                    row.setLayoutParams(new android.widget.AbsListView.LayoutParams(-1, -2));
+                }
+                ResolveInfo app = choices.get(position);
+                String packageName = app.activityInfo.packageName;
+                boolean isSelected = selected.contains(packageName);
+                ImageView icon = (ImageView) row.getChildAt(0);
+                LinearLayout copy = (LinearLayout) row.getChildAt(1);
+                TextView label = (TextView) copy.getChildAt(0);
+                TextView packageLabel = (TextView) copy.getChildAt(1);
+                TextView check = (TextView) row.getChildAt(2);
+                try { icon.setImageDrawable(app.loadIcon(packageManager)); }
+                catch (RuntimeException ignored) { icon.setImageDrawable(null); }
+                icon.setBackground(LauncherUiUtils.roundRect(MainActivity.this,
+                        new int[]{studioTint(homeStudioAccentColor, 43),
+                                studioTint(homeStudioAccentColor, 18)},
+                        LauncherUiUtils.dp(MainActivity.this, 11)));
+                label.setText(String.valueOf(app.loadLabel(packageManager)));
+                packageLabel.setText(packageName);
+                check.setText(isSelected ? "✓" : "");
+                check.setTextColor(isSelected ? Color.rgb(10, 15, 27)
+                        : Color.rgb(165, 177, 207));
+                check.setBackground(isSelected
+                        ? LauncherUiUtils.roundRect(MainActivity.this,
+                                new int[]{homeStudioAccentColor, studioDarken(homeStudioAccentColor)},
+                                LauncherUiUtils.dp(MainActivity.this, 10))
+                        : studioControlBackground());
+                row.setBackground(isSelected
+                        ? LauncherUiUtils.roundRect(MainActivity.this,
+                                new int[]{studioTint(homeStudioAccentColor, 58),
+                                        studioTint(homeStudioAccentColor, 23)},
+                                LauncherUiUtils.dp(MainActivity.this, 14))
+                        : studioControlBackground());
+                return row;
+            }
+        };
+        listView.setAdapter(adapter);
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            String packageName = choices.get(position).activityInfo.packageName;
+            if (selected.contains(packageName)) selected.remove(packageName);
+            else selected.add(packageName);
+            selectedCount.setText(selected.size() + " selected");
+            confirm.setText((removeMode ? "Remove selected" : "Add selected")
+                    + " (" + selected.size() + ")");
+            confirm.setEnabled(!selected.isEmpty());
+            confirm.setAlpha(selected.isEmpty() ? 0.45f : 1f);
+            adapter.notifyDataSetChanged();
+        });
+        panel.addView(listView, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout footer = new LinearLayout(this);
         footer.setGravity(Gravity.CENTER_VERTICAL);
