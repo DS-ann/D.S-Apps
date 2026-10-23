@@ -5986,63 +5986,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    /**
-     * Moves the existing app-group overlay from the dialog window into the launcher window.
-     * Its actual panel and icon snapshot then reverse the opening morph in the same attached
-     * view hierarchy. No separately captured full-cell bitmap is needed for the final frame.
-     */
-    private boolean transferAppGroupOverlayToActivityRoot(FrameLayout activityOverlay) {
-        if (activityOverlay == null || root == null
-                || activityOverlay.getParent() == root) {
-            return activityOverlay != null && activityOverlay.getParent() == root;
-        }
-        android.view.ViewParent parentObject = activityOverlay.getParent();
-        if (!(parentObject instanceof ViewGroup)
-                || activityOverlay.getWidth() <= 0 || activityOverlay.getHeight() <= 0) {
-            return false;
-        }
-        final ViewGroup oldParent = (ViewGroup) parentObject;
-        final int oldIndex = oldParent.indexOfChild(activityOverlay);
-        final ViewGroup.LayoutParams oldParams = activityOverlay.getLayoutParams();
-        final int width = activityOverlay.getWidth();
-        final int height = activityOverlay.getHeight();
-        int[] overlayLocation = new int[2];
-        int[] rootLocation = new int[2];
-        activityOverlay.getLocationOnScreen(overlayLocation);
-        root.getLocationOnScreen(rootLocation);
-        FrameLayout.LayoutParams rootParams = new FrameLayout.LayoutParams(
-                width, height, Gravity.TOP | Gravity.LEFT);
-        // Preserve exact screen-space origin across the reparenting. The overlay's children,
-        // including panel pivots/translations and the home-icon snapshot, keep their geometry.
-        rootParams.leftMargin = overlayLocation[0] - rootLocation[0] - root.getPaddingLeft();
-        rootParams.topMargin = overlayLocation[1] - rootLocation[1] - root.getPaddingTop();
-        try {
-            oldParent.removeView(activityOverlay);
-            activityOverlay.setTranslationX(0f);
-            activityOverlay.setTranslationY(0f);
-            root.addView(activityOverlay, rootParams);
-            activityOverlay.bringToFront();
-            root.invalidate();
-            return true;
-        } catch (RuntimeException transferError) {
-            android.util.Log.w("D.S Launcher",
-                    "Unable to transfer app-group closing animation to launcher root",
-                    transferError);
-            try {
-                if (activityOverlay.getParent() instanceof ViewGroup) {
-                    ((ViewGroup) activityOverlay.getParent()).removeView(activityOverlay);
-                }
-                if (activityOverlay.getParent() == null) {
-                    oldParent.addView(activityOverlay,
-                            Math.max(0, Math.min(oldIndex, oldParent.getChildCount())), oldParams);
-                }
-            } catch (RuntimeException restoreError) {
-                android.util.Log.e("D.S Launcher",
-                        "Unable to restore app-group overlay after failed transfer", restoreError);
-            }
-            return false;
-        }
-    }
+    
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
             boolean[] closing, float[] iconScale, float[] startTranslation,
@@ -6085,8 +6029,8 @@ public class MainActivity extends Activity {
             snapshot.setTranslationY(0f);
             snapshot.bringToFront();
         }
-        panel.setLayerType(Build.VERSION.SDK_INT <= 23
-                ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
+        // Keep the layer mode established by opening. Switching to a hardware layer here
+        // forced a renderer rebuild before the first reverse-morph frame.
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
         transition.setDuration(animationDuration(240L));
@@ -6141,22 +6085,14 @@ public class MainActivity extends Activity {
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
 
-                // Restore the live home cell and remove the animated overlay in this same UI
-                // traversal. Both views now share the activity root, so no dialog/full-cell
-                // snapshot handoff or intervening frame is required.
-                if (activityOverlay.getParent() instanceof ViewGroup) {
-                    ((ViewGroup) activityOverlay.getParent()).removeView(activityOverlay);
-                }
+                // Restore the real home cell underneath the still-attached panel, then dismiss
+                // the Dialog. Do not remove its full-screen overlay first: that exposed a blank
+                // transparent-window frame between the final morph frame and window teardown.
                 if (sourceCell != null) {
                     sourceCell.setAlpha(sourceCellAlpha);
                     sourceCell.invalidate();
                 }
                 if (root != null) root.invalidate();
-
-                // Keep the transparent Dialog window alive until the transferred root overlay
-                // has completed its close morph. Dismissing it immediately after reparenting
-                // can clear the dialog surface one frame before the activity root presents its
-                // first overlay frame, creating a visible flash before the animation starts.
                 if (dialog.isShowing()) dialog.dismiss();
                 if (rootCloseTransition != null && rootCloseTransition.length > 0) {
                     rootCloseTransition[0] = false;
@@ -6169,10 +6105,8 @@ public class MainActivity extends Activity {
         });
         morphAnimator[0] = transition;
 
-        // Use the same attached Dialog overlay that displayed opening. Reparenting it to the
-        // Activity root before the first reverse-animation frame causes a visible flash.
-        // The existing animation-end block still restores the live cell, removes this overlay,
-        // dismisses the Dialog and releases resources in its original order.
+        // Reverse the opening morph in place. The existing Dialog continues owning the panel
+        // and icon snapshot until the terminal frame, avoiding a window/hierarchy handoff.
         if (rootCloseTransition != null && rootCloseTransition.length > 0) {
             rootCloseTransition[0] = true;
         }
@@ -10994,6 +10928,30 @@ public class MainActivity extends Activity {
         WidgetController.saveGeometry(prefs, KEY_WIDGET_IDS, widgetId, pageIndex, container);
     }
 
+    /** Correct widget bounds after page reparenting or live collision displacement. */
+    private void normalizeWorkspaceWidgetBounds(FrameLayout page, View item,
+            int fallbackPageIndex) {
+        if (page == null || item == null || widgetInteractionController == null
+                || !(item.getTag() instanceof String) || !(item instanceof FrameLayout)) return;
+        String tag = (String) item.getTag();
+        if (!tag.startsWith("launcher_widget:")) return;
+        int widgetId;
+        try {
+            widgetId = Integer.parseInt(tag.substring("launcher_widget:".length()));
+        } catch (NumberFormatException ignored) {
+            return;
+        }
+        int pageIndex = pagesStrip == null ? -1 : pagesStrip.indexOfChild(page);
+        if (pageIndex < 0) pageIndex = Math.max(0, fallbackPageIndex);
+        if (page.getWidth() > 0 && page.getHeight() > 0) {
+            widgetInteractionController.clampWidgetGeometryToPageNow(
+                    page, (FrameLayout) item, widgetId, pageIndex);
+        } else {
+            widgetInteractionController.normalizeWidgetGeometryToPage(
+                    page, (FrameLayout) item, widgetId, pageIndex);
+        }
+    }
+
     private void updatePlacedWidgetSize(int widgetId, FrameLayout container) {
         if (container == null
                 || !(container.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
@@ -11082,6 +11040,7 @@ public class MainActivity extends Activity {
                 parent.removeView(child);
                 targetPage.addView(child, oldParams);
                 child.bringToFront();
+                normalizeWorkspaceWidgetBounds(targetPage, child, targetPageIndex);
             }
         }
     }
@@ -15341,6 +15300,8 @@ public class MainActivity extends Activity {
                     displaced.setLayoutParams(lp);
                 }
             }
+            normalizeWorkspaceWidgetBounds(page, displaced,
+                    pagesStrip == null ? 0 : Math.max(0, pagesStrip.indexOfChild(page)));
         }
 
         liveDisplacedItems.clear();

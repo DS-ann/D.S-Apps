@@ -130,6 +130,19 @@ final class WidgetPickerDialog {
         panel.addView(line, lineParams);
     }
 
+    private TextView studioButton(String label, boolean primary) {
+        TextView button = text(label, 14,
+                primary ? Color.rgb(10, 15, 27) : Color.rgb(211, 220, 240), true);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(LauncherUiUtils.dp(activity, 10), LauncherUiUtils.dp(activity, 8),
+                LauncherUiUtils.dp(activity, 10), LauncherUiUtils.dp(activity, 8));
+        button.setMinHeight(LauncherUiUtils.dp(activity, 44));
+        button.setBackground(primary
+                ? roundRect(new int[]{accentColor, darken(accentColor)}, 13)
+                : controlBackground());
+        return button;
+    }
+
     void show() {
         List<Entry> entries = new ArrayList<>();
         List<AppWidgetProviderInfo> providers = widgetManager.getInstalledProviders();
@@ -179,9 +192,13 @@ final class WidgetPickerDialog {
             LinearLayout row = new LinearLayout(activity);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(LauncherUiUtils.dp(activity, 8), LauncherUiUtils.dp(activity, 8),
-                    LauncherUiUtils.dp(activity, 8), LauncherUiUtils.dp(activity, 8));
+            row.setPadding(LauncherUiUtils.dp(activity, 9), LauncherUiUtils.dp(activity, 7),
+                    LauncherUiUtils.dp(activity, 10), LauncherUiUtils.dp(activity, 7));
             row.setBackground(controlBackground());
+            View rail = new View(activity);
+            rail.setBackground(roundRect(new int[]{accentColor}, 2));
+            row.addView(rail, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(activity, 3), LauncherUiUtils.dp(activity, 42)));
 
             ImageView preview = new ImageView(activity);
             preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -206,8 +223,10 @@ final class WidgetPickerDialog {
                 catch (Exception ignored) {}
             }
             if (image != null) preview.setImageDrawable(image);
-            row.addView(preview, new LinearLayout.LayoutParams(
-                    LauncherUiUtils.dp(activity, 58), LauncherUiUtils.dp(activity, 58)));
+            LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(activity, 58), LauncherUiUtils.dp(activity, 58));
+            previewParams.leftMargin = LauncherUiUtils.dp(activity, 8);
+            row.addView(preview, previewParams);
 
             LinearLayout details = new LinearLayout(activity);
             details.setOrientation(LinearLayout.VERTICAL);
@@ -252,11 +271,8 @@ final class WidgetPickerDialog {
         LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         panel.addView(scroll, scrollParams);
 
-        TextView cancel = text("Cancel", 14, Color.rgb(210, 220, 240), true);
-        cancel.setGravity(Gravity.CENTER);
-        cancel.setBackground(controlBackground());
-        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1,
-                LauncherUiUtils.dp(activity, 44));
+        TextView cancel = studioButton("Cancel", false);
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, -2);
         cancelParams.topMargin = LauncherUiUtils.dp(activity, 10);
         panel.addView(cancel, cancelParams);
         cancel.setOnClickListener(v -> dialog.dismiss());

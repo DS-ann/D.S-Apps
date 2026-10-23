@@ -264,29 +264,91 @@ final class WidgetInteractionController {
                 page.getHeight() - page.getPaddingTop() - page.getPaddingBottom());
         int width = Math.min(oldWidth, availableWidth);
         int height = Math.min(oldHeight, availableHeight);
-        int maxLeft = Math.max(0, availableWidth - width);
-        int maxTop = Math.max(0, availableHeight - height);
-        int left = Math.max(0, Math.min(maxLeft, params.leftMargin));
-        int top = Math.max(0, Math.min(maxTop, params.topMargin));
         boolean sizeChanged = width != oldWidth || height != oldHeight;
-        boolean changed = sizeChanged || left != params.leftMargin || top != params.topMargin;
+
+        float oldScaleX = container.getScaleX();
+        float oldScaleY = container.getScaleY();
+        float scaleX = Math.max(0.01f, Math.min(1f, oldScaleX));
+        float scaleY = Math.max(0.01f, Math.min(1f, oldScaleY));
+        if (sizeChanged) {
+            // Re-centre the pivot on the bounded dimensions before checking visible bounds.
+            container.setPivotX(width * 0.5f);
+            container.setPivotY(height * 0.5f);
+        }
+        float pivotX = container.getPivotX();
+        float pivotY = container.getPivotY();
+        float translationX = container.getTranslationX();
+        float translationY = container.getTranslationY();
+
+        // FrameLayout margins do not include transformed drawing bounds. Account for both
+        // translation and pivot-based scaling so the visible surface and resize handles fit.
+        float offsetX = translationX + pivotX * (1f - scaleX);
+        float offsetY = translationY + pivotY * (1f - scaleY);
+        int minLeft = Math.max(0, (int) Math.ceil(-offsetX));
+        int minTop = Math.max(0, (int) Math.ceil(-offsetY));
+        int maxLeft = (int) Math.floor(availableWidth - width * scaleX - offsetX);
+        int maxTop = (int) Math.floor(availableHeight - height * scaleY - offsetY);
+
+        // Discard an impossible old translation rather than leaving the widget stranded.
+        if (maxLeft < minLeft) {
+            translationX = 0f;
+            offsetX = pivotX * (1f - scaleX);
+            minLeft = Math.max(0, (int) Math.ceil(-offsetX));
+            maxLeft = (int) Math.floor(availableWidth - width * scaleX - offsetX);
+        }
+        if (maxTop < minTop) {
+            translationY = 0f;
+            offsetY = pivotY * (1f - scaleY);
+            minTop = Math.max(0, (int) Math.ceil(-offsetY));
+            maxTop = (int) Math.floor(availableHeight - height * scaleY - offsetY);
+        }
+        maxLeft = Math.max(minLeft, maxLeft);
+        maxTop = Math.max(minTop, maxTop);
+        int left = Math.max(minLeft, Math.min(maxLeft, params.leftMargin));
+        int top = Math.max(minTop, Math.min(maxTop, params.topMargin));
+        boolean transformChanged = Math.abs(scaleX - oldScaleX) > 0.001f
+                || Math.abs(scaleY - oldScaleY) > 0.001f
+                || Math.abs(translationX - container.getTranslationX()) > 0.001f
+                || Math.abs(translationY - container.getTranslationY()) > 0.001f;
+        boolean changed = sizeChanged || left != params.leftMargin || top != params.topMargin
+                || transformChanged;
         if (!changed) return false;
 
         params.leftMargin = left;
         params.topMargin = top;
         params.width = width;
         params.height = height;
+        container.setScaleX(scaleX);
+        container.setScaleY(scaleY);
+        container.setTranslationX(translationX);
+        container.setTranslationY(translationY);
         container.setLayoutParams(params);
-        if (sizeChanged) {
-            container.setPivotX(width * 0.5f);
-            container.setPivotY(height * 0.5f);
-            listener.updatePlacedWidgetSize(widgetId, container);
-        }
+        if (sizeChanged) listener.updatePlacedWidgetSize(widgetId, container);
         LinearLayout strip = listener.getPagesStrip();
         int actualPageIndex = strip == null ? -1 : strip.indexOfChild(page);
         listener.saveWidgetGeometry(widgetId,
                 actualPageIndex >= 0 ? actualPageIndex : Math.max(0, fallbackPageIndex), container);
         return true;
+    }
+
+    boolean clampWidgetGeometryToPageNow(FrameLayout page, FrameLayout container,
+            int widgetId, int fallbackPageIndex) {
+        return clampWidgetGeometryToPage(page, container, widgetId, fallbackPageIndex);
+    }
+
+    void normalizeWidgetGeometryToPage(FrameLayout page, FrameLayout container,
+            int widgetId, int fallbackPageIndex) {
+        if (page == null || container == null) return;
+        final Runnable[] retry = new Runnable[1];
+        retry[0] = () -> {
+            if (container.getParent() != page) return;
+            if (page.getWidth() <= 0 || page.getHeight() <= 0) {
+                page.postDelayed(retry[0], 16L);
+                return;
+            }
+            clampWidgetGeometryToPage(page, container, widgetId, fallbackPageIndex);
+        };
+        page.post(retry[0]);
     }
 
     void addWidgetContainer(FrameLayout page, AppWidgetHostView widget, int widgetId, int pageIndex,
@@ -586,7 +648,7 @@ final class WidgetInteractionController {
             dragging[0] = false;
         }));
 
-        // Long press arms movement with a steady 10% enlargement. It deliberately does
+        // Long press arms movement with a steady 5% enlargement. It deliberately does
         // not expose resize handles or run any wobble/bobbing animation.
         movePress[0] = () -> {
             if (menuShown[0] || dragging[0] || reparenting[0]) return;
@@ -602,8 +664,7 @@ final class WidgetInteractionController {
             }
             editMode[0] = 1;
             // Preserve the widget's actual collision-recovery scale in move-ready mode.
-            // A 10% hint enlarged a widget that had just been auto-shrunk for a nearby
-            // app icon/label, making the widget visibly jump and overlap again.
+            // The 5% hint is edge-constrained and must not restore the former 10% jump.
             LauncherUiUtils.startStableScaleHint(container);
             cancelWidgetTouch.run();
         };
