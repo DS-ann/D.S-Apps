@@ -457,6 +457,11 @@ final class WidgetInteractionController {
         final float[] down = {0f, 0f};
         final float[] fingerOffset = {0f, 0f};
         final int[] origin = {x, y, lp.width, lp.height};
+        final int[] resizeSavedGeometry = new int[4];
+        // scaleX/Y, pivotX/Y, translationX/Y before a manual-resize gesture.
+        final float[] resizeSavedTransform = new float[6];
+        final float[] resizeAutoScale = {1f, 1f};
+        final boolean[] resizeGeometryNormalized = {false};
         final boolean[] resizeRejectedAtLastPosition = {false};
         final int[] widgetPage = {pageIndex};
         final int[] originalPageAtDown = {pageIndex};
@@ -819,40 +824,112 @@ final class WidgetInteractionController {
                 if (action == MotionEvent.ACTION_DOWN) {
                     listener.setWorkspaceGridVisible(false, null);
                     resizeRejectedAtLastPosition[0] = false;
-                    down[0] = event.getRawX(); down[1] = event.getRawY();
-                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    origin[0] = current.leftMargin; origin[1] = current.topMargin;
-                    origin[2] = current.width > 0 ? current.width : container.getWidth();
-                    origin[3] = current.height > 0 ? current.height : container.getHeight();
-                    container.getParent().requestDisallowInterceptTouchEvent(true);
+                    resizeGeometryNormalized[0] = false;
+                    down[0] = event.getRawX();
+                    down[1] = event.getRawY();
+                    FrameLayout.LayoutParams current =
+                            (FrameLayout.LayoutParams) container.getLayoutParams();
+                    resizeSavedGeometry[0] = current.leftMargin;
+                    resizeSavedGeometry[1] = current.topMargin;
+                    resizeSavedGeometry[2] = current.width > 0
+                            ? current.width : Math.max(1, container.getWidth());
+                    resizeSavedGeometry[3] = current.height > 0
+                            ? current.height : Math.max(1, container.getHeight());
+                    resizeSavedTransform[0] = container.getScaleX();
+                    resizeSavedTransform[1] = container.getScaleY();
+                    resizeSavedTransform[2] = container.getPivotX();
+                    resizeSavedTransform[3] = container.getPivotY();
+                    resizeSavedTransform[4] = container.getTranslationX();
+                    resizeSavedTransform[5] = container.getTranslationY();
+                    resizeAutoScale[0] = Math.max(0.25f, Math.min(1f,
+                            LauncherUiUtils.getFloatPreferenceCompat(prefs,
+                                    "workspace_resize_auto_scale_x_launcher_widget:" + widgetId, 1f)));
+                    resizeAutoScale[1] = Math.max(0.25f, Math.min(1f,
+                            LauncherUiUtils.getFloatPreferenceCompat(prefs,
+                                    "workspace_resize_auto_scale_y_launcher_widget:" + widgetId, 1f)));
+                    origin[0] = resizeSavedGeometry[0];
+                    origin[1] = resizeSavedGeometry[1];
+                    origin[2] = resizeSavedGeometry[2];
+                    origin[3] = resizeSavedGeometry[3];
+                    if (container.getParent() != null) {
+                        container.getParent().requestDisallowInterceptTouchEvent(true);
+                    }
                     return true;
                 }
                 if (action == MotionEvent.ACTION_MOVE) {
-                    FrameLayout activePage = container.getParent() instanceof FrameLayout ? (FrameLayout) container.getParent() : page;
-                    FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    int dx = Math.round(event.getRawX() - down[0]), dy = Math.round(event.getRawY() - down[1]);
-                    int minW = Math.min(LauncherUiUtils.dp(activity, 140), Math.max(1, activePage.getWidth()));
-                    int minH = Math.min(LauncherUiUtils.dp(activity, 90), Math.max(1, activePage.getHeight()));
-                    int left = origin[0], top = origin[1], resizeWidth = origin[2], resizeHeight = origin[3];
+                    FrameLayout activePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    // Collision recovery scales a widget's drawing independently of its
+                    // stored dimensions. On the first resize frame, move that automatic
+                    // shrink into layout dimensions while compensating scale/pivot to keep
+                    // the visible rectangle steady. A tap/no-op resize changes nothing.
+                    if (!resizeGeometryNormalized[0]) {
+                        float autoX = resizeAutoScale[0];
+                        float autoY = resizeAutoScale[1];
+                        int baseWidth = Math.max(1, Math.round(resizeSavedGeometry[2] * autoX));
+                        int baseHeight = Math.max(1, Math.round(resizeSavedGeometry[3] * autoY));
+                        float baseScaleX = Math.max(0.01f, resizeSavedTransform[0] / autoX);
+                        float baseScaleY = Math.max(0.01f, resizeSavedTransform[1] / autoY);
+                        float originalVisualLeft = resizeSavedGeometry[0]
+                                + resizeSavedTransform[4]
+                                + resizeSavedTransform[2] * (1f - resizeSavedTransform[0]);
+                        float originalVisualTop = resizeSavedGeometry[1]
+                                + resizeSavedTransform[5]
+                                + resizeSavedTransform[3] * (1f - resizeSavedTransform[1]);
+                        int baseLeft = Math.round(originalVisualLeft - resizeSavedTransform[4]
+                                - (baseWidth * 0.5f) * (1f - baseScaleX));
+                        int baseTop = Math.round(originalVisualTop - resizeSavedTransform[5]
+                                - (baseHeight * 0.5f) * (1f - baseScaleY));
+                        FrameLayout.LayoutParams normalized =
+                                (FrameLayout.LayoutParams) container.getLayoutParams();
+                        normalized.leftMargin = baseLeft;
+                        normalized.topMargin = baseTop;
+                        normalized.width = baseWidth;
+                        normalized.height = baseHeight;
+                        container.setPivotX(baseWidth * 0.5f);
+                        container.setPivotY(baseHeight * 0.5f);
+                        container.setScaleX(baseScaleX);
+                        container.setScaleY(baseScaleY);
+                        container.setLayoutParams(normalized);
+                        origin[0] = baseLeft;
+                        origin[1] = baseTop;
+                        origin[2] = baseWidth;
+                        origin[3] = baseHeight;
+                        resizeGeometryNormalized[0] = true;
+                    }
+
+                    FrameLayout.LayoutParams current =
+                            (FrameLayout.LayoutParams) container.getLayoutParams();
+                    int dx = Math.round(event.getRawX() - down[0]);
+                    int dy = Math.round(event.getRawY() - down[1]);
+                    int minW = Math.min(LauncherUiUtils.dp(activity, 140),
+                            Math.max(1, activePage.getWidth()));
+                    int minH = Math.min(LauncherUiUtils.dp(activity, 90),
+                            Math.max(1, activePage.getHeight()));
+                    int left = origin[0], top = origin[1];
+                    int resizeWidth = origin[2], resizeHeight = origin[3];
                     // Keep the opposite edge fixed while dragging left/top handles.
-                    // Clamp the moving edge itself, then derive size from the fixed edge.
                     if (resizeEdge == 0) {
                         int fixedRight = origin[0] + origin[2];
                         left = Math.max(0, Math.min(origin[0] + dx, fixedRight - minW));
                         resizeWidth = fixedRight - left;
                     } else if (resizeEdge == 1) {
-                        resizeWidth = Math.max(minW, Math.min(origin[2] + dx, activePage.getWidth() - origin[0]));
+                        resizeWidth = Math.max(minW, Math.min(origin[2] + dx,
+                                activePage.getWidth() - origin[0]));
                     } else if (resizeEdge == 2) {
                         int fixedBottom = origin[1] + origin[3];
                         top = Math.max(0, Math.min(origin[1] + dy, fixedBottom - minH));
                         resizeHeight = fixedBottom - top;
                     } else {
-                        resizeHeight = Math.max(minH, Math.min(origin[3] + dy, activePage.getHeight() - origin[1]));
+                        resizeHeight = Math.max(minH, Math.min(origin[3] + dy,
+                                activePage.getHeight() - origin[1]));
                     }
                     left = Math.max(0, Math.min(left, activePage.getWidth() - minW));
                     top = Math.max(0, Math.min(top, activePage.getHeight() - minH));
-                    resizeWidth = Math.max(minW, Math.min(resizeWidth, activePage.getWidth() - left));
-                    resizeHeight = Math.max(minH, Math.min(resizeHeight, activePage.getHeight() - top));
+                    resizeWidth = Math.max(minW,
+                            Math.min(resizeWidth, activePage.getWidth() - left));
+                    resizeHeight = Math.max(minH,
+                            Math.min(resizeHeight, activePage.getHeight() - top));
                     if (!listener.canPlaceWorkspaceItem(activePage, container,
                             left, top, resizeWidth, resizeHeight)) {
                         resizeRejectedAtLastPosition[0] = true;
@@ -863,38 +940,54 @@ final class WidgetInteractionController {
                     current.topMargin = top;
                     current.width = resizeWidth;
                     current.height = resizeHeight;
+                    container.setPivotX(resizeWidth * 0.5f);
+                    container.setPivotY(resizeHeight * 0.5f);
                     container.setLayoutParams(current);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     listener.setWorkspaceGridVisible(false, null);
-                    FrameLayout.LayoutParams finalParams = (FrameLayout.LayoutParams) container.getLayoutParams();
-                    if (action == MotionEvent.ACTION_CANCEL) {
-                        finalParams.leftMargin = origin[0]; finalParams.topMargin = origin[1];
-                        finalParams.width = origin[2]; finalParams.height = origin[3]; container.setLayoutParams(finalParams);
-                    }
-                    if (action == MotionEvent.ACTION_UP && resizeRejectedAtLastPosition[0]) {
-                        Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
-                    }
+                    FrameLayout.LayoutParams finalParams =
+                            (FrameLayout.LayoutParams) container.getLayoutParams();
                     boolean committedManualResize = action == MotionEvent.ACTION_UP
+                            && resizeGeometryNormalized[0]
                             && (finalParams.leftMargin != origin[0]
                                     || finalParams.topMargin != origin[1]
                                     || finalParams.width != origin[2]
                                     || finalParams.height != origin[3]);
-                    if (committedManualResize) {
-                        // Manual geometry now owns the widget's size. Remove automatic
-                        // collision-shrink scales so package replacement cannot reapply them.
-                        container.setScaleX(1f);
-                        container.setScaleY(1f);
+                    if (action == MotionEvent.ACTION_CANCEL || !committedManualResize) {
+                        // Preserve the original auto-shrunk state if the user only touched
+                        // a handle, returned to the starting rectangle, or cancelled.
+                        finalParams.leftMargin = resizeSavedGeometry[0];
+                        finalParams.topMargin = resizeSavedGeometry[1];
+                        finalParams.width = resizeSavedGeometry[2];
+                        finalParams.height = resizeSavedGeometry[3];
+                        container.setPivotX(resizeSavedTransform[2]);
+                        container.setPivotY(resizeSavedTransform[3]);
+                        container.setScaleX(resizeSavedTransform[0]);
+                        container.setScaleY(resizeSavedTransform[1]);
+                        container.setTranslationX(resizeSavedTransform[4]);
+                        container.setTranslationY(resizeSavedTransform[5]);
+                        container.setLayoutParams(finalParams);
+                    } else {
+                        // Automatic collision shrink is now represented by the new layout
+                        // dimensions. Keep the equivalent base scale and remove the temporary
+                        // factors so a later redraw cannot apply the shrink a second time.
                         prefs.edit()
                                 .remove("workspace_resize_auto_scale_x_launcher_widget:" + widgetId)
                                 .remove("workspace_resize_auto_scale_y_launcher_widget:" + widgetId)
                                 .apply();
                     }
+                    resizeGeometryNormalized[0] = false;
+                    if (action == MotionEvent.ACTION_UP && resizeRejectedAtLastPosition[0]) {
+                        Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
+                    }
                     if (container.getChildAt(0) instanceof AppWidgetHostView) {
-                        WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
+                        WidgetController.updateWidgetSize(
+                                android.appwidget.AppWidgetManager.getInstance(activity),
                                 widgetId, (AppWidgetHostView) container.getChildAt(0),
-                                activity.getResources().getDisplayMetrics().density, finalParams.width, finalParams.height);
+                                activity.getResources().getDisplayMetrics().density,
+                                finalParams.width, finalParams.height);
                     }
                     listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
                     return true;

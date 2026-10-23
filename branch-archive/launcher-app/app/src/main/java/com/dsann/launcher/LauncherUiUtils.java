@@ -58,8 +58,14 @@ final class LauncherUiUtils {
             view.setScaleX(previousBase[2]);
             view.setScaleY(previousBase[3]);
         }
+        float baseRotation = view.getRotation();
+        float baseTranslationY = view.getTranslationY();
+        float baseScaleX = view.getScaleX();
+        float baseScaleY = view.getScaleY();
         MOVE_HINT_BASES.put(view, new float[]{
-                view.getRotation(), view.getTranslationY(), view.getScaleX(), view.getScaleY()});
+                baseRotation, baseTranslationY, baseScaleX, baseScaleY});
+        view.setScaleX(baseScaleX * 1.10f);
+        view.setScaleY(baseScaleY * 1.10f);
     }
 
     /** Allows position-sensitive widgets (such as the clock) to dance without bobbing. */

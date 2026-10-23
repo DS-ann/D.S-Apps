@@ -3658,62 +3658,42 @@ public class MainActivity extends Activity {
         return Math.max(baseHeight, requiredHeight);
     }
 
-    private boolean isHomeGridBottomAligned() {
-        return prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
-    }
-
     /**
-     * Keep a fixed 30dp gap between the bottom of every home grid and the dock.
-     * The clearance is independent of icon size and whether home labels are enabled.
+     * Fixed clearance between the bottom edge of the home grid and the dock.
+     * This is deliberately independent of icon and label dimensions.
      */
     private int homeGridBottomGapPx() {
         return LauncherUiUtils.dp(this, 30);
     }
 
     /**
-     * Keep the first row's origin stable while icon-size changes alter row height/capacity.
-     * The reference size is captured from the user's existing layout once, so adopting this
-     * row flow does not immediately jump an already-customized home screen on upgrade.
+     * Compute grid capacity from the dock edge upward. Row zero is always the
+     * lowest row, 30dp above the dock, regardless of label visibility or icon size.
      */
-    private int homeGridTopInsetPx(int pageHeightPx) {
-        if (!isHomeGridBottomAligned()) return 0;
-        int height = Math.max(1, pageHeightPx);
-        int bottomGap = homeGridBottomGapPx();
-        int currentSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
-        int anchorSize = prefs == null ? currentSize
-                : prefs.getInt(KEY_HOME_GRID_ANCHOR_ICON_SIZE, currentSize);
-        anchorSize = Math.max(32, Math.min(74, anchorSize));
-        int anchorCellHeightDp = prefs == null ? homeCellHeightDp(anchorSize)
-                : prefs.getInt(KEY_HOME_GRID_ANCHOR_CELL_HEIGHT_DP, homeCellHeightDp(anchorSize));
-        int anchorCellHeight = Math.max(1, LauncherUiUtils.dp(this,
-                Math.max(1, anchorCellHeightDp)));
-        int referenceRows = Math.max(1,
-                Math.max(1, height - bottomGap) / anchorCellHeight);
-        return Math.max(0, height - bottomGap - referenceRows * anchorCellHeight);
-    }
-
-    /** Returns row capacity after reserving the stable top origin and dock clearance. */
     private int homeGridRowsForHeight(int pageHeightPx, int cellHeightPx) {
-        int usableHeight = Math.max(1,
-                pageHeightPx - homeGridBottomGapPx() - homeGridTopInsetPx(pageHeightPx));
-        return Math.max(1, usableHeight / Math.max(1, cellHeightPx));
+        int availableHeight = Math.max(1, pageHeightPx - homeGridBottomGapPx());
+        return Math.max(1, availableHeight / Math.max(1, cellHeightPx));
     }
 
-    /** Returns a row top from a fixed origin, like the app drawer's top-to-bottom grid. */
+    /**
+     * Return the physical top of a bottom-origin row. The dock clearance remains
+     * fixed in dp; rows are added upward rather than expanding down from the top.
+     */
     private int homeGridRowTop(int row, int rowCount, int pageHeightPx, int cellHeightPx) {
         int rows = Math.max(1, rowCount);
         int cellHeight = Math.max(1, cellHeightPx);
         int safeRow = Math.max(0, Math.min(rows - 1, row));
-        return homeGridTopInsetPx(pageHeightPx) + safeRow * cellHeight;
+        return Math.max(0, pageHeightPx - homeGridBottomGapPx()
+                - (safeRow + 1) * cellHeight);
     }
 
-    /** Maps a pixel top coordinate back to the nearest legal row for the current mode. */
+    /** Convert a physical top coordinate to the corresponding bottom-origin row. */
     private int homeGridRowFromTop(float topPx, int rowCount, int pageHeightPx, int cellHeightPx) {
         int rows = Math.max(1, rowCount);
         int cellHeight = Math.max(1, cellHeightPx);
-        int topInset = homeGridTopInsetPx(pageHeightPx);
-        return Math.max(0, Math.min(rows - 1,
-                Math.round((topPx - topInset) / (float) cellHeight)));
+        float bottomOriginRow = (pageHeightPx - homeGridBottomGapPx()
+                - cellHeight - topPx) / (float) cellHeight;
+        return Math.max(0, Math.min(rows - 1, Math.round(bottomOriginRow)));
     }
 
     /**
@@ -5648,28 +5628,11 @@ public class MainActivity extends Activity {
                 ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
         android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
                 ? snapshotRef[0] : null;
-        int panelWidth = panel.getWidth();
-        int panelHeight = panel.getHeight();
-        if (panelWidth <= 0 && panel.getLayoutParams() != null) {
-            panelWidth = panel.getLayoutParams().width;
-        }
-        if (panelHeight <= 0 && panel.getLayoutParams() != null) {
-            panelHeight = panel.getLayoutParams().height;
-        }
-        int snapshotWidth = snapshot == null ? 0 : snapshot.getWidth();
-        int snapshotHeight = snapshot == null ? 0 : snapshot.getHeight();
-        if (snapshot != null && snapshot.getLayoutParams() != null) {
-            if (snapshotWidth <= 0) snapshotWidth = snapshot.getLayoutParams().width;
-            if (snapshotHeight <= 0) snapshotHeight = snapshot.getLayoutParams().height;
-        }
-        if (panelWidth > 0 && snapshotWidth > 0) {
-            resolvedTargetScaleX = Math.min(1f, snapshotWidth / (float) panelWidth);
-        }
-        if (panelHeight > 0 && snapshotHeight > 0) {
-            resolvedTargetScaleY = Math.min(1f, snapshotHeight / (float) panelHeight);
-        }
-        final float targetScaleX = resolvedTargetScaleX;
-        final float targetScaleY = resolvedTargetScaleY;
+        // Reverse the opening morph using its exact captured start scale. The
+        // handoff snapshot includes the label and can have different proportions, so
+        // deriving the target scale from its dimensions made the final close frame drift.
+        final float targetScaleX = Math.max(0.01f, Math.min(1f, resolvedTargetScaleX));
+        final float targetScaleY = Math.max(0.01f, Math.min(1f, resolvedTargetScaleY));
         if (snapshot != null) {
             snapshot.setVisibility(View.VISIBLE);
             snapshot.setAlpha(1f - Math.min(1f, initialProgress * 2f));
@@ -5683,7 +5646,7 @@ public class MainActivity extends Activity {
                 ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
-        transition.setDuration(animationDuration(175L));
+        transition.setDuration(animationDuration(240L));
         transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
         transition.addUpdateListener(animation -> {
             if (!dialog.isShowing() || !closing[0]) return;
@@ -6601,7 +6564,10 @@ public class MainActivity extends Activity {
     }
 
     private void renderSavedContactShortcut(String shortcutId) {
-        if (pagesStrip == null || prefs == null) return;
+        if (pagesStrip == null || prefs == null || shortcutId == null || shortcutId.isEmpty()) return;
+        // A replacement/settings callback can race a pending render. Never attach a second
+        // live tile for the same persisted shortcut ID.
+        if (hasRenderedContactShortcut(shortcutId)) return;
         if (pageViewport == null) return;
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
             pageViewport.post(() -> renderSavedContactShortcut());
@@ -6679,7 +6645,8 @@ public class MainActivity extends Activity {
                 && pagesStrip.getChildAt(desiredPage) instanceof FrameLayout) {
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(desiredPage);
             int preferredX = lastSavedLeft >= 0 ? lastSavedLeft : 0;
-            int preferredY = lastSavedTop >= 0 ? lastSavedTop : 0;
+            int preferredY = lastSavedTop >= 0 ? lastSavedTop
+                    : homeGridRowTop(0, rows, page.getHeight(), cellH);
             // Keep the saved slot/row when possible. If a widget blocks that slot,
             // progressively shrink the blocker before considering another grid cell.
             int[] resolved = findContactShortcutGridPositionWithWidgetShrink(
@@ -7106,6 +7073,13 @@ public class MainActivity extends Activity {
                 }
             });
             return true;
+        });
+        chosenPage.post(() -> {
+            if (tile.getParent() == chosenPage && pagesStrip != null
+                    && chosenPage.getParent() == pagesStrip && !homeIconResizeRepairPending) {
+                repairContactShortcutGridPositions(chosenPage);
+                resolveAllWorkspaceOverlaps(chosenPage, tile);
+            }
         });
     }
 
