@@ -10315,7 +10315,11 @@ public class MainActivity extends Activity {
         if (fromHome && homeIndex >= 0 && homeIndex < homePackages.size() - 1) { labels.add("Move later"); icons.add("↓"); actions.add("Move later"); }
         if (fromHome) { labels.add("Remove from Home"); icons.add("−"); actions.add("Remove from Home"); }
         else { labels.add("Add to Home"); icons.add("+"); actions.add("Add to Home"); }
-        showActionDialog(app.loadLabel(packageManager).toString(), icons.toArray(new String[0]), labels.toArray(new String[0]), (dialog, which) -> {
+
+        String title = app.loadLabel(packageManager).toString();
+        String[] iconItems = icons.toArray(new String[0]);
+        String[] labelItems = labels.toArray(new String[0]);
+        android.content.DialogInterface.OnClickListener optionListener = (dialog, which) -> {
             String action = actions.get(which);
             if (action.equals("App info")) {
                 Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
@@ -10343,7 +10347,63 @@ public class MainActivity extends Activity {
                 addToHome(app.activityInfo.packageName);
                 showHome();
             }
-        });
+        };
+
+        // Home long-press is an editing interaction: use a compact card without a dim
+        // scrim. App-drawer actions retain the established larger Studio dialog.
+        if (fromHome) {
+            showCompactAppOptionsDialog(title, iconItems, labelItems, optionListener);
+        } else {
+            showActionDialog(title, iconItems, labelItems, optionListener);
+        }
+    }
+
+    private void showCompactAppOptionsDialog(String title, String[] icons, String[] labels,
+            android.content.DialogInterface.OnClickListener listener) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, title, "Choose an action");
+        for (int i = 0; i < labels.length; i++) {
+            final int index = i;
+            String icon = icons != null && i < icons.length ? icons[i] : "›";
+            LinearLayout row = createStudioDialogActionRow(icon, labels[i], v -> {
+                dialog.dismiss();
+                if (listener != null) listener.onClick(dialog, index);
+            });
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = LauncherUiUtils.dp(this, 5);
+            panel.addView(row, rowParams);
+        }
+
+        dialog.setContentView(panel);
+        dialog.setCanceledOnTouchOutside(true);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams attributes = window.getAttributes();
+            attributes.dimAmount = 0f;
+            window.setAttributes(attributes);
+            window.setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        }
+
+        dialog.show();
+        window = dialog.getWindow();
+        if (window != null) {
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int horizontalMargin = LauncherUiUtils.dp(this, 40);
+            int maxCardWidth = LauncherUiUtils.dp(this, 340);
+            int width = Math.min(maxCardWidth, Math.max(1, screenWidth - horizontalMargin));
+            window.setGravity(Gravity.CENTER);
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+
+        panel.setAlpha(0f);
+        panel.setScaleX(0.97f);
+        panel.setScaleY(0.97f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(animationDuration(180L)).start();
     }
 
     private void showActionDialog(String title, String[] icons, String[] labels,
