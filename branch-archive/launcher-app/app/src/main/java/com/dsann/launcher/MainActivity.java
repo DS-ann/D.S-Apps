@@ -685,6 +685,8 @@ public class MainActivity extends Activity {
     private View activeAppGroupMemberMoveModeView;
     private boolean appGroupCreationPending;
     private boolean appGroupRenderDeferred;
+    private final java.util.WeakHashMap<FrameLayout, Boolean> shortcutPageLayoutWatchers =
+            new java.util.WeakHashMap<FrameLayout, Boolean>();
     // Defers generic overlap validation until resize-specific recovery completes.
     private boolean homeIconResizeRepairPending;
     private int resizeRepairCollisionCount;
@@ -5973,6 +5975,80 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void ensureShortcutPageLayoutWatcher(FrameLayout page) {
+        if (page == null || shortcutPageLayoutWatchers.containsKey(page)) return;
+        shortcutPageLayoutWatchers.put(page, Boolean.TRUE);
+        page.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                       oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left == oldRight - oldLeft
+                    && bottom - top == oldBottom - oldTop) return;
+            syncShortcutCellsToPageGeometry((FrameLayout) view);
+        });
+    }
+
+    private void syncShortcutCellsToPageGeometry(FrameLayout page) {
+        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0
+                || pagesStrip == null || page.getParent() != pagesStrip) return;
+        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View child = page.getChildAt(i);
+            if (!isWorkspaceContactShortcut(child) || !(child instanceof ViewGroup)
+                    || !(child.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            ViewGroup tile = (ViewGroup) child;
+            if (tile.getChildCount() < 2) continue;
+            ImageView icon = tile.getChildAt(0) instanceof ImageView
+                    ? (ImageView) tile.getChildAt(0) : null;
+            TextView label = tile.getChildAt(1) instanceof TextView
+                    ? (TextView) tile.getChildAt(1) : null;
+            if (icon == null) continue;
+            String id = shortcutIdFromTile(tile);
+            if (id.isEmpty()) continue;
+            float savedX = Math.max(0f, Math.min(1f, getFloatPreferenceCompat(
+                    shortcutPrefKey(KEY_SHORTCUT_X, id), 0f)));
+            float savedY = Math.max(0f, Math.min(1f, getFloatPreferenceCompat(
+                    shortcutPrefKey(KEY_SHORTCUT_Y, id), 0f)));
+            int col = Math.max(0, Math.min(3, Math.round(savedX * 3f)));
+            int row = Math.max(0, Math.min(rows - 1,
+                    Math.round(savedY * Math.max(1, rows - 1))));
+            int iconSize = shortcutIconSizePx(cellWidth, cellHeight);
+            FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) tile.getLayoutParams();
+            tileParams.width = cellWidth;
+            tileParams.height = cellHeight;
+            tileParams.leftMargin = col * cellWidth;
+            tileParams.topMargin = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+            tileParams.gravity = Gravity.TOP | Gravity.LEFT;
+            tile.setLayoutParams(tileParams);
+            if (icon.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams iconParams =
+                        (FrameLayout.LayoutParams) icon.getLayoutParams();
+                iconParams.width = iconSize;
+                iconParams.height = iconSize;
+                iconParams.leftMargin = Math.max(0, (cellWidth - iconSize) / 2);
+                iconParams.topMargin = LauncherUiUtils.dp(this, 14);
+                icon.setLayoutParams(iconParams);
+            }
+            if (label != null && label.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams labelParams =
+                        (FrameLayout.LayoutParams) label.getLayoutParams();
+                labelParams.width = cellWidth;
+                labelParams.height = workspaceLabelHeightPx(label);
+                labelParams.leftMargin = 0;
+                labelParams.topMargin = LauncherUiUtils.dp(this, 15) + iconSize;
+                label.setLayoutParams(labelParams);
+                label.post(() -> fitShortcutLabelWithDots(label));
+            }
+        }
+        page.post(() -> {
+            if (page.getParent() == pagesStrip && !homeIconResizeRepairPending) {
+                resolveAllWorkspaceOverlaps(page, null);
+            }
+            ensureShortcutLabelsNotClipped();
+        });
+    }
+
     private void renderSavedContactShortcut(String shortcutId) {
         if (pagesStrip == null || prefs == null) return;
         if (pageViewport == null) return;
@@ -6075,9 +6151,9 @@ public class MainActivity extends Activity {
                 Math.round(chosenLeft / (float) cellW)));
         int chosenRow = homeGridRowFromTop(chosenTop, rows, pageViewport.getHeight(), cellH);
         int initialIconSize = shortcutIconSizePx(cellW, cellH);
-        int tileLeft = homeGridIconLeftAt(null, chosenCol, cellW, initialIconSize);
-        int tileTop = homeGridRowTop(chosenRow, rows, pageViewport.getHeight(), cellH)
-                + LauncherUiUtils.dp(this, 14);
+        int tileLeft = chosenCol * cellW;
+        int tileTop = homeGridRowTop(chosenRow, rows, pageViewport.getHeight(), cellH);
+        ensureShortcutPageLayoutWatcher(chosenPage);
         float normalizedX = chosenCol / (float) Math.max(1, columns - 1);
         float normalizedY = chosenRow / (float) Math.max(1, rows - 1);
         prefs.edit().putInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), desiredPage)
@@ -6123,6 +6199,8 @@ public class MainActivity extends Activity {
 
         FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
                 initialIconSize, initialIconSize, Gravity.TOP | Gravity.LEFT);
+        iconParams.leftMargin = Math.max(0, (cellW - initialIconSize) / 2);
+        iconParams.topMargin = LauncherUiUtils.dp(this, 14);
         tile.addView(icon, iconParams);
 
         TextView label = LauncherUiUtils.text(this,
@@ -6146,8 +6224,8 @@ public class MainActivity extends Activity {
         int shortcutLabelHeight = workspaceLabelHeightPx(label);
         FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
                 cellW, shortcutLabelHeight, Gravity.TOP | Gravity.LEFT);
-        labelParams.leftMargin = chosenCol * cellW - tileLeft;
-        labelParams.topMargin = initialIconSize + LauncherUiUtils.dp(this, 1);
+        labelParams.leftMargin = 0;
+        labelParams.topMargin = LauncherUiUtils.dp(this, 15) + initialIconSize;
         tile.addView(label, labelParams);
         label.setVisibility(prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
                 ? View.VISIBLE : View.GONE);
@@ -6155,8 +6233,7 @@ public class MainActivity extends Activity {
         int initialLabelExtraHeight = prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
                 ? shortcutLabelHeight + LauncherUiUtils.dp(this, 1) : 0;
         FrameLayout.LayoutParams tileParams = new FrameLayout.LayoutParams(
-                initialIconSize, initialIconSize + initialLabelExtraHeight,
-                Gravity.TOP | Gravity.LEFT);
+                cellW, cellH, Gravity.TOP | Gravity.LEFT);
         tileParams.leftMargin = tileLeft;
         tileParams.topMargin = tileTop;
         chosenPage.addView(tile, tileParams);
