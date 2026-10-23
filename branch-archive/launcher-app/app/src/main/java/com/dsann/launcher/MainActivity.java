@@ -3663,11 +3663,11 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Keep a 45dp breathing space between the label-enabled home grid and the dock.
-     * With labels disabled, preserve the previous workspace capacity exactly.
+     * Keep a fixed 30dp gap between the bottom of every home grid and the dock.
+     * The clearance is independent of icon size and whether home labels are enabled.
      */
     private int homeGridBottomGapPx() {
-        return isHomeGridBottomAligned() ? LauncherUiUtils.dp(this, 45) : 0;
+        return LauncherUiUtils.dp(this, 30);
     }
 
     /**
@@ -7056,6 +7056,17 @@ public class MainActivity extends Activity {
                     if (tile.getParent() != null) tile.getParent().requestDisallowInterceptTouchEvent(false);
                     setWorkspaceGridVisible(false, null);
                     refreshWorkspaceGrid();
+                    if (commit && targetPage.getParent() == pagesStrip) {
+                        // Repair the committed layout after the destination tile is attached
+                        // and measured, so rounded saved coordinates can never leave two
+                        // shortcuts occupying the same logical grid cell.
+                        final FrameLayout shortcutPageToRepair = targetPage;
+                        shortcutPageToRepair.post(() -> {
+                            if (shortcutPageToRepair.getParent() == pagesStrip) {
+                                repairContactShortcutGridPositions(shortcutPageToRepair);
+                            }
+                        });
+                    }
                     return true;
                 }
                 LauncherUiUtils.stopMoveHint(tile);
@@ -7201,6 +7212,26 @@ public class MainActivity extends Activity {
                     || child.getVisibility() != View.VISIBLE || !isWorkspaceItem(child)) continue;
             int[] geometry = itemGeometry(child);
             if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            if (isWorkspaceContactShortcut(child)
+                    && child.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                // Shortcuts reserve an exclusive four-column cell as well as their painted
+                // icon/label bounds. Without this, differently sized or label-hidden
+                // shortcuts could pass the visual-only test and be saved in one same slot.
+                FrameLayout.LayoutParams otherLp =
+                        (FrameLayout.LayoutParams) child.getLayoutParams();
+                int otherCol = Math.max(0, Math.min(3,
+                        Math.round(otherLp.leftMargin / (float) cellWidth)));
+                int otherRow = homeGridRowFromTop(otherLp.topMargin, rows,
+                        page.getHeight(), cellHeight);
+                int otherLeft = otherCol * cellWidth;
+                int otherTop = homeGridRowTop(otherRow, rows, page.getHeight(), cellHeight);
+                android.graphics.Rect candidateCell = new android.graphics.Rect(
+                        snappedLeft, snappedTop, snappedLeft + cellWidth,
+                        snappedTop + cellHeight);
+                android.graphics.Rect otherCell = new android.graphics.Rect(
+                        otherLeft, otherTop, otherLeft + cellWidth, otherTop + cellHeight);
+                if (android.graphics.Rect.intersects(candidateCell, otherCell)) return false;
+            }
             if (isHomeGridIcon(child)) {
                 android.graphics.Rect other = appIconVisualRectAt(
                         child, geometry[0], geometry[1], geometry[2], geometry[3]);
