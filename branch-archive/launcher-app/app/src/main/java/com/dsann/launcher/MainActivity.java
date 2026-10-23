@@ -5558,8 +5558,8 @@ public class MainActivity extends Activity {
         if (morphAnimator != null && morphAnimator.length > 0 && morphAnimator[0] != null) {
             morphAnimator[0].cancel();
         }
-        float targetScaleX = iconScale != null ? iconScale[0] : 0.12f;
-        float targetScaleY = iconScale != null ? iconScale[1] : targetScaleX;
+        float resolvedTargetScaleX = iconScale != null ? iconScale[0] : 0.12f;
+        float resolvedTargetScaleY = iconScale != null ? iconScale[1] : resolvedTargetScaleX;
         float offsetX = startTranslation != null ? startTranslation[0] : 0f;
         float offsetY = startTranslation != null ? startTranslation[1] : 0f;
         float initialProgress = morphProgress != null
@@ -5581,11 +5581,13 @@ public class MainActivity extends Activity {
             if (snapshotHeight <= 0) snapshotHeight = snapshot.getLayoutParams().height;
         }
         if (panelWidth > 0 && snapshotWidth > 0) {
-            targetScaleX = Math.min(1f, snapshotWidth / (float) panelWidth);
+            resolvedTargetScaleX = Math.min(1f, snapshotWidth / (float) panelWidth);
         }
         if (panelHeight > 0 && snapshotHeight > 0) {
-            targetScaleY = Math.min(1f, snapshotHeight / (float) panelHeight);
+            resolvedTargetScaleY = Math.min(1f, snapshotHeight / (float) panelHeight);
         }
+        final float targetScaleX = resolvedTargetScaleX;
+        final float targetScaleY = resolvedTargetScaleY;
         if (snapshot != null) {
             snapshot.setVisibility(View.VISIBLE);
             snapshot.setAlpha(1f - Math.min(1f, initialProgress * 2f));
