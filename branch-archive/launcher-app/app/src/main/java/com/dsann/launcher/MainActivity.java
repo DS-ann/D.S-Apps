@@ -6674,24 +6674,23 @@ public class MainActivity extends Activity {
                 int[] slot = homeGridIconSlot(page, shortcut, cellHeight, rows);
                 if (slot == null) continue;
                 int target = shortcutIconSizePx(cellWidth, cellHeight);
-                FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) shortcut.getLayoutParams();
-                tileParams.width = target;
+                FrameLayout.LayoutParams tileParams =
+                        (FrameLayout.LayoutParams) shortcut.getLayoutParams();
+                tileParams.width = cellWidth;
+                tileParams.height = cellHeight;
+                tileParams.leftMargin = slot[0] * cellWidth;
+                tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight);
+                tileParams.gravity = Gravity.TOP | Gravity.LEFT;
                 if (label != null) label.setTextSize(homeFontSizeSp());
-                int labelExtraHeight = prefs != null && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)
-                        ? (label != null ? workspaceLabelHeightPx(label)
-                                : LauncherUiUtils.dp(this, homeLabelHeightDp()))
-                                + LauncherUiUtils.dp(this, 1) : 0;
-                tileParams.height = target + labelExtraHeight;
-                int targetTileLeft = homeGridIconLeftAt(null, slot[0], cellWidth, target);
-                tileParams.leftMargin = targetTileLeft;
-                tileParams.topMargin = homeGridRowTop(slot[1], rows, page.getHeight(), cellHeight)
-                        + LauncherUiUtils.dp(this, 14);
                 shortcut.setLayoutParams(tileParams);
 
-                ViewGroup.LayoutParams iconParams = icon.getLayoutParams();
-                if (iconParams != null && (iconParams.width != target || iconParams.height != target)) {
+                if (icon.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams iconParams =
+                            (FrameLayout.LayoutParams) icon.getLayoutParams();
                     iconParams.width = target;
                     iconParams.height = target;
+                    iconParams.leftMargin = Math.max(0, (cellWidth - target) / 2);
+                    iconParams.topMargin = LauncherUiUtils.dp(this, 14);
                     icon.setLayoutParams(iconParams);
                 }
                 if (label != null && label.getLayoutParams() instanceof FrameLayout.LayoutParams) {
@@ -6699,10 +6698,10 @@ public class MainActivity extends Activity {
                             (FrameLayout.LayoutParams) label.getLayoutParams();
                     labelParams.width = cellWidth;
                     labelParams.height = workspaceLabelHeightPx(label);
-                    labelParams.leftMargin = slot[0] * cellWidth - targetTileLeft;
-                    labelParams.topMargin = target + LauncherUiUtils.dp(this, 1);
+                    labelParams.leftMargin = 0;
+                    labelParams.topMargin = LauncherUiUtils.dp(this, 15) + target;
                     label.setLayoutParams(labelParams);
-                    fitShortcutLabelWithDots(label);
+                    label.post(() -> fitShortcutLabelWithDots(label));
                 }
             }
             page.post(() -> {
@@ -6860,33 +6859,44 @@ public class MainActivity extends Activity {
         label.setIncludeFontPadding(false);
         if (shortcut && label.getParent() instanceof ViewGroup) {
             ViewGroup shortcutTile = (ViewGroup) label.getParent();
-            shortcutTile.setClipChildren(false);
-            shortcutTile.setClipToPadding(false);
+            shortcutTile.setClipChildren(true);
+            shortcutTile.setClipToPadding(true);
             View shortcutIcon = shortcutTile.getChildCount() > 0
                     ? shortcutTile.getChildAt(0) : null;
             ViewGroup.LayoutParams iconRawParams = shortcutIcon == null
                     ? null : shortcutIcon.getLayoutParams();
             int iconHeight = iconRawParams != null && iconRawParams.height > 0
                     ? iconRawParams.height : (shortcutIcon == null ? 0 : shortcutIcon.getHeight());
+            int iconTop = iconRawParams instanceof FrameLayout.LayoutParams
+                    ? ((FrameLayout.LayoutParams) iconRawParams).topMargin
+                    : LauncherUiUtils.dp(this, 14);
             int labelHeight = workspaceLabelHeightPx(label);
             ViewGroup.LayoutParams labelRawParams = label.getLayoutParams();
             if (labelRawParams instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams labelParams = (FrameLayout.LayoutParams) labelRawParams;
+                labelParams.width = shortcutTile.getParent() instanceof View
+                        ? Math.max(1, ((View) shortcutTile.getParent()).getWidth() / 4)
+                        : Math.max(1, shortcutTile.getWidth());
                 labelParams.height = labelHeight;
-                labelParams.topMargin = iconHeight + LauncherUiUtils.dp(this, 1);
+                labelParams.leftMargin = 0;
+                labelParams.topMargin = iconTop + iconHeight + LauncherUiUtils.dp(this, 1);
                 label.setLayoutParams(labelParams);
             }
             ViewGroup.LayoutParams tileRawParams = shortcutTile.getLayoutParams();
             if (tileRawParams instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) tileRawParams;
-                boolean labelsVisible = prefs != null
-                        && prefs.getBoolean(KEY_SHOW_HOME_LABELS, true);
-                tileParams.height = iconHeight + (labelsVisible
-                        ? labelHeight + LauncherUiUtils.dp(this, 1) : 0);
+                if (shortcutTile.getParent() instanceof View && tileRawParams.width != ViewGroup.LayoutParams.MATCH_PARENT) {
+                    tileParams.width = Math.max(1, ((View) shortcutTile.getParent()).getWidth() / 4);
+                }
+                int iconSizeDp = Math.max(32, Math.min(74,
+                        prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
+                tileParams.height = LauncherUiUtils.dp(this, homeCellHeightDp(iconSizeDp));
                 shortcutTile.setLayoutParams(tileParams);
             }
         }
-        if (shortcut) fitShortcutLabelWithDots(label);
+        if (shortcut) {
+            label.post(() -> fitShortcutLabelWithDots(label));
+        }
         label.invalidate();
     }
 
