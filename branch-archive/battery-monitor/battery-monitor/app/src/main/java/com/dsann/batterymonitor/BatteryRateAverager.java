@@ -1,15 +1,15 @@
 package com.dsann.batterymonitor;
 
 /**
- * Low-memory, time-weighted battery charge-rate estimate updated as samples arrive
- * within one-minute averaging windows.
+ * Low-memory, time-weighted battery charge-rate estimate published in 20-second windows.
  *
  * Device convention: negative current enters the battery (charging), while positive current
  * leaves the battery (discharging). The rate is the signed change in battery percentage per
  * hour, independent of Android's plugged/charging status.
  */
 final class BatteryRateAverager {
-    private static final long WINDOW_MS = 60_000L;
+    private static final long WINDOW_MS = 20_000L;
+    private static final long MIN_WINDOW_COVERAGE_MS = WINDOW_MS * 3L / 4L;
     private static final long MAX_SAMPLE_GAP_MS = 3_000L;
     private static final double MIN_CAPACITY_MAH = 100.0;
     private static final double MAX_CAPACITY_MAH = 100_000.0;
@@ -82,9 +82,9 @@ final class BatteryRateAverager {
                 integrate(lastCurrentMa, currentMa, segmentMs);
             }
 
-            // Publish any observed part of the window. The rate therefore appears promptly;
-            // missed sampling gaps are still discarded above rather than invented.
-            publishObservedRate();
+            // Publish only after a complete 20-second window, and only when at least 75%
+            // was actually observed. Never label a short or interrupted sample as a 20s average.
+            publishCompletedWindow();
 
             windowStartMs = now;
             integratedCurrentMaMs = 0.0;
@@ -95,16 +95,22 @@ final class BatteryRateAverager {
         }
 
         integrate(lastCurrentMa, currentMa, gapMs);
-        publishObservedRate();
         lastSampleAtMs = now;
         lastCurrentMa = currentMa;
         return publishedRatePercentPerHour;
     }
 
-    private static void publishObservedRate() {
-        if (integratedDurationMs <= 0L || !isValidCapacity(activeCapacityMah)) return;
+    private static void publishCompletedWindow() {
+        if (integratedDurationMs < MIN_WINDOW_COVERAGE_MS
+                || !isValidCapacity(activeCapacityMah)) {
+            publishedRatePercentPerHour = Double.NaN;
+            return;
+        }
         double averageCurrentMa = integratedCurrentMaMs / integratedDurationMs;
-        if (Double.isNaN(averageCurrentMa) || Double.isInfinite(averageCurrentMa)) return;
+        if (Double.isNaN(averageCurrentMa) || Double.isInfinite(averageCurrentMa)) {
+            publishedRatePercentPerHour = Double.NaN;
+            return;
+        }
         // Negative current means charging, so invert current sign for battery % change.
         publishedRatePercentPerHour =
                 -averageCurrentMa * 100.0 / activeCapacityMah;

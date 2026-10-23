@@ -613,7 +613,7 @@ public class MainActivity extends Activity {
         myBatteryRateLabel=text("Charging rate: --%/h\nDischarging rate: --%/h",12);
         myBatteryRateLabel.setTextColor(0xFF9AA0AA);
         calculator.addView(myBatteryRateLabel,top(3));
-        TextView rateAverageHint=text("Live current-based estimate • improves as samples accumulate",11);
+        TextView rateAverageHint=text("20-second average • refreshes every 20 seconds",11);
         rateAverageHint.setTextColor(0xFF7F8B9B);
         calculator.addView(rateAverageHint,top(2));
         calculatedMah=text("Remaining charge: enter capacity and starting mAh",13);
