@@ -7074,11 +7074,15 @@ public class MainActivity extends Activity {
             });
             return true;
         });
-        chosenPage.post(() -> {
-            if (tile.getParent() == chosenPage && pagesStrip != null
-                    && chosenPage.getParent() == pagesStrip && !homeIconResizeRepairPending) {
-                repairContactShortcutGridPositions(chosenPage);
-                resolveAllWorkspaceOverlaps(chosenPage, tile);
+        final FrameLayout attachedPageForRepair = chosenPage;
+        final FrameLayout attachedShortcutForRepair = tile;
+        attachedPageForRepair.post(() -> {
+            if (attachedShortcutForRepair.getParent() == attachedPageForRepair
+                    && pagesStrip != null
+                    && attachedPageForRepair.getParent() == pagesStrip
+                    && !homeIconResizeRepairPending) {
+                repairContactShortcutGridPositions(attachedPageForRepair);
+                resolveAllWorkspaceOverlaps(attachedPageForRepair, attachedShortcutForRepair);
             }
         });
     }
