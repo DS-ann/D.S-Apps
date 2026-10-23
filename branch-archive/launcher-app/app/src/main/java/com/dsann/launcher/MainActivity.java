@@ -850,7 +850,9 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(refreshAppsAfterPackageChange);
         handler.postDelayed(refreshAppsAfterPackageChange, 800L);
     }
-    private static final int MAX_WIDGET_RESTORE_RETRIES = 8;
+    // Some providers remain unavailable for several seconds while Android restores them
+    // after reboot/update. Keep their saved IDs and retry long enough for provider startup.
+    private static final int MAX_WIDGET_RESTORE_RETRIES = 40;
     private boolean widgetRestoreRetryScheduled = false;
     private int widgetRestoreRetryCount = 0;
     private final Runnable widgetRestoreRetry = () -> {
@@ -2983,6 +2985,13 @@ public class MainActivity extends Activity {
         handler.postDelayed(() -> {
             if (!clockUpdatesActive || widgetHost == null) return;
             try { widgetHost.startListening(); } catch (Exception ignored) {}
+            // Recheck saved host IDs only after AppWidgetHost has resumed listening.
+            // If an earlier startup attempt exhausted its retry budget, allow a fresh
+            // restoration window when the launcher becomes active again.
+            if (widgetRestoreRetryCount >= MAX_WIDGET_RESTORE_RETRIES) {
+                widgetRestoreRetryCount = 0;
+            }
+            restoreWidgetsOnPages();
         }, 500L);
         // Avoid a PackageManager scan on every resume. Install, removal, update, and
         // component-enabled broadcasts refresh the drawer through packageChangesReceiver.
@@ -4845,16 +4854,31 @@ public class MainActivity extends Activity {
                     // the real view, so the separately rendered home label cannot flash.
                     final ViewGroup finalHandoffParent = handoffParent;
                     final boolean[] handoffFinished = new boolean[]{false};
-                    final Runnable finishCloseHandoff = () -> {
-                        if (handoffFinished[0]) return;
-                        handoffFinished[0] = true;
-                        openingGroupCell.setAlpha(openingGroupCellAlpha);
+                    final Runnable removeCloseHandoffSnapshot = () -> {
                         if (closeHandoffSnapshot.getParent() instanceof ViewGroup) {
                             ((ViewGroup) closeHandoffSnapshot.getParent())
                                     .removeView(closeHandoffSnapshot);
                         }
                         closeHandoffSnapshot.setImageDrawable(null);
                         closeHandoffSnapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                    };
+                    final Runnable finishCloseHandoff = () -> {
+                        if (handoffFinished[0]) return;
+                        handoffFinished[0] = true;
+                        // Reveal the real cell under the opaque image first. Android 6
+                        // then fades the image away instead of atomically swapping surfaces,
+                        // preventing the home label from flashing during compositor handoff.
+                        openingGroupCell.setAlpha(openingGroupCellAlpha);
+                        if (Build.VERSION.SDK_INT <= 23
+                                && closeHandoffSnapshot.getParent() instanceof ViewGroup) {
+                            closeHandoffSnapshot.animate().cancel();
+                            closeHandoffSnapshot.setAlpha(1f);
+                            closeHandoffSnapshot.animate().alpha(0f)
+                                    .setDuration(animationDuration(120L))
+                                    .withEndAction(removeCloseHandoffSnapshot).start();
+                        } else {
+                            removeCloseHandoffSnapshot.run();
+                        }
                     };
                     finalHandoffParent.postOnAnimation(() ->
                             finalHandoffParent.postOnAnimation(finishCloseHandoff));
@@ -5729,7 +5753,15 @@ public class MainActivity extends Activity {
                     try {
                         View activityDecor = getWindow() != null
                                 ? getWindow().getDecorView() : null;
-                        if (activityDecor instanceof ViewGroup && sourceCell.getParent() != null
+                        // Android 6's legacy compositor can flash when a child is added
+                        // directly to DecorView while a translucent dialog is being removed.
+                        // Use the attached launcher content root on API 23 and below; retain
+                        // the current DecorView handoff for newer Android versions.
+                        ViewGroup activityHost = Build.VERSION.SDK_INT <= 23 && root != null
+                                ? root
+                                : (activityDecor instanceof ViewGroup
+                                        ? (ViewGroup) activityDecor : null);
+                        if (activityHost != null && sourceCell.getParent() != null
                                 && sourceCell.getWidth() > 0 && sourceCell.getHeight() > 0) {
                             android.widget.ImageView handoff = closeHandoffSnapshotRef[0];
                             if (handoff == null) {
@@ -5750,7 +5782,7 @@ public class MainActivity extends Activity {
                             int[] cellLocation = new int[2];
                             int[] decorLocation = new int[2];
                             sourceCell.getLocationOnScreen(cellLocation);
-                            activityDecor.getLocationOnScreen(decorLocation);
+                            activityHost.getLocationOnScreen(decorLocation);
                             FrameLayout.LayoutParams handoffParams =
                                     new FrameLayout.LayoutParams(sourceCell.getWidth(),
                                             sourceCell.getHeight(),
@@ -5759,7 +5791,7 @@ public class MainActivity extends Activity {
                             handoffParams.topMargin = cellLocation[1] - decorLocation[1];
                             handoff.setAlpha(1f);
                             handoff.setVisibility(View.VISIBLE);
-                            ((ViewGroup) activityDecor).addView(handoff, handoffParams);
+                            activityHost.addView(handoff, handoffParams);
                             handoff.bringToFront();
                             sourceCell.setAlpha(0f);
                         }
@@ -10583,9 +10615,17 @@ public class MainActivity extends Activity {
                     }
                 }
                 if (targetPageIndex < 0) {
-                    clearFocusRecursively(child);
-                    sourcePage.removeViewAt(childIndex);
-                    continue;
+                    // A live host view is stronger evidence than a missing/stale registry
+                    // entry. Re-register it at its current page instead of detaching it;
+                    // the old behavior could make a widget disappear on a workspace rebuild.
+                    if (child instanceof FrameLayout) {
+                        saveWidgetGeometry(widgetId, pageIndex, (FrameLayout) child);
+                        targetPageIndex = pageIndex;
+                    } else {
+                        clearFocusRecursively(child);
+                        sourcePage.removeViewAt(childIndex);
+                        continue;
+                    }
                 }
                 targetPageIndex = Math.max(0, Math.min(pages.size() - 1, targetPageIndex));
                 if (targetPageIndex == pageIndex || targetPageIndex >= pagesStrip.getChildCount()) continue;
@@ -10621,7 +10661,11 @@ public class MainActivity extends Activity {
                 try {
                     int id = Integer.parseInt(parts[0]);
                     int pageIndex = Integer.parseInt(parts[1]);
-                    if (pageIndex < 0 || pageIndex >= pagesStrip.getChildCount()) continue;
+                    if (pageIndex < 0 || pageIndex >= pagesStrip.getChildCount()) {
+                        // Keep the ID registered and retry after the page strip/layout is ready.
+                        retryNeeded = true;
+                        continue;
+                    }
                     FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
                     boolean exists = false;
                     for (int i = 0; i < page.getChildCount(); i++) {

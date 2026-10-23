@@ -57,29 +57,35 @@ final class WidgetController {
                              int pageIndex, FrameLayout container) {
         if (container == null || !(container.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) container.getLayoutParams();
-        prefs.edit().putInt("widget_x_" + widgetId, lp.leftMargin)
-                .putInt("widget_y_" + widgetId, lp.topMargin)
-                .putInt("widget_w_" + widgetId, lp.width)
-                .putInt("widget_h_" + widgetId, lp.height).apply();
-
+        // Commit widget dimensions and the host-ID registry in one transaction. Two
+        // separate apply() calls left a crash/update window where geometry reached disk
+        // but the widget ID was lost, making the widget impossible to restore next launch.
         String stored = prefs.getString(widgetIdsKey, "");
         StringBuilder updated = new StringBuilder();
         boolean found = false;
-        for (String entry : stored.split("\\n")) {
-            String[] parts = entry.split(":");
-            if (parts.length < 2) continue;
-            if (parts[0].equals(String.valueOf(widgetId))) {
-                entry = widgetId + ":" + pageIndex;
-                found = true;
+        if (stored != null && !stored.isEmpty()) {
+            for (String entry : stored.split("\\n")) {
+                String[] parts = entry.split(":");
+                if (parts.length < 2) continue;
+                if (parts[0].trim().equals(String.valueOf(widgetId))) {
+                    entry = widgetId + ":" + pageIndex;
+                    found = true;
+                }
+                if (updated.length() > 0) updated.append('\n');
+                updated.append(entry);
             }
-            if (updated.length() > 0) updated.append('\n');
-            updated.append(entry);
         }
         if (!found) {
             if (updated.length() > 0) updated.append('\n');
             updated.append(widgetId).append(':').append(pageIndex);
         }
-        prefs.edit().putString(widgetIdsKey, updated.toString()).apply();
+        prefs.edit()
+                .putInt("widget_x_" + widgetId, lp.leftMargin)
+                .putInt("widget_y_" + widgetId, lp.topMargin)
+                .putInt("widget_w_" + widgetId, lp.width)
+                .putInt("widget_h_" + widgetId, lp.height)
+                .putString(widgetIdsKey, updated.toString())
+                .commit();
     }
 
     static void removeWidget(SharedPreferences prefs, String widgetIdsKey, int widgetId) {
@@ -95,6 +101,6 @@ final class WidgetController {
         }
         prefs.edit().putString(widgetIdsKey, updated.toString())
                 .remove("widget_x_" + widgetId).remove("widget_y_" + widgetId)
-                .remove("widget_w_" + widgetId).remove("widget_h_" + widgetId).apply();
+                .remove("widget_w_" + widgetId).remove("widget_h_" + widgetId).commit();
     }
 }
