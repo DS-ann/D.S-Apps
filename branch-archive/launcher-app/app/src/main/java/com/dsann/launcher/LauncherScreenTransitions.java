@@ -99,8 +99,18 @@ final class LauncherScreenTransitions {
         resetTransitionPose(homeScreen);
         drawerScreen.setVisibility(View.GONE);
         resetTransitionPose(drawerScreen);
-        releaseTransitionLayer(homeScreen);
-        releaseTransitionLayer(drawerScreen);
+        // Releasing a full-screen hardware layer in the animator's final frame can
+        // invalidate/rebuild the just-settled home surface and flash it for one frame.
+        // Defer cleanup until Home has rendered the stable, fully-closed pose.
+        homeScreen.postOnAnimation(() -> {
+            if (homeScreen.getVisibility() == View.VISIBLE
+                    && drawerScreen.getVisibility() == View.GONE
+                    && activeParallaxAnimator == null
+                    && activeDrawerSettleAnimator == null) {
+                releaseTransitionLayer(homeScreen);
+                releaseTransitionLayer(drawerScreen);
+            }
+        });
     }
 
     private static void finishParallaxAtDrawer(LinearLayout homeScreen, LinearLayout drawerScreen) {

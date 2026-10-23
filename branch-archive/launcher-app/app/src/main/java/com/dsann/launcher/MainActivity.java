@@ -780,6 +780,12 @@ public class MainActivity extends Activity {
         }
     };
     private boolean drawerOpen = false;
+    // Treat an app launch as one transaction: rapid taps must not enqueue a second task.
+    private boolean appLaunchInProgress;
+    private boolean appLaunchPaused;
+    private final Runnable appLaunchGateRecovery = () -> {
+        if (!appLaunchPaused) appLaunchInProgress = false;
+    };
     // Coalesce high-frequency touch MOVE events to one drawer pose update per display frame.
     private float drawerSwipePendingProgress;
     private int drawerSwipePendingEffect;
@@ -2947,6 +2953,12 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // Release the one-launch gate only after the launcher returns from the launched app.
+        if (appLaunchInProgress && appLaunchPaused) {
+            appLaunchInProgress = false;
+            appLaunchPaused = false;
+            handler.removeCallbacks(appLaunchGateRecovery);
+        }
         // A hidden INVISIBLE drawer can measure and warm its first viewport without appearing
         // over Home. GONE prevents GridView from laying out cells, so restore the warm state
         // when we return to the launcher and persist the finished viewport from there.
@@ -3002,6 +3014,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        if (appLaunchInProgress) appLaunchPaused = true;
         // Leaving the launcher (opening an app or locking the screen) must never
         // leave clock widget edit grips/grid active when the launcher returns.
         if (clockWidgetEditing) exitClockWidgetEditMode();
@@ -10241,28 +10254,37 @@ public class MainActivity extends Activity {
     }
 
     private void launchApp(ResolveInfo app, View sourceView) {
-        if (app == null || app.activityInfo == null || !canLaunchAppFromSource(sourceView)) return;
-        Intent intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
-        if (intent != null) {
-            try {
-                if (android.os.Build.VERSION.SDK_INT >= 16 && sourceView != null
-                        && sourceView.getWidth() > 0 && sourceView.getHeight() > 0) {
-                    // Scale the launched app from the tapped icon, matching the native
-                    // launcher-to-app transition available on Android 6 and newer.
-                    android.app.ActivityOptions options =
-                            android.app.ActivityOptions.makeScaleUpAnimation(sourceView,
-                                    0, 0, sourceView.getWidth(), sourceView.getHeight());
-                    startActivity(intent, options.toBundle());
-                } else {
-                    startActivity(intent);
-                }
-            } catch (Exception e) {
-                try {
-                    startActivity(intent);
-                } catch (Exception ignored) {
-                    Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show();
-                }
-            }
+        if (app == null || app.activityInfo == null || !canLaunchAppFromSource(sourceView)
+                || appLaunchInProgress) return;
+        final Intent intent;
+        try {
+            intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
+        } catch (RuntimeException error) {
+            Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (intent == null) {
+            Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Use normal task launch semantics instead of a source-view scale-up. That transition
+        // can race recycled/detached icon views during rapid taps. The lock is set BEFORE
+        // startActivity, so duplicate click callbacks cannot create a second Recent Apps task.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        appLaunchInProgress = true;
+        appLaunchPaused = false;
+        handler.removeCallbacks(appLaunchGateRecovery);
+        handler.postDelayed(appLaunchGateRecovery, 1800L);
+        try {
+            startActivity(intent);
+        } catch (Exception error) {
+            // Never retry the same launch intent in the exception path: a first launch can
+            // already have reached ActivityTaskManager, and retrying can open a duplicate card.
+            appLaunchInProgress = false;
+            appLaunchPaused = false;
+            handler.removeCallbacks(appLaunchGateRecovery);
+            Toast.makeText(this, "Unable to open app", Toast.LENGTH_SHORT).show();
         }
     }
 
