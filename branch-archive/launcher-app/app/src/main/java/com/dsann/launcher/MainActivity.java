@@ -4742,6 +4742,9 @@ public class MainActivity extends Activity {
         final float openingGroupCellAlpha = openingGroupCell == null
                 ? 1f : openingGroupCell.getAlpha();
         final Dialog dialog = new Dialog(this);
+        // Android 6's older HWUI renderer is unstable when this popup promotes several
+        // nested views to independent hardware layers. Use ordinary display-list drawing there.
+        final boolean legacyAppGroupRenderer = Build.VERSION.SDK_INT <= 23;
         activeAppGroupDialog = dialog;
         final java.util.concurrent.atomic.AtomicBoolean memberLoadCancelled =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -4905,7 +4908,8 @@ public class MainActivity extends Activity {
         panel.setClipToOutline(false);
         // Keep the transformed panel cached from its first visible frame through close.
         // Releasing the layer after opening forces another allocation on older GPUs.
-        panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        panel.setLayerType(legacyAppGroupRenderer
+                ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         panel.setClickable(true);
         panel.setOnClickListener(v -> { /* Consume blank-panel taps; only outside taps close. */ });
         // Keep app rows inside the rounded card. Their ScrollView is a separate
@@ -4924,12 +4928,14 @@ public class MainActivity extends Activity {
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
         title.setAlpha(0f);
-        title.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        title.setLayerType(legacyAppGroupRenderer
+                ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         View groupDivider = new View(this);
         groupDivider.setAlpha(0f);
-        groupDivider.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        groupDivider.setLayerType(legacyAppGroupRenderer
+                ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         groupDivider.setBackgroundColor(Color.argb(170, 255, 255, 255));
         panel.addView(groupDivider, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, LauncherUiUtils.dp(this, 1)));
@@ -4946,7 +4952,8 @@ public class MainActivity extends Activity {
         // Deferring drawable binding prevents package-resource work invalidating its animation layer.
         scroll.setTag("app_group_content_fade");
         scroll.setAlpha(0f);
-        scroll.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        scroll.setLayerType(legacyAppGroupRenderer
+                ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(true);
@@ -5056,7 +5063,7 @@ public class MainActivity extends Activity {
             // Release the full-card texture only after motion stops. The scroll viewport's
             // smaller hardware layer can now fade independently without rebuilding the card.
             // Opening progress owns the grid fade; artwork binding must not start a second animation.
-            scroll.buildLayer();
+            if (!legacyAppGroupRenderer) scroll.buildLayer();
         };
 
         // Load member artwork off the UI thread. The main panel animation starts as soon
@@ -5072,6 +5079,11 @@ public class MainActivity extends Activity {
                         loaded[i] = createAppGroupMemberDrawable(appsToLoad[i]);
                     } catch (RuntimeException ignored) {
                         loaded[i] = null;
+                    } catch (OutOfMemoryError memoryError) {
+                        // A large/complex third-party icon must not kill the loader thread
+                        // on low-memory Android 6 devices. Remaining entries may stay empty.
+                        loaded[i] = null;
+                        break;
                     }
                 }
                 if (memberLoadCancelled.get() || Thread.currentThread().isInterrupted()) return;
@@ -5322,7 +5334,8 @@ public class MainActivity extends Activity {
                     preview.setClickable(false);
                     preview.setEnabled(false);
                     preview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                    preview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                    preview.setLayerType(legacyAppGroupRenderer
+                            ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
                     FrameLayout.LayoutParams previewParams = new FrameLayout.LayoutParams(
                             iconW, iconH, Gravity.TOP | Gravity.LEFT);
                     previewParams.leftMargin = iconLeft;
@@ -5381,7 +5394,8 @@ public class MainActivity extends Activity {
 
             // Keep the source icon visible and the panel hidden until member artwork and
             // child layout are both ready for a single continuous transition.
-            panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            panel.setLayerType(legacyAppGroupRenderer
+                    ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
 
             final long duration = animationDuration(240L);
             android.animation.ValueAnimator transition =
@@ -5489,10 +5503,12 @@ public class MainActivity extends Activity {
                     // Warm the separately animated child surfaces; an offscreen parent layer
                     // would need rebuilding while child alpha changes and cause stepped fades.
                     panel.setAlpha(1f);
-                    title.buildLayer();
-                    groupDivider.buildLayer();
-                    scroll.buildLayer();
-                    panel.setLayerType(View.LAYER_TYPE_NONE, null);
+                    if (!legacyAppGroupRenderer) {
+                        title.buildLayer();
+                        groupDivider.buildLayer();
+                        scroll.buildLayer();
+                        panel.setLayerType(View.LAYER_TYPE_NONE, null);
+                    }
                     panel.setAlpha(0f);
                     overlay.postOnAnimation(() -> {
                         if (!isCurrentAppGroupSession(sessionId, dialog) || !dialog.isShowing()
@@ -5550,6 +5566,26 @@ public class MainActivity extends Activity {
                 ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
         android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
                 ? snapshotRef[0] : null;
+        int panelWidth = panel.getWidth();
+        int panelHeight = panel.getHeight();
+        if (panelWidth <= 0 && panel.getLayoutParams() != null) {
+            panelWidth = panel.getLayoutParams().width;
+        }
+        if (panelHeight <= 0 && panel.getLayoutParams() != null) {
+            panelHeight = panel.getLayoutParams().height;
+        }
+        int snapshotWidth = snapshot == null ? 0 : snapshot.getWidth();
+        int snapshotHeight = snapshot == null ? 0 : snapshot.getHeight();
+        if (snapshot != null && snapshot.getLayoutParams() != null) {
+            if (snapshotWidth <= 0) snapshotWidth = snapshot.getLayoutParams().width;
+            if (snapshotHeight <= 0) snapshotHeight = snapshot.getLayoutParams().height;
+        }
+        if (panelWidth > 0 && snapshotWidth > 0) {
+            targetScaleX = Math.min(1f, snapshotWidth / (float) panelWidth);
+        }
+        if (panelHeight > 0 && snapshotHeight > 0) {
+            targetScaleY = Math.min(1f, snapshotHeight / (float) panelHeight);
+        }
         if (snapshot != null) {
             snapshot.setVisibility(View.VISIBLE);
             snapshot.setAlpha(1f - Math.min(1f, initialProgress * 2f));
@@ -5559,7 +5595,8 @@ public class MainActivity extends Activity {
             snapshot.setTranslationY(0f);
             snapshot.bringToFront();
         }
-        panel.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        panel.setLayerType(Build.VERSION.SDK_INT <= 23
+                ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
         transition.setDuration(animationDuration(175L));
@@ -5597,6 +5634,19 @@ public class MainActivity extends Activity {
                 if (morphAnimator != null && morphAnimator.length > 0
                         && morphAnimator[0] == animation) {
                     morphAnimator[0] = null;
+                }
+                // Pin the last frame to the exact live snapshot dimensions/position. This avoids
+                // a stale scale from setup briefly shrinking the card below the launcher icon.
+                panel.setScaleX(targetScaleX);
+                panel.setScaleY(targetScaleY);
+                panel.setTranslationX(offsetX);
+                panel.setTranslationY(offsetY);
+                if (snapshot != null) {
+                    snapshot.setScaleX(1f);
+                    snapshot.setScaleY(1f);
+                    snapshot.setTranslationX(0f);
+                    snapshot.setTranslationY(0f);
+                    snapshot.setAlpha(1f);
                 }
                 // Restore the source icon before the popup disappears to avoid a blank frame.
                 if (beforeDismiss != null) {
