@@ -4530,6 +4530,317 @@ public class MainActivity extends Activity {
         }
     }
 
+    private interface StudioDialogActionListener {
+        void onSelect(int index);
+    }
+
+    private interface StudioTextActionListener {
+        void onSubmit(String value);
+    }
+
+    private LinearLayout createStudioDialogPanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14),
+                LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14));
+        panel.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{Color.rgb(28, 33, 57), Color.rgb(10, 14, 27)},
+                LauncherUiUtils.dp(this, 26)));
+        panel.setClipToPadding(false);
+        return panel;
+    }
+
+    private void addStudioDialogHeader(LinearLayout panel, String title, String subtitle) {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        View rail = new View(this);
+        rail.setBackground(studioSolidRoundRect(homeStudioAccentColor, 3));
+        header.addView(rail, new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 44)));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        copyParams.leftMargin = LauncherUiUtils.dp(this, 11);
+        TextView heading = LauncherUiUtils.text(this, title, 20, Color.WHITE, true);
+        heading.setMaxLines(2);
+        heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        copy.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        if (subtitle != null && !subtitle.trim().isEmpty()) {
+            TextView detail = LauncherUiUtils.text(this, subtitle, 12.5f,
+                    Color.rgb(190, 202, 226), false);
+            detail.setMaxLines(3);
+            detail.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+            detailParams.topMargin = LauncherUiUtils.dp(this, 3);
+            copy.addView(detail, detailParams);
+        }
+        header.addView(copy, copyParams);
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
+        headerParams.bottomMargin = LauncherUiUtils.dp(this, 12);
+        panel.addView(header, headerParams);
+
+        View accentLine = new View(this);
+        accentLine.setBackground(studioSolidRoundRect(homeStudioAccentColor, 2));
+        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, 2));
+        lineParams.bottomMargin = LauncherUiUtils.dp(this, 12);
+        panel.addView(accentLine, lineParams);
+    }
+
+    private TextView createStudioDialogButton(String label, boolean primary) {
+        TextView button = LauncherUiUtils.text(this, label, 14,
+                primary ? Color.rgb(10, 15, 27) : Color.rgb(211, 220, 240), true);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
+        button.setMinHeight(LauncherUiUtils.dp(this, 44));
+        button.setBackground(primary
+                ? LauncherUiUtils.roundRect(this,
+                        new int[]{homeStudioAccentColor, studioDarken(homeStudioAccentColor)},
+                        LauncherUiUtils.dp(this, 13))
+                : studioControlBackground());
+        return button;
+    }
+
+    private LinearLayout createStudioDialogActionRow(String icon, String label,
+            View.OnClickListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(LauncherUiUtils.dp(this, 9), LauncherUiUtils.dp(this, 7),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7));
+        row.setBackground(studioControlBackground());
+
+        View rail = new View(this);
+        rail.setBackground(studioSolidRoundRect(homeStudioAccentColor, 2));
+        row.addView(rail, new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 3), LauncherUiUtils.dp(this, 36)));
+
+        TextView glyph = LauncherUiUtils.text(this, icon, 19, homeStudioAccentColor, true);
+        glyph.setGravity(Gravity.CENTER);
+        glyph.setBackground(LauncherUiUtils.roundRect(this,
+                new int[]{studioTint(homeStudioAccentColor, 55),
+                        studioTint(homeStudioAccentColor, 22)},
+                LauncherUiUtils.dp(this, 11)));
+        LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(
+                LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38));
+        glyphParams.leftMargin = LauncherUiUtils.dp(this, 9);
+        glyphParams.rightMargin = LauncherUiUtils.dp(this, 10);
+        row.addView(glyph, glyphParams);
+
+        TextView text = LauncherUiUtils.text(this, label, 15,
+                Color.rgb(245, 247, 255), false);
+        text.setGravity(Gravity.CENTER_VERTICAL);
+        text.setMaxLines(2);
+        text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(text, new LinearLayout.LayoutParams(0, -1, 1f));
+        row.setOnClickListener(listener);
+        return row;
+    }
+
+    private void showStudioDialog(Dialog dialog, LinearLayout panel, int maxHeightDp) {
+        dialog.setContentView(panel);
+        dialog.setCanceledOnTouchOutside(true);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams attributes = window.getAttributes();
+            attributes.dimAmount = 0.58f;
+            window.setAttributes(attributes);
+            window.setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+        dialog.show();
+        window = dialog.getWindow();
+        if (window != null) {
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            int width = Math.max(1, screenWidth - LauncherUiUtils.dp(this, 32));
+            int height = maxHeightDp > 0
+                    ? Math.min(Math.max(1, screenHeight - LauncherUiUtils.dp(this, 56)),
+                            LauncherUiUtils.dp(this, maxHeightDp))
+                    : ViewGroup.LayoutParams.WRAP_CONTENT;
+            window.setLayout(width, height);
+        }
+        panel.setAlpha(0f);
+        panel.setScaleX(0.97f);
+        panel.setScaleY(0.97f);
+        panel.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(animationDuration(180L)).start();
+    }
+
+    private void showStudioPrompt(String title, String message, String cancelLabel,
+            String confirmLabel, android.content.DialogInterface.OnClickListener confirmAction) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, title, "Please confirm");
+        TextView body = LauncherUiUtils.text(this, message, 14,
+                Color.rgb(215, 223, 242), false);
+        body.setGravity(Gravity.CENTER_VERTICAL);
+        body.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 11),
+                LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 11));
+        body.setBackground(studioControlBackground());
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2);
+        bodyParams.bottomMargin = LauncherUiUtils.dp(this, 14);
+        panel.addView(body, bodyParams);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        TextView cancel = createStudioDialogButton(cancelLabel, false);
+        TextView confirm = createStudioDialogButton(confirmLabel, true);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        buttonParams.rightMargin = LauncherUiUtils.dp(this, 5);
+        actions.addView(cancel, buttonParams);
+        LinearLayout.LayoutParams confirmParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        confirmParams.leftMargin = LauncherUiUtils.dp(this, 5);
+        actions.addView(confirm, confirmParams);
+        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        confirm.setOnClickListener(v -> {
+            dialog.dismiss();
+            if (confirmAction != null) {
+                confirmAction.onClick(dialog, android.content.DialogInterface.BUTTON_POSITIVE);
+            }
+        });
+        showStudioDialog(dialog, panel, 0);
+    }
+
+    private void showStudioTextInputPrompt(String title, String hint, String initialValue,
+            String confirmLabel, StudioTextActionListener submitAction) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, title, hint);
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(Color.rgb(145, 159, 190));
+        input.setText(initialValue == null ? "" : initialValue);
+        input.setHint(hint);
+        input.setSelectAllOnFocus(true);
+        input.setPadding(LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 10),
+                LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 10));
+        input.setBackground(studioControlBackground());
+        input.setSelection(input.length());
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, 48));
+        inputParams.bottomMargin = LauncherUiUtils.dp(this, 14);
+        panel.addView(input, inputParams);
+
+        LinearLayout actions = new LinearLayout(this);
+        TextView cancel = createStudioDialogButton("Cancel", false);
+        TextView confirm = createStudioDialogButton(confirmLabel, true);
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        cancelParams.rightMargin = LauncherUiUtils.dp(this, 5);
+        actions.addView(cancel, cancelParams);
+        LinearLayout.LayoutParams confirmParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        confirmParams.leftMargin = LauncherUiUtils.dp(this, 5);
+        actions.addView(confirm, confirmParams);
+        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        confirm.setOnClickListener(v -> {
+            String value = input.getText().toString().trim();
+            dialog.dismiss();
+            if (submitAction != null) submitAction.onSubmit(value);
+        });
+        showStudioDialog(dialog, panel, 0);
+        input.requestFocus();
+    }
+
+    private void showStudioMultiActionPrompt(String title, String message, String[] icons,
+            String[] labels, StudioDialogActionListener action, Runnable onCancel) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, title, "Choose how to continue");
+        TextView body = LauncherUiUtils.text(this, message, 13.5f,
+                Color.rgb(210, 220, 239), false);
+        body.setPadding(LauncherUiUtils.dp(this, 11), LauncherUiUtils.dp(this, 10),
+                LauncherUiUtils.dp(this, 11), LauncherUiUtils.dp(this, 10));
+        body.setBackground(studioControlBackground());
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-1, -2);
+        bodyParams.bottomMargin = LauncherUiUtils.dp(this, 10);
+        panel.addView(body, bodyParams);
+        for (int i = 0; i < labels.length; i++) {
+            final int selectedIndex = i;
+            String icon = icons != null && i < icons.length ? icons[i] : "›";
+            LinearLayout row = createStudioDialogActionRow(icon, labels[i], v -> {
+                dialog.dismiss();
+                if (action != null) action.onSelect(selectedIndex);
+            });
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+            panel.addView(row, rowParams);
+        }
+        dialog.setOnCancelListener(ignored -> {
+            if (onCancel != null) onCancel.run();
+        });
+        showStudioDialog(dialog, panel, 600);
+    }
+
+    private void showStudioAppChoiceDialog(String title, List<ResolveInfo> choices,
+            StudioDialogActionListener selection) {
+        if (choices == null || choices.isEmpty()) return;
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, title, "Select an app to add to Home");
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setFillViewport(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < choices.size(); i++) {
+            final int index = i;
+            ResolveInfo app = choices.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 7),
+                    LauncherUiUtils.dp(this, 9), LauncherUiUtils.dp(this, 7));
+            row.setBackground(studioControlBackground());
+            ImageView icon = new ImageView(this);
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            try { icon.setImageDrawable(app.loadIcon(packageManager)); }
+            catch (RuntimeException ignored) {}
+            icon.setBackground(LauncherUiUtils.roundRect(this,
+                    new int[]{studioTint(homeStudioAccentColor, 46),
+                            studioTint(homeStudioAccentColor, 20)},
+                    LauncherUiUtils.dp(this, 11)));
+            icon.setPadding(LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 5),
+                    LauncherUiUtils.dp(this, 5), LauncherUiUtils.dp(this, 5));
+            row.addView(icon, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 42), LauncherUiUtils.dp(this, 42)));
+            TextView label = LauncherUiUtils.text(this,
+                    String.valueOf(app.loadLabel(packageManager)), 14.5f,
+                    Color.rgb(245, 247, 255), false);
+            label.setMaxLines(2);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1f);
+            labelParams.leftMargin = LauncherUiUtils.dp(this, 11);
+            row.addView(label, labelParams);
+            TextView add = LauncherUiUtils.text(this, "+", 22, homeStudioAccentColor, true);
+            add.setGravity(Gravity.CENTER);
+            row.addView(add, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 30), LauncherUiUtils.dp(this, 38)));
+            row.setOnClickListener(v -> {
+                dialog.dismiss();
+                if (selection != null) selection.onSelect(index);
+            });
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+            list.addView(row, rowParams);
+        }
+        scroll.addView(list, new android.widget.ScrollView.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        panel.addView(scroll, scrollParams);
+        TextView cancel = createStudioDialogButton("Cancel", false);
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, -2);
+        cancelParams.topMargin = LauncherUiUtils.dp(this, 9);
+        panel.addView(cancel, cancelParams);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        showStudioDialog(dialog, panel, 610);
+    }
+
     private void showAppGroupMemberPicker(String groupId, boolean removeMode) {
         ArrayList<String> currentMembers = getAppGroupMembers(groupId);
         ArrayList<ResolveInfo> choices = new ArrayList<ResolveInfo>();
@@ -4551,37 +4862,153 @@ public class MainActivity extends Activity {
                     : "No more apps are available to add.", Toast.LENGTH_SHORT).show();
             return;
         }
-        CharSequence[] labels = new CharSequence[choices.size()];
-        boolean[] checked = new boolean[choices.size()];
-        for (int i = 0; i < choices.size(); i++) {
-            ResolveInfo app = choices.get(i);
-            labels[i] = String.valueOf(app.loadLabel(packageManager));
-            checked[i] = false;
-        }
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, removeMode ? "Remove apps" : "Add apps",
+                removeMode ? "Select apps to remove from this group"
+                        : "Select apps to add to this group");
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setFillViewport(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
         ArrayList<String> selected = new ArrayList<String>();
-        new android.app.AlertDialog.Builder(this)
-                .setTitle(removeMode ? "Remove apps" : "Add apps")
-                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> {
-                    String packageName = choices.get(which).activityInfo.packageName;
-                    if (isChecked) {
-                        if (!selected.contains(packageName)) selected.add(packageName);
-                    } else {
-                        selected.remove(packageName);
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton(removeMode ? "Remove" : "Add", (dialog, which) -> {
-                    if (selected.isEmpty()) return;
-                    if (!removeMode) {
-                        addPackagesToAppGroup(groupId, selected);
-                    } else {
-                        ArrayList<String> members = getAppGroupMembers(groupId);
-                        members.removeAll(selected);
-                        saveAppGroupMembers(groupId, members);
-                        int groupPage = getAppGroupPage(groupId);
-                        restoreGroupedAppsToHome(groupPage, selected);
-                    }
-                }).show();
+        TextView[] checks = new TextView[choices.size()];
+        LinearLayout[] rows = new LinearLayout[choices.size()];
+        boolean[] selectedFlags = new boolean[choices.size()];
+
+        Runnable refreshSelection = () -> {
+            for (int i = 0; i < choices.size(); i++) {
+                ResolveInfo app = choices.get(i);
+                String packageName = app.activityInfo.packageName;
+                selectedFlags[i] = selected.contains(packageName);
+                checks[i].setText(selectedFlags[i] ? "✓" : "");
+                checks[i].setTextColor(selectedFlags[i]
+                        ? Color.rgb(10, 15, 27) : Color.rgb(165, 177, 207));
+                checks[i].setBackground(selectedFlags[i]
+                        ? LauncherUiUtils.roundRect(this,
+                                new int[]{homeStudioAccentColor, studioDarken(homeStudioAccentColor)},
+                                LauncherUiUtils.dp(this, 10))
+                        : studioControlBackground());
+                rows[i].setBackground(selectedFlags[i]
+                        ? LauncherUiUtils.roundRect(this,
+                                new int[]{studioTint(homeStudioAccentColor, 58),
+                                        studioTint(homeStudioAccentColor, 23)},
+                                LauncherUiUtils.dp(this, 14))
+                        : studioControlBackground());
+            }
+        };
+
+        TextView selectedCount = LauncherUiUtils.text(this, "0 selected", 12.5f,
+                Color.rgb(190, 202, 226), true);
+        TextView confirm = createStudioDialogButton(removeMode ? "Remove selected" : "Add selected", true);
+        confirm.setEnabled(false);
+        confirm.setAlpha(0.45f);
+        refreshSelection.run();
+
+        for (int i = 0; i < choices.size(); i++) {
+            final int index = i;
+            ResolveInfo app = choices.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 7),
+                    LauncherUiUtils.dp(this, 8), LauncherUiUtils.dp(this, 7));
+            rows[i] = row;
+
+            ImageView icon = new ImageView(this);
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            try { icon.setImageDrawable(app.loadIcon(packageManager)); }
+            catch (RuntimeException ignored) {}
+            icon.setBackground(LauncherUiUtils.roundRect(this,
+                    new int[]{studioTint(homeStudioAccentColor, 43),
+                            studioTint(homeStudioAccentColor, 18)},
+                    LauncherUiUtils.dp(this, 11)));
+            icon.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4),
+                    LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4));
+            row.addView(icon, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 42), LauncherUiUtils.dp(this, 42)));
+
+            LinearLayout copy = new LinearLayout(this);
+            copy.setOrientation(LinearLayout.VERTICAL);
+            copy.setGravity(Gravity.CENTER_VERTICAL);
+            TextView label = LauncherUiUtils.text(this,
+                    String.valueOf(app.loadLabel(packageManager)), 14.5f,
+                    Color.rgb(245, 247, 255), true);
+            label.setMaxLines(2);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            copy.addView(label, new LinearLayout.LayoutParams(-1, -2));
+            TextView packageLabel = LauncherUiUtils.text(this,
+                    app.activityInfo.packageName, 10.5f, Color.rgb(159, 174, 204), false);
+            packageLabel.setSingleLine(true);
+            packageLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams packageParams = new LinearLayout.LayoutParams(-1, -2);
+            packageParams.topMargin = LauncherUiUtils.dp(this, 2);
+            copy.addView(packageLabel, packageParams);
+            LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
+            copyParams.leftMargin = LauncherUiUtils.dp(this, 10);
+            copyParams.rightMargin = LauncherUiUtils.dp(this, 8);
+            row.addView(copy, copyParams);
+
+            TextView check = LauncherUiUtils.text(this, "", 17, Color.WHITE, true);
+            check.setGravity(Gravity.CENTER);
+            checks[i] = check;
+            row.addView(check, new LinearLayout.LayoutParams(
+                    LauncherUiUtils.dp(this, 31), LauncherUiUtils.dp(this, 31)));
+            row.setOnClickListener(v -> {
+                String packageName = choices.get(index).activityInfo.packageName;
+                if (selected.contains(packageName)) selected.remove(packageName);
+                else selected.add(packageName);
+                refreshSelection.run();
+                selectedCount.setText(selected.size() + " selected");
+                confirm.setText((removeMode ? "Remove selected" : "Add selected")
+                        + " (" + selected.size() + ")");
+                confirm.setEnabled(!selected.isEmpty());
+                confirm.setAlpha(selected.isEmpty() ? 0.45f : 1f);
+            });
+
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+            list.addView(row, rowParams);
+        }
+
+        // Selection views are all installed before the first draw; now normalize their state.
+        refreshSelection.run();
+        scroll.addView(list, new android.widget.ScrollView.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        panel.addView(scroll, scrollParams);
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.addView(selectedCount, new LinearLayout.LayoutParams(0, -2, 1f));
+        LinearLayout.LayoutParams confirmParams = new LinearLayout.LayoutParams(-2, -2);
+        confirmParams.leftMargin = LauncherUiUtils.dp(this, 7);
+        footer.addView(confirm, confirmParams);
+        LinearLayout.LayoutParams footerParams = new LinearLayout.LayoutParams(-1, -2);
+        footerParams.topMargin = LauncherUiUtils.dp(this, 9);
+        panel.addView(footer, footerParams);
+        TextView cancel = createStudioDialogButton("Cancel", false);
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-1, -2);
+        cancelParams.topMargin = LauncherUiUtils.dp(this, 7);
+        panel.addView(cancel, cancelParams);
+
+        confirm.setOnClickListener(v -> {
+            if (selected.isEmpty()) return;
+            ArrayList<String> selectedPackages = new ArrayList<String>(selected);
+            dialog.dismiss();
+            if (!removeMode) {
+                addPackagesToAppGroup(groupId, selectedPackages);
+            } else {
+                ArrayList<String> members = getAppGroupMembers(groupId);
+                members.removeAll(selectedPackages);
+                saveAppGroupMembers(groupId, members);
+                int groupPage = getAppGroupPage(groupId);
+                restoreGroupedAppsToHome(groupPage, selectedPackages);
+            }
+        });
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        showStudioDialog(dialog, panel, 620);
     }
 
     private void showAppGroupOptions(String groupId) {
@@ -4595,28 +5022,20 @@ public class MainActivity extends Activity {
             } else if (which == 1) {
                 showAppGroupMemberPicker(groupId, true);
             } else if (which == 2) {
-                android.widget.EditText input = new android.widget.EditText(this);
-                input.setSingleLine(true);
-                input.setText(getAppGroupLabel(groupId));
-                input.setSelection(input.length());
-                new android.app.AlertDialog.Builder(this).setTitle("Rename group")
-                        .setView(input).setNegativeButton("Cancel", null)
-                        .setPositiveButton("Save", (renameDialog, button) -> {
-                            String value = input.getText().toString().trim();
-                            if (!value.isEmpty()) {
-                                prefs.edit().putString(appGroupKey("label", groupId), value).apply();
-                                renderHomePages(false);
-                            }
-                        }).show();
+                showStudioTextInputPrompt("Rename group", "Group name",
+                        getAppGroupLabel(groupId), "Save", value -> {
+                    if (!value.isEmpty()) {
+                        prefs.edit().putString(appGroupKey("label", groupId), value).apply();
+                        renderHomePages(false);
+                    }
+                });
             } else if (which == 3) {
                 shareAppGroup(groupId);
             } else if (which == 4) {
-                new android.app.AlertDialog.Builder(this)
-                        .setTitle("Delete app group")
-                        .setMessage("Delete this group? Its apps will be returned to Home where space is available.")
-                        .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Delete", (confirm, button) -> deleteAppGroup(groupId))
-                        .show();
+                showStudioPrompt("Delete app group",
+                        "Delete this group? Its apps will be returned to Home where space is available.",
+                        "Cancel", "Delete",
+                        (confirm, button) -> deleteAppGroup(groupId));
             }
         });
     }
@@ -4740,8 +5159,7 @@ public class MainActivity extends Activity {
         final Thread[] memberIconLoaderRef = new Thread[1];
         final View[][] groupLayerViewsRef = new View[1][];
         final boolean[] closing = new boolean[]{false};
-        // True while the closing animation has been transferred to the launcher window.
-        // The same panel and icon snapshot then animate in one view hierarchy/window.
+        // True while the close animator owns dismissal/cleanup, including its final handoff.
         final boolean[] rootCloseTransition = new boolean[]{false};
         // [panel start scale X/Y, icon snapshot expanded scale X/Y].
         final float[] iconScale = new float[]{0.12f, 0.12f, 1f, 1f};
@@ -4830,8 +5248,8 @@ public class MainActivity extends Activity {
             Thread loader = memberIconLoaderRef[0];
             if (loader != null) loader.interrupt();
 
-            // Once moved into the activity root, this is still the active closing animation.
-            // Do not cancel it or detach its icon snapshot as the dialog window disappears.
+            // The reverse morph remains in this Dialog until its terminal frame. Its dismissal
+            // must not cancel the animator or prematurely release the icon snapshot.
             if (rootCloseTransition[0]) {
                 boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
                 if (ownedGroupSlot) {
@@ -5624,8 +6042,8 @@ public class MainActivity extends Activity {
                 ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
         android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
                 ? snapshotRef[0] : null;
-        // Reverse the same geometry used by opening. The panel and icon preview stay together
-        // as the overlay is reparented, so the dialog's disappearance is not an animation step.
+        // Reverse the same panel, icon preview, pivot, translation and progress used by opening.
+        // Keep both views in the original Dialog surface to avoid a window-to-window flash.
         final float targetScaleX = Math.max(0.01f, Math.min(1f, resolvedTargetScaleX));
         final float targetScaleY = Math.max(0.01f, Math.min(1f, resolvedTargetScaleY));
         if (snapshot != null) {
@@ -5644,7 +6062,9 @@ public class MainActivity extends Activity {
         transition.setDuration(animationDuration(240L));
         transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
         transition.addUpdateListener(animation -> {
-            if (!closing[0] || root == null || activityOverlay.getParent() != root) return;
+            // Animate in the Dialog's own hierarchy, exactly like the opening path. Moving the
+            // overlay to the Activity root here created a detach/attach frame before animation.
+            if (!closing[0] || activityOverlay.getParent() == null) return;
             float progress = (Float) animation.getAnimatedValue();
             if (morphProgress != null) morphProgress[0] = progress;
             float sx = targetScaleX + (1f - targetScaleX) * progress;
@@ -5719,20 +6139,14 @@ public class MainActivity extends Activity {
         });
         morphAnimator[0] = transition;
 
-        // Reparent the existing panel/icon hierarchy before dismissing the Dialog. Its screen
-        // position is preserved, and the activity root now owns every remaining close frame.
-        if (!transferAppGroupOverlayToActivityRoot(activityOverlay)) {
-            morphAnimator[0] = null;
-            if (dialog.isShowing()) dialog.dismiss();
-            return;
-        }
+        // Use the same attached Dialog overlay that displayed opening. Reparenting it to the
+        // Activity root before the first reverse-animation frame causes a visible flash.
+        // The existing animation-end block still restores the live cell, removes this overlay,
+        // dismisses the Dialog and releases resources in its original order.
         if (rootCloseTransition != null && rootCloseTransition.length > 0) {
             rootCloseTransition[0] = true;
         }
         if (sourceCell != null) sourceCell.setAlpha(0f);
-        // Keep the transparent Dialog window attached during the root overlay's close
-        // animation. Its empty transparent content allows the launcher-root overlay to
-        // become visible without the one-frame surface gap caused by immediate dismissal.
         transition.start();
     }
 
@@ -8783,13 +9197,10 @@ public class MainActivity extends Activity {
                                     "This app is already in the group.", Toast.LENGTH_SHORT).show();
                             return true;
                         }
-                        new android.app.AlertDialog.Builder(MainActivity.this)
-                                .setTitle("Add to " + groupLabel)
-                                .setMessage("Add " + appLabel + " to this app group?")
-                                .setNegativeButton("Cancel", null)
-                                .setPositiveButton("Add", (groupDialog, button) ->
-                                        moveHomeAppIntoGroup(dropTargetGroupId, packageName))
-                                .show();
+                        MainActivity.this.showStudioPrompt("Add to " + groupLabel,
+                                "Add " + appLabel + " to this app group?",
+                                "Cancel", "Add", (groupDialog, button) ->
+                                        moveHomeAppIntoGroup(dropTargetGroupId, packageName));
                         return true;
                     }
                     int proposedIconLeft = targetCol * cellWidth;
@@ -9858,11 +10269,9 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "All apps are already on Home", Toast.LENGTH_SHORT).show();
             return;
         }
-        String[] labels = new String[available.size()];
-        for (int i = 0; i < available.size(); i++) labels[i] = available.get(i).loadLabel(packageManager).toString();
-        new android.app.AlertDialog.Builder(this).setTitle("Add to Home").setItems(labels, (dialog, which) -> {
+        showStudioAppChoiceDialog("Add to Home", available, which -> {
             addToHome(available.get(which).activityInfo.packageName, destinationPage);
-        }).show();
+        });
     }
 
     private void showAppOptions(ResolveInfo app, boolean fromHome) {
@@ -9907,59 +10316,33 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void showActionDialog(String title, String[] icons, String[] labels, android.content.DialogInterface.OnClickListener listener) {
+    private void showActionDialog(String title, String[] icons, String[] labels,
+            android.content.DialogInterface.OnClickListener listener) {
         Dialog dialog = new Dialog(this);
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 18), LauncherUiUtils.dp(this, 16));
-        panel.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(28, 35, 59), Color.rgb(15, 19, 34)}, LauncherUiUtils.dp(this, 24)));
-        TextView heading = LauncherUiUtils.text(this, title, 20, Color.WHITE, true);
-        heading.setPadding(LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 4), LauncherUiUtils.dp(this, 12));
-        panel.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout panel = createStudioDialogPanel();
+        addStudioDialogHeader(panel, title, "Choose an action");
         for (int i = 0; i < labels.length; i++) {
             final int index = i;
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 7), LauncherUiUtils.dp(this, 12), LauncherUiUtils.dp(this, 7));
-            row.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(42, 51, 79), Color.rgb(31, 38, 61)}, LauncherUiUtils.dp(this, 15)));
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, LauncherUiUtils.dp(this, 54));
-            rowParams.topMargin = LauncherUiUtils.dp(this, 5);
-            TextView glyph = LauncherUiUtils.text(this, icons[i], 21, Color.rgb(178, 198, 255), true);
-            glyph.setGravity(Gravity.CENTER);
-            glyph.setBackground(LauncherUiUtils.roundRect(this, new int[]{Color.rgb(65, 83, 139), Color.rgb(51, 57, 112)}, LauncherUiUtils.dp(this, 12)));
-            row.addView(glyph, new LinearLayout.LayoutParams(LauncherUiUtils.dp(this, 38), LauncherUiUtils.dp(this, 38)));
-            TextView label = LauncherUiUtils.text(this, labels[i], 15, Color.rgb(245, 247, 255), false);
-            label.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -1, 1f);
-            labelParams.leftMargin = LauncherUiUtils.dp(this, 12);
-            row.addView(label, labelParams);
-            row.setOnClickListener(v -> {
+            String icon = icons != null && i < icons.length ? icons[i] : "›";
+            LinearLayout row = createStudioDialogActionRow(icon, labels[i], v -> {
                 dialog.dismiss();
-                listener.onClick(dialog, index);
+                if (listener != null) {
+                    listener.onClick(dialog, index);
+                }
             });
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
             panel.addView(row, rowParams);
         }
-        dialog.setContentView(panel);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            android.view.WindowManager.LayoutParams params = dialog.getWindow().getAttributes();
-            params.dimAmount = 0.58f;
-            dialog.getWindow().setAttributes(params);
-        }
-        dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 36), -2);
-        panel.setAlpha(0f);
-        panel.setScaleX(0.94f);
-        panel.setScaleY(0.94f);
-        panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(animationDuration(180)).start();
+        showStudioDialog(dialog, panel, 620);
     }
 
     private void beginWidgetPicker() { beginWidgetPicker(currentPage); }
 
     private void beginWidgetPicker(int requestedPage) {
         pendingWidgetTargetPage = Math.max(0, Math.min(1, requestedPage));
-        new WidgetPickerDialog(this, widgetManager, packageManager, new WidgetPickerDialog.Listener() {
+        new WidgetPickerDialog(this, widgetManager, packageManager, homeStudioAccentColor,
+                new WidgetPickerDialog.Listener() {
             @Override public void onWidgetSelected(AppWidgetProviderInfo info) {
                 beginBindingWidget(info);
             }
@@ -15304,26 +15687,24 @@ public class MainActivity extends Activity {
         String message = "Changing " + changeReason
                 + " makes items on Home overlap or extend beyond the screen. "
                 + "Choose how to recover. The clock will remain visible.";
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("Home layout collision")
-                .setMessage(message)
-                .setPositiveButton("Shrink / move", (dialog, which) ->
-                        runWorkspaceCollisionRepair(targetPages, changeReason))
-                .setNeutralButton("Remove widgets", (dialog, which) -> {
-                    removeOverlappingResizeWidgets(targetPages);
-                    runWorkspaceCollisionRepair(targetPages, changeReason);
-                })
-                .setNegativeButton("Not now", (dialog, which) -> {
-                    homeIconResizeRepairPending = false;
-                    ensureShortcutLabelsNotClipped();
-                    refreshWorkspaceGrid();
-                })
-                .setOnCancelListener(dialog -> {
-                    homeIconResizeRepairPending = false;
-                    ensureShortcutLabelsNotClipped();
-                    refreshWorkspaceGrid();
-                })
-                .show();
+        Runnable cancelRepair = () -> {
+            homeIconResizeRepairPending = false;
+            ensureShortcutLabelsNotClipped();
+            refreshWorkspaceGrid();
+        };
+        showStudioMultiActionPrompt("Home layout collision", message,
+                new String[]{"↘", "▦", "×"},
+                new String[]{"Shrink / move", "Remove widgets", "Not now"},
+                which -> {
+                    if (which == 0) {
+                        runWorkspaceCollisionRepair(targetPages, changeReason);
+                    } else if (which == 1) {
+                        removeOverlappingResizeWidgets(targetPages);
+                        runWorkspaceCollisionRepair(targetPages, changeReason);
+                    } else {
+                        cancelRepair.run();
+                    }
+                }, cancelRepair);
     }
 
     private void removeOverlappingResizeWidgets(

@@ -628,6 +628,9 @@ final class WidgetInteractionController {
                     try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
                     listener.renderHomePages(false);
                 } else if (which == 1) {
+                    FrameLayout resizePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    clampWidgetGeometryToPage(resizePage, container, widgetId, widgetPage[0]);
                     for (View handle : resizeHandles) handle.setVisibility(View.VISIBLE);
                     container.setBackground(LauncherUiUtils.roundRect(activity, new int[]{Color.argb(65, 115, 159, 255), Color.argb(30, 115, 159, 255)}, LauncherUiUtils.dp(activity, 8)));
                     Toast.makeText(activity, "Drag the blue corner handle to resize", Toast.LENGTH_LONG).show();
@@ -917,6 +920,9 @@ final class WidgetInteractionController {
             resizeHandles[edge].setOnTouchListener((v, event) -> {
                 int action = event.getActionMasked();
                 if (action == MotionEvent.ACTION_DOWN) {
+                    FrameLayout resizePage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    clampWidgetGeometryToPage(resizePage, container, widgetId, widgetPage[0]);
                     listener.setWorkspaceGridVisible(false, null);
                     resizeRejectedAtLastPosition[0] = false;
                     resizeGeometryNormalized[0] = false;
