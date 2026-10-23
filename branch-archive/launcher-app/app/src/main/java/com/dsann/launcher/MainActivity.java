@@ -4757,6 +4757,11 @@ public class MainActivity extends Activity {
         final float[] morphProgress = new float[]{0f};
         final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
         final Bitmap[] morphSnapshotBitmapRef = new Bitmap[1];
+        // A separate full-cell image is used only for the close handoff. Unlike the
+        // morph image above, it includes both the group artwork and its home label.
+        final android.widget.ImageView[] closeHandoffSnapshotRef =
+                new android.widget.ImageView[1];
+        final Bitmap[] closeHandoffBitmapRef = new Bitmap[1];
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
         final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
         final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
@@ -4818,6 +4823,11 @@ public class MainActivity extends Activity {
                 // its last frame. Do not recycle its bitmap while Android may still reference it.
                 morphSnapshotRef[0] = null;
             }
+            final android.widget.ImageView closeHandoffSnapshot = closeHandoffSnapshotRef[0];
+            closeHandoffSnapshotRef[0] = null;
+            // The handoff ImageView (when created) owns the bitmap now. If no view was
+            // attached, dropping this reference lets a failed/aborted snapshot be collected.
+            closeHandoffBitmapRef[0] = null;
             loadedMemberDrawablesRef[0] = null;
             pendingMemberApps.clear();
             pendingMemberIconViews.clear();
@@ -4825,9 +4835,43 @@ public class MainActivity extends Activity {
             final boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
             if (ownedGroupSlot) appGroupCleanupPendingSessionGeneration = sessionId;
             if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-            // Restore the home icon in this UI turn, avoiding an empty compositor frame.
             if (ownedGroupSlot && openingGroupCell != null) {
-                openingGroupCell.setAlpha(openingGroupCellAlpha);
+                ViewGroup handoffParent = closeHandoffSnapshot != null
+                        && closeHandoffSnapshot.getParent() instanceof ViewGroup
+                        ? (ViewGroup) closeHandoffSnapshot.getParent() : null;
+                if (closing[0] && handoffParent != null) {
+                    // The activity is now exposed beneath the dismissed dialog. Let its
+                    // full-cell snapshot render for one complete frame before swapping to
+                    // the real view, so the separately rendered home label cannot flash.
+                    final ViewGroup finalHandoffParent = handoffParent;
+                    final boolean[] handoffFinished = new boolean[]{false};
+                    final Runnable finishCloseHandoff = () -> {
+                        if (handoffFinished[0]) return;
+                        handoffFinished[0] = true;
+                        openingGroupCell.setAlpha(openingGroupCellAlpha);
+                        if (closeHandoffSnapshot.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) closeHandoffSnapshot.getParent())
+                                    .removeView(closeHandoffSnapshot);
+                        }
+                        closeHandoffSnapshot.setImageDrawable(null);
+                        closeHandoffSnapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                    };
+                    finalHandoffParent.postOnAnimation(() ->
+                            finalHandoffParent.postOnAnimation(finishCloseHandoff));
+                    // Safety fallback for an activity surface that stops scheduling frames.
+                    handler.postDelayed(finishCloseHandoff, 250L);
+                } else {
+                    // Non-animated dismissals and snapshot-allocation failures keep the
+                    // previous recovery path; a stale hidden cell is never left behind.
+                    openingGroupCell.setAlpha(openingGroupCellAlpha);
+                    if (closeHandoffSnapshot != null) {
+                        if (closeHandoffSnapshot.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) closeHandoffSnapshot.getParent())
+                                    .removeView(closeHandoffSnapshot);
+                        }
+                        closeHandoffSnapshot.setImageDrawable(null);
+                    }
+                }
             }
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
             handler.postDelayed(() -> {
@@ -5116,12 +5160,14 @@ public class MainActivity extends Activity {
         // the launcher icon from appearing underneath the final shrinking card frame.
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
-                morphProgress, morphSnapshotRef, morphAnimator));
+                morphProgress, morphSnapshotRef, morphAnimator, openingGroupCell,
+                closeHandoffBitmapRef, closeHandoffSnapshotRef));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
-                        morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator);
+                        morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
+                        openingGroupCell, closeHandoffBitmapRef, closeHandoffSnapshotRef);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -5305,6 +5351,28 @@ public class MainActivity extends Activity {
             lp.leftMargin = panelBounds.left;
             lp.topMargin = panelBounds.top;
             panel.setLayoutParams(lp);
+
+            // Capture the complete source cell while it is still visible. This image is
+            // not used during opening; it only bridges the activity/dialog surface handoff
+            // on close and therefore keeps the opening animation unchanged.
+            if (openingGroupCell != null && openingGroupCell.getWidth() > 0
+                    && openingGroupCell.getHeight() > 0) {
+                Bitmap fullCellBitmap = null;
+                try {
+                    fullCellBitmap = Bitmap.createBitmap(openingGroupCell.getWidth(),
+                            openingGroupCell.getHeight(), Bitmap.Config.ARGB_8888);
+                    openingGroupCell.draw(new Canvas(fullCellBitmap));
+                    closeHandoffBitmapRef[0] = fullCellBitmap;
+                    fullCellBitmap = null;
+                } catch (RuntimeException | OutOfMemoryError snapshotError) {
+                    if (fullCellBitmap != null && !fullCellBitmap.isRecycled()) {
+                        fullCellBitmap.recycle();
+                    }
+                    closeHandoffBitmapRef[0] = null;
+                    android.util.Log.w("D.S Launcher",
+                            "Unable to capture the full app-group close handoff", snapshotError);
+                }
+            }
 
             if (openingGroupIcon != null && iconW > 0 && iconH > 0) {
                 Bitmap previewBitmap = null;
@@ -5533,7 +5601,9 @@ public class MainActivity extends Activity {
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
             boolean[] closing, float[] iconScale, float[] startTranslation,
             float[] morphProgress, android.widget.ImageView[] snapshotRef,
-            android.animation.ValueAnimator[] morphAnimator) {
+            android.animation.ValueAnimator[] morphAnimator, View sourceCell,
+            Bitmap[] closeHandoffBitmapRef,
+            android.widget.ImageView[] closeHandoffSnapshotRef) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -5647,8 +5717,59 @@ public class MainActivity extends Activity {
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
-                // Keep the real launcher icon hidden for this final popup frame.
-                // Dialog.onDismiss restores it immediately after the popup window is dismissed.
+                // Install the full home-cell snapshot in the activity decor beneath the
+                // dialog before dismissing the popup. It includes the logo and label and
+                // remains visible after the dialog surface is removed, until onDismiss
+                // swaps back to the real cell on a later display frame.
+                if (sourceCell != null && closeHandoffBitmapRef != null
+                        && closeHandoffBitmapRef.length > 0
+                        && closeHandoffBitmapRef[0] != null
+                        && closeHandoffSnapshotRef != null
+                        && closeHandoffSnapshotRef.length > 0) {
+                    try {
+                        View activityDecor = getWindow() != null
+                                ? getWindow().getDecorView() : null;
+                        if (activityDecor instanceof ViewGroup && sourceCell.getParent() != null
+                                && sourceCell.getWidth() > 0 && sourceCell.getHeight() > 0) {
+                            android.widget.ImageView handoff = closeHandoffSnapshotRef[0];
+                            if (handoff == null) {
+                                handoff = new android.widget.ImageView(this);
+                                handoff.setImageBitmap(closeHandoffBitmapRef[0]);
+                                handoff.setScaleType(
+                                        android.widget.ImageView.ScaleType.FIT_XY);
+                                handoff.setFocusable(false);
+                                handoff.setClickable(false);
+                                handoff.setEnabled(false);
+                                handoff.setImportantForAccessibility(
+                                        View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                                handoff.setLayerType(View.LAYER_TYPE_NONE, null);
+                                closeHandoffSnapshotRef[0] = handoff;
+                                // The ImageView drawable now owns the bitmap reference.
+                                closeHandoffBitmapRef[0] = null;
+                            }
+                            int[] cellLocation = new int[2];
+                            int[] decorLocation = new int[2];
+                            sourceCell.getLocationOnScreen(cellLocation);
+                            activityDecor.getLocationOnScreen(decorLocation);
+                            FrameLayout.LayoutParams handoffParams =
+                                    new FrameLayout.LayoutParams(sourceCell.getWidth(),
+                                            sourceCell.getHeight(),
+                                            Gravity.TOP | Gravity.LEFT);
+                            handoffParams.leftMargin = cellLocation[0] - decorLocation[0];
+                            handoffParams.topMargin = cellLocation[1] - decorLocation[1];
+                            handoff.setAlpha(1f);
+                            handoff.setVisibility(View.VISIBLE);
+                            ((ViewGroup) activityDecor).addView(handoff, handoffParams);
+                            handoff.bringToFront();
+                            sourceCell.setAlpha(0f);
+                        }
+                    } catch (RuntimeException | OutOfMemoryError handoffError) {
+                        android.util.Log.w("D.S Launcher",
+                                "Unable to install the app-group close handoff", handoffError);
+                    }
+                }
+                // Keep the real launcher cell hidden; its logo and label are restored only
+                // after the activity-side handoff snapshot has occupied a displayed frame.
                 if (dialog.isShowing()) dialog.dismiss();
             }
         });
