@@ -4740,17 +4740,15 @@ public class MainActivity extends Activity {
         final Thread[] memberIconLoaderRef = new Thread[1];
         final View[][] groupLayerViewsRef = new View[1][];
         final boolean[] closing = new boolean[]{false};
+        // True while the closing animation has been transferred to the launcher window.
+        // The same panel and icon snapshot then animate in one view hierarchy/window.
+        final boolean[] rootCloseTransition = new boolean[]{false};
         // [panel start scale X/Y, icon snapshot expanded scale X/Y].
         final float[] iconScale = new float[]{0.12f, 0.12f, 1f, 1f};
         final float[] morphStartTranslation = new float[2];
         final float[] morphProgress = new float[]{0f};
         final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
         final Bitmap[] morphSnapshotBitmapRef = new Bitmap[1];
-        // A separate full-cell image is used only for the close handoff. Unlike the
-        // morph image above, it includes both the group artwork and its home label.
-        final android.widget.ImageView[] closeHandoffSnapshotRef =
-                new android.widget.ImageView[1];
-        final Bitmap[] closeHandoffBitmapRef = new Bitmap[1];
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
         final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
         final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
@@ -4780,24 +4778,76 @@ public class MainActivity extends Activity {
                 outline.setRoundRect(0, 0, Math.round(width), Math.round(height), radius);
             }
         };
+        final boolean[] closeCleanupScheduled = new boolean[]{false};
+        final Runnable[] rootCloseCleanupRef = new Runnable[1];
+        rootCloseCleanupRef[0] = () -> {
+            if (closeCleanupScheduled[0]) return;
+            closeCleanupScheduled[0] = true;
+            // Keep rendered resources alive briefly after detaching the animation surface.
+            // Android 6 may still have the last hardware/display-list frame queued.
+            final long releaseDelay = Build.VERSION.SDK_INT <= 23 ? 320L : 80L;
+            handler.postDelayed(() -> {
+                View[] layerViews = groupLayerViewsRef[0];
+                if (layerViews != null) {
+                    for (View layerView : layerViews) {
+                        if (layerView == null) continue;
+                        try {
+                            layerView.setLayerType(View.LAYER_TYPE_NONE, null);
+                        } catch (RuntimeException cleanupError) {
+                            android.util.Log.w("D.S Launcher",
+                                    "Unable to release an app-group layer", cleanupError);
+                        }
+                    }
+                }
+                android.widget.ImageView snapshot = morphSnapshotRef[0];
+                if (snapshot != null) {
+                    try {
+                        if (snapshot.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) snapshot.getParent()).removeView(snapshot);
+                        }
+                        snapshot.animate().cancel();
+                        snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                        snapshot.setImageDrawable(null);
+                    } catch (RuntimeException cleanupError) {
+                        android.util.Log.w("D.S Launcher",
+                                "Unable to release the app-group snapshot view", cleanupError);
+                    }
+                }
+                morphSnapshotRef[0] = null;
+                morphSnapshotBitmapRef[0] = null;
+                loadedMemberDrawablesRef[0] = null;
+                pendingMemberApps.clear();
+                pendingMemberIconViews.clear();
+                pendingMemberItemViews.clear();
+                if (appGroupCleanupPendingSessionGeneration == sessionId) {
+                    appGroupCleanupPendingSessionGeneration = -1L;
+                    releaseAppGroupOpenGuard(sessionId, dialog);
+                }
+            }, releaseDelay);
+        };
         dialog.setOnDismissListener(ignored -> {
             memberLoadCancelled.set(true);
             Thread loader = memberIconLoaderRef[0];
             if (loader != null) loader.interrupt();
 
-            // Explicitly release per-open hardware layers and the icon snapshot drawable.
-            // On Android 6, the renderer may still hold a queued reference to the bitmap,
-            // so drop Java references after the final frame instead of recycling its pixels.
+            // Once moved into the activity root, this is still the active closing animation.
+            // Do not cancel it or detach its icon snapshot as the dialog window disappears.
+            if (rootCloseTransition[0]) {
+                boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
+                if (ownedGroupSlot) {
+                    appGroupCleanupPendingSessionGeneration = sessionId;
+                }
+                if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
+                return;
+            }
+
             android.animation.ValueAnimator running = morphAnimator[0];
             if (running != null && running.isRunning()) {
                 running.removeAllUpdateListeners();
                 running.removeAllListeners();
                 running.cancel();
             }
-            // Keep hardware layers intact until the dismissed window's final frame has
-            // left the renderer. Releasing them inside onDismiss caused a one-frame flash
-            // and was unnecessarily aggressive on Android 6's older compositor.
-            final long releaseDelay = Build.VERSION.SDK_INT <= 23 ? 320L : 80L;
+            morphAnimator[0] = null;
             View[] layerViews = groupLayerViewsRef[0];
             if (layerViews != null) {
                 for (View layerView : layerViews) {
@@ -4805,114 +4855,17 @@ public class MainActivity extends Activity {
                 }
             }
             android.widget.ImageView snapshot = morphSnapshotRef[0];
-            morphSnapshotBitmapRef[0] = null;
-            if (snapshot != null) {
-                snapshot.animate().cancel();
-                // Leave the snapshot in the detached dialog tree until the renderer retires
-                // its last frame. Do not recycle its bitmap while Android may still reference it.
-                morphSnapshotRef[0] = null;
-            }
-            final android.widget.ImageView closeHandoffSnapshot = closeHandoffSnapshotRef[0];
-            closeHandoffSnapshotRef[0] = null;
-            // The handoff ImageView (when created) owns the bitmap now. If no view was
-            // attached, dropping this reference lets a failed/aborted snapshot be collected.
-            closeHandoffBitmapRef[0] = null;
-            loadedMemberDrawablesRef[0] = null;
-            pendingMemberApps.clear();
-            pendingMemberIconViews.clear();
-            pendingMemberItemViews.clear();
-            final boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
+            if (snapshot != null) snapshot.animate().cancel();
+
+            boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
             if (ownedGroupSlot) appGroupCleanupPendingSessionGeneration = sessionId;
             if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
             if (ownedGroupSlot && openingGroupCell != null) {
-                ViewGroup handoffParent = closeHandoffSnapshot != null
-                        && closeHandoffSnapshot.getParent() instanceof ViewGroup
-                        ? (ViewGroup) closeHandoffSnapshot.getParent() : null;
-                if (closing[0] && handoffParent != null) {
-                    // The activity is now exposed beneath the dismissed dialog. Let its
-                    // full-cell snapshot render for one complete frame before swapping to
-                    // the real view, so the separately rendered home label cannot flash.
-                    final ViewGroup finalHandoffParent = handoffParent;
-                    final boolean[] handoffFinished = new boolean[]{false};
-                    final Runnable removeCloseHandoffSnapshot = () -> {
-                        if (closeHandoffSnapshot.getParent() instanceof ViewGroup) {
-                            ((ViewGroup) closeHandoffSnapshot.getParent())
-                                    .removeView(closeHandoffSnapshot);
-                        }
-                        closeHandoffSnapshot.setImageDrawable(null);
-                        closeHandoffSnapshot.setLayerType(View.LAYER_TYPE_NONE, null);
-                        // Restore the live cell in the same UI traversal that removes the
-                        // opaque snapshot. Restoring it one frame earlier caused Android 6
-                        // to draw the live logo/label over the bitmap, producing the final flash.
-                        openingGroupCell.setAlpha(openingGroupCellAlpha);
-                        openingGroupCell.invalidate();
-                        finalHandoffParent.invalidate();
-                    };
-                    final Runnable finishCloseHandoff = () -> {
-                        if (handoffFinished[0]) return;
-                        handoffFinished[0] = true;
-                        if (Build.VERSION.SDK_INT <= 23
-                                && closeHandoffSnapshot.getParent() instanceof ViewGroup) {
-                            closeHandoffSnapshot.animate().cancel();
-                            closeHandoffSnapshot.setAlpha(1f);
-                            // Keep only the bitmap visible until the atomic surface swap.
-                            finalHandoffParent.postOnAnimation(removeCloseHandoffSnapshot);
-                        } else {
-                            removeCloseHandoffSnapshot.run();
-                        }
-                    };
-                    finalHandoffParent.postOnAnimation(() ->
-                            finalHandoffParent.postOnAnimation(finishCloseHandoff));
-                    // Safety fallback for an activity surface that stops scheduling frames.
-                    handler.postDelayed(finishCloseHandoff, 250L);
-                } else {
-                    // Non-animated dismissals and snapshot-allocation failures keep the
-                    // previous recovery path; a stale hidden cell is never left behind.
-                    openingGroupCell.setAlpha(openingGroupCellAlpha);
-                    if (closeHandoffSnapshot != null) {
-                        if (closeHandoffSnapshot.getParent() instanceof ViewGroup) {
-                            ((ViewGroup) closeHandoffSnapshot.getParent())
-                                    .removeView(closeHandoffSnapshot);
-                        }
-                        closeHandoffSnapshot.setImageDrawable(null);
-                    }
-                }
+                openingGroupCell.setAlpha(openingGroupCellAlpha);
+                openingGroupCell.invalidate();
             }
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
-            handler.postDelayed(() -> {
-                try {
-                    if (layerViews != null) {
-                        for (View layerView : layerViews) {
-                            if (layerView == null) continue;
-                            try {
-                                layerView.setLayerType(View.LAYER_TYPE_NONE, null);
-                            } catch (RuntimeException cleanupError) {
-                                android.util.Log.w("D.S Launcher",
-                                        "Unable to release an app-group layer", cleanupError);
-                            }
-                        }
-                    }
-                    if (snapshot != null) {
-                        try {
-                            if (snapshot.getParent() instanceof ViewGroup) {
-                                ((ViewGroup) snapshot.getParent()).removeView(snapshot);
-                            }
-                            snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
-                            snapshot.setImageDrawable(null);
-                        } catch (RuntimeException cleanupError) {
-                            android.util.Log.w("D.S Launcher",
-                                    "Unable to release the app-group snapshot view", cleanupError);
-                        }
-                    }
-                } finally {
-                    if (ownedGroupSlot) {
-                        if (appGroupCleanupPendingSessionGeneration == sessionId) {
-                            appGroupCleanupPendingSessionGeneration = -1L;
-                        }
-                        releaseAppGroupOpenGuard(sessionId, dialog);
-                    }
-                }
-            }, releaseDelay);
+            if (rootCloseCleanupRef[0] != null) rootCloseCleanupRef[0].run();
         });
 
         // Use a transparent full-screen dialog host so the group panel can be placed
@@ -5160,19 +5113,20 @@ public class MainActivity extends Activity {
         overlay.addView(panel, panelParams);
         panel.bringToFront();
 
-        // The real home icon remains hidden until Dialog.onDismiss restores it.
-        // This mirrors opening's icon-to-card handoff in exact reverse and prevents
-        // the launcher icon from appearing underneath the final shrinking card frame.
+        // The home cell stays hidden while the group is open. Closing transfers this
+        // existing overlay into the activity root, then reveals the real cell only when
+        // the same panel/icon morph reaches its final frame.
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
                 morphProgress, morphSnapshotRef, morphAnimator, openingGroupCell,
-                closeHandoffBitmapRef, closeHandoffSnapshotRef));
+                openingGroupCellAlpha, overlay, rootCloseTransition, rootCloseCleanupRef));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
                         morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
-                        openingGroupCell, closeHandoffBitmapRef, closeHandoffSnapshotRef);
+                        openingGroupCell, openingGroupCellAlpha, overlay, rootCloseTransition,
+                        rootCloseCleanupRef);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -5356,28 +5310,6 @@ public class MainActivity extends Activity {
             lp.leftMargin = panelBounds.left;
             lp.topMargin = panelBounds.top;
             panel.setLayoutParams(lp);
-
-            // Capture the complete source cell while it is still visible. This image is
-            // not used during opening; it only bridges the activity/dialog surface handoff
-            // on close and therefore keeps the opening animation unchanged.
-            if (openingGroupCell != null && openingGroupCell.getWidth() > 0
-                    && openingGroupCell.getHeight() > 0) {
-                Bitmap fullCellBitmap = null;
-                try {
-                    fullCellBitmap = Bitmap.createBitmap(openingGroupCell.getWidth(),
-                            openingGroupCell.getHeight(), Bitmap.Config.ARGB_8888);
-                    openingGroupCell.draw(new Canvas(fullCellBitmap));
-                    closeHandoffBitmapRef[0] = fullCellBitmap;
-                    fullCellBitmap = null;
-                } catch (RuntimeException | OutOfMemoryError snapshotError) {
-                    if (fullCellBitmap != null && !fullCellBitmap.isRecycled()) {
-                        fullCellBitmap.recycle();
-                    }
-                    closeHandoffBitmapRef[0] = null;
-                    android.util.Log.w("D.S Launcher",
-                            "Unable to capture the full app-group close handoff", snapshotError);
-                }
-            }
 
             if (openingGroupIcon != null && iconW > 0 && iconH > 0) {
                 Bitmap previewBitmap = null;
@@ -5603,12 +5535,70 @@ public class MainActivity extends Activity {
         });
     }
 
+    /**
+     * Moves the existing app-group overlay from the dialog window into the launcher window.
+     * Its actual panel and icon snapshot then reverse the opening morph in the same attached
+     * view hierarchy. No separately captured full-cell bitmap is needed for the final frame.
+     */
+    private boolean transferAppGroupOverlayToActivityRoot(FrameLayout activityOverlay) {
+        if (activityOverlay == null || root == null
+                || activityOverlay.getParent() == root) {
+            return activityOverlay != null && activityOverlay.getParent() == root;
+        }
+        android.view.ViewParent parentObject = activityOverlay.getParent();
+        if (!(parentObject instanceof ViewGroup)
+                || activityOverlay.getWidth() <= 0 || activityOverlay.getHeight() <= 0) {
+            return false;
+        }
+        final ViewGroup oldParent = (ViewGroup) parentObject;
+        final int oldIndex = oldParent.indexOfChild(activityOverlay);
+        final ViewGroup.LayoutParams oldParams = activityOverlay.getLayoutParams();
+        final int width = activityOverlay.getWidth();
+        final int height = activityOverlay.getHeight();
+        int[] overlayLocation = new int[2];
+        int[] rootLocation = new int[2];
+        activityOverlay.getLocationOnScreen(overlayLocation);
+        root.getLocationOnScreen(rootLocation);
+        FrameLayout.LayoutParams rootParams = new FrameLayout.LayoutParams(
+                width, height, Gravity.TOP | Gravity.LEFT);
+        // Preserve exact screen-space origin across the reparenting. The overlay's children,
+        // including panel pivots/translations and the home-icon snapshot, keep their geometry.
+        rootParams.leftMargin = overlayLocation[0] - rootLocation[0] - root.getPaddingLeft();
+        rootParams.topMargin = overlayLocation[1] - rootLocation[1] - root.getPaddingTop();
+        try {
+            oldParent.removeView(activityOverlay);
+            activityOverlay.setTranslationX(0f);
+            activityOverlay.setTranslationY(0f);
+            root.addView(activityOverlay, rootParams);
+            activityOverlay.bringToFront();
+            root.invalidate();
+            return true;
+        } catch (RuntimeException transferError) {
+            android.util.Log.w("D.S Launcher",
+                    "Unable to transfer app-group closing animation to launcher root",
+                    transferError);
+            try {
+                if (activityOverlay.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) activityOverlay.getParent()).removeView(activityOverlay);
+                }
+                if (activityOverlay.getParent() == null) {
+                    oldParent.addView(activityOverlay,
+                            Math.max(0, Math.min(oldIndex, oldParent.getChildCount())), oldParams);
+                }
+            } catch (RuntimeException restoreError) {
+                android.util.Log.e("D.S Launcher",
+                        "Unable to restore app-group overlay after failed transfer", restoreError);
+            }
+            return false;
+        }
+    }
+
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
             boolean[] closing, float[] iconScale, float[] startTranslation,
             float[] morphProgress, android.widget.ImageView[] snapshotRef,
             android.animation.ValueAnimator[] morphAnimator, View sourceCell,
-            Bitmap[] closeHandoffBitmapRef,
-            android.widget.ImageView[] closeHandoffSnapshotRef) {
+            float sourceCellAlpha, FrameLayout activityOverlay, boolean[] rootCloseTransition,
+            Runnable[] rootCloseCleanupRef) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -5619,7 +5609,9 @@ public class MainActivity extends Activity {
         if (fadingDivider != null) fadingDivider.animate().cancel();
         if (fadingContent != null) fadingContent.animate().cancel();
         if (morphAnimator != null && morphAnimator.length > 0 && morphAnimator[0] != null) {
-            morphAnimator[0].cancel();
+            android.animation.ValueAnimator openingTransition = morphAnimator[0];
+            openingTransition.cancel();
+            morphAnimator[0] = null;
         }
         float resolvedTargetScaleX = iconScale != null ? iconScale[0] : 0.12f;
         float resolvedTargetScaleY = iconScale != null ? iconScale[1] : resolvedTargetScaleX;
@@ -5629,9 +5621,8 @@ public class MainActivity extends Activity {
                 ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
         android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
                 ? snapshotRef[0] : null;
-        // Reverse the opening morph using its exact captured start scale. The
-        // handoff snapshot includes the label and can have different proportions, so
-        // deriving the target scale from its dimensions made the final close frame drift.
+        // Reverse the same geometry used by opening. The panel and icon preview stay together
+        // as the overlay is reparented, so the dialog's disappearance is not an animation step.
         final float targetScaleX = Math.max(0.01f, Math.min(1f, resolvedTargetScaleX));
         final float targetScaleY = Math.max(0.01f, Math.min(1f, resolvedTargetScaleY));
         if (snapshot != null) {
@@ -5650,7 +5641,7 @@ public class MainActivity extends Activity {
         transition.setDuration(animationDuration(240L));
         transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
         transition.addUpdateListener(animation -> {
-            if (!dialog.isShowing() || !closing[0]) return;
+            if (!closing[0] || root == null || activityOverlay.getParent() != root) return;
             float progress = (Float) animation.getAnimatedValue();
             if (morphProgress != null) morphProgress[0] = progress;
             float sx = targetScaleX + (1f - targetScaleX) * progress;
@@ -5661,19 +5652,13 @@ public class MainActivity extends Activity {
             panel.setScaleY(sy);
             panel.setTranslationX(tx);
             panel.setTranslationY(ty);
-            // Keep panel content cached during close as well; the panel transform and
-            // source-icon snapshot are the only animated foreground surfaces.
             if (snapshot != null) {
                 snapshot.setScaleX(1f);
                 snapshot.setScaleY(1f);
                 snapshot.setTranslationX(0f);
                 snapshot.setTranslationY(0f);
                 snapshot.setAlpha(1f - Math.min(1f, progress * 2f));
-                // Alpha alone now controls the handoff; the source snapshot never toggles
-                // visibility during the close animation, avoiding a midpoint layer flash.
             }
-            // Reverse opening's title/divider/grid fade using the same progress curve.
-            // At progress 1 the card content is fully visible; at 0 it is fully hidden.
             float contentAlpha = Math.max(0f, Math.min(1f, (progress - 0.5f) * 2f));
             if (fadingTitle != null) fadingTitle.setAlpha(contentAlpha);
             if (fadingDivider != null) fadingDivider.setAlpha(contentAlpha);
@@ -5682,15 +5667,12 @@ public class MainActivity extends Activity {
         });
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
-                // Dismiss before releasing the hardware layer. Dropping the transformed
-                // panel layer while its window is still attached can expose a one-frame flash.
-                // Also clear the slot so onDismiss never cancels this animator re-entrantly.
                 if (morphAnimator != null && morphAnimator.length > 0
                         && morphAnimator[0] == animation) {
                     morphAnimator[0] = null;
                 }
-                // Pin the last frame to the exact live snapshot dimensions/position. This avoids
-                // a stale scale from setup briefly shrinking the card below the launcher icon.
+                // Pin the terminal frame before changing any parent visibility. The icon preview
+                // is now pixel-aligned with the original group icon inside the same root window.
                 panel.setScaleX(targetScaleX);
                 panel.setScaleY(targetScaleY);
                 panel.setTranslationX(offsetX);
@@ -5705,71 +5687,41 @@ public class MainActivity extends Activity {
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
-                // Install the full home-cell snapshot in the activity decor beneath the
-                // dialog before dismissing the popup. It includes the logo and label and
-                // remains visible after the dialog surface is removed, until onDismiss
-                // swaps back to the real cell on a later display frame.
-                if (sourceCell != null && closeHandoffBitmapRef != null
-                        && closeHandoffBitmapRef.length > 0
-                        && closeHandoffBitmapRef[0] != null
-                        && closeHandoffSnapshotRef != null
-                        && closeHandoffSnapshotRef.length > 0) {
-                    try {
-                        View activityDecor = getWindow() != null
-                                ? getWindow().getDecorView() : null;
-                        // Android 6's legacy compositor can flash when a child is added
-                        // directly to DecorView while a translucent dialog is being removed.
-                        // Use the attached launcher content root on API 23 and below; retain
-                        // the current DecorView handoff for newer Android versions.
-                        ViewGroup activityHost = Build.VERSION.SDK_INT <= 23 && root != null
-                                ? root
-                                : (activityDecor instanceof ViewGroup
-                                        ? (ViewGroup) activityDecor : null);
-                        if (activityHost != null && sourceCell.getParent() != null
-                                && sourceCell.getWidth() > 0 && sourceCell.getHeight() > 0) {
-                            android.widget.ImageView handoff = closeHandoffSnapshotRef[0];
-                            if (handoff == null) {
-                                handoff = new android.widget.ImageView(MainActivity.this);
-                                handoff.setImageBitmap(closeHandoffBitmapRef[0]);
-                                handoff.setScaleType(
-                                        android.widget.ImageView.ScaleType.FIT_XY);
-                                handoff.setFocusable(false);
-                                handoff.setClickable(false);
-                                handoff.setEnabled(false);
-                                handoff.setImportantForAccessibility(
-                                        View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                                handoff.setLayerType(View.LAYER_TYPE_NONE, null);
-                                closeHandoffSnapshotRef[0] = handoff;
-                                // The ImageView drawable now owns the bitmap reference.
-                                closeHandoffBitmapRef[0] = null;
-                            }
-                            int[] cellLocation = new int[2];
-                            int[] decorLocation = new int[2];
-                            sourceCell.getLocationOnScreen(cellLocation);
-                            activityHost.getLocationOnScreen(decorLocation);
-                            FrameLayout.LayoutParams handoffParams =
-                                    new FrameLayout.LayoutParams(sourceCell.getWidth(),
-                                            sourceCell.getHeight(),
-                                            Gravity.TOP | Gravity.LEFT);
-                            handoffParams.leftMargin = cellLocation[0] - decorLocation[0];
-                            handoffParams.topMargin = cellLocation[1] - decorLocation[1];
-                            handoff.setAlpha(1f);
-                            handoff.setVisibility(View.VISIBLE);
-                            activityHost.addView(handoff, handoffParams);
-                            handoff.bringToFront();
-                            sourceCell.setAlpha(0f);
-                        }
-                    } catch (RuntimeException | OutOfMemoryError handoffError) {
-                        android.util.Log.w("D.S Launcher",
-                                "Unable to install the app-group close handoff", handoffError);
-                    }
+
+                // Restore the live home cell and remove the animated overlay in this same UI
+                // traversal. Both views now share the activity root, so no dialog/full-cell
+                // snapshot handoff or intervening frame is required.
+                if (activityOverlay.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) activityOverlay.getParent()).removeView(activityOverlay);
                 }
-                // Keep the real launcher cell hidden; its logo and label are restored only
-                // after the activity-side handoff snapshot has occupied a displayed frame.
-                if (dialog.isShowing()) dialog.dismiss();
+                if (sourceCell != null) {
+                    sourceCell.setAlpha(sourceCellAlpha);
+                    sourceCell.invalidate();
+                }
+                if (root != null) root.invalidate();
+                if (rootCloseTransition != null && rootCloseTransition.length > 0) {
+                    rootCloseTransition[0] = false;
+                }
+                if (rootCloseCleanupRef != null && rootCloseCleanupRef.length > 0
+                        && rootCloseCleanupRef[0] != null) {
+                    rootCloseCleanupRef[0].run();
+                }
             }
         });
         morphAnimator[0] = transition;
+
+        // Reparent the existing panel/icon hierarchy before dismissing the Dialog. Its screen
+        // position is preserved, and the activity root now owns every remaining close frame.
+        if (!transferAppGroupOverlayToActivityRoot(activityOverlay)) {
+            morphAnimator[0] = null;
+            if (dialog.isShowing()) dialog.dismiss();
+            return;
+        }
+        if (rootCloseTransition != null && rootCloseTransition.length > 0) {
+            rootCloseTransition[0] = true;
+        }
+        if (sourceCell != null) sourceCell.setAlpha(0f);
+        dialog.dismiss();
         transition.start();
     }
 
