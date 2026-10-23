@@ -61,6 +61,8 @@ public class MainActivity extends Activity {
     private static final String KEY_COLUMNS = "home_columns";
     // Stable reference size used to anchor home-grid rows while the visible icon size changes.
     private static final String KEY_HOME_GRID_ANCHOR_ICON_SIZE = "home_grid_anchor_icon_size_v1";
+    private static final String KEY_HOME_GRID_ANCHOR_CELL_HEIGHT_DP =
+            "home_grid_anchor_cell_height_dp_v1";
     private static final String KEY_SHOW_DATE = "show_date";
     private static final String KEY_ICON_SIZE = "icon_size";
     private static final String KEY_ICON_BACKGROUND_COLOR = "icon_background_color";
@@ -3634,8 +3636,10 @@ public class MainActivity extends Activity {
         int anchorSize = prefs == null ? currentSize
                 : prefs.getInt(KEY_HOME_GRID_ANCHOR_ICON_SIZE, currentSize);
         anchorSize = Math.max(32, Math.min(74, anchorSize));
-        int anchorCellHeight = Math.max(1,
-                LauncherUiUtils.dp(this, homeCellHeightDp(anchorSize)));
+        int anchorCellHeightDp = prefs == null ? homeCellHeightDp(anchorSize)
+                : prefs.getInt(KEY_HOME_GRID_ANCHOR_CELL_HEIGHT_DP, homeCellHeightDp(anchorSize));
+        int anchorCellHeight = Math.max(1, LauncherUiUtils.dp(this,
+                Math.max(1, anchorCellHeightDp)));
         int referenceRows = Math.max(1,
                 Math.max(1, height - bottomGap) / anchorCellHeight);
         return Math.max(0, height - bottomGap - referenceRows * anchorCellHeight);
@@ -4181,7 +4185,7 @@ public class MainActivity extends Activity {
 
         ArrayList<String> ids = getAppGroupIds();
         int columns = Math.max(1, getHomeColumns());
-        int cellWidth = Math.max(1, pageViewport.getWidth() / columns);
+        int fallbackCellWidth = Math.max(1, pageViewport.getWidth() / columns);
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int iconSizePx = LauncherUiUtils.dp(this, iconSizeDp);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSizeDp));
@@ -4190,6 +4194,9 @@ public class MainActivity extends Activity {
             if (pageIndex >= pagesStrip.getChildCount()
                     || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
+            int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageViewport.getWidth();
+            int cellWidth = Math.max(1, actualPageWidth > 0
+                    ? actualPageWidth / columns : fallbackCellWidth);
             int rows = homeGridRowsForHeight(page.getHeight() > 0
                     ? page.getHeight() : pageViewport.getHeight(), cellHeight);
             boolean hasX = prefs.contains(appGroupKey("x", id));
@@ -14074,6 +14081,9 @@ public class MainActivity extends Activity {
         // anchor stable, like the drawer grid, rather than moving every row to re-fill the page.
         if (!prefs.contains(KEY_HOME_GRID_ANCHOR_ICON_SIZE)) {
             edit.putInt(KEY_HOME_GRID_ANCHOR_ICON_SIZE, homeSize);
+        }
+        if (!prefs.contains(KEY_HOME_GRID_ANCHOR_CELL_HEIGHT_DP)) {
+            edit.putInt(KEY_HOME_GRID_ANCHOR_CELL_HEIGHT_DP, homeCellHeightDp(homeSize));
         }
         // Keep every icon inside its slot at the selected size. Preserve normalized
         // positions instead of clearing them when a large size reduces column capacity.
