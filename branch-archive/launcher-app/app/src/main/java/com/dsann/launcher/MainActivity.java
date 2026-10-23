@@ -696,6 +696,7 @@ public class MainActivity extends Activity {
     private int resizeRepairMovedCount;
     private int resizeRepairRemovedWidgetCount;
     private int resizeRepairRemovedClockCount;
+    private int resizeRepairUnresolvedCollisionCount;
     private int resizeRepairGroupRepositionCount;
     private long lastAppGroupCreationUptime;
     private View workspaceTransferItem;
@@ -3839,14 +3840,15 @@ public class MainActivity extends Activity {
             LinearLayout panel = clockPanelsByPage[pageIndex];
             if (panel == null) continue;
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
-            if (prefs.getBoolean(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + pageIndex, false)) {
-                if (panel.getParent() instanceof ViewGroup) {
-                    ((ViewGroup) panel.getParent()).removeView(panel);
-                }
-                panel.setVisibility(View.GONE);
-                continue;
+            // Older builds persisted "auto-removed" clocks after a failed resize repair.
+            // That state is obsolete: a layout refresh must always reattach and reveal the
+            // page's clock instead of carrying a transient collision decision forward.
+            String removedClockKey = KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + pageIndex;
+            if (prefs.getBoolean(removedClockKey, false)) {
+                prefs.edit().remove(removedClockKey).apply();
             }
             panel.setVisibility(View.VISIBLE);
+            panel.setAlpha(1f);
             // Also enforce clipping on pages that already existed before this rebuild.
             page.setClipChildren(true);
             page.setClipToPadding(true);
@@ -14446,6 +14448,7 @@ public class MainActivity extends Activity {
         resizeRepairMovedCount = 0;
         resizeRepairRemovedWidgetCount = 0;
         resizeRepairRemovedClockCount = 0;
+        resizeRepairUnresolvedCollisionCount = 0;
         resizeRepairGroupRepositionCount = 0;
         pagesStrip.post(() -> {
             if (pagesStrip == null || isFinishing()) {
@@ -14492,7 +14495,8 @@ public class MainActivity extends Activity {
 
 
     private void showIconResizeRecoveryPrompt(String changeReason) {
-        if (resizeRepairCollisionCount == 0 && resizeRepairGroupRepositionCount == 0) return;
+        if (resizeRepairCollisionCount == 0 && resizeRepairGroupRepositionCount == 0
+                && resizeRepairUnresolvedCollisionCount == 0) return;
         StringBuilder message = new StringBuilder();
         if (resizeRepairClockBackgroundCollisionCount > 0) {
             message.append("Clock background collision detected after ")
@@ -14522,8 +14526,11 @@ public class MainActivity extends Activity {
                     .append(" widget(s) from Home because both screens had no safe space. ");
         }
         if (resizeRepairRemovedClockCount > 0) {
-            message.append("Hid ").append(resizeRepairRemovedClockCount)
-                    .append(" clock(s) because its page had no safe space; open Home Studio to restore it.");
+            message.append("A clock was restored after a previous layout overflow. ");
+        }
+        if (resizeRepairUnresolvedCollisionCount > 0) {
+            message.append("The clock stayed visible, but no fully collision-free placement was available. ")
+                    .append("Move or resize another item to clear the overlap.");
         }
         Toast.makeText(this, message.toString().trim(), Toast.LENGTH_LONG).show();
     }
@@ -14885,16 +14892,78 @@ public class MainActivity extends Activity {
         resizeRepairRemovedWidgetCount++;
     }
 
-    private void removeResizeOverflowClock(FrameLayout page, View clock) {
+    /**
+     * Last-resort clock recovery. A collision repair may fail to find an empty rectangle
+     * when the workspace is saturated, but hiding/detaching the clock made a temporary
+     * icon or label resize look like the clock had been deleted. Keep it attached and
+     * visible, try the smallest permitted automatic scale, and clearly report any remaining
+     * overlap rather than persisting a hidden-clock flag.
+     */
+    private void preserveResizeOverflowClock(FrameLayout page, View clock) {
+        if (clock == null) return;
         int pageIndex = pagesStrip == null ? -1 : pagesStrip.indexOfChild(page);
-        if (pageIndex < 0) {
-            clock.setVisibility(View.GONE);
+        clock.setVisibility(View.VISIBLE);
+        clock.setAlpha(1f);
+        if (pageIndex < 0 || page == null || page.getWidth() <= 0 || page.getHeight() <= 0) {
+            resizeRepairUnresolvedCollisionCount++;
             return;
         }
-        prefs.edit().putBoolean(KEY_AUTO_REMOVED_CLOCK_PAGE_PREFIX + pageIndex, true).apply();
-        if (clock.getParent() instanceof ViewGroup) ((ViewGroup) clock.getParent()).removeView(clock);
-        clock.setVisibility(View.GONE);
-        resizeRepairRemovedClockCount++;
+        if (clock.getParent() != page) {
+            if (clock.getParent() instanceof ViewGroup) {
+                ((ViewGroup) clock.getParent()).removeView(clock);
+            }
+            page.addView(clock, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP | Gravity.LEFT));
+        }
+
+        String autoXKey = workspaceAutoShrinkScaleKey(clock, true);
+        String autoYKey = workspaceAutoShrinkScaleKey(clock, false);
+        float originalScaleX = Math.max(0.01f, clock.getScaleX());
+        float originalScaleY = Math.max(0.01f, clock.getScaleY());
+        float savedAutoX = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoXKey, 1f));
+        float savedAutoY = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoYKey, 1f));
+        float baseScaleX = originalScaleX / savedAutoX;
+        float baseScaleY = originalScaleY / savedAutoY;
+        boolean scaleChanged = false;
+
+        // tryShrinkResizeItemInPlace stops at 50%; this final pass may go to the
+        // launcher's 25% automatic-shrink floor before conceding that space is full.
+        for (int percent = 45; percent >= 25; percent -= 5) {
+            float targetAutoX = Math.max(0.25f, savedAutoX * percent / 100f);
+            float targetAutoY = Math.max(0.25f, savedAutoY * percent / 100f);
+            clock.setScaleX(baseScaleX * targetAutoX);
+            clock.setScaleY(baseScaleY * targetAutoY);
+            scaleChanged = Math.abs(clock.getScaleX() - originalScaleX) > 0.001f
+                    || Math.abs(clock.getScaleY() - originalScaleY) > 0.001f;
+            if (resizeItemFitsAtCurrentPosition(page, clock)) {
+                prefs.edit().putFloat(autoXKey, targetAutoX)
+                        .putFloat(autoYKey, targetAutoY).apply();
+                if (scaleChanged) resizeRepairSpecialShrinkCount++;
+                return;
+            }
+        }
+
+        // Preserve the smallest attempted visible clock even if the page is genuinely
+        // saturated. Clamp it to the screen bounds, persist the reduced scale, and expose
+        // the unresolved background collision in the resize prompt.
+        float minAutoX = 0.25f;
+        float minAutoY = 0.25f;
+        clock.setScaleX(baseScaleX * minAutoX);
+        clock.setScaleY(baseScaleY * minAutoY);
+        prefs.edit().putFloat(autoXKey, minAutoX).putFloat(autoYKey, minAutoY).apply();
+        int[] geometry = itemGeometry(clock);
+        int maxX = Math.max(0, page.getWidth() - geometry[2]);
+        int maxY = Math.max(0, page.getHeight() - geometry[3]);
+        int safeX = Math.max(0, Math.min(maxX, geometry[0]));
+        int safeY = Math.max(0, Math.min(maxY, geometry[1]));
+        if (safeX != geometry[0] || safeY != geometry[1]) {
+            setClockVisualPosition(clock, safeX, safeY, true);
+        }
+        clock.setVisibility(View.VISIBLE);
+        clock.setAlpha(1f);
+        if (scaleChanged) resizeRepairSpecialShrinkCount++;
+        resizeRepairUnresolvedCollisionCount++;
     }
 
 
@@ -15140,7 +15209,7 @@ public class MainActivity extends Activity {
                 if (freePixels != null) {
                     placeResizeRecoveredItem(page, item, pageIndex, freePixels[0], freePixels[1]);
                 } else {
-                    removeResizeOverflowClock(page, item);
+                    preserveResizeOverflowClock(page, item);
                 }
             }
         }
