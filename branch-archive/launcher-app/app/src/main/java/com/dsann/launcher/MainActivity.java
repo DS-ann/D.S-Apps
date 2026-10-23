@@ -4791,9 +4791,9 @@ public class MainActivity extends Activity {
             Thread loader = memberIconLoaderRef[0];
             if (loader != null) loader.interrupt();
 
-            // Explicitly release per-open hardware layers and the icon snapshot bitmap.
-            // On Android 6, detached dialogs can otherwise retain sizeable GPU/native
-            // allocations across repeated opens.
+            // Explicitly release per-open hardware layers and the icon snapshot drawable.
+            // On Android 6, the renderer may still hold a queued reference to the bitmap,
+            // so drop Java references after the final frame instead of recycling its pixels.
             android.animation.ValueAnimator running = morphAnimator[0];
             if (running != null && running.isRunning()) {
                 running.removeAllUpdateListeners();
@@ -4811,7 +4811,6 @@ public class MainActivity extends Activity {
                 }
             }
             android.widget.ImageView snapshot = morphSnapshotRef[0];
-            final Bitmap snapshotBitmap = morphSnapshotBitmapRef[0];
             morphSnapshotBitmapRef[0] = null;
             if (snapshot != null) {
                 snapshot.animate().cancel();
@@ -4854,14 +4853,6 @@ public class MainActivity extends Activity {
                         } catch (RuntimeException cleanupError) {
                             android.util.Log.w("D.S Launcher",
                                     "Unable to release the app-group snapshot view", cleanupError);
-                        }
-                    }
-                    if (snapshotBitmap != null && !snapshotBitmap.isRecycled()) {
-                        try {
-                            snapshotBitmap.recycle();
-                        } catch (RuntimeException cleanupError) {
-                            android.util.Log.w("D.S Launcher",
-                                    "Unable to recycle the app-group snapshot bitmap", cleanupError);
                         }
                     }
                 } finally {
@@ -4928,12 +4919,14 @@ public class MainActivity extends Activity {
         title.setPadding(LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 2),
                 LauncherUiUtils.dp(this, 6), LauncherUiUtils.dp(this, 8));
         title.setAlpha(0f);
+        title.setTag("app_group_title_fade");
         title.setLayerType(legacyAppGroupRenderer
                 ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         View groupDivider = new View(this);
         groupDivider.setAlpha(0f);
+        groupDivider.setTag("app_group_divider_fade");
         groupDivider.setLayerType(legacyAppGroupRenderer
                 ? View.LAYER_TYPE_NONE : View.LAYER_TYPE_HARDWARE, null);
         groupDivider.setBackgroundColor(Color.argb(170, 255, 255, 255));
@@ -5553,7 +5546,11 @@ public class MainActivity extends Activity {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
+        View fadingTitle = panel.findViewWithTag("app_group_title_fade");
+        View fadingDivider = panel.findViewWithTag("app_group_divider_fade");
         View fadingContent = panel.findViewWithTag("app_group_content_fade");
+        if (fadingTitle != null) fadingTitle.animate().cancel();
+        if (fadingDivider != null) fadingDivider.animate().cancel();
         if (fadingContent != null) fadingContent.animate().cancel();
         if (morphAnimator != null && morphAnimator.length > 0 && morphAnimator[0] != null) {
             morphAnimator[0].cancel();
@@ -5626,6 +5623,12 @@ public class MainActivity extends Activity {
                 // Alpha alone now controls the handoff; the source snapshot never toggles
                 // visibility during the close animation, avoiding a midpoint layer flash.
             }
+            // Reverse opening's title/divider/grid fade using the same progress curve.
+            // At progress 1 the card content is fully visible; at 0 it is fully hidden.
+            float contentAlpha = Math.max(0f, Math.min(1f, (progress - 0.5f) * 2f));
+            if (fadingTitle != null) fadingTitle.setAlpha(contentAlpha);
+            if (fadingDivider != null) fadingDivider.setAlpha(contentAlpha);
+            if (fadingContent != null) fadingContent.setAlpha(contentAlpha);
             if (dimLayer != null) dimLayer.setAlpha(0f);
         });
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
@@ -5650,6 +5653,9 @@ public class MainActivity extends Activity {
                     snapshot.setTranslationY(0f);
                     snapshot.setAlpha(1f);
                 }
+                if (fadingTitle != null) fadingTitle.setAlpha(0f);
+                if (fadingDivider != null) fadingDivider.setAlpha(0f);
+                if (fadingContent != null) fadingContent.setAlpha(0f);
                 // Restore the source icon before the popup disappears to avoid a blank frame.
                 if (beforeDismiss != null) {
                     try {
