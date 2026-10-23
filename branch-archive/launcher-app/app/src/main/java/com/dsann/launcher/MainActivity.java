@@ -5733,7 +5733,7 @@ public class MainActivity extends Activity {
                                 && sourceCell.getWidth() > 0 && sourceCell.getHeight() > 0) {
                             android.widget.ImageView handoff = closeHandoffSnapshotRef[0];
                             if (handoff == null) {
-                                handoff = new android.widget.ImageView(this);
+                                handoff = new android.widget.ImageView(MainActivity.this);
                                 handoff.setImageBitmap(closeHandoffBitmapRef[0]);
                                 handoff.setScaleType(
                                         android.widget.ImageView.ScaleType.FIT_XY);
