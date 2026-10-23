@@ -11341,7 +11341,8 @@ public class MainActivity extends Activity {
             }
             if (!use24Hour && periodLength > 0) {
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                Color.WHITE, whiteOuterWidth, blackInnerWidth),
+                                0, Color.WHITE, whiteOuterWidth, blackInnerWidth,
+                                0.2f * density, true, true),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             String clockValue = formatClockDigits(now, use24Hour);
