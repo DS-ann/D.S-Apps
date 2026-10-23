@@ -873,6 +873,21 @@ final class WidgetInteractionController {
                     if (action == MotionEvent.ACTION_UP && resizeRejectedAtLastPosition[0]) {
                         Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
                     }
+                    boolean committedManualResize = action == MotionEvent.ACTION_UP
+                            && (finalParams.leftMargin != origin[0]
+                                    || finalParams.topMargin != origin[1]
+                                    || finalParams.width != origin[2]
+                                    || finalParams.height != origin[3]);
+                    if (committedManualResize) {
+                        // Manual geometry now owns the widget's size. Remove automatic
+                        // collision-shrink scales so package replacement cannot reapply them.
+                        container.setScaleX(1f);
+                        container.setScaleY(1f);
+                        prefs.edit()
+                                .remove("workspace_resize_auto_scale_x_launcher_widget:" + widgetId)
+                                .remove("workspace_resize_auto_scale_y_launcher_widget:" + widgetId)
+                                .apply();
+                    }
                     if (container.getChildAt(0) instanceof AppWidgetHostView) {
                         WidgetController.updateWidgetSize(android.appwidget.AppWidgetManager.getInstance(activity),
                                 widgetId, (AppWidgetHostView) container.getChildAt(0),
