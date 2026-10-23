@@ -4759,9 +4759,18 @@ public class MainActivity extends Activity {
                 android.graphics.drawable.Drawable drawable = snapshot.getDrawable();
                 android.graphics.Bitmap bitmap = drawable instanceof android.graphics.drawable.BitmapDrawable
                         ? ((android.graphics.drawable.BitmapDrawable) drawable).getBitmap() : null;
-                snapshot.setImageDrawable(null);
+                // Detach the snapshot now, but do not free its pixels while Android 6's
+                // render thread may still be finishing the last frame of the dismissed window.
+                if (snapshot.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) snapshot.getParent()).removeView(snapshot);
+                }
                 morphSnapshotRef[0] = null;
-                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                long releaseDelay = Build.VERSION.SDK_INT <= 23 ? 320L : 80L;
+                handler.postDelayed(() -> {
+                    snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                    snapshot.setImageDrawable(null);
+                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                }, releaseDelay);
             }
             loadedMemberDrawablesRef[0] = null;
             pendingMemberApps.clear();
@@ -5024,13 +5033,16 @@ public class MainActivity extends Activity {
         dialog.setContentView(overlay);
         dialog.setCancelable(false);
         dialog.setCanceledOnTouchOutside(false);
-        dialog.show();
-        if (dialog.getWindow() != null) {
-            android.view.Window window = dialog.getWindow();
+        // Configure the full-screen transparent host before showing it. Applying these
+        // attributes after show() allowed the default floating dialog to flash for a frame
+        // before it expanded to the full-screen morph coordinate space.
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
             window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
             window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(Color.TRANSPARENT);
+            window.setWindowAnimations(0);
             View decor = window.getDecorView();
             decor.setSystemUiVisibility(decor.getSystemUiVisibility()
                     | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
@@ -5038,6 +5050,7 @@ public class MainActivity extends Activity {
             window.setGravity(Gravity.TOP | Gravity.LEFT);
             window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         }
+        dialog.show();
 
         overlay.requestFocus();
         overlay.post(() -> {
