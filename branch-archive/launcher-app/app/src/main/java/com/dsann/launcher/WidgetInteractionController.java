@@ -271,6 +271,11 @@ final class WidgetInteractionController {
         float oldScaleY = container.getScaleY();
         float scaleX = Math.max(0.01f, Math.min(1f, oldScaleX));
         float scaleY = Math.max(0.01f, Math.min(1f, oldScaleY));
+        // Old saved dimensions can exceed the page, in which case clamping left/top to zero
+        // still leaves the resize handles off-screen. Reduce only the drawing transform enough
+        // to make the full visible rectangle accessible; stored widget dimensions stay intact.
+        scaleX = Math.min(scaleX, availableWidth / (float) Math.max(1, width));
+        scaleY = Math.min(scaleY, availableHeight / (float) Math.max(1, height));
         float pivotX = container.getPivotX();
         float pivotY = container.getPivotY();
         float translationX = container.getTranslationX();

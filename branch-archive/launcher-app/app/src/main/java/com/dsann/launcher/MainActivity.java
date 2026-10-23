@@ -4088,7 +4088,7 @@ public class MainActivity extends Activity {
         // Match the expanded panel's 24dp corner radius at the icon's starting scale.
         // Keeping the same rounded-square silhouette avoids an oval-to-square morph.
         logoBackground.setCornerRadius(Math.max(1f, iconSizePx * 0.08f));
-        logoBackground.setStroke(Math.max(1, LauncherUiUtils.dp(this, 1)), Color.BLACK);
+        logoBackground.setStroke(Math.max(1, LauncherUiUtils.dp(this, 2)), Color.BLACK);
         logo.setBackground(logoBackground);
         logo.setClipChildren(true);
         logo.setClipToPadding(true);
@@ -5288,7 +5288,12 @@ public class MainActivity extends Activity {
                 boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
                 if (ownedGroupSlot) {
                     appGroupCleanupPendingSessionGeneration = sessionId;
+                    if (openingGroupCell != null) {
+                        openingGroupCell.setAlpha(openingGroupCellAlpha);
+                        openingGroupCell.invalidate();
+                    }
                 }
+                if (root != null) root.invalidate();
                 if (groupId.equals(activeAppGroupMemberMoveModeId)) {
                     clearAppGroupMemberMoveMode();
                 }
@@ -6078,25 +6083,21 @@ public class MainActivity extends Activity {
                 panel.setScaleY(targetScaleY);
                 panel.setTranslationX(offsetX);
                 panel.setTranslationY(offsetY);
+                // Hide both temporary animation layers at the terminal frame. The live home
+                // icon is restored by onDismiss after the Dialog window has detached, avoiding
+                // a one-frame double image at the end of the reverse morph.
+                panel.setAlpha(0f);
                 if (snapshot != null) {
                     snapshot.setScaleX(1f);
                     snapshot.setScaleY(1f);
                     snapshot.setTranslationX(0f);
                     snapshot.setTranslationY(0f);
-                    snapshot.setAlpha(1f);
+                    snapshot.setAlpha(0f);
                 }
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
 
-                // Restore the real home cell underneath the still-attached panel, then dismiss
-                // the Dialog. Do not remove its full-screen overlay first: that exposed a blank
-                // transparent-window frame between the final morph frame and window teardown.
-                if (sourceCell != null) {
-                    sourceCell.setAlpha(sourceCellAlpha);
-                    sourceCell.invalidate();
-                }
-                if (root != null) root.invalidate();
                 if (dialog.isShowing()) dialog.dismiss();
                 if (rootCloseTransition != null && rootCloseTransition.length > 0) {
                     rootCloseTransition[0] = false;
@@ -11692,10 +11693,10 @@ public class MainActivity extends Activity {
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             if (!use24Hour && periodLength > 0) {
-                // AM/PM uses an exterior-only black rim; keep the existing 0.2dp outer width.
+                // AM/PM uses an exterior-only black rim with the requested 0.4dp outer width.
                 dateLine.setSpan(new ClockTextOutlineSpan(
                                 0, Color.WHITE, whiteOuterWidth, 0f,
-                                0.2f * density, true, true),
+                                0.4f * density, true, true),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             String clockValue = formatClockDigits(now, use24Hour);
@@ -15020,8 +15021,10 @@ public class MainActivity extends Activity {
             // Collision repair is strictly page-local. Cross-screen moves are handled only
             // by the explicit edge-drag interaction, never by layout or overlap repair.
             if (bestX < 0 && isHomeGridIcon(item)) {
-                // If this page has no legal grid slot, keep the shortcut visible here.
-                // Register its actual bounds so later items do not get placed on top of it.
+                // No safe grid slot: keep the app/shortcut/group visible at its original scale.
+                // Report unresolved conflicts during a size change instead of silently shrinking
+                // artwork until it is effectively invisible.
+                if (homeIconResizeRepairPending) resizeRepairUnresolvedCollisionCount++;
                 int[] retainedGeometry = itemGeometry(item);
                 accepted.add(collisionRect(item, retainedGeometry));
                 acceptedViews.add(item);
@@ -15043,7 +15046,7 @@ public class MainActivity extends Activity {
                             .putFloat("workspace_base_scale_y_" + scaleTag, originalScaleY)
                             .apply();
                 }
-                for (float factor = 0.90f; factor >= 0.05f && bestX < 0; factor -= 0.05f) {
+                for (float factor = 0.90f; factor >= 0.50f - 0.001f && bestX < 0; factor -= 0.05f) {
                     item.setScaleX(originalScaleX * factor);
                     item.setScaleY(originalScaleY * factor);
                     g = itemGeometry(item);
@@ -15661,7 +15664,7 @@ public class MainActivity extends Activity {
             // sizes. The user must see recovery choices before a widget is shrunk or removed.
             final int[] remaining = {targetPages.size()};
             for (FrameLayout page : targetPages) {
-                page.post(() -> {
+                page.postOnAnimation(() -> page.postOnAnimation(() -> {
                     if (pagesStrip == null || page.getParent() != pagesStrip) {
                         if (--remaining[0] == 0) homeIconResizeRepairPending = false;
                         return;
@@ -15680,9 +15683,11 @@ public class MainActivity extends Activity {
                     if (collisionFound) {
                         showResizeCollisionChoiceDialog(changeReason, targetPages);
                     } else {
-                        runWorkspaceCollisionRepair(targetPages, changeReason);
+                        homeIconResizeRepairPending = false;
+                        ensureShortcutLabelsNotClipped();
+                        refreshWorkspaceGrid();
                     }
-                });
+                }));
             }
         });
     }
@@ -15776,6 +15781,9 @@ public class MainActivity extends Activity {
                 // Commit automatic widget shrink into real AppWidgetHostView dimensions so
                 // provider content reflows rather than only scaling the outer container.
                 commitAutoShrunkWidgetsToLayout(page);
+                if (hasWorkspaceVisualOverlaps(page)) {
+                    resizeRepairUnresolvedCollisionCount++;
+                }
                 if (collisionBeforeRepair
                         && resizeRepairCollisionCount == collisionsBeforePage) {
                     resizeRepairCollisionCount++;
@@ -15826,7 +15834,7 @@ public class MainActivity extends Activity {
             message.append("A clock was restored after a previous layout overflow. ");
         }
         if (resizeRepairUnresolvedCollisionCount > 0) {
-            message.append("The clock stayed visible, but no fully collision-free placement was available. ")
+            message.append("Some workspace items still overlap because no free arrangement was available. ")
                     .append("Move or resize another item to clear the overlap.");
         }
         Toast.makeText(this, message.toString().trim(), Toast.LENGTH_LONG).show();
@@ -16173,6 +16181,41 @@ public class MainActivity extends Activity {
         }
         widgetInteractionController.updateWidgetPageIndex((FrameLayout) widget, targetPageIndex);
         saveWidgetGeometry(id, targetPageIndex, (FrameLayout) widget);
+    }
+
+    private void preserveResizeOverflowWidget(FrameLayout page, View widget) {
+        if (page == null || widget == null || widget.getParent() != page
+                || !(widget.getLayoutParams() instanceof FrameLayout.LayoutParams)
+                || page.getWidth() <= 0 || page.getHeight() <= 0) {
+            resizeRepairUnresolvedCollisionCount++;
+            return;
+        }
+        int[] geometry = itemGeometry(widget);
+        int visualWidth = Math.max(1, geometry[2]);
+        int visualHeight = Math.max(1, geometry[3]);
+        int safeX = Math.max(0, Math.min(Math.max(0, page.getWidth() - visualWidth), geometry[0]));
+        int safeY = Math.max(0, Math.min(Math.max(0, page.getHeight() - visualHeight), geometry[1]));
+        FrameLayout.LayoutParams params =
+                (FrameLayout.LayoutParams) widget.getLayoutParams();
+        float scaleX = Math.max(0.01f, widget.getScaleX());
+        float scaleY = Math.max(0.01f, widget.getScaleY());
+        params.gravity = Gravity.TOP | Gravity.LEFT;
+        params.leftMargin = safeX - Math.round(widget.getPivotX() * (1f - scaleX));
+        params.topMargin = safeY - Math.round(widget.getPivotY() * (1f - scaleY));
+        params.rightMargin = 0;
+        params.bottomMargin = 0;
+        widget.setTranslationX(0f);
+        widget.setTranslationY(0f);
+        widget.setVisibility(View.VISIBLE);
+        widget.setAlpha(1f);
+        widget.setLayoutParams(params);
+        try {
+            int widgetId = Integer.parseInt(String.valueOf(widget.getTag())
+                    .substring("launcher_widget:".length()));
+            int pageIndex = Math.max(0, pagesStrip == null ? 0 : pagesStrip.indexOfChild(page));
+            saveWidgetGeometry(widgetId, pageIndex, (FrameLayout) widget);
+        } catch (RuntimeException ignored) {}
+        resizeRepairUnresolvedCollisionCount++;
     }
 
     private void removeResizeOverflowWidget(FrameLayout page, View widget) {
@@ -16611,13 +16654,14 @@ public class MainActivity extends Activity {
                         continue;
                     }
                 }
-                // Only detach a widget after local, global-shrink, and other-page trials.
+                // A failed placement is not permission to silently delete an installed widget.
+                // Keep it visible and clamp it inside the page; unresolved overlap is reported.
                 int[] finalLocal = findResizeFreePixelPosition(page, item);
                 if (finalLocal != null) {
                     placeResizeRecoveredItem(page, item, pageIndex, finalLocal[0], finalLocal[1]);
                     continue;
                 }
-                removeResizeOverflowWidget(page, item);
+                preserveResizeOverflowWidget(page, item);
             } else {
                 int[] freePixels = findResizeFreePixelPosition(page, item);
                 if (freePixels != null) {
