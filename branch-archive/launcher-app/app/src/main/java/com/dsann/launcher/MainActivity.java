@@ -14891,6 +14891,9 @@ public class MainActivity extends Activity {
                     boolean collisionBeforeRepair = hasWorkspaceVisualOverlaps(page);
                     int collisionsBeforePage = resizeRepairCollisionCount;
                     snapAppGroupsToGridAfterIconResize(page);
+                    // Relocate conflicting workspace items before any automatic shrink.
+                    // This gives widgets and the clock first claim to their intended size.
+                    resolveAllWorkspaceOverlaps(page, null);
                     repairResizeCollisionsOnPage(page);
                     resolveAllWorkspaceOverlaps(page, null);
                     repairResizeCollisionsOnPage(page);
@@ -15517,6 +15520,117 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    /**
+     * Try to free a collision-free rectangle by reducing other widgets or the page's
+     * clock, not only whichever item directly intersects the protected widget. The
+     * changed scales stay provisional until a valid position is found.
+     */
+    private int[] shrinkOtherResizeItemsToCreateSpace(FrameLayout page, View protectedItem) {
+        if (page == null || protectedItem == null || page.getWidth() <= 0
+                || page.getHeight() <= 0) return null;
+
+        boolean protectedItemOnPage = protectedItem.getParent() == page;
+        if (protectedItemOnPage && resizeItemFitsAtCurrentPosition(page, protectedItem)) {
+            int[] current = itemGeometry(protectedItem);
+            return new int[]{current[0], current[1]};
+        }
+        int[] initialPosition = findResizeFreeGridPosition(page, protectedItem);
+        if (initialPosition == null) {
+            initialPosition = findResizeFreePixelPosition(page, protectedItem);
+        }
+        if (initialPosition != null) return initialPosition;
+
+        final int[] protectedGeometry = itemGeometry(protectedItem);
+        java.util.ArrayList<View> candidates = new java.util.ArrayList<View>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View candidate = page.getChildAt(i);
+            if (candidate == protectedItem || !isWorkspaceItem(candidate)
+                    || candidate.getVisibility() != View.VISIBLE) continue;
+            Object rawTag = candidate.getTag();
+            boolean widget = rawTag instanceof String
+                    && ((String) rawTag).startsWith("launcher_widget:");
+            if (!widget && !isClockWorkspaceItem(candidate)) continue;
+            int[] geometry = itemGeometry(candidate);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            candidates.add(candidate);
+        }
+        // Start with likely blockers for minimal changes, but deliberately keep every
+        // widget and clock on the page in the candidate set, including distant items.
+        java.util.Collections.sort(candidates, (a, b) -> {
+            int[] ga = itemGeometry(a);
+            int[] gb = itemGeometry(b);
+            long da = Math.abs((long) ga[0] + ga[2] / 2
+                    - ((long) protectedGeometry[0] + protectedGeometry[2] / 2))
+                    + Math.abs((long) ga[1] + ga[3] / 2
+                    - ((long) protectedGeometry[1] + protectedGeometry[3] / 2));
+            long db = Math.abs((long) gb[0] + gb[2] / 2
+                    - ((long) protectedGeometry[0] + protectedGeometry[2] / 2))
+                    + Math.abs((long) gb[1] + gb[3] / 2
+                    - ((long) protectedGeometry[1] + protectedGeometry[3] / 2));
+            return Long.compare(da, db);
+        });
+
+        java.util.IdentityHashMap<View, float[]> provisional =
+                new java.util.IdentityHashMap<View, float[]>();
+        for (View candidate : candidates) {
+            float originalX = candidate.getScaleX();
+            float originalY = candidate.getScaleY();
+            String autoXKey = workspaceAutoShrinkScaleKey(candidate, true);
+            String autoYKey = workspaceAutoShrinkScaleKey(candidate, false);
+            float storedAutoX = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoXKey, 1f));
+            float storedAutoY = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoYKey, 1f));
+            float selectedFactor = 1f;
+
+            for (int percent = 95; percent >= 50; percent -= 5) {
+                float factor = percent / 100f;
+                if (storedAutoX * factor < 0.25f || storedAutoY * factor < 0.25f) continue;
+                candidate.setScaleX(originalX * factor);
+                candidate.setScaleY(originalY * factor);
+                selectedFactor = factor;
+
+                int[] position = null;
+                if (protectedItemOnPage
+                        && resizeItemFitsAtCurrentPosition(page, protectedItem)) {
+                    int[] current = itemGeometry(protectedItem);
+                    position = new int[]{current[0], current[1]};
+                }
+                if (position == null) position = findResizeFreeGridPosition(page, protectedItem);
+                if (position == null) position = findResizeFreePixelPosition(page, protectedItem);
+                if (position != null) {
+                    provisional.put(candidate, new float[]{originalX, originalY,
+                            storedAutoX, storedAutoY, selectedFactor});
+                    SharedPreferences.Editor edit = prefs.edit();
+                    for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
+                        View changed = entry.getKey();
+                        float[] values = entry.getValue();
+                        edit.putFloat(workspaceAutoShrinkScaleKey(changed, true),
+                                        clampWorkspaceAutoScale(values[2] * values[4]))
+                                .putFloat(workspaceAutoShrinkScaleKey(changed, false),
+                                        clampWorkspaceAutoScale(values[3] * values[4]));
+                    }
+                    edit.apply();
+                    resizeRepairSpecialShrinkCount += provisional.size();
+                    return position;
+                }
+            }
+
+            // Keep this candidate provisionally at its smallest allowed scale while
+            // testing the next widget/clock. Roll everything back if no arrangement works.
+            if (selectedFactor < 1f) {
+                provisional.put(candidate, new float[]{originalX, originalY,
+                        storedAutoX, storedAutoY, selectedFactor});
+            }
+        }
+
+        for (java.util.Map.Entry<View, float[]> entry : provisional.entrySet()) {
+            View candidate = entry.getKey();
+            float[] values = entry.getValue();
+            candidate.setScaleX(values[0]);
+            candidate.setScaleY(values[1]);
+        }
+        return null;
+    }
+
     private void repairResizeCollisionsOnPage(FrameLayout page) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
         java.util.ArrayList<View> resizeItems = new java.util.ArrayList<View>();
@@ -15529,7 +15643,6 @@ public class MainActivity extends Activity {
                 resizeItems.add(child);
             }
         }
-        // Keep the page's own clock first. Other widgets then route around it.
         java.util.Collections.sort(resizeItems, (a, b) ->
                 Boolean.compare(isClockWorkspaceItem(b), isClockWorkspaceItem(a)));
         for (View item : resizeItems) {
@@ -15540,35 +15653,61 @@ public class MainActivity extends Activity {
                 resizeRepairClockBackgroundCollisionCount++;
             }
 
-            // Priority 1: shrink the clock/widget itself before changing its location.
-            if (tryShrinkResizeItemInPlace(page, item)) {
-                resizeRepairSpecialShrinkCount++;
-                continue;
-            }
-
-            // Priority 2: use a collision-free grid slot on this screen.
-            int[] local = findResizeFreeGridPosition(page, item);
             int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
+            boolean widget = item.getTag() instanceof String
+                    && ((String) item.getTag()).startsWith("launcher_widget:");
+
+            // First preserve the item's scale and relocate it on the current page.
+            int[] local = findResizeFreeGridPosition(page, item);
+            if (local == null) local = findResizeFreePixelPosition(page, item);
             if (local != null) {
                 placeResizeRecoveredItem(page, item, pageIndex, local[0], local[1]);
                 continue;
             }
 
-            // Additional icon fallback: ordinary apps/groups/shortcuts may shrink to free
-            // a slot; the conflicting clock/widget itself and every other clock/widget are
-            // excluded from this neighbour-shrink step.
-            int[] afterNeighbourShrink = shrinkGridIconsToCreateResizeSpace(page, item);
-            if (afterNeighbourShrink != null) {
-                int[] before = itemGeometry(item);
-                if (before[0] != afterNeighbourShrink[0] || before[1] != afterNeighbourShrink[1]) {
-                    placeResizeRecoveredItem(page, item, pageIndex,
-                            afterNeighbourShrink[0], afterNeighbourShrink[1]);
-                }
+            // If repositioning alone is insufficient, try shrinking any other widget or
+            // the clock on this screen. Distant items are eligible too; adjacency is not
+            // used as a filter for finding space.
+            int[] afterOtherShrink = shrinkOtherResizeItemsToCreateSpace(page, item);
+            if (afterOtherShrink != null) {
+                placeResizeRecoveredItem(page, item, pageIndex,
+                        afterOtherShrink[0], afterOtherShrink[1]);
                 continue;
             }
 
-            // A page may contain safe space between grid slots. Test pixel positions on
-            // the current page before moving a widget away or deciding to delete it.
+            int otherIndex = pageIndex == 0 ? 1 : 0;
+            if (widget && otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
+                    && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
+                FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
+                int[] otherPosition = findResizeFreeGridPosition(other, item);
+                if (otherPosition == null) otherPosition = findResizeFreePixelPosition(other, item);
+                if (otherPosition == null) {
+                    otherPosition = shrinkOtherResizeItemsToCreateSpace(other, item);
+                }
+                if (otherPosition != null) {
+                    moveResizeWidgetToOtherPage(page, item, otherIndex,
+                            otherPosition[0], otherPosition[1]);
+                    resizeRepairMovedCount++;
+                    continue;
+                }
+            }
+
+            // Shrinking the conflicted item itself is now a last-resort option, after
+            // both-page placement and reductions of other widgets/clock have failed.
+            if (tryShrinkResizeItemInPlace(page, item)) {
+                resizeRepairSpecialShrinkCount++;
+                continue;
+            }
+
+            // Ordinary icons/groups/shortcuts are the next fallback, once widget/clock
+            // moves and other-widget reductions have been exhausted.
+            int[] afterNeighbourShrink = shrinkGridIconsToCreateResizeSpace(page, item);
+            if (afterNeighbourShrink != null) {
+                placeResizeRecoveredItem(page, item, pageIndex,
+                        afterNeighbourShrink[0], afterNeighbourShrink[1]);
+                continue;
+            }
+
             int[] localPixelPosition = findResizeFreePixelPosition(page, item);
             if (localPixelPosition != null) {
                 placeResizeRecoveredItem(page, item, pageIndex,
@@ -15576,12 +15715,7 @@ public class MainActivity extends Activity {
                 continue;
             }
 
-            boolean widget = item.getTag() instanceof String
-                    && ((String) item.getTag()).startsWith("launcher_widget:");
             if (widget) {
-                // Priority 3: try the other screen. Give it the same ordinary-icon
-                // shrinking fallback before declaring that neither page has room.
-                int otherIndex = pageIndex == 0 ? 1 : 0;
                 if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
                         && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
                     FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
@@ -15589,7 +15723,9 @@ public class MainActivity extends Activity {
                     if (otherPosition == null) {
                         otherPosition = shrinkGridIconsToCreateResizeSpace(other, item);
                     }
-                    if (otherPosition == null) otherPosition = findResizeFreePixelPosition(other, item);
+                    if (otherPosition == null) {
+                        otherPosition = findResizeFreePixelPosition(other, item);
+                    }
                     if (otherPosition != null) {
                         moveResizeWidgetToOtherPage(page, item, otherIndex,
                                 otherPosition[0], otherPosition[1]);
@@ -15597,30 +15733,14 @@ public class MainActivity extends Activity {
                         continue;
                     }
                 }
-                // Last safety check before destructive removal: re-evaluate both pages
-                // after neighbour-shrink attempts. Grid-only failure is not proof that
-                // there is no usable rectangular gap.
-                int[] finalLocalPosition = findResizeFreePixelPosition(page, item);
-                if (finalLocalPosition != null) {
-                    placeResizeRecoveredItem(page, item, pageIndex,
-                            finalLocalPosition[0], finalLocalPosition[1]);
+                // Only detach a widget after local, global-shrink, and other-page trials.
+                int[] finalLocal = findResizeFreePixelPosition(page, item);
+                if (finalLocal != null) {
+                    placeResizeRecoveredItem(page, item, pageIndex, finalLocal[0], finalLocal[1]);
                     continue;
-                }
-                if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
-                        && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
-                    FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
-                    int[] finalOtherPosition = findResizeFreePixelPosition(other, item);
-                    if (finalOtherPosition != null) {
-                        moveResizeWidgetToOtherPage(page, item, otherIndex,
-                                finalOtherPosition[0], finalOtherPosition[1]);
-                        resizeRepairMovedCount++;
-                        continue;
-                    }
                 }
                 removeResizeOverflowWidget(page, item);
             } else {
-                // Clock panels are page-specific. Keep their independent state on this screen:
-                // try any safe pixel position, then hide this page's clock as a final resort.
                 int[] freePixels = findResizeFreePixelPosition(page, item);
                 if (freePixels != null) {
                     placeResizeRecoveredItem(page, item, pageIndex, freePixels[0], freePixels[1]);
