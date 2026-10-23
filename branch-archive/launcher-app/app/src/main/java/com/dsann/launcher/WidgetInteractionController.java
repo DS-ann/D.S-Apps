@@ -504,7 +504,7 @@ final class WidgetInteractionController {
             // Preserve the widget's actual collision-recovery scale in move-ready mode.
             // A 10% hint enlarged a widget that had just been auto-shrunk for a nearby
             // app icon/label, making the widget visibly jump and overlap again.
-            LauncherUiUtils.startScaleHint(container, 1.0f);
+            LauncherUiUtils.startStableScaleHint(container);
             cancelWidgetTouch.run();
         };
         // The two-second stationary hold remains the explicit widget-options gesture.
