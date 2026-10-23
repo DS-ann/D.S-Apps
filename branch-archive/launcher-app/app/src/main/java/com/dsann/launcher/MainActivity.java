@@ -4837,6 +4837,9 @@ public class MainActivity extends Activity {
                 if (ownedGroupSlot) {
                     appGroupCleanupPendingSessionGeneration = sessionId;
                 }
+                if (groupId.equals(activeAppGroupMemberMoveModeId)) {
+                    clearAppGroupMemberMoveMode();
+                }
                 if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
                 return;
             }
