@@ -37,6 +37,31 @@ final class LauncherUiUtils {
         view.setScaleY(baseScaleY * scale);
     }
 
+    /**
+     * Enter a move-ready state without modifying the view's current scale. This is needed
+     * for widgets whose size may already be reduced by workspace collision recovery.
+     * Unlike startScaleHint(), this does not call stopMoveHint()'s no-base fallback, which
+     * intentionally normalizes untracked views to scale 1.
+     */
+    static void startStableScaleHint(View view) {
+        if (view == null) return;
+        ObjectAnimator[] animators = MOVE_HINTS.remove(view);
+        if (animators != null) {
+            for (ObjectAnimator animator : animators) {
+                if (animator != null) animator.cancel();
+            }
+        }
+        float[] previousBase = MOVE_HINT_BASES.remove(view);
+        if (previousBase != null) {
+            view.setRotation(previousBase[0]);
+            view.setTranslationY(previousBase[1]);
+            view.setScaleX(previousBase[2]);
+            view.setScaleY(previousBase[3]);
+        }
+        MOVE_HINT_BASES.put(view, new float[]{
+                view.getRotation(), view.getTranslationY(), view.getScaleX(), view.getScaleY()});
+    }
+
     /** Allows position-sensitive widgets (such as the clock) to dance without bobbing. */
     static void startMoveHint(View view, Context context, boolean verticalBob) {
         if (view == null) return;
