@@ -64,9 +64,17 @@ final class WidgetPickerDialog {
     }
 
     private android.graphics.drawable.GradientDrawable roundRect(int[] colors, float radiusDp) {
-        android.graphics.drawable.GradientDrawable drawable =
-                new android.graphics.drawable.GradientDrawable(
-                        android.graphics.drawable.GradientDrawable.Orientation.TL_BR, colors);
+        android.graphics.drawable.GradientDrawable drawable;
+        if (colors == null || colors.length == 0) {
+            drawable = new android.graphics.drawable.GradientDrawable();
+            drawable.setColor(Color.TRANSPARENT);
+        } else if (colors.length == 1) {
+            drawable = new android.graphics.drawable.GradientDrawable();
+            drawable.setColor(colors[0]);
+        } else {
+            drawable = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TL_BR, colors);
+        }
         drawable.setCornerRadius(LauncherUiUtils.dp(activity, radiusDp));
         return drawable;
     }
