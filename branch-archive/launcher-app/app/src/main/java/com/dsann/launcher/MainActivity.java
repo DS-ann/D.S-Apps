@@ -6932,6 +6932,15 @@ public class MainActivity extends Activity {
                             top = homeGridRowTop(shortcutRow, shortcutRows,
                                     targetPage.getHeight(), shortcutCellHeight);
                         }
+                        if (commit && targetPage.getWidth() > 0
+                                && targetPage.getHeight() > 0) {
+                            int[] safeShortcutSlot = findContactShortcutGridPositionWithWidgetShrink(
+                                    targetPage, shortcutId, left, top, tile);
+                            if (safeShortcutSlot != null) {
+                                left = safeShortcutSlot[0];
+                                top = safeShortcutSlot[1];
+                            }
+                        }
                         if (commit) {
                             lp.leftMargin = left;
                             lp.topMargin = top;
@@ -14436,6 +14445,11 @@ public class MainActivity extends Activity {
         // The legacy resolver always rebuilt a nearest-free plan for every item,
         // even when the page was already visually collision-free. That caused needless
         // position changes and a costly post-drop pause. Make it a true no-op in that case.
+        if (!hasWorkspaceVisualOverlaps(page)) return;
+        // Before general collision recovery can move a shortcut to another row, give
+        // existing shortcuts first use of their grid slots and let intersecting widgets
+        // shrink in place where possible.
+        repairContactShortcutGridPositions(page);
         if (!hasWorkspaceVisualOverlaps(page)) return;
         java.util.ArrayList<View> items = new java.util.ArrayList<View>();
         // For explicit widget resizing, reserve the selected widget's exact dimensions first;
