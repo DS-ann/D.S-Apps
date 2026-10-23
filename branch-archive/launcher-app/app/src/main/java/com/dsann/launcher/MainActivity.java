@@ -53,6 +53,32 @@ import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
+    private static final android.view.ViewOutlineProvider HOME_ICON_ROUNDED_SQUARE_OUTLINE =
+            new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View view, android.graphics.Outline outline) {
+                    int width = view.getWidth();
+                    int height = view.getHeight();
+                    if (width <= 0 || height <= 0) {
+                        outline.setEmpty();
+                        return;
+                    }
+                    float radius = Math.min(width, height) * 0.23f;
+                    outline.setRoundRect(0, 0, width, height, radius);
+                }
+            };
+    private static final android.view.ViewOutlineProvider HOME_ICON_ROUND_OUTLINE =
+            new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View view, android.graphics.Outline outline) {
+                    int width = view.getWidth();
+                    int height = view.getHeight();
+                    if (width <= 0 || height <= 0) {
+                        outline.setEmpty();
+                        return;
+                    }
+                    outline.setOval(0, 0, width, height);
+                }
+            };
+
     private static final int HOST_ID = 1407;
     private static final String PREFS = "ds_launcher_prefs";
     private static final String KEY_HOME_APPS = "home_apps";
@@ -6822,21 +6848,54 @@ public class MainActivity extends Activity {
     private void updateIconAppearance(ImageView icon, ResolveInfo app, boolean showBackground,
             int shape, int backgroundColor, int artworkTheme, boolean fitInsideBackground) {
         if (icon == null) return;
+        int safeShape = LauncherIconDrawable.clampShape(shape);
+        boolean outlineClip = showBackground
+                && (safeShape == LauncherIconDrawable.SHAPE_SQUARE
+                    || safeShape == LauncherIconDrawable.SHAPE_ROUND)
+                && android.os.Build.VERSION.SDK_INT >= 21;
+
+        // Match LauncherAppAdapter.bindIconAppearance() whenever a preference changes.
+        // Mutating the Drawable alone is not enough: ImageView's native outline and the
+        // wrapper's external-clip mode must change too, otherwise the old shape remains
+        // visible until a later home-item rebuild.
+        if (outlineClip) {
+            android.view.ViewOutlineProvider provider =
+                    safeShape == LauncherIconDrawable.SHAPE_ROUND
+                            ? HOME_ICON_ROUND_OUTLINE : HOME_ICON_ROUNDED_SQUARE_OUTLINE;
+            if (icon.getOutlineProvider() != provider) {
+                icon.setOutlineProvider(provider);
+                icon.invalidateOutline();
+            }
+            if (!icon.getClipToOutline()) {
+                icon.setClipToOutline(true);
+                icon.invalidateOutline();
+            }
+        } else if (icon.getClipToOutline()) {
+            icon.setClipToOutline(false);
+            icon.invalidateOutline();
+        }
+
         Drawable current = icon.getDrawable();
         if (current instanceof LauncherIconDrawable) {
-            ((LauncherIconDrawable) current).updateAppearance(
-                    showBackground, shape, backgroundColor, artworkTheme, fitInsideBackground);
+            LauncherIconDrawable wrapped = (LauncherIconDrawable) current;
+            wrapped.updateAppearance(showBackground, safeShape, backgroundColor,
+                    artworkTheme, fitInsideBackground);
+            wrapped.setExternalShapeClip(outlineClip);
+            icon.invalidate();
             return;
         }
         // A package-manager icon is only loaded when the view has not yet received
         // our wrapper. Continuous colour dragging reuses the existing drawable.
         if (app == null) return;
-        Drawable source = app.loadIcon(packageManager);
-        String cacheToken = app == null || app.activityInfo == null ? null
+        Drawable loaded = app.loadIcon(packageManager);
+        String cacheToken = app.activityInfo == null ? null
                 : app.activityInfo.packageName + "/" + app.activityInfo.name;
-        icon.setImageDrawable(source == null ? null : new LauncherIconDrawable(
-                source, showBackground, shape, backgroundColor, artworkTheme, cacheToken,
-                fitInsideBackground));
+        LauncherIconDrawable wrapped = loaded == null ? null : new LauncherIconDrawable(
+                loaded, showBackground, safeShape, backgroundColor, artworkTheme, cacheToken,
+                fitInsideBackground);
+        if (wrapped != null) wrapped.setExternalShapeClip(outlineClip);
+        icon.setImageDrawable(wrapped);
+        icon.invalidate();
     }
 
     private void updateShortcutIconAppearance(ImageView icon, View shortcutTile,
