@@ -4756,11 +4756,9 @@ public class MainActivity extends Activity {
             android.widget.ImageView snapshot = morphSnapshotRef[0];
             if (snapshot != null) {
                 snapshot.animate().cancel();
-                android.graphics.drawable.Drawable drawable = snapshot.getDrawable();
-                android.graphics.Bitmap bitmap = drawable instanceof android.graphics.drawable.BitmapDrawable
-                        ? ((android.graphics.drawable.BitmapDrawable) drawable).getBitmap() : null;
-                // Detach the snapshot now, but do not free its pixels while Android 6's
-                // render thread may still be finishing the last frame of the dismissed window.
+                // Detach it immediately, then release the drawable after the renderer has
+                // retired the dismissed window's last frame. Do not call Bitmap.recycle():
+                // Android 6 can still reference that bitmap from a queued render operation.
                 if (snapshot.getParent() instanceof ViewGroup) {
                     ((ViewGroup) snapshot.getParent()).removeView(snapshot);
                 }
@@ -4769,7 +4767,6 @@ public class MainActivity extends Activity {
                 handler.postDelayed(() -> {
                     snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
                     snapshot.setImageDrawable(null);
-                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                 }, releaseDelay);
             }
             loadedMemberDrawablesRef[0] = null;
@@ -5299,7 +5296,8 @@ public class MainActivity extends Activity {
                     snapshot.setTranslationX(0f);
                     snapshot.setTranslationY(0f);
                     snapshot.setAlpha(1f - Math.min(1f, progress * 2f));
-                    snapshot.setVisibility(progress >= 0.5f ? View.GONE : View.VISIBLE);
+                    // Keep the snapshot attached throughout the morph. Toggling GONE/VISIBLE
+                    // at the midpoint invalidates its hardware layer and can flash one frame.
                 }
                 if (!memberInteractionsEnabled[0] && progress >= 0.9f) {
                     memberInteractionsEnabled[0] = true;
@@ -5325,7 +5323,7 @@ public class MainActivity extends Activity {
                     android.widget.ImageView snapshot = morphSnapshotRef[0];
                     if (snapshot != null) {
                         snapshot.setAlpha(0f);
-                        snapshot.setVisibility(View.GONE);
+                        snapshot.setVisibility(View.VISIBLE);
                     }
                     /* no dynamic outline clipping */
                     Runnable reveal = revealGroupContents[0];
@@ -5425,13 +5423,20 @@ public class MainActivity extends Activity {
                 snapshot.setTranslationX(0f);
                 snapshot.setTranslationY(0f);
                 snapshot.setAlpha(1f - Math.min(1f, progress * 2f));
-                snapshot.setVisibility(progress >= 0.5f ? View.GONE : View.VISIBLE);
+                // Alpha alone now controls the handoff; the source snapshot never toggles
+                // visibility during the close animation, avoiding a midpoint layer flash.
             }
             if (dimLayer != null) dimLayer.setAlpha(0f);
         });
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
-                panel.setLayerType(View.LAYER_TYPE_NONE, null);
+                // Dismiss before releasing the hardware layer. Dropping the transformed
+                // panel layer while its window is still attached can expose a one-frame flash.
+                // Also clear the slot so onDismiss never cancels this animator re-entrantly.
+                if (morphAnimator != null && morphAnimator.length > 0
+                        && morphAnimator[0] == animation) {
+                    morphAnimator[0] = null;
+                }
                 if (dialog.isShowing()) dialog.dismiss();
                 if (afterClose != null) afterClose.run();
             }
