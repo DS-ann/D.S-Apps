@@ -5999,10 +5999,12 @@ public class MainActivity extends Activity {
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+        boolean foundShortcut = false;
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
             if (!isWorkspaceContactShortcut(child) || !(child instanceof ViewGroup)
                     || !(child.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            foundShortcut = true;
             ViewGroup tile = (ViewGroup) child;
             if (tile.getChildCount() < 2) continue;
             ImageView icon = tile.getChildAt(0) instanceof ImageView
@@ -6047,6 +6049,7 @@ public class MainActivity extends Activity {
                 label.post(() -> fitShortcutLabelWithDots(label));
             }
         }
+        if (!foundShortcut) return;
         page.post(() -> {
             if (page.getParent() == pagesStrip && !homeIconResizeRepairPending) {
                 resolveAllWorkspaceOverlaps(page, null);
@@ -6829,6 +6832,11 @@ public class MainActivity extends Activity {
         for (int pageIndex = 0; pageIndex < Math.min(2, pagesStrip.getChildCount()); pageIndex++) {
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof ViewGroup)) continue;
+            if (pageView instanceof FrameLayout) {
+                // Watch both screens, not just the page on which a shortcut was first created.
+                // A shortcut can be moved to the other page before a later rotation/resize.
+                ensureShortcutPageLayoutWatcher((FrameLayout) pageView);
+            }
             ViewGroup page = (ViewGroup) pageView;
             boolean hasContactShortcut = false;
             for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
