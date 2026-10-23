@@ -4774,13 +4774,15 @@ public class MainActivity extends Activity {
                 if (action != null) action.onSelect(selectedIndex);
             });
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+            if (i < labels.length - 1) {
+                rowParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+            }
             panel.addView(row, rowParams);
         }
         dialog.setOnCancelListener(ignored -> {
             if (onCancel != null) onCancel.run();
         });
-        showStudioDialog(dialog, panel, 600);
+        showStudioDialog(dialog, panel, 0);
     }
 
     private void showStudioAppChoiceDialog(String title, List<ResolveInfo> choices,
@@ -15647,6 +15649,10 @@ public class MainActivity extends Activity {
     }
 
     private void validateWorkspacePagesAfterIconResize(String changeReason) {
+        validateWorkspacePagesAfterIconResize(changeReason, null);
+    }
+
+    private void validateWorkspacePagesAfterIconResize(String changeReason, Runnable onCancel) {
         if (pagesStrip == null) {
             homeIconResizeRepairPending = false;
             return;
@@ -15697,7 +15703,7 @@ public class MainActivity extends Activity {
                         }
                     }
                     if (collisionFound) {
-                        showResizeCollisionChoiceDialog(changeReason, targetPages);
+                        showResizeCollisionChoiceDialog(changeReason, targetPages, onCancel);
                     } else {
                         homeIconResizeRepairPending = false;
                         ensureShortcutLabelsNotClipped();
@@ -15709,7 +15715,7 @@ public class MainActivity extends Activity {
     }
 
     private void showResizeCollisionChoiceDialog(String changeReason,
-            java.util.ArrayList<FrameLayout> targetPages) {
+            java.util.ArrayList<FrameLayout> targetPages, Runnable rollbackAction) {
         if (isFinishing()) {
             homeIconResizeRepairPending = false;
             return;
@@ -15718,18 +15724,16 @@ public class MainActivity extends Activity {
                 + " makes items on Home overlap or extend beyond the screen. "
                 + "Choose how to recover. The clock will remain visible.";
         Runnable cancelRepair = () -> {
+            if (rollbackAction != null) rollbackAction.run();
             homeIconResizeRepairPending = false;
             ensureShortcutLabelsNotClipped();
             refreshWorkspaceGrid();
         };
         showStudioMultiActionPrompt("Home layout collision", message,
-                new String[]{"↘", "▦", "×"},
-                new String[]{"Shrink / move", "Remove widgets", "Not now"},
+                new String[]{"↘", "×"},
+                new String[]{"Move / shrink / remove", "Cancel"},
                 which -> {
                     if (which == 0) {
-                        runWorkspaceCollisionRepair(targetPages, changeReason);
-                    } else if (which == 1) {
-                        removeOverlappingResizeWidgets(targetPages);
                         runWorkspaceCollisionRepair(targetPages, changeReason);
                     } else {
                         cancelRepair.run();
@@ -15774,6 +15778,12 @@ public class MainActivity extends Activity {
 
     private void runWorkspaceCollisionRepair(
             java.util.ArrayList<FrameLayout> targetPages, String changeReason) {
+        runWorkspaceCollisionRepair(targetPages, changeReason, true);
+    }
+
+    private void runWorkspaceCollisionRepair(
+            java.util.ArrayList<FrameLayout> targetPages, String changeReason,
+            boolean allowWidgetRemovalFallback) {
         if (pagesStrip == null || targetPages == null || targetPages.isEmpty()) {
             homeIconResizeRepairPending = false;
             return;
@@ -15805,6 +15815,28 @@ public class MainActivity extends Activity {
                     resizeRepairCollisionCount++;
                 }
                 if (--remaining[0] == 0) {
+                    boolean overlapsRemain = false;
+                    for (FrameLayout candidate : targetPages) {
+                        if (candidate != null && candidate.getParent() == pagesStrip
+                                && hasWorkspaceVisualOverlaps(candidate)) {
+                            overlapsRemain = true;
+                            break;
+                        }
+                    }
+
+                    // Relocate and shrink first. Delete only widgets that still overlap
+                    // after those recovery paths have had a chance to resolve the layout.
+                    if (allowWidgetRemovalFallback && overlapsRemain) {
+                        int removedBefore = resizeRepairRemovedWidgetCount;
+                        removeOverlappingResizeWidgets(targetPages);
+                        if (resizeRepairRemovedWidgetCount > removedBefore) {
+                            resizeRepairUnresolvedCollisionCount = 0;
+                            homeIconResizeRepairPending = true;
+                            runWorkspaceCollisionRepair(targetPages, changeReason, false);
+                            return;
+                        }
+                    }
+                    if (!overlapsRemain) resizeRepairUnresolvedCollisionCount = 0;
                     homeIconResizeRepairPending = false;
                     ensureShortcutLabelsNotClipped();
                     refreshWorkspaceGrid();
@@ -17159,6 +17191,8 @@ public class MainActivity extends Activity {
                 Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48))), " dp", newSize -> {
             int oldIconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             if (newSize == oldIconSize) return;
+            final int oldStoredColumns = prefs.getInt(KEY_COLUMNS, COLUMNS);
+            final int oldHomeFontSize = Math.round(homeFontSizeSp());
             clearAutoShrunkHomeGridItems();
             int oldColumns = getHomeColumns();
             boolean reduceColumns = newSize > 64 && oldColumns > 5;
@@ -17174,7 +17208,26 @@ public class MainActivity extends Activity {
             renderDock();
             rebuildContactShortcutViews();
             ensureShortcutLabelsNotClipped();
-            validateWorkspacePagesAfterIconResize();
+
+            Runnable restorePreviousSizes = () -> {
+                homeIconResizeRepairPending = true;
+                int changedColumns = getHomeColumns();
+                remapHomeIconSlotsForColumnChange(
+                        changedColumns, oldColumns, newSize, oldIconSize);
+                prefs.edit().putInt(KEY_ICON_SIZE, oldIconSize)
+                        .putInt(KEY_COLUMNS, oldStoredColumns)
+                        .putInt(KEY_HOME_FONT_SIZE, oldHomeFontSize).apply();
+                currentPage = Math.max(0, Math.min(1, currentPage));
+                rebuildPages();
+                renderHomePages(false);
+                renderDock();
+                rebuildContactShortcutViews();
+                ensureShortcutLabelsNotClipped();
+                homeIconResizeRepairPending = false;
+                refreshWorkspaceGrid();
+                showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            };
+            validateWorkspacePagesAfterIconResize("icon-size change", restorePreviousSizes);
         });
         addSettingRow(content, "▣", "App icon background",
                 prefs.getBoolean("icon_rounded_square_background", false) ? "On" : "Off", () -> {
@@ -17247,8 +17300,9 @@ public class MainActivity extends Activity {
                 homeFontSizeSp(), " sp", value -> {
             int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             int columns = getHomeColumns();
+            final int oldHomeFontSize = Math.round(homeFontSizeSp());
             int oldCellHeight = homeCellHeightDp(iconSize);
-            if (value == Math.round(homeFontSizeSp())) return;
+            if (value == oldHomeFontSize) return;
             clearAutoShrunkHomeGridItems();
             homeIconResizeRepairPending = true;
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
@@ -17258,7 +17312,21 @@ public class MainActivity extends Activity {
             renderHomePages(false);
             rebuildContactShortcutViews();
             ensureShortcutLabelsNotClipped();
-            validateWorkspacePagesAfterIconResize("label-size change");
+
+            Runnable restorePreviousSizes = () -> {
+                homeIconResizeRepairPending = true;
+                remapHomeIconSlotsForLayoutChange(columns, columns, iconSize, iconSize,
+                        newCellHeight, oldCellHeight);
+                prefs.edit().putInt(KEY_HOME_FONT_SIZE, oldHomeFontSize).apply();
+                renderHomePages(false);
+                rebuildContactShortcutViews();
+                refreshWorkspaceLabelAppearance();
+                ensureShortcutLabelsNotClipped();
+                homeIconResizeRepairPending = false;
+                refreshWorkspaceGrid();
+                showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            };
+            validateWorkspacePagesAfterIconResize("label-size change", restorePreviousSizes);
         });
         addChoiceRow(content, "App and shortcut label font",
                 Math.max(0, Math.min(3, prefs.getInt(KEY_HOME_LABEL_FONT, 0))),
