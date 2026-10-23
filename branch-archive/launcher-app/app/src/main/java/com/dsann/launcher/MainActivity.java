@@ -3663,7 +3663,7 @@ public class MainActivity extends Activity {
      * This is deliberately independent of icon and label dimensions.
      */
     private int homeGridBottomGapPx() {
-        return LauncherUiUtils.dp(this, 30);
+        return LauncherUiUtils.dp(this, 40);
     }
 
     /**
@@ -4845,17 +4845,16 @@ public class MainActivity extends Activity {
                     final Runnable finishCloseHandoff = () -> {
                         if (handoffFinished[0]) return;
                         handoffFinished[0] = true;
-                        // Reveal the real cell under the opaque image first. Android 6
-                        // then fades the image away instead of atomically swapping surfaces,
-                        // preventing the home label from flashing during compositor handoff.
+                        // Keep the full-cell snapshot opaque while the restored live cell gets
+                        // a covered draw. Android 6 can flash when the two nearly-identical
+                        // surfaces are crossfaded during the last frame of the close morph.
                         openingGroupCell.setAlpha(openingGroupCellAlpha);
                         if (Build.VERSION.SDK_INT <= 23
                                 && closeHandoffSnapshot.getParent() instanceof ViewGroup) {
                             closeHandoffSnapshot.animate().cancel();
                             closeHandoffSnapshot.setAlpha(1f);
-                            closeHandoffSnapshot.animate().alpha(0f)
-                                    .setDuration(animationDuration(120L))
-                                    .withEndAction(removeCloseHandoffSnapshot).start();
+                            // Swap surfaces only after another traversal, avoiding the fade.
+                            finalHandoffParent.postOnAnimation(removeCloseHandoffSnapshot);
                         } else {
                             removeCloseHandoffSnapshot.run();
                         }
@@ -15312,6 +15311,9 @@ public class MainActivity extends Activity {
                     repairResizeCollisionsOnPage(page);
                     resolveAllWorkspaceOverlaps(page, null);
                     repairResizeCollisionsOnPage(page);
+                    // Commit collision shrink into native widget bounds so providers reflow
+                    // their content instead of only scaling the entire widget container.
+                    commitAutoShrunkWidgetsToLayout(page);
                     if (collisionBeforeRepair
                             && resizeRepairCollisionCount == collisionsBeforePage) {
                         resizeRepairCollisionCount++;
@@ -16166,6 +16168,88 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Convert collision-recovery scale factors into real AppWidgetHostView dimensions.
+     * This updates provider size options and persisted geometry while keeping the current
+     * visible bounds stable. Only temporary auto-shrink factors are removed; any base
+     * transform the user already had is retained.
+     */
+    private void commitAutoShrunkWidgetsToLayout(FrameLayout page) {
+        if (page == null || prefs == null || pagesStrip == null
+                || page.getParent() != pagesStrip || page.getWidth() <= 0
+                || page.getHeight() <= 0) return;
+        final int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
+        final java.util.ArrayList<FrameLayout> shrunkWidgets =
+                new java.util.ArrayList<FrameLayout>();
+        for (int index = 0; index < page.getChildCount(); index++) {
+            View candidate = page.getChildAt(index);
+            if (!(candidate instanceof FrameLayout)
+                    || !(candidate.getTag() instanceof String)
+                    || !((String) candidate.getTag()).startsWith("launcher_widget:")
+                    || !(candidate.getLayoutParams() instanceof FrameLayout.LayoutParams)) {
+                continue;
+            }
+            float autoX = clampWorkspaceAutoScale(
+                    getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(candidate, true), 1f));
+            float autoY = clampWorkspaceAutoScale(
+                    getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(candidate, false), 1f));
+            if (autoX < 0.999f || autoY < 0.999f) {
+                shrunkWidgets.add((FrameLayout) candidate);
+            }
+        }
+        for (FrameLayout container : shrunkWidgets) {
+            if (container.getParent() != page
+                    || !(container.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            String tag = String.valueOf(container.getTag());
+            int widgetId;
+            try {
+                widgetId = Integer.parseInt(tag.substring("launcher_widget:".length()));
+            } catch (RuntimeException invalidWidgetId) {
+                continue;
+            }
+            String autoXKey = workspaceAutoShrinkScaleKey(container, true);
+            String autoYKey = workspaceAutoShrinkScaleKey(container, false);
+            float autoX = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoXKey, 1f));
+            float autoY = clampWorkspaceAutoScale(getFloatPreferenceCompat(autoYKey, 1f));
+            if (autoX >= 0.999f && autoY >= 0.999f) continue;
+
+            FrameLayout.LayoutParams lp =
+                    (FrameLayout.LayoutParams) container.getLayoutParams();
+            int oldWidth = Math.max(1, lp.width > 0 ? lp.width : container.getWidth());
+            int oldHeight = Math.max(1, lp.height > 0 ? lp.height : container.getHeight());
+            int newWidth = Math.max(1, Math.round(oldWidth * autoX));
+            int newHeight = Math.max(1, Math.round(oldHeight * autoY));
+            float oldScaleX = Math.max(0.01f, container.getScaleX());
+            float oldScaleY = Math.max(0.01f, container.getScaleY());
+            float baseScaleX = Math.max(0.01f, oldScaleX / autoX);
+            float baseScaleY = Math.max(0.01f, oldScaleY / autoY);
+            float translationX = container.getTranslationX();
+            float translationY = container.getTranslationY();
+            float visualLeft = lp.leftMargin + translationX
+                    + container.getPivotX() * (1f - oldScaleX);
+            float visualTop = lp.topMargin + translationY
+                    + container.getPivotY() * (1f - oldScaleY);
+
+            lp.leftMargin = Math.max(0, Math.min(page.getWidth() - newWidth,
+                    Math.round(visualLeft - translationX
+                            - (newWidth * 0.5f) * (1f - baseScaleX))));
+            lp.topMargin = Math.max(0, Math.min(page.getHeight() - newHeight,
+                    Math.round(visualTop - translationY
+                            - (newHeight * 0.5f) * (1f - baseScaleY))));
+            lp.width = newWidth;
+            lp.height = newHeight;
+            container.setPivotX(newWidth * 0.5f);
+            container.setPivotY(newHeight * 0.5f);
+            container.setLayoutParams(lp);
+            container.setScaleX(baseScaleX);
+            container.setScaleY(baseScaleY);
+
+            prefs.edit().remove(autoXKey).remove(autoYKey).apply();
+            updatePlacedWidgetSize(widgetId, container);
+            saveWidgetGeometry(widgetId, pageIndex, container);
+        }
+    }
+
     private void validateWorkspacePagesAfterLayout() {
         if (pagesStrip == null || homeIconResizeRepairPending) return;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
@@ -16638,6 +16722,7 @@ public class MainActivity extends Activity {
             int columns = getHomeColumns();
             int oldCellHeight = homeCellHeightDp(iconSize);
             if (value == Math.round(homeFontSizeSp())) return;
+            clearAutoShrunkHomeGridItems();
             homeIconResizeRepairPending = true;
             prefs.edit().putInt(KEY_HOME_FONT_SIZE, value).apply();
             int newCellHeight = homeCellHeightDp(iconSize);
@@ -16655,6 +16740,7 @@ public class MainActivity extends Activity {
             int columns = getHomeColumns();
             int oldCellHeight = homeCellHeightDp(iconSize);
             if (value == prefs.getInt(KEY_HOME_LABEL_FONT, 0)) return;
+            clearAutoShrunkHomeGridItems();
             homeIconResizeRepairPending = true;
             prefs.edit().putInt(KEY_HOME_LABEL_FONT, value).apply();
             int newCellHeight = homeCellHeightDp(iconSize);
@@ -16681,6 +16767,7 @@ public class MainActivity extends Activity {
             int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
             int columns = getHomeColumns();
             int oldCellHeight = homeCellHeightDp(iconSize);
+            clearAutoShrunkHomeGridItems();
             homeIconResizeRepairPending = true;
             prefs.edit().putBoolean(KEY_SHOW_HOME_LABELS,
                     !prefs.getBoolean(KEY_SHOW_HOME_LABELS, true)).apply();
