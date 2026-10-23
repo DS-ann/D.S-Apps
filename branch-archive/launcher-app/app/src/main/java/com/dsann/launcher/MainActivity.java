@@ -11678,9 +11678,6 @@ public class MainActivity extends Activity {
             int dateStart = use24Hour ? 0 : periodLength + 2;
             float density = getResources().getDisplayMetrics().density;
             float whiteOuterWidth = 0.4f * density;
-            float blackInnerWidth = android.util.TypedValue.applyDimension(
-                    android.util.TypedValue.COMPLEX_UNIT_SP, 0.5f,
-                    getResources().getDisplayMetrics());
             float dateBorderWidthPx = density * (configuredDateSize / 20f);
             int selectedArtworkTheme = LauncherIconDrawable.clampArtworkTheme(prefs.getInt(
                     KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
@@ -11695,8 +11692,9 @@ public class MainActivity extends Activity {
                         android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             if (!use24Hour && periodLength > 0) {
+                // AM/PM uses an exterior-only black rim; keep the existing 0.2dp outer width.
                 dateLine.setSpan(new ClockTextOutlineSpan(
-                                0, Color.WHITE, whiteOuterWidth, blackInnerWidth,
+                                0, Color.WHITE, whiteOuterWidth, 0f,
                                 0.2f * density, true, true),
                         0, periodLength, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
