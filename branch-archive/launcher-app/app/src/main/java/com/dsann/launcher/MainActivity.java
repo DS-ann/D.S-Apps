@@ -711,6 +711,8 @@ public class MainActivity extends Activity {
     private View activeAppGroupMemberMoveModeView;
     private boolean appGroupCreationPending;
     private boolean appGroupRenderDeferred;
+    // A single folder dialog may own the window/animation layers at a time.
+    private Dialog activeAppGroupDialog;
     private final java.util.WeakHashMap<FrameLayout, Boolean> shortcutPageLayoutWatchers =
             new java.util.WeakHashMap<FrameLayout, Boolean>();
     // Defers generic overlap validation until resize-specific recovery completes.
@@ -4677,12 +4679,23 @@ public class MainActivity extends Activity {
 
     private void openAppGroup(String groupId) {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
+        // Ignore duplicate tap/gesture callbacks while the current folder is opening or
+        // closing. Stacking full-screen dialogs also stacks several GPU-backed layers.
+        if (activeAppGroupDialog != null) {
+            if (activeAppGroupDialog.isShowing()) return;
+            activeAppGroupDialog = null;
+        }
         ArrayList<String> members = getAppGroupMembers(groupId);
         final View openingGroupIcon = findAppGroupLogoView(groupId);
         final View openingGroupCell = findAppGroupView(groupId);
         final float openingGroupCellAlpha = openingGroupCell == null
                 ? 1f : openingGroupCell.getAlpha();
         final Dialog dialog = new Dialog(this);
+        activeAppGroupDialog = dialog;
+        final java.util.concurrent.atomic.AtomicBoolean memberLoadCancelled =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Thread[] memberIconLoaderRef = new Thread[1];
+        final View[][] groupLayerViewsRef = new View[1][];
         final boolean[] closing = new boolean[]{false};
         // [panel start scale X/Y, icon snapshot expanded scale X/Y].
         final float[] iconScale = new float[]{0.12f, 0.12f, 1f, 1f};
@@ -4719,6 +4732,42 @@ public class MainActivity extends Activity {
             }
         };
         dialog.setOnDismissListener(ignored -> {
+            memberLoadCancelled.set(true);
+            Thread loader = memberIconLoaderRef[0];
+            if (loader != null) loader.interrupt();
+
+            // Explicitly release per-open hardware layers and the icon snapshot bitmap.
+            // On Android 6, detached dialogs can otherwise retain sizeable GPU/native
+            // allocations across repeated opens.
+            android.animation.ValueAnimator running = morphAnimator[0];
+            if (running != null && running.isRunning()) {
+                running.removeAllUpdateListeners();
+                running.removeAllListeners();
+                running.cancel();
+            }
+            View[] layerViews = groupLayerViewsRef[0];
+            if (layerViews != null) {
+                for (View layerView : layerViews) {
+                    if (layerView == null) continue;
+                    layerView.animate().cancel();
+                    layerView.setLayerType(View.LAYER_TYPE_NONE, null);
+                }
+            }
+            android.widget.ImageView snapshot = morphSnapshotRef[0];
+            if (snapshot != null) {
+                snapshot.animate().cancel();
+                android.graphics.drawable.Drawable drawable = snapshot.getDrawable();
+                android.graphics.Bitmap bitmap = drawable instanceof android.graphics.drawable.BitmapDrawable
+                        ? ((android.graphics.drawable.BitmapDrawable) drawable).getBitmap() : null;
+                snapshot.setImageDrawable(null);
+                morphSnapshotRef[0] = null;
+                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            }
+            loadedMemberDrawablesRef[0] = null;
+            pendingMemberApps.clear();
+            pendingMemberIconViews.clear();
+            pendingMemberItemViews.clear();
+            if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
             if (openingGroupCell != null) openingGroupCell.setAlpha(openingGroupCellAlpha);
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
         });
@@ -4919,20 +4968,23 @@ public class MainActivity extends Activity {
             Thread iconLoader = new Thread(() -> {
                 final Drawable[] loaded = new Drawable[appsToLoad.length];
                 for (int i = 0; i < appsToLoad.length; i++) {
+                    if (memberLoadCancelled.get() || Thread.currentThread().isInterrupted()) return;
                     try {
                         loaded[i] = createAppGroupMemberDrawable(appsToLoad[i]);
                     } catch (RuntimeException ignored) {
                         loaded[i] = null;
                     }
                 }
+                if (memberLoadCancelled.get() || Thread.currentThread().isInterrupted()) return;
                 handler.post(() -> {
-                    if (!dialog.isShowing() || isFinishing()) return;
+                    if (memberLoadCancelled.get() || !dialog.isShowing() || isFinishing()) return;
                     loadedMemberDrawablesRef[0] = loaded;
                     memberArtworkReady[0] = true;
                     Runnable reveal = revealGroupContents[0];
                     if (reveal != null) reveal.run();
                 });
             }, "LauncherAppGroupIcons");
+            memberIconLoaderRef[0] = iconLoader;
             iconLoader.setDaemon(true);
             iconLoader.start();
         }
@@ -4968,6 +5020,7 @@ public class MainActivity extends Activity {
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
         });
 
+        groupLayerViewsRef[0] = new View[]{overlay, dimLayer, panel, title, groupDivider, scroll};
         dialog.setContentView(overlay);
         dialog.setCancelable(false);
         dialog.setCanceledOnTouchOutside(false);
