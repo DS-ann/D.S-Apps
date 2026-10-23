@@ -716,6 +716,10 @@ public class MainActivity extends Activity {
     // Keep the slot locked until the dismissed dialog's final hardware frame is retired.
     private boolean appGroupOpenOrCloseInProgress;
     private long lastAppGroupOpenRequestUptime;
+    // Stale callbacks from an older popup must never mutate a newer popup's state.
+    private long appGroupSessionGeneration;
+    // Retain the open lock until a dismissed window's last renderer frame is retired.
+    private long appGroupCleanupPendingSessionGeneration = -1L;
     private final java.util.WeakHashMap<FrameLayout, Boolean> shortcutPageLayoutWatchers =
             new java.util.WeakHashMap<FrameLayout, Boolean>();
     // Defers generic overlap validation until resize-specific recovery completes.
@@ -4680,42 +4684,58 @@ public class MainActivity extends Activity {
         restoreGroupedAppsToHome(oldPage, members);
     }
 
+    private boolean isCurrentAppGroupSession(long sessionId, Dialog dialog) {
+        return dialog != null && sessionId == appGroupSessionGeneration
+                && activeAppGroupDialog == dialog;
+    }
+
+    private void releaseAppGroupOpenGuard(long sessionId, Dialog dialog) {
+        if (sessionId != appGroupSessionGeneration) return;
+        if (appGroupCleanupPendingSessionGeneration == sessionId) return;
+        if (activeAppGroupDialog != null && activeAppGroupDialog != dialog) return;
+        if (dialog != null && dialog.isShowing()) return;
+        if (dialog != null && activeAppGroupDialog == dialog) activeAppGroupDialog = null;
+        appGroupOpenOrCloseInProgress = false;
+    }
+
     private void openAppGroup(String groupId) {
         if (groupId == null || !getAppGroupIds().contains(groupId)) return;
         long now = android.os.SystemClock.uptimeMillis();
-        // Dialog.isShowing() becomes false before its final renderer resources are retired.
-        // Do not treat that window state as permission to create a second group card.
+        // A dismissing window still owns the slot after isShowing() becomes false.
         if (appGroupOpenOrCloseInProgress || activeAppGroupDialog != null
                 || (lastAppGroupOpenRequestUptime > 0L
                     && now - lastAppGroupOpenRequestUptime < 300L)) {
             return;
         }
+        final long sessionId = ++appGroupSessionGeneration;
         appGroupOpenOrCloseInProgress = true;
         lastAppGroupOpenRequestUptime = now;
         try {
-            openAppGroupDialog(groupId);
+            openAppGroupDialog(groupId, sessionId);
         } catch (RuntimeException error) {
             android.util.Log.e("D.S Launcher", "Unable to open app group", error);
             Dialog dialog = activeAppGroupDialog;
             if (dialog != null && dialog.isShowing()) {
                 try {
                     dialog.dismiss();
+                    // onDismiss owns release after renderer cleanup if the window was attached.
                 } catch (RuntimeException dismissError) {
                     android.util.Log.w("D.S Launcher", "Unable to dismiss failed app group",
                             dismissError);
-                    if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-                    appGroupOpenOrCloseInProgress = false;
+                    if (activeAppGroupDialog == dialog && !dialog.isShowing()) {
+                        releaseAppGroupOpenGuard(sessionId, dialog);
+                    }
                 }
-            } else {
-                if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-                appGroupOpenOrCloseInProgress = false;
+            } else if (dialog == null || activeAppGroupDialog == dialog) {
+                // If onDismiss already ran, the pending-cleanup token keeps this lock held.
+                releaseAppGroupOpenGuard(sessionId, dialog);
             }
             Toast.makeText(this, "Couldn't open this app group. Try again.",
                     Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void openAppGroupDialog(String groupId) {
+    private void openAppGroupDialog(String groupId, long sessionId) {
         ArrayList<String> members = getAppGroupMembers(groupId);
         final View openingGroupIcon = findAppGroupLogoView(groupId);
         final View openingGroupCell = findAppGroupView(groupId);
@@ -4733,6 +4753,7 @@ public class MainActivity extends Activity {
         final float[] morphStartTranslation = new float[2];
         final float[] morphProgress = new float[]{0f};
         final android.widget.ImageView[] morphSnapshotRef = new android.widget.ImageView[1];
+        final Bitmap[] morphSnapshotBitmapRef = new Bitmap[1];
         final android.animation.ValueAnimator[] morphAnimator = new android.animation.ValueAnimator[1];
         final ArrayList<ResolveInfo> pendingMemberApps = new ArrayList<>();
         final ArrayList<ImageView> pendingMemberIconViews = new ArrayList<>();
@@ -4787,6 +4808,8 @@ public class MainActivity extends Activity {
                 }
             }
             android.widget.ImageView snapshot = morphSnapshotRef[0];
+            final Bitmap snapshotBitmap = morphSnapshotBitmapRef[0];
+            morphSnapshotBitmapRef[0] = null;
             if (snapshot != null) {
                 snapshot.animate().cancel();
                 // Leave the snapshot in the detached dialog tree until the renderer retires
@@ -4797,28 +4820,55 @@ public class MainActivity extends Activity {
             pendingMemberApps.clear();
             pendingMemberIconViews.clear();
             pendingMemberItemViews.clear();
-            final boolean ownedGroupSlot = activeAppGroupDialog == dialog;
-            if (ownedGroupSlot) activeAppGroupDialog = null;
-            if (openingGroupCell != null) {
-                // Restore the source icon on the next frame, after the popup window is gone.
-                openingGroupCell.postOnAnimation(
-                        () -> openingGroupCell.setAlpha(openingGroupCellAlpha));
+            final boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
+            if (ownedGroupSlot) appGroupCleanupPendingSessionGeneration = sessionId;
+            if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
+            // Restore the home icon in this UI turn, avoiding an empty compositor frame.
+            if (ownedGroupSlot && openingGroupCell != null) {
+                openingGroupCell.setAlpha(openingGroupCellAlpha);
             }
             if (groupId.equals(activeAppGroupMemberMoveModeId)) clearAppGroupMemberMoveMode();
             handler.postDelayed(() -> {
-                if (layerViews != null) {
-                    for (View layerView : layerViews) {
-                        if (layerView != null) layerView.setLayerType(View.LAYER_TYPE_NONE, null);
+                try {
+                    if (layerViews != null) {
+                        for (View layerView : layerViews) {
+                            if (layerView == null) continue;
+                            try {
+                                layerView.setLayerType(View.LAYER_TYPE_NONE, null);
+                            } catch (RuntimeException cleanupError) {
+                                android.util.Log.w("D.S Launcher",
+                                        "Unable to release an app-group layer", cleanupError);
+                            }
+                        }
+                    }
+                    if (snapshot != null) {
+                        try {
+                            if (snapshot.getParent() instanceof ViewGroup) {
+                                ((ViewGroup) snapshot.getParent()).removeView(snapshot);
+                            }
+                            snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
+                            snapshot.setImageDrawable(null);
+                        } catch (RuntimeException cleanupError) {
+                            android.util.Log.w("D.S Launcher",
+                                    "Unable to release the app-group snapshot view", cleanupError);
+                        }
+                    }
+                    if (snapshotBitmap != null && !snapshotBitmap.isRecycled()) {
+                        try {
+                            snapshotBitmap.recycle();
+                        } catch (RuntimeException cleanupError) {
+                            android.util.Log.w("D.S Launcher",
+                                    "Unable to recycle the app-group snapshot bitmap", cleanupError);
+                        }
+                    }
+                } finally {
+                    if (ownedGroupSlot) {
+                        if (appGroupCleanupPendingSessionGeneration == sessionId) {
+                            appGroupCleanupPendingSessionGeneration = -1L;
+                        }
+                        releaseAppGroupOpenGuard(sessionId, dialog);
                     }
                 }
-                if (snapshot != null) {
-                    if (snapshot.getParent() instanceof ViewGroup) {
-                        ((ViewGroup) snapshot.getParent()).removeView(snapshot);
-                    }
-                    snapshot.setLayerType(View.LAYER_TYPE_NONE, null);
-                    snapshot.setImageDrawable(null);
-                }
-                if (ownedGroupSlot) appGroupOpenOrCloseInProgress = false;
             }, releaseDelay);
         });
 
@@ -4833,9 +4883,8 @@ public class MainActivity extends Activity {
         View dimLayer = new View(this);
         dimLayer.setBackgroundColor(Color.BLACK);
         dimLayer.setAlpha(0f);
-        // Cache the full-screen dim surface so animating its alpha does not repaint
-        // the dialog's entire software content on every animation tick.
-        dimLayer.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        // The dim surface remains transparent here; a display-sized hardware texture
+        // is unnecessary for a surface whose alpha stays zero.
         overlay.addView(dimLayer, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout panel = new LinearLayout(this);
@@ -4993,8 +5042,8 @@ public class MainActivity extends Activity {
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, scrollHeight));
 
         revealGroupContents[0] = () -> {
-            if (!dialog.isShowing() || closing[0]
-                    || !memberArtworkReady[0] || groupContentRevealStarted[0]) return;
+            if (!isCurrentAppGroupSession(sessionId, dialog) || !dialog.isShowing()
+                    || closing[0] || !memberArtworkReady[0] || groupContentRevealStarted[0]) return;
             groupContentRevealStarted[0] = true;
             Drawable[] loaded = loadedMemberDrawablesRef[0];
             if (loaded != null) {
@@ -5027,7 +5076,8 @@ public class MainActivity extends Activity {
                 }
                 if (memberLoadCancelled.get() || Thread.currentThread().isInterrupted()) return;
                 handler.post(() -> {
-                    if (memberLoadCancelled.get() || !dialog.isShowing() || isFinishing()) return;
+                    if (memberLoadCancelled.get() || !isCurrentAppGroupSession(sessionId, dialog)
+                            || !dialog.isShowing() || isFinishing()) return;
                     loadedMemberDrawablesRef[0] = loaded;
                     memberArtworkReady[0] = true;
                     Runnable reveal = revealGroupContents[0];
@@ -5058,13 +5108,23 @@ public class MainActivity extends Activity {
 
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
-                morphProgress, morphSnapshotRef, morphAnimator, null));
+                morphProgress, morphSnapshotRef, morphAnimator,
+                () -> {
+                    if (isCurrentAppGroupSession(sessionId, dialog) && openingGroupCell != null) {
+                        openingGroupCell.setAlpha(openingGroupCellAlpha);
+                    }
+                }));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
                         morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
-                        null);
+                        () -> {
+                            if (isCurrentAppGroupSession(sessionId, dialog)
+                                    && openingGroupCell != null) {
+                                openingGroupCell.setAlpha(openingGroupCellAlpha);
+                            }
+                        });
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -5096,7 +5156,8 @@ public class MainActivity extends Activity {
         overlay.requestFocus();
         overlay.post(() -> {
             try {
-            if (!dialog.isShowing() || panel.getParent() != overlay) return;
+            if (!isCurrentAppGroupSession(sessionId, dialog) || !dialog.isShowing()
+                    || panel.getParent() != overlay) return;
             int availableW = Math.max(1, overlay.getWidth());
             int availableH = Math.max(1, overlay.getHeight());
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) panel.getLayoutParams();
@@ -5249,11 +5310,12 @@ public class MainActivity extends Activity {
             panel.setLayoutParams(lp);
 
             if (openingGroupIcon != null && iconW > 0 && iconH > 0) {
+                Bitmap previewBitmap = null;
+                android.widget.ImageView preview = null;
                 try {
-                    android.graphics.Bitmap previewBitmap = android.graphics.Bitmap.createBitmap(
-                            iconW, iconH, android.graphics.Bitmap.Config.ARGB_8888);
-                    openingGroupIcon.draw(new android.graphics.Canvas(previewBitmap));
-                    android.widget.ImageView preview = new android.widget.ImageView(this);
+                    previewBitmap = Bitmap.createBitmap(iconW, iconH, Bitmap.Config.ARGB_8888);
+                    openingGroupIcon.draw(new Canvas(previewBitmap));
+                    preview = new android.widget.ImageView(this);
                     preview.setImageBitmap(previewBitmap);
                     preview.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
                     preview.setFocusable(false);
@@ -5268,10 +5330,19 @@ public class MainActivity extends Activity {
                     overlay.addView(preview, previewParams);
                     preview.bringToFront();
                     morphSnapshotRef[0] = preview;
+                    morphSnapshotBitmapRef[0] = previewBitmap;
+                    previewBitmap = null;
                     iconScale[2] = 1f;
                     iconScale[3] = 1f;
-                } catch (RuntimeException ignored) {
+                } catch (RuntimeException | OutOfMemoryError snapshotError) {
+                    if (preview != null && preview.getParent() instanceof ViewGroup) {
+                        ((ViewGroup) preview.getParent()).removeView(preview);
+                    }
+                    if (preview != null) preview.setImageDrawable(null);
+                    if (previewBitmap != null && !previewBitmap.isRecycled()) previewBitmap.recycle();
                     morphSnapshotRef[0] = null;
+                    morphSnapshotBitmapRef[0] = null;
+                    // Opening still works when the optional snapshot cannot be allocated.
                 }
             }
 
@@ -5319,6 +5390,8 @@ public class MainActivity extends Activity {
             transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
             transition.addUpdateListener(animation -> {
                 try {
+                if (!isCurrentAppGroupSession(sessionId, dialog)
+                        || !dialog.isShowing() || closing[0]) return;
                 float progress = (Float) animation.getAnimatedValue();
                 morphProgress[0] = progress;
                 float sx = startScaleX + (1f - startScaleX) * progress;
@@ -5360,21 +5433,22 @@ public class MainActivity extends Activity {
                                 dialog.dismiss();
                             } else if (activeAppGroupDialog == dialog) {
                                 activeAppGroupDialog = null;
-                                appGroupOpenOrCloseInProgress = false;
+                                releaseAppGroupOpenGuard(sessionId, dialog);
                             }
                         } catch (RuntimeException dismissError) {
                             android.util.Log.w("D.S Launcher",
                                     "Unable to dismiss failed app-group animation",
                                     dismissError);
                             if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-                            appGroupOpenOrCloseInProgress = false;
+                            releaseAppGroupOpenGuard(sessionId, dialog);
                         }
                     });
                 }
             });
             transition.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator animation) {
-                    if (closing[0] || !dialog.isShowing()) return;
+                    if (closing[0] || !isCurrentAppGroupSession(sessionId, dialog)
+                            || !dialog.isShowing()) return;
                     morphProgress[0] = 1f;
                     panel.setScaleX(1f);
                     panel.setScaleY(1f);
@@ -5398,11 +5472,12 @@ public class MainActivity extends Activity {
             });
             morphAnimator[0] = transition;
             startTransitionWhenReady[0] = () -> {
-                if (!dialog.isShowing() || closing[0]
-                        || transitionStartScheduled[0] || transition.isStarted()) return;
+                if (!isCurrentAppGroupSession(sessionId, dialog) || !dialog.isShowing()
+                        || closing[0] || transitionStartScheduled[0] || transition.isStarted()) return;
                 transitionStartScheduled[0] = true;
                 panel.post(() -> {
-                    if (!dialog.isShowing() || closing[0] || transition.isStarted()) {
+                    if (!isCurrentAppGroupSession(sessionId, dialog) || !dialog.isShowing()
+                            || closing[0] || transition.isStarted()) {
                         transitionStartScheduled[0] = false;
                         return;
                     }
@@ -5420,7 +5495,8 @@ public class MainActivity extends Activity {
                     panel.setLayerType(View.LAYER_TYPE_NONE, null);
                     panel.setAlpha(0f);
                     overlay.postOnAnimation(() -> {
-                        if (!dialog.isShowing() || closing[0] || transition.isStarted()) {
+                        if (!isCurrentAppGroupSession(sessionId, dialog) || !dialog.isShowing()
+                                || closing[0] || transition.isStarted()) {
                             transitionStartScheduled[0] = false;
                             return;
                         }
@@ -5439,13 +5515,13 @@ public class MainActivity extends Activity {
                         dialog.dismiss();
                     } else {
                         if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-                        appGroupOpenOrCloseInProgress = false;
+                        releaseAppGroupOpenGuard(sessionId, dialog);
                     }
                 } catch (RuntimeException dismissError) {
                     android.util.Log.w("D.S Launcher", "Unable to dismiss failed app group",
                             dismissError);
                     if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-                    appGroupOpenOrCloseInProgress = false;
+                    releaseAppGroupOpenGuard(sessionId, dialog);
                 }
                 Toast.makeText(this, "Couldn't open this app group. Try again.",
                         Toast.LENGTH_SHORT).show();
@@ -5457,7 +5533,7 @@ public class MainActivity extends Activity {
             boolean[] closing, float[] iconScale, float[] startTranslation,
             float[] morphProgress, android.widget.ImageView[] snapshotRef,
             android.animation.ValueAnimator[] morphAnimator,
-            Runnable afterClose) {
+            Runnable beforeDismiss) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -5489,6 +5565,7 @@ public class MainActivity extends Activity {
         transition.setDuration(animationDuration(175L));
         transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
         transition.addUpdateListener(animation -> {
+            if (!dialog.isShowing() || !closing[0]) return;
             float progress = (Float) animation.getAnimatedValue();
             if (morphProgress != null) morphProgress[0] = progress;
             float sx = targetScaleX + (1f - targetScaleX) * progress;
@@ -5521,8 +5598,17 @@ public class MainActivity extends Activity {
                         && morphAnimator[0] == animation) {
                     morphAnimator[0] = null;
                 }
+                // Restore the source icon before the popup disappears to avoid a blank frame.
+                if (beforeDismiss != null) {
+                    try {
+                        beforeDismiss.run();
+                    } catch (RuntimeException callbackError) {
+                        android.util.Log.w("D.S Launcher",
+                                "Unable to restore the app-group icon before dismissal",
+                                callbackError);
+                    }
+                }
                 if (dialog.isShowing()) dialog.dismiss();
-                if (afterClose != null) afterClose.run();
             }
         });
         morphAnimator[0] = transition;
