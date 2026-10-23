@@ -1197,7 +1197,7 @@ public class MainActivity extends Activity {
                     LauncherScreenTransitions.finishDrawerSwipeToHome(this, homeScreen, drawerScreen,
                             () -> { drawerOpen = false; scheduleDrawerArtworkPrewarmAfterHomeTransition(); }, getDrawerTransition(), progress);
                 } else {
-                    refreshDrawerIconAppearances();
+
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(), progress);
                 }
@@ -1795,7 +1795,7 @@ public class MainActivity extends Activity {
                 // Progress is the remaining-open fraction: a 10% downward
                 // swipe leaves progress at 90%, which is enough to close to Home.
                 if (drawerSwipeProgress > 0.90f) {
-                                        refreshDrawerIconAppearances();
+
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1808,7 +1808,7 @@ public class MainActivity extends Activity {
                 flushDrawerSwipeFrame();
                 drawerSwipeVisualActive = false;
                 if (drawerSwipeProgress >= 0.10f) {
-                                        refreshDrawerIconAppearances();
+
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1915,7 +1915,7 @@ public class MainActivity extends Activity {
                 // A 10% downward pull is enough to complete the drawer-to-Home
                 // transition; progress represents how much of the drawer remains open.
                 if (drawerSwipeProgress > 0.90f) {
-                                        refreshDrawerIconAppearances();
+
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1928,7 +1928,7 @@ public class MainActivity extends Activity {
                 flushDrawerSwipeFrame();
                 drawerSwipeVisualActive = false;
                 if (drawerSwipeProgress >= 0.10f) {
-                                        refreshDrawerIconAppearances();
+
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                             this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(), drawerSwipeProgress);
                 } else {
@@ -1952,7 +1952,7 @@ public class MainActivity extends Activity {
                     // Finish from the current pose, but do not force a tiny partial
                     // swipe all the way open. Always settle to home or drawer.
                     if (drawerSwipeProgress >= 0.10f) {
-                                            refreshDrawerIconAppearances();
+
                     LauncherScreenTransitions.finishDrawerSwipeToDrawer(this, homeScreen, drawerScreen,
                                 this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(), drawerSwipeProgress);
                     } else {
@@ -8885,7 +8885,10 @@ public class MainActivity extends Activity {
         // Preference changes run on the UI thread. Refresh the cached frame while Home is visible
         // so the next drawer opening can continue showing its last complete image meanwhile.
         if (root != null && !isFinishing()) {
-            root.post(this::scheduleDrawerArtworkPrewarm);
+            root.post(() -> {
+                scheduleDrawerArtworkPrewarm();
+                refreshDrawerIconAppearances();
+            });
         }
     }
 
@@ -8924,12 +8927,6 @@ public class MainActivity extends Activity {
         handler.postDelayed(drawerArtworkReadyCheck, 100L);
     }
 
-    private void prepareDrawerArtworkForOpening() {
-        if (drawerAdapter == null) return;
-        drawerAdapter.prewarmAllDrawerArtwork();
-        scheduleDrawerArtworkPrewarm();
-    }
-
     private void markDrawerOpenAndRefreshArtwork() {
         drawerOpen = true;
         handler.removeCallbacks(drawerArtworkReadyCheck);
@@ -8946,8 +8943,8 @@ public class MainActivity extends Activity {
     }
 
     private void showDrawer(float swipeProgress) {
-        prepareDrawerArtworkForOpening();
-        refreshDrawerIconAppearances();
+
+
         LauncherScreenTransitions.showDrawer(this, homeScreen, drawerScreen,
                 this::markDrawerOpenAndRefreshArtwork, getDrawerTransition(),
                 Math.max(0f, Math.min(1f, swipeProgress)));
