@@ -18924,19 +18924,19 @@ public class MainActivity extends Activity {
 
     private int animationSpeedForSliderProgress(int progress) {
         int p = Math.max(0, Math.min(1000, progress));
-        // The full slider travel is normal 100% speed; moving left slows the animation
-        // linearly down to 50%. The old 45%-travel pivot made the far-right endpoint 150%.
-        return 10 + Math.round(p * 90f / 1000f);
+        // Keep the minimum at 10. The speed previously reached at 50% travel (55)
+        // is now reached at the 100% slider endpoint.
+        return 10 + Math.round(p * 45f / 1000f);
     }
 
     private int animationSliderProgressForSpeed(int speedPercent) {
-        int speed = Math.max(10, Math.min(100, speedPercent));
-        return Math.round((speed - 10) * 1000f / 90f);
+        int speed = Math.max(10, Math.min(55, speedPercent));
+        return Math.round((speed - 10) * 1000f / 45f);
     }
 
     private void addAnimationSpeedSliderRow(LinearLayout panel, int current,
             IntSliderAction action) {
-        final int safeCurrent = Math.max(10, Math.min(100, current));
+        final int safeCurrent = Math.max(10, Math.min(55, current));
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
@@ -18957,7 +18957,7 @@ public class MainActivity extends Activity {
         block.addView(heading);
 
         TextView hintView = LauncherUiUtils.text(this,
-                "Range 10–100%. Normal speed (100%) is at 100% slider travel.",
+                "Range 10–55%; the 10% minimum is unchanged. Full travel now equals the previous 50% speed.",
                 11.5f, Color.rgb(184, 198, 223), false);
         hintView.setPadding(0, LauncherUiUtils.dp(this, 4), 0,
                 LauncherUiUtils.dp(this, 2));

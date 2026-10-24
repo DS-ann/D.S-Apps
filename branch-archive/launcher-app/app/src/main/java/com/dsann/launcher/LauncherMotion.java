@@ -6,16 +6,17 @@ import android.content.SharedPreferences;
 /**
  * Shared animation timing for all timed launcher motion.
  *
- * The slider stores a speed percentage: 100 is normal, lower values are slower.
- * The supported range is 10–100 so full slider travel corresponds to normal speed.
+ * The slider stores an effective animation speed percentage; lower values are slower.
+ * The supported range is 10–55. Slider position 100% now equals the former 50% position,
+ * while the 10% minimum remains fixed.
  * Existing 0/1/2 preset preferences migrate once to approximate speed percentages.
  */
 final class LauncherMotion {
     private static final String PREFS = "ds_launcher_prefs";
     private static final String KEY_ANIMATION_SPEED = "animation_speed";
-    private static final int DEFAULT_SPEED_PERCENT = 100;
+    private static final int DEFAULT_SPEED_PERCENT = 55;
     private static final int MIN_SPEED_PERCENT = 10;
-    private static final int MAX_SPEED_PERCENT = 100;
+    private static final int MAX_SPEED_PERCENT = 55;
 
     private LauncherMotion() {}
 
