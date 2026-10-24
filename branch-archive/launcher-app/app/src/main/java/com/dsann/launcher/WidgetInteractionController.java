@@ -570,13 +570,59 @@ final class WidgetInteractionController {
         // The two workspace pages can be unmeasured during widget restoration. Wait until
         // their real dimensions are available, then clamp position without mutating saved size
         // before exposing the widget or its resize handles.
+        final View.OnLayoutChangeListener[] pageMeasureWatcher =
+                new View.OnLayoutChangeListener[1];
+        final View.OnAttachStateChangeListener detachWatcher =
+                new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewDetachedFromWindow(View view) {
+                // A removed/reparented widget must not leave a pending page-measure callback.
+                if (container.getParent() != page) {
+                    if (pageMeasureWatcher[0] != null) {
+                        page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
+                        pageMeasureWatcher[0] = null;
+                    }
+                    container.removeOnAttachStateChangeListener(this);
+                }
+            }
+        };
         final Runnable[] normalizeWidgetBounds = new Runnable[1];
         normalizeWidgetBounds[0] = () -> {
-            if (container.getParent() != page) return;
-            if (page.getWidth() <= 0 || page.getHeight() <= 0) {
-                page.postDelayed(normalizeWidgetBounds[0], 16L);
+            if (container.getParent() != page) {
+                if (pageMeasureWatcher[0] != null) {
+                    page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
+                    pageMeasureWatcher[0] = null;
+                }
+                container.removeOnAttachStateChangeListener(detachWatcher);
                 return;
             }
+            if (page.getWidth() <= 0 || page.getHeight() <= 0) {
+                // Wait for the page's next real layout instead of polling every 16 ms.
+                // This avoids an endless main-thread callback loop if a page stays unmeasured.
+                if (pageMeasureWatcher[0] == null) {
+                    pageMeasureWatcher[0] = (view, left, top, right, bottom,
+                            oldLeft, oldTop, oldRight, oldBottom) -> {
+                        if (container.getParent() != page) {
+                            page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
+                            pageMeasureWatcher[0] = null;
+                            container.removeOnAttachStateChangeListener(detachWatcher);
+                            return;
+                        }
+                        if (page.getWidth() > 0 && page.getHeight() > 0) {
+                            page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
+                            pageMeasureWatcher[0] = null;
+                            normalizeWidgetBounds[0].run();
+                        }
+                    };
+                    page.addOnLayoutChangeListener(pageMeasureWatcher[0]);
+                }
+                return;
+            }
+            if (pageMeasureWatcher[0] != null) {
+                page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
+                pageMeasureWatcher[0] = null;
+            }
+            container.removeOnAttachStateChangeListener(detachWatcher);
             clampWidgetGeometryToPage(page, container, widgetId, pageIndex);
             if (container.getVisibility() != View.VISIBLE) {
                 container.setVisibility(View.VISIBLE);
@@ -585,6 +631,7 @@ final class WidgetInteractionController {
             // collision resolver after final size and page geometry are known.
             if (!preserveGeometry) listener.resolveWidgetCollisions(page, container);
         };
+        container.addOnAttachStateChangeListener(detachWatcher);
         page.post(normalizeWidgetBounds[0]);
 
         // A transparent interaction layer observes long presses across the full widget.

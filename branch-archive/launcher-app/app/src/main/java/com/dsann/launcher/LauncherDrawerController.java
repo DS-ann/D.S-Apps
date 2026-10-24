@@ -23,7 +23,7 @@ final class LauncherDrawerController {
     interface Actions {
         boolean canLaunchApp(View sourceView);
         void launchApp(ResolveInfo app, View sourceView);
-        void showAppOptions(ResolveInfo app, boolean onHome);
+        void showAppOptions(ResolveInfo app, boolean onHome, View sourceView);
         int getColumns();
         void onDrawerDataChanged();
     }
@@ -112,8 +112,9 @@ final class LauncherDrawerController {
                         if (closeSearchRef[0] != null) closeSearchRef[0].run();
                         actions.launchApp(app, sourceView);
                     }
-                    @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
-                        actions.showAppOptions(app, onHome);
+                    @Override public void onAppLongClick(ResolveInfo app, boolean onHome,
+                            View sourceView) {
+                        actions.showAppOptions(app, onHome, sourceView);
                     }
                 });
         adapter.setOnDataChangedListener(actions::onDrawerDataChanged);

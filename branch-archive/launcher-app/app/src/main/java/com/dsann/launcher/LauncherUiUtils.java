@@ -19,6 +19,28 @@ final class LauncherUiUtils {
 
     private LauncherUiUtils() {}
 
+    /**
+     * Cancels an existing hint and restores its saved transform only when one exists.
+     * An untracked view may already be auto-shrunk to resolve collisions; its current
+     * transform is the baseline and must not be normalized to scale 1.
+     */
+    private static void cancelMoveHintAndRestoreBase(View view) {
+        ObjectAnimator[] animators = MOVE_HINTS.remove(view);
+        if (animators != null) {
+            for (ObjectAnimator animator : animators) {
+                if (animator != null) animator.cancel();
+            }
+        }
+        float[] base = MOVE_HINT_BASES.remove(view);
+        if (base != null) {
+            view.setRotation(base[0]);
+            view.setTranslationY(base[1]);
+            view.setScaleX(base[2]);
+            view.setScaleY(base[3]);
+            if (base.length > 4) view.setTranslationX(base[4]);
+        }
+    }
+
     /** Subtle move-ready feedback: scale-up with a low-amplitude dance. */
     static void startMoveHint(View view, Context context) {
         startMoveHint(view, context, true);
@@ -27,7 +49,7 @@ final class LauncherUiUtils {
     /** Static move-ready feedback for position-sensitive items: enlarge without dancing. */
     static void startScaleHint(View view, float scale) {
         if (view == null) return;
-        stopMoveHint(view);
+        cancelMoveHintAndRestoreBase(view);
         float baseRotation = view.getRotation();
         float baseTranslationY = view.getTranslationY();
         float baseScaleX = view.getScaleX();
@@ -40,25 +62,12 @@ final class LauncherUiUtils {
     /**
      * Enter a move-ready state without modifying the view's current scale. This is needed
      * for widgets whose size may already be reduced by workspace collision recovery.
-     * Unlike startScaleHint(), this does not call stopMoveHint()'s no-base fallback, which
-     * intentionally normalizes untracked views to scale 1.
+     * Like startScaleHint(), it preserves an untracked view's transform; it additionally
+     * bounds the hint to the parent and compensates translation near an edge.
      */
     static void startStableScaleHint(View view) {
         if (view == null) return;
-        ObjectAnimator[] animators = MOVE_HINTS.remove(view);
-        if (animators != null) {
-            for (ObjectAnimator animator : animators) {
-                if (animator != null) animator.cancel();
-            }
-        }
-        float[] previousBase = MOVE_HINT_BASES.remove(view);
-        if (previousBase != null) {
-            view.setRotation(previousBase[0]);
-            view.setTranslationY(previousBase[1]);
-            view.setScaleX(previousBase[2]);
-            view.setScaleY(previousBase[3]);
-            if (previousBase.length > 4) view.setTranslationX(previousBase[4]);
-        }
+        cancelMoveHintAndRestoreBase(view);
         float baseRotation = view.getRotation();
         float baseTranslationY = view.getTranslationY();
         float baseTranslationX = view.getTranslationX();
@@ -108,7 +117,7 @@ final class LauncherUiUtils {
     /** Allows position-sensitive widgets (such as the clock) to dance without bobbing. */
     static void startMoveHint(View view, Context context, boolean verticalBob) {
         if (view == null) return;
-        stopMoveHint(view);
+        cancelMoveHintAndRestoreBase(view);
         float baseRotation = view.getRotation();
         float baseTranslationY = view.getTranslationY();
         float baseScaleX = view.getScaleX();

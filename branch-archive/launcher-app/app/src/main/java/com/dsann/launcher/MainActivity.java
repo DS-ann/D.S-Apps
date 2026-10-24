@@ -731,7 +731,6 @@ public class MainActivity extends Activity {
     private int resizeRepairSpecialShrinkCount;
     private int resizeRepairNeighbourIconShrinkCount;
     private int resizeRepairMovedCount;
-    private int resizeRepairRemovedWidgetCount;
     private int resizeRepairRemovedClockCount;
     private int resizeRepairUnresolvedCollisionCount;
     private int resizeRepairGroupRepositionCount;
@@ -3945,8 +3944,9 @@ public class MainActivity extends Activity {
                     @Override public void launchApp(ResolveInfo app, View sourceView) {
                         MainActivity.this.launchApp(app, sourceView);
                     }
-                    @Override public void showAppOptions(ResolveInfo app, boolean onHome) {
-                        MainActivity.this.showAppOptions(app, onHome);
+                    @Override public void showAppOptions(ResolveInfo app, boolean onHome,
+                            View sourceView) {
+                        MainActivity.this.showAppOptions(app, onHome, sourceView);
                     }
                     @Override public int getColumns() { return getDrawerColumns(); }
                     @Override public void onDrawerDataChanged() {
@@ -7422,7 +7422,8 @@ public class MainActivity extends Activity {
         // provide the same long-press options explicitly.
         tile.setOnLongClickListener(v -> {
             if (shortcutMoved[0]) return true;
-            showActionDialog(prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
+            showCompactContextActionCardNear(tile,
+                    prefs.getString(shortcutPrefKey(KEY_SHORTCUT_LABEL, shortcutId), "Contact shortcut"),
                     new String[]{"↔", "×", "↻"},
                     new String[]{"Move to other page", "Remove shortcut", "Recreate contact shortcut"},
                     (dialog, which) -> {
@@ -8694,6 +8695,13 @@ public class MainActivity extends Activity {
                 if (child.getParent() == outgoing) child.setAlpha(baseAlpha * (1f - progress));
                 else if (child.getParent() == incoming) child.setAlpha(baseAlpha * progress);
             }
+            // The active drag owner is not part of the page fade; keep it visible in both
+            // directions, especially when moving from the second screen back to the first.
+            View draggedFrame = iconDragParallaxView;
+            if (draggedFrame != null) {
+                draggedFrame.setVisibility(View.VISIBLE);
+                draggedFrame.setAlpha(1f);
+            }
         });
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
@@ -8754,6 +8762,10 @@ public class MainActivity extends Activity {
             View child = entry.getKey();
             if (child.getParent() != null) child.setAlpha(entry.getValue().floatValue());
         }
+        if (dragged != null) {
+            dragged.setVisibility(View.VISIBLE);
+            dragged.setAlpha(1f);
+        }
         iconDragParallaxChildAlphas.clear();
         iconDragParallaxView = null;
         iconDragParallaxOutgoing = null;
@@ -8764,6 +8776,16 @@ public class MainActivity extends Activity {
 
     private void restoreIconDragPageVisuals() {
         if (pagesStrip == null) return;
+        if (iconDragPageAnimator != null) finishIconDragPageAnimation();
+        for (java.util.Map.Entry<View, Float> entry : iconDragParallaxChildAlphas.entrySet()) {
+            View child = entry.getKey();
+            if (child.getParent() != null) child.setAlpha(entry.getValue().floatValue());
+        }
+        iconDragParallaxChildAlphas.clear();
+        if (activeDragView != null && activeDragView.getParent() != null) {
+            activeDragView.setVisibility(View.VISIBLE);
+            activeDragView.setAlpha(1f);
+        }
         pagesStrip.setClipChildren(true);
         pagesStrip.setClipToPadding(true);
         if (iconOriginalPageIndex >= 0 && iconOriginalPageIndex < pagesStrip.getChildCount()) {
@@ -8915,6 +8937,7 @@ public class MainActivity extends Activity {
                 view.setScaleX(1f);
                 view.setScaleY(1f);
                 view.setAlpha(1f);
+                view.setVisibility(View.VISIBLE);
             }
             // Finish resize gestures here before they can fall through to launcher
             // gesture handling. Without this reset, the resize flag stayed armed
@@ -9231,6 +9254,8 @@ public class MainActivity extends Activity {
                         workspaceIconReparenting = true;
                         sourceView.removeView(view);
                         targetPage.addView(view, finalIconParams);
+                        view.setVisibility(View.VISIBLE);
+                        view.setAlpha(1f);
                         workspaceIconReparenting = false;
                         // Finalize collision checks against the real snapped icon, not
                         // solely its temporary destination-page proxy.
@@ -15713,7 +15738,6 @@ public class MainActivity extends Activity {
         resizeRepairSpecialShrinkCount = 0;
         resizeRepairNeighbourIconShrinkCount = 0;
         resizeRepairMovedCount = 0;
-        resizeRepairRemovedWidgetCount = 0;
         resizeRepairRemovedClockCount = 0;
         resizeRepairUnresolvedCollisionCount = 0;
         resizeRepairGroupRepositionCount = 0;
@@ -15773,7 +15797,7 @@ public class MainActivity extends Activity {
         }
         String message = "Changing " + changeReason
                 + " makes items on Home overlap or extend beyond the screen. "
-                + "Choose how to recover. The clock will remain visible.";
+                + "Choose how to recover. Widgets and the clock will be kept.";
         Runnable cancelRepair = () -> {
             if (rollbackAction != null) rollbackAction.run();
             homeIconResizeRepairPending = false;
@@ -15782,7 +15806,7 @@ public class MainActivity extends Activity {
         };
         showStudioMultiActionPrompt("Home layout collision", message,
                 new String[]{"↘", "×"},
-                new String[]{"Move / shrink / remove", "Cancel"},
+                new String[]{"Move / shrink", "Cancel"},
                 which -> {
                     if (which == 0) {
                         runWorkspaceCollisionRepair(targetPages, changeReason);
@@ -15792,49 +15816,8 @@ public class MainActivity extends Activity {
                 }, cancelRepair);
     }
 
-    private void removeOverlappingResizeWidgets(
-            java.util.ArrayList<FrameLayout> targetPages) {
-        if (targetPages == null) return;
-        for (FrameLayout page : targetPages) {
-            if (page == null || page.getParent() != pagesStrip) continue;
-            java.util.ArrayList<View> widgetsToRemove = new java.util.ArrayList<View>();
-            for (int i = 0; i < page.getChildCount(); i++) {
-                View candidate = page.getChildAt(i);
-                if (!(candidate.getTag() instanceof String)
-                        || !((String) candidate.getTag()).startsWith("launcher_widget:")
-                        || candidate.getVisibility() != View.VISIBLE) continue;
-                int[] candidateGeometry = itemGeometry(candidate);
-                if (candidateGeometry[2] <= 0 || candidateGeometry[3] <= 0) continue;
-                for (int j = 0; j < page.getChildCount(); j++) {
-                    View other = page.getChildAt(j);
-                    if (other == candidate || !isWorkspaceItem(other)
-                            || other.getVisibility() != View.VISIBLE) continue;
-                    int[] otherGeometry = itemGeometry(other);
-                    if (otherGeometry[2] <= 0 || otherGeometry[3] <= 0) continue;
-                    android.graphics.Rect candidateBounds =
-                            collisionRectForInteraction(candidate, candidateGeometry, other);
-                    android.graphics.Rect otherBounds =
-                            collisionRectForInteraction(other, otherGeometry, candidate);
-                    if (android.graphics.Rect.intersects(candidateBounds, otherBounds)) {
-                        widgetsToRemove.add(candidate);
-                        break;
-                    }
-                }
-            }
-            for (View widget : widgetsToRemove) {
-                if (widget.getParent() == page) removeResizeOverflowWidget(page, widget);
-            }
-        }
-    }
-
     private void runWorkspaceCollisionRepair(
             java.util.ArrayList<FrameLayout> targetPages, String changeReason) {
-        runWorkspaceCollisionRepair(targetPages, changeReason, true);
-    }
-
-    private void runWorkspaceCollisionRepair(
-            java.util.ArrayList<FrameLayout> targetPages, String changeReason,
-            boolean allowWidgetRemovalFallback) {
         if (pagesStrip == null || targetPages == null || targetPages.isEmpty()) {
             homeIconResizeRepairPending = false;
             return;
@@ -15875,18 +15858,8 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    // Relocate and shrink first. Delete only widgets that still overlap
-                    // after those recovery paths have had a chance to resolve the layout.
-                    if (allowWidgetRemovalFallback && overlapsRemain) {
-                        int removedBefore = resizeRepairRemovedWidgetCount;
-                        removeOverlappingResizeWidgets(targetPages);
-                        if (resizeRepairRemovedWidgetCount > removedBefore) {
-                            resizeRepairUnresolvedCollisionCount = 0;
-                            homeIconResizeRepairPending = true;
-                            runWorkspaceCollisionRepair(targetPages, changeReason, false);
-                            return;
-                        }
-                    }
+                    // Keep installed widgets if space cannot be recovered. Remaining overlap
+                    // is reported below rather than silently deleting provider content.
                     if (!overlapsRemain) resizeRepairUnresolvedCollisionCount = 0;
                     homeIconResizeRepairPending = false;
                     ensureShortcutLabelsNotClipped();
@@ -15924,10 +15897,6 @@ public class MainActivity extends Activity {
         if (resizeRepairGroupRepositionCount > 0) {
             message.append("Snapped ").append(resizeRepairGroupRepositionCount)
                     .append(" app group(s) back to the grid. ");
-        }
-        if (resizeRepairRemovedWidgetCount > 0) {
-            message.append("Removed ").append(resizeRepairRemovedWidgetCount)
-                    .append(" widget(s) from Home because both screens had no safe space. ");
         }
         if (resizeRepairRemovedClockCount > 0) {
             message.append("A clock was restored after a previous layout overflow. ");

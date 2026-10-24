@@ -25,7 +25,7 @@ import java.util.Map;
 public final class LauncherAppAdapter extends BaseAdapter {
     public interface Actions {
         void onAppClick(ResolveInfo app, View sourceView);
-        void onAppLongClick(ResolveInfo app, boolean onHome);
+        void onAppLongClick(ResolveInfo app, boolean onHome, View sourceView);
     }
 
     private final Activity activity;
@@ -690,7 +690,7 @@ public final class LauncherAppAdapter extends BaseAdapter {
         cell.setTag(drawer ? "launcher_app_cell" : "launcher_app:" + app.activityInfo.packageName);
         cell.setOnClickListener(v -> { if (actions != null) actions.onAppClick(app, icon); });
         cell.setOnLongClickListener(v -> {
-            if (actions != null) actions.onAppLongClick(app, !drawer);
+            if (actions != null) actions.onAppLongClick(app, !drawer, icon);
             return true;
         });
         return cell;
