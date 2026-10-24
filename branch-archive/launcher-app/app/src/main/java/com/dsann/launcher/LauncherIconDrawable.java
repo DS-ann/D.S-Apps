@@ -1302,9 +1302,8 @@ final class LauncherIconDrawable extends Drawable {
      * Converts original icon pixels to a two-tone Nothing-style artwork using the source
      * colour regions directly, not text/shape heuristics:
      * - neutral white areas remain white;
-     * - clearly chromatic source pixels become white, keeping coloured artwork visible;
-     * - neutral black/grey details remain black;
-     * - junctions between non-white source colours may add thin white seams;
+     * - every other filled area (including original black) becomes black;
+     * - junctions between non-white source colours become white seams;
      * - strong junctions use a thin seam, while subtle/near-colour transitions use a
      *   one-source-pixel seam;
      * - no synthetic seam is added where either side of a junction is white.
@@ -1320,10 +1319,8 @@ final class LauncherIconDrawable extends Drawable {
         rendered.getPixels(source, 0, width, 0, 0, width, height);
 
         final boolean[] sourceWhite = new boolean[count];
-        final boolean[] sourceChromatic = new boolean[count];
         for (int i = 0; i < count; i++) {
             sourceWhite[i] = isSourceWhiteSegment(source[i]);
-            sourceChromatic[i] = isSourceChromaticSegment(source[i]);
         }
 
         // Original dark artwork takes priority over generated junction seams. Protect
@@ -1398,9 +1395,8 @@ final class LauncherIconDrawable extends Drawable {
                 outputPixels[i] = Color.TRANSPARENT;
                 continue;
             }
-            // Source white and distinct colour regions stay light. Generated seams may
-            // brighten only unprotected boundaries; neutral original dark details stay black.
-            final int tone = sourceWhite[i] || sourceChromatic[i]
+            // A seam is never allowed to supersede an original black/dark pixel.
+            final int tone = sourceWhite[i]
                     || (seams[i] && !protectedSourceBlack[i]) ? 255 : 0;
             outputPixels[i] = Color.argb(alpha, tone, tone, tone);
         }
@@ -1424,22 +1420,6 @@ final class LauncherIconDrawable extends Drawable {
         int minimum = Math.min(red, Math.min(green, blue));
         int maximum = Math.max(red, Math.max(green, blue));
         return minimum >= 190 && maximum - minimum <= 24;
-    }
-
-    /**
-     * Distinctly coloured pixels must remain visible in the monochrome Nothing theme.
-     * Otherwise a blue region beside original black artwork can be converted to black on
-     * both sides and the icon appears completely black. Neutral black/grey details do not
-     * meet this chroma threshold and remain dark.
-     */
-    private static boolean isSourceChromaticSegment(int pixel) {
-        if (Color.alpha(pixel) < 32) return false;
-        int red = Color.red(pixel);
-        int green = Color.green(pixel);
-        int blue = Color.blue(pixel);
-        int minimum = Math.min(red, Math.min(green, blue));
-        int maximum = Math.max(red, Math.max(green, blue));
-        return maximum >= 72 && maximum - minimum >= 32;
     }
 
     /**
