@@ -34,7 +34,7 @@ final class HomePageController {
         void restoreWidgetsOnPages();
         void syncWidgetViewsToPages();
         void launchApp(ResolveInfo app, View sourceView);
-        void showAppOptions(ResolveInfo app, boolean onHome);
+        void showAppOptions(ResolveInfo app, boolean onHome, View sourceView);
     }
 
     private final Activity activity;
@@ -189,7 +189,7 @@ final class HomePageController {
                         @Override public void onAppClick(ResolveInfo app, View sourceView) { host.launchApp(app, sourceView); }
                         @Override public void onAppLongClick(ResolveInfo app, boolean onHome,
                                 View sourceView) {
-                            host.showAppOptions(app, onHome);
+                            host.showAppOptions(app, onHome, sourceView);
                         }
                     });
             for (int itemIndex = 0; itemIndex < pagePackages.size(); itemIndex++) {
