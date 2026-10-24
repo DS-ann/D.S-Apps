@@ -18934,6 +18934,12 @@ public class MainActivity extends Activity {
         return Math.round((speed - 10) * 1000f / 45f);
     }
 
+    /** Converts the internal 10–55 speed value to the slider's displayed 10–100 label. */
+    private int animationSpeedDisplayPercent(int internalSpeedPercent) {
+        int speed = Math.max(10, Math.min(55, internalSpeedPercent));
+        return 10 + Math.round((speed - 10) * 90f / 45f);
+    }
+
     private void addAnimationSpeedSliderRow(LinearLayout panel, int current,
             IntSliderAction action) {
         final int safeCurrent = Math.max(10, Math.min(55, current));
@@ -18948,20 +18954,14 @@ public class MainActivity extends Activity {
 
         TextView label = LauncherUiUtils.text(this, "Animation speed", 15,
                 Color.rgb(247, 249, 255), true);
-        TextView valueLabel = LauncherUiUtils.text(this, safeCurrent + "%", 13,
+        TextView valueLabel = LauncherUiUtils.text(
+                this, animationSpeedDisplayPercent(safeCurrent) + "%", 13,
                 homeStudioAccentColor, true);
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
         heading.addView(valueLabel);
         block.addView(heading);
-
-        TextView hintView = LauncherUiUtils.text(this,
-                "Range 10–55%; the 10% minimum is unchanged. Full travel now equals the previous 50% speed.",
-                11.5f, Color.rgb(184, 198, 223), false);
-        hintView.setPadding(0, LauncherUiUtils.dp(this, 4), 0,
-                LauncherUiUtils.dp(this, 2));
-        block.addView(hintView, new LinearLayout.LayoutParams(-1, -2));
 
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(1000);
@@ -18977,7 +18977,7 @@ public class MainActivity extends Activity {
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 int value = animationSpeedForSliderProgress(progress);
-                valueLabel.setText(value + "%");
+                valueLabel.setText(animationSpeedDisplayPercent(value) + "%");
                 if (fromUser && action != null) action.onChange(value);
             }
             @Override public void onStartTrackingTouch(SeekBar bar) {}
