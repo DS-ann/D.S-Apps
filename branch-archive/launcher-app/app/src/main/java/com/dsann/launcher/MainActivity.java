@@ -3251,7 +3251,7 @@ public class MainActivity extends Activity {
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
                     @Override public void syncWidgetViewsToPages() { MainActivity.this.syncWidgetViewsToPages(); }
                     @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
-                    @Override public void showAppOptions(ResolveInfo app, boolean onHome) { MainActivity.this.showAppOptions(app, onHome); }
+                    @Override public void showAppOptions(ResolveInfo app, boolean onHome, View sourceView) { MainActivity.this.showAppOptions(app, onHome, sourceView); }
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
         showHomeImmediately();
@@ -8312,6 +8312,8 @@ public class MainActivity extends Activity {
             pagesStrip.setTranslationX(stripX);
             View dragged = workspaceTransferItem;
             if (dragged != null && dragged.getParent() == workspaceTransferSourcePage) {
+                dragged.setVisibility(View.VISIBLE);
+                dragged.setAlpha(1f);
                 dragged.setTranslationX(workspaceTransferAnimationStartItemX
                         + (workspaceTransferAnimationStartStripX - stripX));
             }
@@ -8323,6 +8325,8 @@ public class MainActivity extends Activity {
                 if (pagesStrip != null) pagesStrip.setTranslationX(workspaceTransferAnimationEndStripX);
                 View dragged = workspaceTransferItem;
                 if (dragged != null && dragged.getParent() == workspaceTransferSourcePage) {
+                    dragged.setVisibility(View.VISIBLE);
+                    dragged.setAlpha(1f);
                     dragged.setTranslationX(workspaceTransferAnimationStartItemX
                             + (workspaceTransferAnimationStartStripX
                             - workspaceTransferAnimationEndStripX));
@@ -8484,6 +8488,11 @@ public class MainActivity extends Activity {
         if (item == null || item != workspaceTransferItem) return;
         finishWorkspaceTransferAnimation();
         clearWorkspaceTransferEdgeHover();
+        // The real item and its collision proxy have separate visuals. Normalize the
+        // real view after every cross-page transfer so reverse-direction drags cannot
+        // leave icons, shortcuts, or widgets hidden after the proxy is removed.
+        item.setVisibility(View.VISIBLE);
+        item.setAlpha(1f);
         if (!commit && workspaceTransferProxy != null && !liveDisplacedItems.isEmpty()) {
             finishLiveDisplacements(false, workspaceTransferProxy);
         }
