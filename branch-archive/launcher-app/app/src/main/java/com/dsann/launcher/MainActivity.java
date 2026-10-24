@@ -8486,6 +8486,7 @@ public class MainActivity extends Activity {
 
     private void finishWorkspaceTransferDrag(View item, boolean commit) {
         if (item == null || item != workspaceTransferItem) return;
+        item.animate().cancel();
         finishWorkspaceTransferAnimation();
         clearWorkspaceTransferEdgeHover();
         // The real item and its collision proxy have separate visuals. Normalize the
@@ -8493,6 +8494,11 @@ public class MainActivity extends Activity {
         // leave icons, shortcuts, or widgets hidden after the proxy is removed.
         item.setVisibility(View.VISIBLE);
         item.setAlpha(1f);
+        item.setTranslationX(0f);
+        item.setTranslationY(0f);
+        item.setRotationX(0f);
+        item.setRotationY(0f);
+        item.setTranslationZ(0f);
         if (!commit && workspaceTransferProxy != null && !liveDisplacedItems.isEmpty()) {
             finishLiveDisplacements(false, workspaceTransferProxy);
         }
@@ -8516,6 +8522,15 @@ public class MainActivity extends Activity {
                     ((ViewGroup) child).setClipToPadding(true);
                     child.setElevation(0f);
                 }
+                child.animate().cancel();
+                child.setAlpha(1f);
+                child.setRotationX(0f);
+                child.setRotationY(0f);
+                child.setScaleX(1f);
+                child.setScaleY(1f);
+                child.setTranslationX(0f);
+                child.setTranslationY(0f);
+                child.setTranslationZ(0f);
             }
             activateClockForPage(currentPage);
             if (pageIndicator != null) {
