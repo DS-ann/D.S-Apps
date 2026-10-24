@@ -8295,6 +8295,9 @@ public class MainActivity extends Activity {
         if (workspaceTransferSourcePage != null) {
             workspaceTransferSourcePage.setClipChildren(false);
             workspaceTransferSourcePage.setClipToPadding(false);
+            // The transfer item may overflow this page while the strip slides. A cached
+            // hardware texture clips that overflow, especially when leaving screen 2 left.
+            workspaceTransferSourcePage.setLayerType(View.LAYER_TYPE_NONE, null);
             workspaceTransferSourcePage.setElevation(LauncherUiUtils.dp(this, 30));
         }
         workspaceTransferAnimationStartStripX = startStripX;
@@ -8546,6 +8549,9 @@ public class MainActivity extends Activity {
         workspaceTransferTargetPage = -1;
         workspaceTransferEdgeHoverTargetPage = -1;
         workspaceTransferAnimationTargetPage = -1;
+        // Reapply the idle page-layer policy only after the transferred view has left
+        // the source page, or its original bounds have been restored on cancellation.
+        releasePageLayers();
     }
 
     private void clearIconEdgeHover() {
@@ -9729,12 +9735,47 @@ public class MainActivity extends Activity {
      * The active gesture then changes transforms on cached surfaces instead of
      * paying the layer-creation cost during the first frames of a swipe.
      */
+    private boolean workspaceDragOverflowsPage(View item, ViewGroup page) {
+        if (item == null || page == null || item.getParent() != page
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
+        int left = item.getLeft();
+        int top = item.getTop();
+        int width = item.getWidth();
+        int height = item.getHeight();
+        ViewGroup.LayoutParams raw = item.getLayoutParams();
+        if (raw instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            if (item.isLayoutRequested() || lp.leftMargin != item.getLeft()
+                    || lp.topMargin != item.getTop()) {
+                left = lp.leftMargin;
+                top = lp.topMargin;
+            }
+            if (lp.width > 0) width = lp.width;
+            if (lp.height > 0) height = lp.height;
+        }
+        float sx = Math.max(0.01f, item.getScaleX());
+        float sy = Math.max(0.01f, item.getScaleY());
+        float visualLeft = left + item.getTranslationX() + item.getPivotX() * (1f - sx);
+        float visualTop = top + item.getTranslationY() + item.getPivotY() * (1f - sy);
+        float visualRight = visualLeft + Math.max(1, width) * sx;
+        float visualBottom = visualTop + Math.max(1, height) * sy;
+        return visualLeft < 0f || visualTop < 0f
+                || visualRight > page.getWidth() || visualBottom > page.getHeight();
+    }
+
     private void releasePageLayers() {
         if (pagesStrip == null) return;
-        // Page 2 is the expensive forward-transition destination on this launcher.
-        // Keep only its composed texture warm while idle; drop page 1's texture to
-        // avoid permanently caching both whole-screen surfaces on older devices.
+        // Page 2 is kept warm while idle. During a reverse drag, however, its item
+        // crosses the page's left edge. A cached page texture clips that overflow even
+        // with clipChildren=false, so never cache the page while the live mover spills out.
         int cachedPage = Math.min(1, pagesStrip.getChildCount() - 1);
+        View moving = iconDragging ? activeDragView : workspaceTransferItem;
+        if (cachedPage >= 0 && moving != null && moving.getParent() instanceof View
+                && pagesStrip.indexOfChild((View) moving.getParent()) == cachedPage
+                && moving.getParent() instanceof ViewGroup
+                && workspaceDragOverflowsPage(moving, (ViewGroup) moving.getParent())) {
+            cachedPage = -1;
+        }
         for (int i = 0; i < pagesStrip.getChildCount(); i++) {
             View page = pagesStrip.getChildAt(i);
             page.setLayerType(i == cachedPage ? View.LAYER_TYPE_HARDWARE : View.LAYER_TYPE_NONE, null);
