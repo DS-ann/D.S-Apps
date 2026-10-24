@@ -5835,6 +5835,10 @@ public class MainActivity extends Activity {
                         || !dialog.isShowing()) return;
                 float progress = (Float) animation.getAnimatedValue();
                 morphProgress[0] = progress;
+                // During close, the reversed progress runs from 1 to 0. Fade the entire
+                // expanded panel with that same value so it is fully transparent exactly
+                // when the original app-group icon is restored at the animation endpoint.
+                panel.setAlpha(closing[0] ? Math.max(0f, Math.min(1f, progress)) : 1f);
                 float sx = startScaleX + (1f - startScaleX) * progress;
                 float sy = startScaleY + (1f - startScaleY) * progress;
                 float tx = morphStartTranslation[0] * (1f - progress);
