@@ -18869,23 +18869,19 @@ public class MainActivity extends Activity {
 
     private int animationSpeedForSliderProgress(int progress) {
         int p = Math.max(0, Math.min(1000, progress));
-        if (p <= 450) {
-            return 50 + Math.round(p * 50f / 450f);
-        }
-        return 100 + Math.round((p - 450) * 50f / 550f);
+        // The full slider travel is normal 100% speed; moving left slows the animation
+        // linearly down to 50%. The old 45%-travel pivot made the far-right endpoint 150%.
+        return 50 + Math.round(p * 50f / 1000f);
     }
 
     private int animationSliderProgressForSpeed(int speedPercent) {
-        int speed = Math.max(50, Math.min(150, speedPercent));
-        if (speed <= 100) {
-            return Math.round((speed - 50) * 450f / 50f);
-        }
-        return 450 + Math.round((speed - 100) * 550f / 50f);
+        int speed = Math.max(50, Math.min(100, speedPercent));
+        return Math.round((speed - 50) * 1000f / 50f);
     }
 
     private void addAnimationSpeedSliderRow(LinearLayout panel, int current,
             IntSliderAction action) {
-        final int safeCurrent = Math.max(50, Math.min(150, current));
+        final int safeCurrent = Math.max(50, Math.min(100, current));
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
@@ -18906,7 +18902,7 @@ public class MainActivity extends Activity {
         block.addView(heading);
 
         TextView hintView = LauncherUiUtils.text(this,
-                "Range 50–150%. Normal speed (100%) is at 45% slider travel.",
+                "Range 50–100%. Normal speed (100%) is at 100% slider travel.",
                 11.5f, Color.rgb(184, 198, 223), false);
         hintView.setPadding(0, LauncherUiUtils.dp(this, 4), 0,
                 LauncherUiUtils.dp(this, 2));
