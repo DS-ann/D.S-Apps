@@ -187,7 +187,8 @@ final class HomePageController {
                     false, iconSizeKey, fontSizeKey, showLabelsKey,
                     new LauncherAppAdapter.Actions() {
                         @Override public void onAppClick(ResolveInfo app, View sourceView) { host.launchApp(app, sourceView); }
-                        @Override public void onAppLongClick(ResolveInfo app, boolean onHome) {
+                        @Override public void onAppLongClick(ResolveInfo app, boolean onHome,
+                                View sourceView) {
                             host.showAppOptions(app, onHome);
                         }
                     });
