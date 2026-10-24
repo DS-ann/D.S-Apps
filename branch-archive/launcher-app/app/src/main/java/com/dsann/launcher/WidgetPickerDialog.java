@@ -38,6 +38,7 @@ final class WidgetPickerDialog {
     }
 
     private final Activity activity;
+    private final MainActivity studioStyle;
     private final AppWidgetManager widgetManager;
     private final PackageManager packageManager;
     private final int accentColor;
@@ -46,6 +47,7 @@ final class WidgetPickerDialog {
     WidgetPickerDialog(Activity activity, AppWidgetManager widgetManager,
             PackageManager packageManager, int accentColor, Listener listener) {
         this.activity = activity;
+        this.studioStyle = activity instanceof MainActivity ? (MainActivity) activity : null;
         this.widgetManager = widgetManager;
         this.packageManager = packageManager;
         this.accentColor = accentColor == Color.TRANSPARENT
@@ -80,7 +82,8 @@ final class WidgetPickerDialog {
     }
 
     private android.graphics.drawable.GradientDrawable controlBackground() {
-        return roundRect(new int[]{Color.rgb(35, 43, 65), Color.rgb(22, 28, 45)}, 14);
+        return studioStyle != null ? studioStyle.studioControlBackground()
+                : roundRect(new int[]{Color.rgb(35, 43, 65), Color.rgb(22, 28, 45)}, 14);
     }
 
     private TextView text(String value, float size, int color, boolean bold) {
@@ -88,6 +91,7 @@ final class WidgetPickerDialog {
     }
 
     private LinearLayout dialogPanel() {
+        if (studioStyle != null) return studioStyle.createStudioDialogPanel();
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(LauncherUiUtils.dp(activity, 16), LauncherUiUtils.dp(activity, 14),
@@ -98,6 +102,10 @@ final class WidgetPickerDialog {
     }
 
     private void addHeader(LinearLayout panel, String title, String subtitle) {
+        if (studioStyle != null) {
+            studioStyle.addStudioDialogHeader(panel, title, subtitle);
+            return;
+        }
         LinearLayout header = new LinearLayout(activity);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -131,6 +139,7 @@ final class WidgetPickerDialog {
     }
 
     private TextView studioButton(String label, boolean primary) {
+        if (studioStyle != null) return studioStyle.createStudioDialogButton(label, primary);
         TextView button = text(label, 14,
                 primary ? Color.rgb(10, 15, 27) : Color.rgb(211, 220, 240), true);
         button.setGravity(Gravity.CENTER);
@@ -277,6 +286,10 @@ final class WidgetPickerDialog {
         panel.addView(cancel, cancelParams);
         cancel.setOnClickListener(v -> dialog.dismiss());
 
+        if (studioStyle != null) {
+            studioStyle.showStudioDialog(dialog, panel, 610);
+            return;
+        }
         dialog.setContentView(panel);
         android.view.Window window = dialog.getWindow();
         if (window != null) {

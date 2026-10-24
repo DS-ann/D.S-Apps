@@ -250,6 +250,11 @@ final class WidgetInteractionController {
      */
     private boolean clampWidgetGeometryToPage(FrameLayout page, FrameLayout container,
             int widgetId, int fallbackPageIndex) {
+        return clampWidgetGeometryToPage(page, container, widgetId, fallbackPageIndex, true);
+    }
+
+    private boolean clampWidgetGeometryToPage(FrameLayout page, FrameLayout container,
+            int widgetId, int fallbackPageIndex, boolean persistGeometry) {
         if (page == null || container == null || container.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
         ViewGroup.LayoutParams raw = container.getLayoutParams();
@@ -276,8 +281,10 @@ final class WidgetInteractionController {
         // to make the full visible rectangle accessible; stored widget dimensions stay intact.
         scaleX = Math.min(scaleX, availableWidth / (float) Math.max(1, width));
         scaleY = Math.min(scaleY, availableHeight / (float) Math.max(1, height));
-        float pivotX = container.getPivotX();
-        float pivotY = container.getPivotY();
+        float oldPivotX = container.getPivotX();
+        float oldPivotY = container.getPivotY();
+        float pivotX = oldPivotX;
+        float pivotY = oldPivotY;
         float translationX = container.getTranslationX();
         float translationY = container.getTranslationY();
 
@@ -293,15 +300,17 @@ final class WidgetInteractionController {
         // Discard an impossible old translation rather than leaving the widget stranded.
         if (maxLeft < minLeft) {
             translationX = 0f;
-            offsetX = pivotX * (1f - scaleX);
-            minLeft = Math.max(0, (int) Math.ceil(-offsetX));
-            maxLeft = (int) Math.floor(availableWidth - width * scaleX - offsetX);
+            pivotX = 0f;
+            offsetX = 0f;
+            minLeft = 0;
+            maxLeft = (int) Math.floor(availableWidth - width * scaleX);
         }
         if (maxTop < minTop) {
             translationY = 0f;
-            offsetY = pivotY * (1f - scaleY);
-            minTop = Math.max(0, (int) Math.ceil(-offsetY));
-            maxTop = (int) Math.floor(availableHeight - height * scaleY - offsetY);
+            pivotY = 0f;
+            offsetY = 0f;
+            minTop = 0;
+            maxTop = (int) Math.floor(availableHeight - height * scaleY);
         }
         maxLeft = Math.max(minLeft, maxLeft);
         maxTop = Math.max(minTop, maxTop);
@@ -309,6 +318,8 @@ final class WidgetInteractionController {
         int top = Math.max(minTop, Math.min(maxTop, params.topMargin));
         boolean transformChanged = Math.abs(scaleX - oldScaleX) > 0.001f
                 || Math.abs(scaleY - oldScaleY) > 0.001f
+                || Math.abs(pivotX - oldPivotX) > 0.001f
+                || Math.abs(pivotY - oldPivotY) > 0.001f
                 || Math.abs(translationX - container.getTranslationX()) > 0.001f
                 || Math.abs(translationY - container.getTranslationY()) > 0.001f;
         boolean changed = left != params.leftMargin || top != params.topMargin
@@ -319,15 +330,19 @@ final class WidgetInteractionController {
         params.topMargin = top;
         params.width = width;
         params.height = height;
+        container.setPivotX(pivotX);
+        container.setPivotY(pivotY);
         container.setScaleX(scaleX);
         container.setScaleY(scaleY);
         container.setTranslationX(translationX);
         container.setTranslationY(translationY);
         container.setLayoutParams(params);
-        LinearLayout strip = listener.getPagesStrip();
-        int actualPageIndex = strip == null ? -1 : strip.indexOfChild(page);
-        listener.saveWidgetGeometry(widgetId,
-                actualPageIndex >= 0 ? actualPageIndex : Math.max(0, fallbackPageIndex), container);
+        if (persistGeometry) {
+            LinearLayout strip = listener.getPagesStrip();
+            int actualPageIndex = strip == null ? -1 : strip.indexOfChild(page);
+            listener.saveWidgetGeometry(widgetId,
+                    actualPageIndex >= 0 ? actualPageIndex : Math.max(0, fallbackPageIndex), container);
+        }
         return true;
     }
 
@@ -809,6 +824,7 @@ final class WidgetInteractionController {
                 current.leftMargin = candidateLeft;
                 current.topMargin = candidateTop;
                 container.setLayoutParams(current);
+                clampWidgetGeometryToPage(sourcePage, container, widgetId, widgetPage[0], false);
                 if (crossPagePreview) {
                     listener.updateWorkspaceTransferDisplacements(container, event.getRawX(),
                             event.getRawY(), fingerOffset[0], fingerOffset[1]);
@@ -867,6 +883,10 @@ final class WidgetInteractionController {
                     container.setTranslationX(0f);
                     container.setTranslationY(0f);
                     container.setLayoutParams(current);
+                    if (targetPage == sourcePage) {
+                        clampWidgetGeometryToPage(sourcePage, container, widgetId,
+                                originalPageAtDown[0], false);
+                    }
                     int[] preparedDrop = commit && targetPage != sourcePage
                             ? listener.prepareWidgetDrop(targetPage, container,
                                     event.getRawX(), event.getRawY(),
@@ -879,6 +899,8 @@ final class WidgetInteractionController {
                         container.setTranslationX(0f);
                         container.setTranslationY(0f);
                         container.setLayoutParams(current);
+                        clampWidgetGeometryToPage(sourcePage, container, widgetId,
+                                originalPageAtDown[0], false);
                         widgetPage[0] = originalPageAtDown[0];
                         listener.finishWorkspaceTransferDrag(container, false);
                         listener.setWorkspaceGridVisible(false, null);
@@ -899,6 +921,8 @@ final class WidgetInteractionController {
                             targetPage.addView(container, current);
                             reparenting[0] = false;
                             widgetPage[0] = targetIndex;
+                            clampWidgetGeometryToPage(targetPage, container, widgetId,
+                                    targetIndex, false);
                             if (current.width != oldWidth || current.height != oldHeight) {
                                 listener.updatePlacedWidgetSize(widgetId, container);
                             }
@@ -930,6 +954,8 @@ final class WidgetInteractionController {
                             } else {
                                 container.setLayoutParams(rejectedParams);
                             }
+                            clampWidgetGeometryToPage(sourcePage, container, widgetId,
+                                    originalPageAtDown[0], false);
                             widgetPage[0] = originalPageAtDown[0];
                             listener.finishWorkspaceTransferDrag(container, false);
                             listener.setCurrentPage(originalPageAtDown[0]);
@@ -1086,6 +1112,9 @@ final class WidgetInteractionController {
                     container.setPivotX(resizeWidth * 0.5f);
                     container.setPivotY(resizeHeight * 0.5f);
                     container.setLayoutParams(current);
+                    // Correct transformed bounds during the gesture so resize handles stay usable.
+                    clampWidgetGeometryToPage(activePage, container, widgetId,
+                            widgetPage[0], false);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -1122,6 +1151,10 @@ final class WidgetInteractionController {
                                 .apply();
                     }
                     resizeGeometryNormalized[0] = false;
+                    FrameLayout finalPage = container.getParent() instanceof FrameLayout
+                            ? (FrameLayout) container.getParent() : page;
+                    clampWidgetGeometryToPage(finalPage, container, widgetId,
+                            widgetPage[0], false);
                     if (action == MotionEvent.ACTION_UP && resizeRejectedAtLastPosition[0]) {
                         Toast.makeText(activity, "Not possible due to overlap", Toast.LENGTH_SHORT).show();
                     }

@@ -4542,7 +4542,7 @@ public class MainActivity extends Activity {
         void onSubmit(String value);
     }
 
-    private LinearLayout createStudioDialogPanel() {
+    LinearLayout createStudioDialogPanel() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(LauncherUiUtils.dp(this, 16), LauncherUiUtils.dp(this, 14),
@@ -4554,7 +4554,7 @@ public class MainActivity extends Activity {
         return panel;
     }
 
-    private void addStudioDialogHeader(LinearLayout panel, String title, String subtitle) {
+    void addStudioDialogHeader(LinearLayout panel, String title, String subtitle) {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -4594,7 +4594,7 @@ public class MainActivity extends Activity {
         panel.addView(accentLine, lineParams);
     }
 
-    private TextView createStudioDialogButton(String label, boolean primary) {
+    TextView createStudioDialogButton(String label, boolean primary) {
         TextView button = LauncherUiUtils.text(this, label, 14,
                 primary ? Color.rgb(10, 15, 27) : Color.rgb(211, 220, 240), true);
         button.setGravity(Gravity.CENTER);
@@ -4644,7 +4644,7 @@ public class MainActivity extends Activity {
         return row;
     }
 
-    private void showStudioDialog(Dialog dialog, LinearLayout panel, int maxHeightDp) {
+    void showStudioDialog(Dialog dialog, LinearLayout panel, int maxHeightDp) {
         dialog.setContentView(panel);
         dialog.setCanceledOnTouchOutside(true);
         android.view.Window window = dialog.getWindow();
@@ -5195,8 +5195,6 @@ public class MainActivity extends Activity {
         final Thread[] memberIconLoaderRef = new Thread[1];
         final View[][] groupLayerViewsRef = new View[1][];
         final boolean[] closing = new boolean[]{false};
-        // True while the close animator owns dismissal/cleanup, including its final handoff.
-        final boolean[] rootCloseTransition = new boolean[]{false};
         // [panel start scale X/Y, icon snapshot expanded scale X/Y].
         final float[] iconScale = new float[]{0.12f, 0.12f, 1f, 1f};
         final float[] morphStartTranslation = new float[2];
@@ -5283,27 +5281,6 @@ public class MainActivity extends Activity {
             memberLoadCancelled.set(true);
             Thread loader = memberIconLoaderRef[0];
             if (loader != null) loader.interrupt();
-
-            // The reverse morph remains in this Dialog until its terminal frame. Its dismissal
-            // must not cancel the animator or prematurely release the icon snapshot.
-            if (rootCloseTransition[0]) {
-                boolean ownedGroupSlot = isCurrentAppGroupSession(sessionId, dialog);
-                if (ownedGroupSlot) {
-                    appGroupCleanupPendingSessionGeneration = sessionId;
-                    if (openingGroupCell != null) {
-                        openingGroupCell.setAlpha(openingGroupCellAlpha);
-                        openingGroupCell.invalidate();
-                    }
-                }
-                if (root != null) root.invalidate();
-                if (groupId.equals(activeAppGroupMemberMoveModeId)) {
-                    clearAppGroupMemberMoveMode();
-                }
-                if (activeAppGroupDialog == dialog) activeAppGroupDialog = null;
-                if (rootCloseCleanupRef[0] != null) rootCloseCleanupRef[0].run();
-                rootCloseTransition[0] = false;
-                return;
-            }
 
             android.animation.ValueAnimator running = morphAnimator[0];
             if (running != null && running.isRunning()) {
@@ -5577,20 +5554,16 @@ public class MainActivity extends Activity {
         overlay.addView(panel, panelParams);
         panel.bringToFront();
 
-        // The home cell stays hidden while the group is open. Closing transfers this
-        // existing overlay into the activity root, then reveals the real cell only when
-        // the same panel/icon morph reaches its final frame.
+        // Keep the overlay in the Dialog window; closing reverses the opening morph in place.
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, iconScale, morphStartTranslation,
-                morphProgress, morphSnapshotRef, morphAnimator, openingGroupCell,
-                openingGroupCellAlpha, overlay, rootCloseTransition, rootCloseCleanupRef));
+                morphProgress, morphSnapshotRef, morphAnimator, overlay));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, iconScale,
                         morphStartTranslation, morphProgress, morphSnapshotRef, morphAnimator,
-                        openingGroupCell, openingGroupCellAlpha, overlay, rootCloseTransition,
-                        rootCloseCleanupRef);
+                        overlay);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -5859,7 +5832,7 @@ public class MainActivity extends Activity {
             transition.addUpdateListener(animation -> {
                 try {
                 if (!isCurrentAppGroupSession(sessionId, dialog)
-                        || !dialog.isShowing() || closing[0]) return;
+                        || !dialog.isShowing()) return;
                 float progress = (Float) animation.getAnimatedValue();
                 morphProgress[0] = progress;
                 float sx = startScaleX + (1f - startScaleX) * progress;
@@ -6004,98 +5977,60 @@ public class MainActivity extends Activity {
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
             boolean[] closing, float[] iconScale, float[] startTranslation,
             float[] morphProgress, android.widget.ImageView[] snapshotRef,
-            android.animation.ValueAnimator[] morphAnimator, View sourceCell,
-            float sourceCellAlpha, FrameLayout activityOverlay, boolean[] rootCloseTransition,
-            Runnable[] rootCloseCleanupRef) {
+            android.animation.ValueAnimator[] morphAnimator, FrameLayout activityOverlay) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
+
         View fadingTitle = panel.findViewWithTag("app_group_title_fade");
         View fadingDivider = panel.findViewWithTag("app_group_divider_fade");
         View fadingContent = panel.findViewWithTag("app_group_content_fade");
+        // Cancel the independent content fades; the shared opening animator owns alpha again.
         if (fadingTitle != null) fadingTitle.animate().cancel();
         if (fadingDivider != null) fadingDivider.animate().cancel();
         if (fadingContent != null) fadingContent.animate().cancel();
-        if (morphAnimator != null && morphAnimator.length > 0 && morphAnimator[0] != null) {
-            android.animation.ValueAnimator openingTransition = morphAnimator[0];
-            openingTransition.cancel();
-            morphAnimator[0] = null;
+
+        final android.animation.ValueAnimator transition =
+                morphAnimator != null && morphAnimator.length > 0 ? morphAnimator[0] : null;
+        if (transition == null || activityOverlay == null
+                || activityOverlay.getParent() == null) {
+            if (dialog.isShowing()) dialog.dismiss();
+            return;
         }
-        float resolvedTargetScaleX = iconScale != null ? iconScale[0] : 0.12f;
-        float resolvedTargetScaleY = iconScale != null ? iconScale[1] : resolvedTargetScaleX;
-        float offsetX = startTranslation != null ? startTranslation[0] : 0f;
-        float offsetY = startTranslation != null ? startTranslation[1] : 0f;
         float initialProgress = morphProgress != null
                 ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
-        android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
+        if (initialProgress <= 0.001f && panel.getAlpha() < 0.5f) {
+            // If the panel has not appeared, avoid reversing an as-yet-unrendered morph.
+            if (dialog.isShowing()) dialog.dismiss();
+            return;
+        }
+
+        final float targetScaleX = Math.max(0.01f, Math.min(1f,
+                iconScale != null ? iconScale[0] : 0.12f));
+        final float targetScaleY = Math.max(0.01f, Math.min(1f,
+                iconScale != null ? iconScale[1] : targetScaleX));
+        final float offsetX = startTranslation != null ? startTranslation[0] : 0f;
+        final float offsetY = startTranslation != null ? startTranslation[1] : 0f;
+        final android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
                 ? snapshotRef[0] : null;
-        // Reverse the same panel, icon preview, pivot, translation and progress used by opening.
-        // Opening uses DecelerateInterpolator(1.2), whose curve is p = 1 - (1 - t)^2.4.
-        // Start at the last rendered progress and traverse that exact curve backwards.
-        final float targetScaleX = Math.max(0.01f, Math.min(1f, resolvedTargetScaleX));
-        final float targetScaleY = Math.max(0.01f, Math.min(1f, resolvedTargetScaleY));
-        final double reverseStartTime = 1d
-                - Math.pow(Math.max(0d, 1d - initialProgress), 1d / 2.4d);
-        // A partially completed opening reverses only the elapsed portion of the same path.
-        long reverseDuration = Math.max(1L,
-                Math.round(animationDuration(240L) * reverseStartTime));
-        android.animation.ValueAnimator transition =
-                android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
-        transition.setDuration(reverseDuration);
-        transition.setInterpolator(new android.animation.TimeInterpolator() {
-            @Override public float getInterpolation(float input) {
-                if (initialProgress <= 0f) return 1f;
-                double openingTime = reverseStartTime * (1d - input);
-                float pathProgress = (float) (1d - Math.pow(1d - openingTime, 2.4d));
-                return Math.max(0f, Math.min(1f,
-                        (initialProgress - pathProgress) / initialProgress));
-            }
-        });
-        transition.addUpdateListener(animation -> {
-            // Animate in the Dialog's own hierarchy, exactly like the opening path. Moving the
-            // overlay to the Activity root here created a detach/attach frame before animation.
-            if (!closing[0] || activityOverlay.getParent() == null) return;
-            float progress = (Float) animation.getAnimatedValue();
-            if (morphProgress != null) morphProgress[0] = progress;
-            float sx = targetScaleX + (1f - targetScaleX) * progress;
-            float sy = targetScaleY + (1f - targetScaleY) * progress;
-            float tx = offsetX * (1f - progress);
-            float ty = offsetY * (1f - progress);
-            panel.setScaleX(sx);
-            panel.setScaleY(sy);
-            panel.setTranslationX(tx);
-            panel.setTranslationY(ty);
-            if (snapshot != null) {
-                snapshot.setScaleX(1f);
-                snapshot.setScaleY(1f);
-                snapshot.setTranslationX(0f);
-                snapshot.setTranslationY(0f);
-                snapshot.setAlpha(1f - Math.min(1f, progress * 2f));
-            }
-            float contentAlpha = Math.max(0f, Math.min(1f, (progress - 0.5f) * 2f));
-            if (fadingTitle != null) fadingTitle.setAlpha(contentAlpha);
-            if (fadingDivider != null) fadingDivider.setAlpha(contentAlpha);
-            if (fadingContent != null) fadingContent.setAlpha(contentAlpha);
-            if (dimLayer != null) dimLayer.setAlpha(0f);
-        });
+
+        // Reuse the opening ValueAnimator and original interpolator. reverse() follows the
+        // identical panel transform, icon-snapshot fade and content fade with no setup frame.
         transition.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (!dialog.isShowing()) return;
                 if (morphAnimator != null && morphAnimator.length > 0
-                        && morphAnimator[0] == animation) {
+                        && morphAnimator[0] == transition) {
                     morphAnimator[0] = null;
                 }
                 if (morphProgress != null) morphProgress[0] = 0f;
-                // Pin the exact reverse endpoint before the Dialog is dismissed. The icon
-                // preview is pixel-aligned with the original group icon in this Dialog surface.
                 panel.setScaleX(targetScaleX);
                 panel.setScaleY(targetScaleY);
                 panel.setTranslationX(offsetX);
                 panel.setTranslationY(offsetY);
-                // Keep the matching terminal icon frame visible until the Dialog detaches.
-                // Hiding both temporary layers first left one transparent Dialog frame while
-                // the real home cell was still hidden, causing the end-of-close flicker.
                 panel.setAlpha(1f);
                 if (snapshot != null) {
+                    snapshot.setVisibility(View.VISIBLE);
                     snapshot.setScaleX(1f);
                     snapshot.setScaleY(1f);
                     snapshot.setTranslationX(0f);
@@ -6105,20 +6040,11 @@ public class MainActivity extends Activity {
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
                 if (fadingContent != null) fadingContent.setAlpha(0f);
-
-                if (dialog.isShowing()) dialog.dismiss();
+                if (dimLayer != null) dimLayer.setAlpha(0f);
+                dialog.dismiss();
             }
         });
-        morphAnimator[0] = transition;
-
-        // Reverse the opening morph in place. The existing Dialog continues owning the panel
-        // and icon snapshot until the terminal frame, avoiding a window/hierarchy handoff.
-        if (rootCloseTransition != null && rootCloseTransition.length > 0) {
-            rootCloseTransition[0] = true;
-        }
-        // The opening path already owns source-cell visibility. Do not toggle it here:
-        // during a very early outside tap, opening may not yet have hidden that cell.
-        transition.start();
+        transition.reverse();
     }
 
     private void clearAppGroupMemberMoveMode() {
@@ -16851,7 +16777,7 @@ public class MainActivity extends Activity {
         return Math.max(0, Math.min(3, prefs == null ? 0 : prefs.getInt(KEY_DRAWER_TRANSITION, 0)));
     }
 
-    private int studioTint(int color, int alpha) {
+    int studioTint(int color, int alpha) {
         return Color.argb(Math.max(0, Math.min(255, alpha)),
                 Color.red(color), Color.green(color), Color.blue(color));
     }
@@ -16862,14 +16788,14 @@ public class MainActivity extends Activity {
                 Color.blue(color) * 3 / 4);
     }
 
-    private GradientDrawable studioSolidRoundRect(int color, float radiusDp) {
+    GradientDrawable studioSolidRoundRect(int color, float radiusDp) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(LauncherUiUtils.dp(this, radiusDp));
         return drawable;
     }
 
-    private GradientDrawable studioControlBackground() {
+    GradientDrawable studioControlBackground() {
         return LauncherUiUtils.roundRect(this,
                 new int[]{Color.rgb(35, 43, 65), Color.rgb(22, 28, 45)},
                 LauncherUiUtils.dp(this, 14));
