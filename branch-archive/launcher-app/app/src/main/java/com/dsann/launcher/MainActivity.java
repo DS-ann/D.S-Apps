@@ -16286,20 +16286,6 @@ public class MainActivity extends Activity {
         resizeRepairUnresolvedCollisionCount++;
     }
 
-    private void removeResizeOverflowWidget(FrameLayout page, View widget) {
-        int id;
-        try {
-            id = Integer.parseInt(String.valueOf(widget.getTag()).substring("launcher_widget:".length()));
-        } catch (RuntimeException ignored) {
-            return;
-        }
-        if (widget.getParent() instanceof ViewGroup) ((ViewGroup) widget.getParent()).removeView(widget);
-        widgetInteractionController.forgetWidgetContainer((FrameLayout) widget);
-        WidgetController.removeWidget(prefs, KEY_WIDGET_IDS, id);
-        try { widgetHost.deleteAppWidgetId(id); } catch (Exception ignored) {}
-        resizeRepairRemovedWidgetCount++;
-    }
-
     /**
      * Last-resort clock recovery. A collision repair may fail to find an empty rectangle
      * when the workspace is saturated, but hiding/detaching the clock made a temporary
