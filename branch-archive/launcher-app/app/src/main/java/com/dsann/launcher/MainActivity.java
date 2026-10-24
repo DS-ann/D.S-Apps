@@ -558,6 +558,8 @@ public class MainActivity extends Activity {
     private int clockWidgetStartVisualX, clockWidgetStartVisualY;
     private int clockWidgetStartVisualWidth, clockWidgetStartVisualHeight;
     private float clockWidgetStartPanelScaleX = 1f;
+    private float clockWidgetStartAutoScaleX = 1f;
+    private float clockWidgetStartAutoScaleY = 1f;
     private boolean clockWidgetLongPressActivated = false;
     // 0 = none, 1 = left edge, 2 = right edge, 3 = top edge, 4 = bottom edge.
     private int clockResizeEdge = 0;
@@ -1490,6 +1492,10 @@ public class MainActivity extends Activity {
                     clockWidgetStartNonRowHeight = Math.max(nonRowChromeHeight,
                             Math.max(0, clockWidgetStartPanelHeight - clockWidgetStartRowHeight));
                     clockWidgetStartPanelScaleX = clockPanel.getScaleX();
+                    clockWidgetStartAutoScaleX = clampWorkspaceAutoScale(
+                            getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(clockPanel, true), 1f));
+                    clockWidgetStartAutoScaleY = clampWorkspaceAutoScale(
+                            getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(clockPanel, false), 1f));
                     clockWidgetStartTextScaleY = clockText == null ? 1f : clockText.getScaleY();
                     clockWidgetLiveResizeLength = clockWidgetStartLength;
                     clockWidgetLiveResizeBreadth = clockWidgetStartBreadth;
@@ -1498,7 +1504,7 @@ public class MainActivity extends Activity {
                     clockWidgetStartVisualY = startGeometry[1];
                     clockWidgetStartVisualWidth = startGeometry[2];
                     clockWidgetStartVisualHeight = Math.max(startGeometry[3],
-                            clockWidgetStartPanelHeight);
+                            Math.round(clockWidgetStartPanelHeight * clockWidgetStartAutoScaleY));
                     clockResizeGeneration++;
                     clockWidgetStartX = clockPanel.getTranslationX();
                     clockWidgetStartY = clockPanel.getTranslationY();
@@ -2467,8 +2473,14 @@ public class MainActivity extends Activity {
                 // The visible panel includes a fixed date line and its insets. Apply the
                 // 80% floor to the clock row, then add that fixed chrome back to the
                 // minimum total height so date/AM-PM never gets pushed beyond the panel.
+                float automaticShrinkX = clampWorkspaceAutoScale(clockWidgetStartAutoScaleX);
+                float automaticShrinkY = clampWorkspaceAutoScale(clockWidgetStartAutoScaleY);
+                int visibleNonRowHeight = Math.round(
+                        clockWidgetStartNonRowHeight * automaticShrinkY);
+                int visibleMinimumRowHeight = Math.max(1,
+                        Math.round(minRowHeight * automaticShrinkY));
                 int minH = Math.min(Math.min(
-                        minRowHeight + clockWidgetStartNonRowHeight, pageHeight),
+                        visibleMinimumRowHeight + visibleNonRowHeight, pageHeight),
                         Math.max(1, clockWidgetStartVisualHeight));
                 boolean horizontalResize = clockResizeEdge == 1 || clockResizeEdge == 2;
                 if (horizontalResize) {
@@ -2534,12 +2546,14 @@ public class MainActivity extends Activity {
                 // of visible widths: when the old clock is capped at the page edge, its
                 // visible width no longer represents the saved scale and shrinking stalls.
                 int lengthPercent = Math.round((right - left) * 100f
-                        / (float) Math.max(1, clockWidgetStartPanelWidth));
+                        / (Math.max(1f, clockWidgetStartPanelWidth) * automaticShrinkX));
                 int breadthPercent;
                 int naturalRowHeight = LauncherUiUtils.dp(this, 114);
                 int targetPanelHeight = Math.max(1, bottom - top);
+                int targetVisibleRowHeight = Math.max(1,
+                        targetPanelHeight - visibleNonRowHeight);
                 int targetRowHeight = Math.max(1,
-                        targetPanelHeight - clockWidgetStartNonRowHeight);
+                        Math.round(targetVisibleRowHeight / automaticShrinkY));
                 // A left/right grip is strictly a width operation. Preserve the
                 // stored breadth percentage. Top/bottom resize maps only the clock row;
                 // the date line and panel insets retain their original height.
@@ -2550,13 +2564,14 @@ public class MainActivity extends Activity {
                 // The latter made left/right handles appear stuck on wide clocks.
                 int minLengthPercent = Math.max(20, (int) Math.ceil(
                         LauncherUiUtils.dp(this, 140) * 100f
-                                / Math.max(1, clockWidgetStartPanelWidth)));
+                                / (Math.max(1f, clockWidgetStartPanelWidth) * automaticShrinkX)));
                 lengthPercent = Math.max(minLengthPercent, Math.min(600, lengthPercent));
                 // All clock styles use the same real panel row height. Map its
                 // target height directly to the natural 114dp row, just as a
                 // widget resize maps its rectangle to layout width/height.
                 int maxAvailableRowHeight = Math.max(minRowHeight,
-                        pageHeight - clockWidgetStartNonRowHeight);
+                        (int) Math.floor(Math.max(0, pageHeight - visibleNonRowHeight)
+                                / automaticShrinkY));
                 int maxBreadthPercent = Math.max(80, Math.min(600, (int) Math.ceil(
                         maxAvailableRowHeight * 100f / Math.max(1, naturalRowHeight))));
                 breadthPercent = Math.max(80, Math.min(maxBreadthPercent, breadthPercent));
@@ -2594,7 +2609,8 @@ public class MainActivity extends Activity {
                     // typography and date styles; only update the row-related params.
                     ViewGroup.LayoutParams panelHeightParams = resizePanel.getLayoutParams();
                     if (panelHeightParams != null) {
-                        panelHeightParams.height = targetHeight;
+                        panelHeightParams.height = Math.max(1,
+                                Math.round(targetHeight / automaticShrinkY));
                         resizePanel.setLayoutParams(panelHeightParams);
                     }
                     if (clockRow != null) {
@@ -13020,7 +13036,11 @@ public class MainActivity extends Activity {
                     getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(view, true), 1f));
             float autoY = clampWorkspaceAutoScale(
                     getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(view, false), 1f));
-            if (tag.startsWith("launcher_app:")) {
+            if (isClockWorkspaceItem(view)) {
+                // The clock's layout/length settings own its base transform. Its automatic
+                // collision-shrink factor is composed in clock geometry, not from generic
+                // workspace_scale preferences (which used to reset the clock's own size).
+            } else if (tag.startsWith("launcher_app:")) {
                 view.setScaleX(autoX);
                 view.setScaleY(autoY);
                 if (prefs != null) {
@@ -13049,8 +13069,49 @@ public class MainActivity extends Activity {
         return Math.max(0.25f, Math.min(1f, value));
     }
 
+    private void migrateLegacyClockAutoShrinkScalePreferences() {
+        if (prefs == null) return;
+        String legacyX = KEY_RESIZE_AUTO_SCALE_X_PREFIX + "launcher_clock_widget";
+        String legacyY = KEY_RESIZE_AUTO_SCALE_Y_PREFIX + "launcher_clock_widget";
+        boolean hasX = prefs.contains(legacyX);
+        boolean hasY = prefs.contains(legacyY);
+        if (!hasX && !hasY) return;
+
+        SharedPreferences.Editor edit = prefs.edit();
+        for (int page = 0; page < 2; page++) {
+            String pageTag = "launcher_clock_widget:page" + page;
+            String pageX = KEY_RESIZE_AUTO_SCALE_X_PREFIX + pageTag;
+            String pageY = KEY_RESIZE_AUTO_SCALE_Y_PREFIX + pageTag;
+            if (hasX && !prefs.contains(pageX)) {
+                edit.putFloat(pageX, clampWorkspaceAutoScale(
+                        getFloatPreferenceCompat(legacyX, 1f)));
+            }
+            if (hasY && !prefs.contains(pageY)) {
+                edit.putFloat(pageY, clampWorkspaceAutoScale(
+                        getFloatPreferenceCompat(legacyY, 1f)));
+            }
+        }
+        if (hasX) edit.remove(legacyX);
+        if (hasY) edit.remove(legacyY);
+        edit.apply();
+    }
+
     private String workspaceAutoShrinkScaleKey(View view, boolean horizontal) {
         String tag = view == null ? "" : String.valueOf(view.getTag());
+        if (isClockWorkspaceItem(view)) {
+            // Migrate old shared values once, then let each page's clock shrink
+            // independently so an icon collision on one page cannot resize the other.
+            migrateLegacyClockAutoShrinkScalePreferences();
+            int clockPage = view == clockPanelsByPage[0] ? 0
+                    : view == clockPanelsByPage[1] ? 1 : -1;
+            if (clockPage < 0 && pagesStrip != null && view != null
+                    && view.getParent() instanceof View) {
+                int parentPage = pagesStrip.indexOfChild((View) view.getParent());
+                if (parentPage >= 0 && parentPage < 2) clockPage = parentPage;
+            }
+            tag = clockPage >= 0
+                    ? "launcher_clock_widget:page" + clockPage : "launcher_clock_widget";
+        }
         // Every contact shortcut uses the same view tag; suffix its stable ID so only
         // the intended shortcut shrinks.
         if (isWorkspaceContactShortcut(view)) {
@@ -18145,12 +18206,18 @@ public class MainActivity extends Activity {
         // the LED digit-group width can allow a scaled background to exceed the page, after
         // which drag/resize clamps and handle positions disagree at the screen edge.
         float widthForScaleCap = naturalPanelWidth;
+        final float automaticShrinkX = clampWorkspaceAutoScale(
+                getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(targetPanel, true), 1f));
+        final float automaticShrinkY = clampWorkspaceAutoScale(
+                getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(targetPanel, false), 1f));
         final float stylePreservedScale = clockStyleChanged
                 && previousClockPanelGeometry[2] > 0
-                ? previousClockPanelGeometry[2] / (float) Math.max(1, naturalPanelWidth)
+                ? previousClockPanelGeometry[2]
+                        / (Math.max(1, naturalPanelWidth) * automaticShrinkX)
                 : requestedLengthScale;
         final float lengthScale = Math.min(stylePreservedScale,
-                Math.max(0.01f, availablePanelWidth / (float) widthForScaleCap));
+                Math.max(0.01f, availablePanelWidth
+                        / (Math.max(1f, widthForScaleCap) * automaticShrinkX)));
         if (clockStyleChanged && previousClockPanelGeometry[2] > 0 && prefs != null) {
             // A preset can have a different intrinsic width because of tracking,
             // marker clearance, or typography. Save the compensating scale so later
@@ -18166,7 +18233,8 @@ public class MainActivity extends Activity {
         final boolean neonCircuitStyle = !sevenSegment && selectedClockStyle == 2;
         final float neonCircuitScaleWithoutDateCap = neonCircuitStyle
                 ? Math.min(requestedLengthScale, Math.max(0.01f,
-                        availablePanelWidth / (float) Math.max(1, clockWithMarkerWidth)))
+                        availablePanelWidth
+                                / (Math.max(1f, clockWithMarkerWidth) * automaticShrinkX)))
                 : lengthScale;
         final float neonCircuitDateScaleCompensation = neonCircuitStyle
                 ? Math.max(1f, neonCircuitScaleWithoutDateCap / Math.max(0.01f, lengthScale))
@@ -18182,9 +18250,9 @@ public class MainActivity extends Activity {
         // Its actual hit bounds stay at the fixed layout size, so overlapping
         // visuals do not steal touches from the shortcut underneath.
         clockPanel.setElevation(LauncherUiUtils.dp(this, 8));
-        // Resize the actual panel downward with the clock instead of scaling a
-        // fixed-height background. The top edge stays anchored in place.
-        clockPanel.setScaleY(1f);
+        // Breadth is expressed by real row height; only collision auto-shrink uses
+        // this outer transform, independent of the user's breadth percentage.
+        clockPanel.setScaleY(automaticShrinkY);
         ViewGroup.LayoutParams rawPanelParams = clockPanel.getLayoutParams();
         FrameLayout.LayoutParams panelParams = rawPanelParams instanceof FrameLayout.LayoutParams
                 ? (FrameLayout.LayoutParams) rawPanelParams
@@ -18201,7 +18269,7 @@ public class MainActivity extends Activity {
         // positioning remain visually stable while changing the clock length.
         clockPanel.setPivotX(alignment == Gravity.RIGHT ? panelParams.width
                 : (alignment == Gravity.CENTER_HORIZONTAL ? panelParams.width / 2f : 0f));
-        clockPanel.setScaleX(lengthScale);
+        clockPanel.setScaleX(lengthScale * automaticShrinkX);
         targetPanel.post(() -> {
             // This callback belongs to the specific page panel measured above. Never
             // consult mutable clockPanel/activeClockPage here: they can point at the
