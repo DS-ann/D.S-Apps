@@ -5835,10 +5835,6 @@ public class MainActivity extends Activity {
                         || !dialog.isShowing()) return;
                 float progress = (Float) animation.getAnimatedValue();
                 morphProgress[0] = progress;
-                // During close, the reversed progress runs from 1 to 0. Fade the entire
-                // expanded panel with that same value so it is fully transparent exactly
-                // when the original app-group icon is restored at the animation endpoint.
-                panel.setAlpha(closing[0] ? Math.max(0f, Math.min(1f, progress)) : 1f);
                 float sx = startScaleX + (1f - startScaleX) * progress;
                 float sy = startScaleY + (1f - startScaleY) * progress;
                 float tx = morphStartTranslation[0] * (1f - progress);
@@ -5863,7 +5859,7 @@ public class MainActivity extends Activity {
                     // Keep the snapshot attached throughout the morph. Toggling GONE/VISIBLE
                     // at the midpoint invalidates its hardware layer and can flash one frame.
                 }
-                if (!closing[0] && !memberInteractionsEnabled[0] && progress >= 0.9f) {
+                if (!memberInteractionsEnabled[0] && progress >= 0.9f) {
                     memberInteractionsEnabled[0] = true;
                     for (View memberItem : pendingMemberItemViews) memberItem.setEnabled(true);
                 }
@@ -6012,23 +6008,52 @@ public class MainActivity extends Activity {
         // Reverse the original opening animator in the same dialog window. Keeping its
         // update listener and interpolation curve avoids a setup frame or window handoff.
         if (dimLayer != null) dimLayer.setAlpha(0f);
+        dialogOverlay.setAlpha(1f);
         if (originalGroupCell != null) originalGroupCell.setAlpha(0f);
         if (snapshot != null) snapshot.setVisibility(View.VISIBLE);
 
-        // Reverse the opening animator in place. The opening update listener remains the
-        // single owner of panel geometry and child/snapshot fades, avoiding a competing
-        // listener and any duration mutation that could create a visible jump.
+        // A shorter close uses the shared animation-speed slider. If opening is still
+        // running, reverse its current play time to avoid a discontinuity.
+        if (!transition.isRunning()) {
+            try {
+                transition.setDuration(animationDuration(160L));
+            } catch (IllegalStateException ignored) {
+                // Some platform versions reject duration changes on a started animator.
+                // Reversing the existing animator still gives a continuous close path.
+            }
+        }
+
+        final android.animation.ValueAnimator.AnimatorUpdateListener closeVisuals =
+                animation -> {
+            float progress = Math.max(0f, Math.min(1f,
+                    (Float) animation.getAnimatedValue()));
+            // Reverse the opening fade: the content disappears first, then the card
+            // background fades completely as the panel reaches the home icon.
+            panel.setAlpha(Math.min(1f, progress * 2f));
+            if (snapshot != null) {
+                snapshot.setVisibility(View.VISIBLE);
+                // Keep only a 10% icon proxy for the final handoff; the live home cell
+                // fades in after all dialog content has reached zero opacity.
+                snapshot.setAlpha(0.1f * (1f - Math.min(1f, progress * 2f)));
+            }
+            if (originalGroupCell != null) originalGroupCell.setAlpha(0f);
+            if (dimLayer != null) dimLayer.setAlpha(0f);
+        };
+        transition.addUpdateListener(closeVisuals);
+
         final android.animation.AnimatorListenerAdapter closeEnd =
                 new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 if (!dialog.isShowing()) return;
+                transition.removeUpdateListener(closeVisuals);
                 transition.removeListener(this);
                 if (morphProgress != null && morphProgress.length > 0) {
                     morphProgress[0] = 0f;
                 }
 
-                // Swap the icon proxy for the real home cell in the same UI traversal.
-                // No second fade or separate close animator is needed.
+                // The panel and its text/grid are now fully transparent. Swap the low-alpha
+                // icon proxy for the real home cell in this same UI traversal, then fade it
+                // from 10% to 100% before dismissing the transparent dialog window.
                 panel.setAlpha(0f);
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
@@ -6036,15 +6061,45 @@ public class MainActivity extends Activity {
                 if (dimLayer != null) dimLayer.setAlpha(0f);
                 if (snapshot != null) snapshot.setAlpha(0f);
                 if (originalGroupCell != null) {
-                    originalGroupCell.setAlpha(originalGroupCellAlpha);
+                    originalGroupCell.setAlpha(originalGroupCellAlpha * 0.1f);
                     originalGroupCell.invalidate();
                 }
-                // Prevent the dismiss listener from canceling the animator at its endpoint.
-                if (morphAnimator != null && morphAnimator.length > 0
-                        && morphAnimator[0] == transition) {
-                    morphAnimator[0] = null;
+
+                final android.animation.ValueAnimator homeIconFade =
+                        android.animation.ValueAnimator.ofFloat(0f, 1f);
+                homeIconFade.setDuration(animationDuration(45L));
+                homeIconFade.setInterpolator(
+                        new android.view.animation.DecelerateInterpolator(1.2f));
+                homeIconFade.addUpdateListener(homeAnimation -> {
+                    float handoff = Math.max(0f, Math.min(1f,
+                            (Float) homeAnimation.getAnimatedValue()));
+                    panel.setAlpha(0f);
+                    if (snapshot != null) snapshot.setAlpha(0f);
+                    if (originalGroupCell != null) {
+                        originalGroupCell.setAlpha(originalGroupCellAlpha
+                                * (0.1f + 0.9f * handoff));
+                    }
+                    if (dimLayer != null) dimLayer.setAlpha(0f);
+                });
+                homeIconFade.addListener(new android.animation.AnimatorListenerAdapter() {
+                    @Override public void onAnimationEnd(android.animation.Animator finished) {
+                        if (morphAnimator != null && morphAnimator.length > 0
+                                && morphAnimator[0] == homeIconFade) {
+                            morphAnimator[0] = null;
+                        }
+                        if (snapshot != null) snapshot.setAlpha(0f);
+                        if (originalGroupCell != null) {
+                            originalGroupCell.setAlpha(originalGroupCellAlpha);
+                            originalGroupCell.invalidate();
+                        }
+                        // Keep the dialog attached until the actual home cell is fully visible.
+                        if (dialog.isShowing()) dialog.dismiss();
+                    }
+                });
+                if (morphAnimator != null && morphAnimator.length > 0) {
+                    morphAnimator[0] = homeIconFade;
                 }
-                dialog.dismiss();
+                homeIconFade.start();
             }
         };
         transition.addListener(closeEnd);
@@ -18871,17 +18926,17 @@ public class MainActivity extends Activity {
         int p = Math.max(0, Math.min(1000, progress));
         // The full slider travel is normal 100% speed; moving left slows the animation
         // linearly down to 50%. The old 45%-travel pivot made the far-right endpoint 150%.
-        return 50 + Math.round(p * 50f / 1000f);
+        return 10 + Math.round(p * 90f / 1000f);
     }
 
     private int animationSliderProgressForSpeed(int speedPercent) {
-        int speed = Math.max(50, Math.min(100, speedPercent));
-        return Math.round((speed - 50) * 1000f / 50f);
+        int speed = Math.max(10, Math.min(100, speedPercent));
+        return Math.round((speed - 10) * 1000f / 90f);
     }
 
     private void addAnimationSpeedSliderRow(LinearLayout panel, int current,
             IntSliderAction action) {
-        final int safeCurrent = Math.max(50, Math.min(100, current));
+        final int safeCurrent = Math.max(10, Math.min(100, current));
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
@@ -18902,7 +18957,7 @@ public class MainActivity extends Activity {
         block.addView(heading);
 
         TextView hintView = LauncherUiUtils.text(this,
-                "Range 50–100%. Normal speed (100%) is at 100% slider travel.",
+                "Range 10–100%. Normal speed (100%) is at 100% slider travel.",
                 11.5f, Color.rgb(184, 198, 223), false);
         hintView.setPadding(0, LauncherUiUtils.dp(this, 4), 0,
                 LauncherUiUtils.dp(this, 2));
