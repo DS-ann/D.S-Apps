@@ -1330,6 +1330,9 @@ final class LauncherIconDrawable extends Drawable {
                 findProtectedSourceBlackPixels(source, width, height);
 
         final boolean[] seams = new boolean[count];
+        // Strong junctions may use one pixel on the protected black side too.
+        // Keep this separate so subtle seams still never overwrite original dark details.
+        final boolean[] strongSeamsOnProtectedBlack = new boolean[count];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 final int index = y * width + x;
@@ -1345,10 +1348,18 @@ final class LauncherIconDrawable extends Drawable {
                         final int maxDifference = largestSourceChannelDifference(
                                 source[index], source[right]);
                         if (maxDifference >= 46 && delta >= 76) {
-                            // Strong colour junction. Never paint over source-black detail;
-                            // when only one side is protected, keep the seam on the other side.
-                            if (!protectedSourceBlack[index]) seams[index] = true;
-                            if (!protectedSourceBlack[right]) seams[right] = true;
+                            // Strong colour junction: use both source pixels, including one
+                            // on the protected black side when the boundary touches dark art.
+                            if (protectedSourceBlack[index]) {
+                                strongSeamsOnProtectedBlack[index] = true;
+                            } else {
+                                seams[index] = true;
+                            }
+                            if (protectedSourceBlack[right]) {
+                                strongSeamsOnProtectedBlack[right] = true;
+                            } else {
+                                seams[right] = true;
+                            }
                         } else if (maxDifference >= 5 && delta >= 9) {
                             // Subtle junctions normally use one pixel. If that pixel belongs
                             // to a protected dark stroke, shift the seam to the other side.
@@ -1372,10 +1383,18 @@ final class LauncherIconDrawable extends Drawable {
                         final int maxDifference = largestSourceChannelDifference(
                                 source[index], source[down]);
                         if (maxDifference >= 46 && delta >= 76) {
-                            // Keep original dark strokes intact and place the seam only on
-                            // the unprotected side when a junction touches dark artwork.
-                            if (!protectedSourceBlack[index]) seams[index] = true;
-                            if (!protectedSourceBlack[down]) seams[down] = true;
+                            // Strong colour junction: use both source pixels, including one
+                            // on the protected black side when the boundary touches dark art.
+                            if (protectedSourceBlack[index]) {
+                                strongSeamsOnProtectedBlack[index] = true;
+                            } else {
+                                seams[index] = true;
+                            }
+                            if (protectedSourceBlack[down]) {
+                                strongSeamsOnProtectedBlack[down] = true;
+                            } else {
+                                seams[down] = true;
+                            }
                         } else if (maxDifference >= 5 && delta >= 9) {
                             if (!protectedSourceBlack[index]) {
                                 seams[index] = true;
@@ -1395,9 +1414,11 @@ final class LauncherIconDrawable extends Drawable {
                 outputPixels[i] = Color.TRANSPARENT;
                 continue;
             }
-            // A seam is never allowed to supersede an original black/dark pixel.
+            // Only a strong detected boundary may override one protected black-side pixel.
+            // All other original dark details remain black.
             final int tone = sourceWhite[i]
-                    || (seams[i] && !protectedSourceBlack[i]) ? 255 : 0;
+                    || (seams[i] && !protectedSourceBlack[i])
+                    || strongSeamsOnProtectedBlack[i] ? 255 : 0;
             outputPixels[i] = Color.argb(alpha, tone, tone, tone);
         }
 
