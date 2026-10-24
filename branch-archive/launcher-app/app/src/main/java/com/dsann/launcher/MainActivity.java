@@ -5859,7 +5859,7 @@ public class MainActivity extends Activity {
                     // Keep the snapshot attached throughout the morph. Toggling GONE/VISIBLE
                     // at the midpoint invalidates its hardware layer and can flash one frame.
                 }
-                if (!memberInteractionsEnabled[0] && progress >= 0.9f) {
+                if (!closing[0] && !memberInteractionsEnabled[0] && progress >= 0.9f) {
                     memberInteractionsEnabled[0] = true;
                     for (View memberItem : pendingMemberItemViews) memberItem.setEnabled(true);
                 }
@@ -6008,52 +6008,23 @@ public class MainActivity extends Activity {
         // Reverse the original opening animator in the same dialog window. Keeping its
         // update listener and interpolation curve avoids a setup frame or window handoff.
         if (dimLayer != null) dimLayer.setAlpha(0f);
-        dialogOverlay.setAlpha(1f);
         if (originalGroupCell != null) originalGroupCell.setAlpha(0f);
         if (snapshot != null) snapshot.setVisibility(View.VISIBLE);
 
-        // A shorter close uses the shared animation-speed slider. If opening is still
-        // running, reverse its current play time to avoid a discontinuity.
-        if (!transition.isRunning()) {
-            try {
-                transition.setDuration(animationDuration(160L));
-            } catch (IllegalStateException ignored) {
-                // Some platform versions reject duration changes on a started animator.
-                // Reversing the existing animator still gives a continuous close path.
-            }
-        }
-
-        final android.animation.ValueAnimator.AnimatorUpdateListener closeVisuals =
-                animation -> {
-            float progress = Math.max(0f, Math.min(1f,
-                    (Float) animation.getAnimatedValue()));
-            // Reverse the opening fade: the content disappears first, then the card
-            // background fades completely as the panel reaches the home icon.
-            panel.setAlpha(Math.min(1f, progress * 2f));
-            if (snapshot != null) {
-                snapshot.setVisibility(View.VISIBLE);
-                // Keep only a 10% icon proxy for the final handoff; the live home cell
-                // fades in after all dialog content has reached zero opacity.
-                snapshot.setAlpha(0.1f * (1f - Math.min(1f, progress * 2f)));
-            }
-            if (originalGroupCell != null) originalGroupCell.setAlpha(0f);
-            if (dimLayer != null) dimLayer.setAlpha(0f);
-        };
-        transition.addUpdateListener(closeVisuals);
-
+        // Reverse the opening animator in place. The opening update listener remains the
+        // single owner of panel geometry and child/snapshot fades, avoiding a competing
+        // listener and any duration mutation that could create a visible jump.
         final android.animation.AnimatorListenerAdapter closeEnd =
                 new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 if (!dialog.isShowing()) return;
-                transition.removeUpdateListener(closeVisuals);
                 transition.removeListener(this);
                 if (morphProgress != null && morphProgress.length > 0) {
                     morphProgress[0] = 0f;
                 }
 
-                // The panel and its text/grid are now fully transparent. Swap the low-alpha
-                // icon proxy for the real home cell in this same UI traversal, then fade it
-                // from 10% to 100% before dismissing the transparent dialog window.
+                // Swap the icon proxy for the real home cell in the same UI traversal.
+                // No second fade or separate close animator is needed.
                 panel.setAlpha(0f);
                 if (fadingTitle != null) fadingTitle.setAlpha(0f);
                 if (fadingDivider != null) fadingDivider.setAlpha(0f);
@@ -6061,45 +6032,15 @@ public class MainActivity extends Activity {
                 if (dimLayer != null) dimLayer.setAlpha(0f);
                 if (snapshot != null) snapshot.setAlpha(0f);
                 if (originalGroupCell != null) {
-                    originalGroupCell.setAlpha(originalGroupCellAlpha * 0.1f);
+                    originalGroupCell.setAlpha(originalGroupCellAlpha);
                     originalGroupCell.invalidate();
                 }
-
-                final android.animation.ValueAnimator homeIconFade =
-                        android.animation.ValueAnimator.ofFloat(0f, 1f);
-                homeIconFade.setDuration(animationDuration(45L));
-                homeIconFade.setInterpolator(
-                        new android.view.animation.DecelerateInterpolator(1.2f));
-                homeIconFade.addUpdateListener(homeAnimation -> {
-                    float handoff = Math.max(0f, Math.min(1f,
-                            (Float) homeAnimation.getAnimatedValue()));
-                    panel.setAlpha(0f);
-                    if (snapshot != null) snapshot.setAlpha(0f);
-                    if (originalGroupCell != null) {
-                        originalGroupCell.setAlpha(originalGroupCellAlpha
-                                * (0.1f + 0.9f * handoff));
-                    }
-                    if (dimLayer != null) dimLayer.setAlpha(0f);
-                });
-                homeIconFade.addListener(new android.animation.AnimatorListenerAdapter() {
-                    @Override public void onAnimationEnd(android.animation.Animator finished) {
-                        if (morphAnimator != null && morphAnimator.length > 0
-                                && morphAnimator[0] == homeIconFade) {
-                            morphAnimator[0] = null;
-                        }
-                        if (snapshot != null) snapshot.setAlpha(0f);
-                        if (originalGroupCell != null) {
-                            originalGroupCell.setAlpha(originalGroupCellAlpha);
-                            originalGroupCell.invalidate();
-                        }
-                        // Keep the dialog attached until the actual home cell is fully visible.
-                        if (dialog.isShowing()) dialog.dismiss();
-                    }
-                });
-                if (morphAnimator != null && morphAnimator.length > 0) {
-                    morphAnimator[0] = homeIconFade;
+                // Prevent the dismiss listener from canceling the animator at its endpoint.
+                if (morphAnimator != null && morphAnimator.length > 0
+                        && morphAnimator[0] == transition) {
+                    morphAnimator[0] = null;
                 }
-                homeIconFade.start();
+                dialog.dismiss();
             }
         };
         transition.addListener(closeEnd);
@@ -17534,9 +17475,7 @@ public class MainActivity extends Activity {
         addSliderRow(content, "Wheel rotation angle", 50, 180, getPageRotationDegrees(), "°", value -> {
             prefs.edit().putInt(KEY_PAGE_ROTATION, value).apply();
         });
-        addSliderRowWithHint(content, "Animation speed", 20, 150,
-                LauncherMotion.speedPercent(this), "%",
-                "Applies to timed launcher animations. Left = slower; 100% = normal; right = faster.",
+        addAnimationSpeedSliderRow(content, LauncherMotion.speedPercent(this),
                 value -> prefs.edit().putInt(KEY_ANIMATION_SPEED, value).apply());
 
         addSection(content, "App drawer");
@@ -18922,6 +18861,74 @@ public class MainActivity extends Activity {
     private void addSliderRow(LinearLayout panel, String title, int min, int max, int current,
             String suffix, IntSliderAction action) {
         addSliderRowInternal(panel, title, min, max, current, suffix, action, false, null);
+    }
+
+    private int animationSpeedForSliderProgress(int progress) {
+        int p = Math.max(0, Math.min(1000, progress));
+        if (p <= 450) {
+            return 50 + Math.round(p * 50f / 450f);
+        }
+        return 100 + Math.round((p - 450) * 50f / 550f);
+    }
+
+    private int animationSliderProgressForSpeed(int speedPercent) {
+        int speed = Math.max(50, Math.min(150, speedPercent));
+        if (speed <= 100) {
+            return Math.round((speed - 50) * 450f / 50f);
+        }
+        return 450 + Math.round((speed - 100) * 550f / 50f);
+    }
+
+    private void addAnimationSpeedSliderRow(LinearLayout panel, int current,
+            IntSliderAction action) {
+        final int safeCurrent = Math.max(50, Math.min(150, current));
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8),
+                LauncherUiUtils.dp(this, 10), LauncherUiUtils.dp(this, 8));
+        block.setBackground(studioControlBackground());
+        addStudioAccentLine(block);
+        LinearLayout.LayoutParams blockParams = new LinearLayout.LayoutParams(-1, -2);
+        blockParams.bottomMargin = LauncherUiUtils.dp(this, 7);
+
+        TextView label = LauncherUiUtils.text(this, "Animation speed", 15,
+                Color.rgb(247, 249, 255), true);
+        TextView valueLabel = LauncherUiUtils.text(this, safeCurrent + "%", 13,
+                homeStudioAccentColor, true);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(label, new LinearLayout.LayoutParams(0, -2, 1f));
+        heading.addView(valueLabel);
+        block.addView(heading);
+
+        TextView hintView = LauncherUiUtils.text(this,
+                "Range 50–150%. Normal speed (100%) is at 45% slider travel.",
+                11.5f, Color.rgb(184, 198, 223), false);
+        hintView.setPadding(0, LauncherUiUtils.dp(this, 4), 0,
+                LauncherUiUtils.dp(this, 2));
+        block.addView(hintView, new LinearLayout.LayoutParams(-1, -2));
+
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(1000);
+        seekBar.setProgress(animationSliderProgressForSpeed(safeCurrent));
+        android.content.res.ColorStateList tint =
+                android.content.res.ColorStateList.valueOf(Color.rgb(222, 255, 112));
+        seekBar.setProgressTintList(tint);
+        seekBar.setThumbTintList(tint);
+        seekBar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(82, 96, 122)));
+        block.addView(seekBar, new LinearLayout.LayoutParams(-1,
+                LauncherUiUtils.dp(this, 42)));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int value = animationSpeedForSliderProgress(progress);
+                valueLabel.setText(value + "%");
+                if (fromUser && action != null) action.onChange(value);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        panel.addView(block, blockParams);
     }
 
     private void addSliderRowWithHint(LinearLayout panel, String title, int min, int max,
