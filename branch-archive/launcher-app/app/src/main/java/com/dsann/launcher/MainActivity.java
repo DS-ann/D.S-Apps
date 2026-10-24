@@ -16014,64 +16014,27 @@ public class MainActivity extends Activity {
             int col = oldCol;
             int row = oldRow;
             if (occupied[row][col]) {
+                // Resizing must not silently drop a group onto another row or screen.
+                // First look for the nearest free column on its existing row.
                 int bestDistance = Integer.MAX_VALUE;
-                int bestCol = -1, bestRow = -1;
-                for (int r = 0; r < rows; r++) {
-                    for (int c = 0; c < columns; c++) {
-                        if (occupied[r][c]) continue;
-                        int distance = Math.abs(c - oldCol) + Math.abs(r - oldRow);
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestCol = c;
-                            bestRow = r;
-                        }
+                int bestCol = -1;
+                for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                    if (occupied[row][candidateCol]) continue;
+                    int distance = Math.abs(candidateCol - oldCol);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestCol = candidateCol;
                     }
                 }
-                if (bestCol < 0) {
-                    // A full page may still have a free grid slot on the other screen.
-                    int otherIndex = pageIndex == 0 ? 1 : 0;
-                    if (otherIndex >= 0 && otherIndex < pagesStrip.getChildCount()
-                            && pagesStrip.getChildAt(otherIndex) instanceof FrameLayout) {
-                        FrameLayout other = (FrameLayout) pagesStrip.getChildAt(otherIndex);
-                        int[] free = findFreeAppGroupSlot(other, null);
-                        if (free != null) {
-                            if (group.getParent() instanceof ViewGroup) {
-                                ((ViewGroup) group.getParent()).removeView(group);
-                            }
-                            int otherColumns = Math.max(1, getHomeColumns());
-                            int otherWidth = Math.max(1, other.getWidth() / otherColumns);
-                            int otherCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
-                            int otherRows = homeGridRowsForHeight(other.getHeight(), otherCellHeight);
-                            FrameLayout.LayoutParams moved = new FrameLayout.LayoutParams(
-                                    otherWidth, otherCellHeight, Gravity.TOP | Gravity.LEFT);
-                            moved.leftMargin = free[0] * otherWidth;
-                            moved.topMargin = homeGridRowTop(free[1], otherRows,
-                                    other.getHeight(), otherCellHeight);
-                            moved.rightMargin = 0;
-                            moved.bottomMargin = 0;
-                            group.setTranslationX(0f);
-                            group.setTranslationY(0f);
-                            other.addView(group, moved);
-                            resizeRepairGroupRepositionCount++;
-                            String groupId = appGroupId(group);
-                            if (groupId != null) {
-                                prefs.edit().putInt(appGroupKey("page", groupId), otherIndex)
-                                        .putFloat(appGroupKey("x", groupId),
-                                                free[0] / (float) Math.max(1, otherColumns - 1))
-                                        .putFloat(appGroupKey("y", groupId),
-                                                free[1] / (float) Math.max(1, otherRows - 1))
-                                        .apply();
-                            }
-                            continue;
-                        }
-                    }
-                    // If both grids are full, snap to the nearest valid slot rather than
-                    // allowing the group to drift into an arbitrary pixel position.
-                    bestCol = oldCol;
-                    bestRow = oldRow;
+                if (bestCol >= 0) {
+                    col = bestCol;
+                } else {
+                    // Keep the group on its existing row if that row is full. The regular
+                    // resize-collision recovery can handle the conflict instead of moving
+                    // the group vertically behind the user's back.
+                    col = oldCol;
+                    row = oldRow;
                 }
-                col = bestCol;
-                row = bestRow;
             }
             occupied[row][col] = true;
             boolean groupMoved = oldCol != col || oldRow != row
