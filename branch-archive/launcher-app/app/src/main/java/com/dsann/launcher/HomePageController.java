@@ -48,6 +48,8 @@ final class HomePageController {
     private final String fontSizeKey;
     private final String showPageIndicatorKey;
     private final int homeRows;
+    private final java.util.WeakHashMap<View, Boolean> workspaceItemAttachWatchers =
+            new java.util.WeakHashMap<View, Boolean>();
 
     HomePageController(Activity activity, SharedPreferences prefs, PackageManager packageManager,
                        Host host, String iconXKey, String iconYKey, String showLabelsKey, String iconSizeKey, String fontSizeKey, String showPageIndicatorKey, int homeRows) {
@@ -74,6 +76,77 @@ final class HomePageController {
             }
         }
         if (view.hasFocus()) view.clearFocus();
+    }
+
+    private boolean isWorkspaceItem(View view) {
+        if (view == null || !(view.getTag() instanceof String)) return false;
+        String tag = (String) view.getTag();
+        return tag.startsWith("launcher_app:")
+                || tag.startsWith("launcher_widget:")
+                || tag.contains("shortcut")
+                || tag.contains("group")
+                || tag.contains("clock_widget");
+    }
+
+    /**
+     * Recover only transient drawing state after a page transfer. A widget's non-zero
+     * scale may represent intentional collision recovery, so preserve it and its margins.
+     */
+    private void normalizeWorkspaceItemVisuals(View item, boolean afterReparent) {
+        if (item == null) return;
+        if (afterReparent) item.animate().cancel();
+        if (item.getVisibility() != View.VISIBLE) item.setVisibility(View.VISIBLE);
+        if (Math.abs(item.getAlpha() - 1f) > 0.001f) item.setAlpha(1f);
+        if (Math.abs(item.getScaleX()) < 0.01f) item.setScaleX(1f);
+        if (Math.abs(item.getScaleY()) < 0.01f) item.setScaleY(1f);
+        if (afterReparent) {
+            if (Math.abs(item.getTranslationX()) > 0.001f) item.setTranslationX(0f);
+            if (Math.abs(item.getTranslationY()) > 0.001f) item.setTranslationY(0f);
+            if (Math.abs(item.getRotationX()) > 0.001f) item.setRotationX(0f);
+            if (Math.abs(item.getRotationY()) > 0.001f) item.setRotationY(0f);
+            if (Math.abs(item.getTranslationZ()) > 0.001f) item.setTranslationZ(0f);
+        }
+    }
+
+    private void watchWorkspaceItemAttachment(View item) {
+        if (!isWorkspaceItem(item) || workspaceItemAttachWatchers.containsKey(item)) return;
+        final boolean[] wasAttached = {item.isAttachedToWindow()};
+        item.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) {
+                if (wasAttached[0]) {
+                    normalizeWorkspaceItemVisuals(view, true);
+                } else {
+                    wasAttached[0] = true;
+                }
+            }
+            @Override public void onViewDetachedFromWindow(View view) { }
+        });
+        workspaceItemAttachWatchers.put(item, Boolean.TRUE);
+    }
+
+    private void normalizeWorkspaceItemsOnPage(FrameLayout page) {
+        if (page == null || page.getParent() == null
+                || page.getWidth() <= 0 || page.getHeight() <= 0) return;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View item = page.getChildAt(i);
+            if (!isWorkspaceItem(item)) continue;
+            watchWorkspaceItemAttachment(item);
+            normalizeWorkspaceItemVisuals(item, false);
+        }
+    }
+
+    private void normalizeMovedWorkspaceItemVisibility(LinearLayout strip, int pageCount) {
+        if (strip == null) return;
+        int limit = Math.min(pageCount, strip.getChildCount());
+        for (int pageIndex = 0; pageIndex < limit; pageIndex++) {
+            View child = strip.getChildAt(pageIndex);
+            if (!(child instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) child;
+            normalizeWorkspaceItemsOnPage(page);
+            // Run after the drop/cleanup callbacks on this frame, which can otherwise
+            // reapply the temporary hidden state after the synchronous render returns.
+            page.post(() -> normalizeWorkspaceItemsOnPage(page));
+        }
     }
 
     void renderHomePages(boolean animate) {
@@ -299,6 +372,7 @@ final class HomePageController {
         }
 
         host.restoreWidgetsOnPages();
+        normalizeMovedWorkspaceItemVisibility(strip, requiredPages);
         if (host.getPageIndicator() != null) {
             boolean showIndicator = requiredPages > 1
                     && prefs.getBoolean(showPageIndicatorKey, true);

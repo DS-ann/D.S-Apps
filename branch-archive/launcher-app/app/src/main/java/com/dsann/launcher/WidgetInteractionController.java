@@ -75,6 +75,27 @@ final class WidgetInteractionController {
     }
     private final java.util.ArrayList<EditChrome> editChrome = new java.util.ArrayList<>();
 
+    /**
+     * A transferred widget can keep a temporary hidden state when its source-page
+     * measurement callback is cancelled. Restore drawing state without discarding a
+     * legitimate collision-recovery scale or changing its saved rectangle.
+     */
+    private void restoreWidgetDrawingState(View view, boolean afterTransfer) {
+        if (view == null) return;
+        if (afterTransfer) view.animate().cancel();
+        if (view.getVisibility() != View.VISIBLE) view.setVisibility(View.VISIBLE);
+        if (Math.abs(view.getAlpha() - 1f) > 0.001f) view.setAlpha(1f);
+        if (Math.abs(view.getScaleX()) < 0.01f) view.setScaleX(1f);
+        if (Math.abs(view.getScaleY()) < 0.01f) view.setScaleY(1f);
+        if (afterTransfer) {
+            if (Math.abs(view.getTranslationX()) > 0.001f) view.setTranslationX(0f);
+            if (Math.abs(view.getTranslationY()) > 0.001f) view.setTranslationY(0f);
+            if (Math.abs(view.getRotationX()) > 0.001f) view.setRotationX(0f);
+            if (Math.abs(view.getRotationY()) > 0.001f) view.setRotationY(0f);
+            if (Math.abs(view.getTranslationZ()) > 0.001f) view.setTranslationZ(0f);
+        }
+    }
+
     /** Update cached page indices after automatic resize recovery reparents a widget. */
     void updateWidgetPageIndex(FrameLayout container, int pageIndex) {
         int[][] refs = widgetPageRefs.get(container);
@@ -574,7 +595,14 @@ final class WidgetInteractionController {
                 new View.OnLayoutChangeListener[1];
         final View.OnAttachStateChangeListener detachWatcher =
                 new View.OnAttachStateChangeListener() {
-            @Override public void onViewAttachedToWindow(View view) { }
+            @Override public void onViewAttachedToWindow(View view) {
+                if (container.getParent() != page) {
+                    // Reparenting detaches the view before it attaches to the destination.
+                    // Recover its visible state on that destination attachment.
+                    restoreWidgetDrawingState(container, true);
+                    container.removeOnAttachStateChangeListener(this);
+                }
+            }
             @Override public void onViewDetachedFromWindow(View view) {
                 // A removed/reparented widget must not leave a pending page-measure callback.
                 if (container.getParent() != page) {
@@ -582,13 +610,17 @@ final class WidgetInteractionController {
                         page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
                         pageMeasureWatcher[0] = null;
                     }
-                    container.removeOnAttachStateChangeListener(this);
+                    // Keep the listener until the destination attach event; otherwise an
+                    // INVISIBLE state from a pending measurement can survive reparenting.
                 }
             }
         };
         final Runnable[] normalizeWidgetBounds = new Runnable[1];
         normalizeWidgetBounds[0] = () -> {
             if (container.getParent() != page) {
+                // The widget may have been moved before the original page was measured.
+                // Do not let the stale source-page callback leave it INVISIBLE on the target.
+                restoreWidgetDrawingState(container, true);
                 if (pageMeasureWatcher[0] != null) {
                     page.removeOnLayoutChangeListener(pageMeasureWatcher[0]);
                     pageMeasureWatcher[0] = null;
@@ -624,9 +656,7 @@ final class WidgetInteractionController {
             }
             container.removeOnAttachStateChangeListener(detachWatcher);
             clampWidgetGeometryToPage(page, container, widgetId, pageIndex);
-            if (container.getVisibility() != View.VISIBLE) {
-                container.setVisibility(View.VISIBLE);
-            }
+            restoreWidgetDrawingState(container, false);
             // Restoration preserves its clamped rectangle; only new placement enters the
             // collision resolver after final size and page geometry are known.
             if (!preserveGeometry) listener.resolveWidgetCollisions(page, container);
@@ -694,6 +724,9 @@ final class WidgetInteractionController {
         // not expose resize handles or run any wobble/bobbing animation.
         movePress[0] = () -> {
             if (menuShown[0] || dragging[0] || reparenting[0]) return;
+            // Icon/label-size reflows can leave stale hidden drawing state on the container.
+            // Make it visible before arming move mode, but preserve its current geometry.
+            restoreWidgetDrawingState(container, false);
             FrameLayout activePage = container.getParent() instanceof FrameLayout
                     ? (FrameLayout) container.getParent() : page;
             if (clampWidgetGeometryToPage(
@@ -950,6 +983,7 @@ final class WidgetInteractionController {
                                 originalPageAtDown[0], false);
                         widgetPage[0] = originalPageAtDown[0];
                         listener.finishWorkspaceTransferDrag(container, false);
+                        restoreWidgetDrawingState(container, true);
                         listener.setWorkspaceGridVisible(false, null);
                         listener.finishLiveDisplacements(false, container);
                         Toast.makeText(activity, "Not possible due to overlap",
@@ -1005,10 +1039,12 @@ final class WidgetInteractionController {
                                     originalPageAtDown[0], false);
                             widgetPage[0] = originalPageAtDown[0];
                             listener.finishWorkspaceTransferDrag(container, false);
+                        restoreWidgetDrawingState(container, true);
                             listener.setCurrentPage(originalPageAtDown[0]);
                             listener.showPage(originalPageAtDown[0], false);
                         } else {
                             listener.finishWorkspaceTransferDrag(container, commit);
+                            restoreWidgetDrawingState(container, true);
                         }
                         listener.setWorkspaceGridVisible(false, null);
                         if (commit && accepted) listener.saveWidgetGeometry(widgetId, widgetPage[0], container);
