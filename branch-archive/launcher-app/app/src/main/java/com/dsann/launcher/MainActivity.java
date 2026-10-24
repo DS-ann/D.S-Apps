@@ -6030,24 +6030,27 @@ public class MainActivity extends Activity {
         android.widget.ImageView snapshot = snapshotRef != null && snapshotRef.length > 0
                 ? snapshotRef[0] : null;
         // Reverse the same panel, icon preview, pivot, translation and progress used by opening.
-        // Keep both views in the original Dialog surface to avoid a window-to-window flash.
+        // Opening uses DecelerateInterpolator(1.2), whose curve is p = 1 - (1 - t)^2.4.
+        // Start at the last rendered progress and traverse that exact curve backwards.
         final float targetScaleX = Math.max(0.01f, Math.min(1f, resolvedTargetScaleX));
         final float targetScaleY = Math.max(0.01f, Math.min(1f, resolvedTargetScaleY));
-        if (snapshot != null) {
-            snapshot.setVisibility(View.VISIBLE);
-            snapshot.setAlpha(1f - Math.min(1f, initialProgress * 2f));
-            snapshot.setScaleX(1f);
-            snapshot.setScaleY(1f);
-            snapshot.setTranslationX(0f);
-            snapshot.setTranslationY(0f);
-            snapshot.bringToFront();
-        }
-        // Keep the layer mode established by opening. Switching to a hardware layer here
-        // forced a renderer rebuild before the first reverse-morph frame.
+        final double reverseStartTime = 1d
+                - Math.pow(Math.max(0d, 1d - initialProgress), 1d / 2.4d);
+        // A partially completed opening reverses only the elapsed portion of the same path.
+        long reverseDuration = Math.max(1L,
+                Math.round(animationDuration(240L) * reverseStartTime));
         android.animation.ValueAnimator transition =
                 android.animation.ValueAnimator.ofFloat(initialProgress, 0f);
-        transition.setDuration(animationDuration(240L));
-        transition.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
+        transition.setDuration(reverseDuration);
+        transition.setInterpolator(new android.animation.TimeInterpolator() {
+            @Override public float getInterpolation(float input) {
+                if (initialProgress <= 0f) return 1f;
+                double openingTime = reverseStartTime * (1d - input);
+                float pathProgress = (float) (1d - Math.pow(1d - openingTime, 2.4d));
+                return Math.max(0f, Math.min(1f,
+                        (initialProgress - pathProgress) / initialProgress));
+            }
+        });
         transition.addUpdateListener(animation -> {
             // Animate in the Dialog's own hierarchy, exactly like the opening path. Moving the
             // overlay to the Activity root here created a detach/attach frame before animation.
@@ -6081,8 +6084,9 @@ public class MainActivity extends Activity {
                         && morphAnimator[0] == animation) {
                     morphAnimator[0] = null;
                 }
-                // Pin the terminal frame before changing any parent visibility. The icon preview
-                // is now pixel-aligned with the original group icon inside the same root window.
+                if (morphProgress != null) morphProgress[0] = 0f;
+                // Pin the exact reverse endpoint before the Dialog is dismissed. The icon
+                // preview is pixel-aligned with the original group icon in this Dialog surface.
                 panel.setScaleX(targetScaleX);
                 panel.setScaleY(targetScaleY);
                 panel.setTranslationX(offsetX);
@@ -6112,7 +6116,8 @@ public class MainActivity extends Activity {
         if (rootCloseTransition != null && rootCloseTransition.length > 0) {
             rootCloseTransition[0] = true;
         }
-        if (sourceCell != null) sourceCell.setAlpha(0f);
+        // The opening path already owns source-cell visibility. Do not toggle it here:
+        // during a very early outside tap, opening may not yet have hidden that cell.
         transition.start();
     }
 
