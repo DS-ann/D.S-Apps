@@ -5557,12 +5557,13 @@ public class MainActivity extends Activity {
         // Keep the overlay in the Dialog window; closing reverses the opening morph in place.
         overlay.setOnClickListener(v -> closeAppGroupWithAnimation(
                 dialog, panel, dimLayer, closing, morphAnimator, overlay,
-                openingGroupCell, openingGroupCellAlpha));
+                openingGroupCell, openingGroupCellAlpha, morphSnapshotRef, morphProgress));
         overlay.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                     && event.getAction() == android.view.KeyEvent.ACTION_UP) {
                 closeAppGroupWithAnimation(dialog, panel, dimLayer, closing, morphAnimator,
-                        overlay, openingGroupCell, openingGroupCellAlpha);
+                        overlay, openingGroupCell, openingGroupCellAlpha, morphSnapshotRef,
+                        morphProgress);
                 return true;
             }
             return keyCode == android.view.KeyEvent.KEYCODE_BACK;
@@ -5975,7 +5976,8 @@ public class MainActivity extends Activity {
 
     private void closeAppGroupWithAnimation(Dialog dialog, View panel, View dimLayer,
             boolean[] closing, android.animation.ValueAnimator[] morphAnimator,
-            FrameLayout dialogOverlay, View originalGroupCell, float originalGroupCellAlpha) {
+            FrameLayout dialogOverlay, View originalGroupCell, float originalGroupCellAlpha,
+            android.widget.ImageView[] snapshotRef, float[] morphProgress) {
         if (dialog == null || !dialog.isShowing() || panel == null
                 || closing == null || closing[0]) return;
         closing[0] = true;
@@ -5987,59 +5989,121 @@ public class MainActivity extends Activity {
         if (fadingDivider != null) fadingDivider.animate().cancel();
         if (fadingContent != null) fadingContent.animate().cancel();
 
-        if (dialogOverlay == null || dialogOverlay.getParent() == null) {
+        final android.animation.ValueAnimator transition =
+                morphAnimator != null && morphAnimator.length > 0 ? morphAnimator[0] : null;
+        final float currentProgress = morphProgress != null && morphProgress.length > 0
+                ? Math.max(0f, Math.min(1f, morphProgress[0])) : 1f;
+        final android.widget.ImageView snapshot = snapshotRef != null
+                && snapshotRef.length > 0 ? snapshotRef[0] : null;
+        if (dialogOverlay == null || dialogOverlay.getParent() == null
+                || transition == null || currentProgress <= 0.001f) {
+            if (originalGroupCell != null) {
+                originalGroupCell.setAlpha(originalGroupCellAlpha);
+                originalGroupCell.invalidate();
+            }
             if (dialog.isShowing()) dialog.dismiss();
             return;
         }
 
-        // Stop the opening morph cleanly. The close is a direct cross-fade in the same
-        // dialog window, so there is no reparent/dismiss gap before the first close frame.
-        if (morphAnimator != null && morphAnimator.length > 0) {
-            android.animation.ValueAnimator openingTransition = morphAnimator[0];
-            morphAnimator[0] = null;
-            if (openingTransition != null) {
-                openingTransition.removeAllUpdateListeners();
-                openingTransition.removeAllListeners();
-                openingTransition.cancel();
-            }
-        }
-
+        // Reverse the original opening animator in the same dialog window. Keeping its
+        // update listener and interpolation curve avoids a setup frame or window handoff.
         if (dimLayer != null) dimLayer.setAlpha(0f);
         dialogOverlay.setAlpha(1f);
         if (originalGroupCell != null) originalGroupCell.setAlpha(0f);
+        if (snapshot != null) snapshot.setVisibility(View.VISIBLE);
 
-        // Keep the prior 240 ms close duration. Linear, complementary alpha values mean
-        // both surfaces are exactly 50% at the midpoint: dialog 100->0, home icon 0->100.
-        final android.animation.ValueAnimator closeFade =
-                android.animation.ValueAnimator.ofFloat(0f, 1f);
-        closeFade.setDuration(animationDuration(240L));
-        closeFade.setInterpolator(new android.view.animation.LinearInterpolator());
-        closeFade.addUpdateListener(animation -> {
+        // A shorter close uses the shared animation-speed slider. If opening is still
+        // running, reverse its current play time to avoid a discontinuity.
+        if (!transition.isRunning()) {
+            try {
+                transition.setDuration(animationDuration(160L));
+            } catch (IllegalStateException ignored) {
+                // Some platform versions reject duration changes on a started animator.
+                // Reversing the existing animator still gives a continuous close path.
+            }
+        }
+
+        final android.animation.ValueAnimator.AnimatorUpdateListener closeVisuals =
+                animation -> {
             float progress = Math.max(0f, Math.min(1f,
                     (Float) animation.getAnimatedValue()));
-            dialogOverlay.setAlpha(1f - progress);
-            if (originalGroupCell != null) {
-                originalGroupCell.setAlpha(originalGroupCellAlpha * progress);
+            // Reverse the opening fade: the content disappears first, then the card
+            // background fades completely as the panel reaches the home icon.
+            panel.setAlpha(Math.min(1f, progress * 2f));
+            if (snapshot != null) {
+                snapshot.setVisibility(View.VISIBLE);
+                // Keep only a 10% icon proxy for the final handoff; the live home cell
+                // fades in after all dialog content has reached zero opacity.
+                snapshot.setAlpha(0.1f * (1f - Math.min(1f, progress * 2f)));
             }
-        });
-        closeFade.addListener(new android.animation.AnimatorListenerAdapter() {
+            if (originalGroupCell != null) originalGroupCell.setAlpha(0f);
+            if (dimLayer != null) dimLayer.setAlpha(0f);
+        };
+        transition.addUpdateListener(closeVisuals);
+
+        final android.animation.AnimatorListenerAdapter closeEnd =
+                new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
-                if (morphAnimator != null && morphAnimator.length > 0
-                        && morphAnimator[0] == closeFade) {
-                    morphAnimator[0] = null;
+                if (!dialog.isShowing()) return;
+                transition.removeUpdateListener(closeVisuals);
+                transition.removeListener(this);
+                if (morphProgress != null && morphProgress.length > 0) {
+                    morphProgress[0] = 0f;
                 }
-                dialogOverlay.setAlpha(0f);
+
+                // The panel and its text/grid are now fully transparent. Swap the low-alpha
+                // icon proxy for the real home cell in this same UI traversal, then fade it
+                // from 10% to 100% before dismissing the transparent dialog window.
+                panel.setAlpha(0f);
+                if (fadingTitle != null) fadingTitle.setAlpha(0f);
+                if (fadingDivider != null) fadingDivider.setAlpha(0f);
+                if (fadingContent != null) fadingContent.setAlpha(0f);
+                if (dimLayer != null) dimLayer.setAlpha(0f);
+                if (snapshot != null) snapshot.setAlpha(0f);
                 if (originalGroupCell != null) {
-                    originalGroupCell.setAlpha(originalGroupCellAlpha);
+                    originalGroupCell.setAlpha(originalGroupCellAlpha * 0.1f);
                     originalGroupCell.invalidate();
                 }
-                dialog.dismiss();
+
+                final android.animation.ValueAnimator homeIconFade =
+                        android.animation.ValueAnimator.ofFloat(0f, 1f);
+                homeIconFade.setDuration(animationDuration(45L));
+                homeIconFade.setInterpolator(
+                        new android.view.animation.DecelerateInterpolator(1.2f));
+                homeIconFade.addUpdateListener(homeAnimation -> {
+                    float handoff = Math.max(0f, Math.min(1f,
+                            (Float) homeAnimation.getAnimatedValue()));
+                    panel.setAlpha(0f);
+                    if (snapshot != null) snapshot.setAlpha(0f);
+                    if (originalGroupCell != null) {
+                        originalGroupCell.setAlpha(originalGroupCellAlpha
+                                * (0.1f + 0.9f * handoff));
+                    }
+                    if (dimLayer != null) dimLayer.setAlpha(0f);
+                });
+                homeIconFade.addListener(new android.animation.AnimatorListenerAdapter() {
+                    @Override public void onAnimationEnd(android.animation.Animator finished) {
+                        if (morphAnimator != null && morphAnimator.length > 0
+                                && morphAnimator[0] == homeIconFade) {
+                            morphAnimator[0] = null;
+                        }
+                        if (snapshot != null) snapshot.setAlpha(0f);
+                        if (originalGroupCell != null) {
+                            originalGroupCell.setAlpha(originalGroupCellAlpha);
+                            originalGroupCell.invalidate();
+                        }
+                        // Keep the dialog attached until the actual home cell is fully visible.
+                        if (dialog.isShowing()) dialog.dismiss();
+                    }
+                });
+                if (morphAnimator != null && morphAnimator.length > 0) {
+                    morphAnimator[0] = homeIconFade;
+                }
+                homeIconFade.start();
             }
-        });
-        if (morphAnimator != null && morphAnimator.length > 0) {
-            morphAnimator[0] = closeFade;
-        }
-        closeFade.start();
+        };
+        transition.addListener(closeEnd);
+        transition.reverse();
     }
 
     private void clearAppGroupMemberMoveMode() {
