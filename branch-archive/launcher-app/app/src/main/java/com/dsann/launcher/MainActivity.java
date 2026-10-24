@@ -7082,8 +7082,8 @@ public class MainActivity extends Activity {
             if (shortcutPopupShown[0] || shortcutDragging[0]) return;
             shortcutMoveArmed[0] = true;
             setWorkspaceGridVisible(true, tile);
-            // Match widgets: steady 10% enlargement after the move-ready hold.
-            LauncherUiUtils.startScaleHint(tile, 1.10f);
+            // Match widgets: steady 5% enlargement after the move-ready hold.
+            LauncherUiUtils.startScaleHint(tile, 1.05f);
         };
         final Runnable showShortcutPopup = () -> {
             if (!shortcutMoved[0] && !shortcutDragging[0]) {
@@ -7137,9 +7137,9 @@ public class MainActivity extends Activity {
                         float baseScaleY = tile.getScaleY();
                         tile.setPivotX(tile.getWidth() / 2f);
                         tile.setPivotY(tile.getHeight() / 2f);
-                        LauncherUiUtils.startScaleHint(tile, 1.10f);
-                        float targetScaleX = baseScaleX * 1.10f;
-                        float targetScaleY = baseScaleY * 1.10f;
+                        LauncherUiUtils.startScaleHint(tile, 1.05f);
+                        float targetScaleX = baseScaleX * 1.05f;
+                        float targetScaleY = baseScaleY * 1.05f;
                         tile.setScaleX(baseScaleX);
                         tile.setScaleY(baseScaleY);
                         tile.bringToFront();
