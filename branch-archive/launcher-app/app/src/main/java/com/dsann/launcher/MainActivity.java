@@ -9318,6 +9318,11 @@ public class MainActivity extends Activity {
                     saveIconSlot(packageName, targetCol, targetRow, columns);
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
                     ensurePageExists(committedPage);
+                    // The saved page index changed, but the in-memory page lists still
+                    // describe the source page. Rebuild them before rendering so a reverse
+                    // (second-to-first) drop is not recreated on the now-hidden source page.
+                    currentPage = committedPage;
+                    rebuildPages();
                     currentPage = committedPage;
                     restoreIconDragPageVisuals();
                     view.setTranslationX(0f);
