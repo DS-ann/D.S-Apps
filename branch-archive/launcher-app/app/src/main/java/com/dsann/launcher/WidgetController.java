@@ -3,6 +3,8 @@ package com.dsann.launcher;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.SizeF;
@@ -14,6 +16,15 @@ import java.util.Collections;
 /** Shared widget persistence operations, kept out of the activity's view code. */
 final class WidgetController {
     private WidgetController() {}
+
+    private static boolean isPortraitConfiguration() {
+        try {
+            return Resources.getSystem().getConfiguration().orientation
+                    == Configuration.ORIENTATION_PORTRAIT;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
 
     static void updateWidgetSize(AppWidgetManager manager, int widgetId, AppWidgetHostView hostView,
                                  float density, int widthPx, int heightPx) {
@@ -79,13 +90,21 @@ final class WidgetController {
             if (updated.length() > 0) updated.append('\n');
             updated.append(widgetId).append(':').append(pageIndex);
         }
-        prefs.edit()
+        SharedPreferences.Editor editor = prefs.edit()
                 .putInt("widget_x_" + widgetId, lp.leftMargin)
                 .putInt("widget_y_" + widgetId, lp.topMargin)
                 .putInt("widget_w_" + widgetId, lp.width)
                 .putInt("widget_h_" + widgetId, lp.height)
-                .putString(widgetIdsKey, updated.toString())
-                .commit();
+                .putString(widgetIdsKey, updated.toString());
+        if (isPortraitConfiguration()) {
+            editor.putString("__portrait_workspace_geometry__launcher_widget:" + widgetId,
+                    pageIndex + "," + lp.leftMargin + "," + lp.topMargin + ","
+                            + lp.width + "," + lp.height + "," + container.getScaleX() + ","
+                            + container.getScaleY() + "," + container.getTranslationX() + ","
+                            + container.getTranslationY() + "," + container.getRotationX() + ","
+                            + container.getRotationY());
+        }
+        editor.commit();
     }
 
     static void removeWidget(SharedPreferences prefs, String widgetIdsKey, int widgetId) {
@@ -101,6 +120,7 @@ final class WidgetController {
         }
         prefs.edit().putString(widgetIdsKey, updated.toString())
                 .remove("widget_x_" + widgetId).remove("widget_y_" + widgetId)
-                .remove("widget_w_" + widgetId).remove("widget_h_" + widgetId).commit();
+                .remove("widget_w_" + widgetId).remove("widget_h_" + widgetId)
+                .remove("__portrait_workspace_geometry__launcher_widget:" + widgetId).commit();
     }
 }

@@ -1,6 +1,10 @@
 package com.dsann.launcher;
 
 import android.app.Activity;
+import android.appwidget.AppWidgetHostView;
+import android.appwidget.AppWidgetManager;
+import android.content.res.Configuration;
+import android.graphics.Rect;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -12,7 +16,12 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TreeSet;
 
 /** Renders home pages and icon cells; gesture behavior remains owned by the activity. */
 final class HomePageController {
@@ -50,6 +59,429 @@ final class HomePageController {
     private final int homeRows;
     private final java.util.WeakHashMap<View, Boolean> workspaceItemAttachWatchers =
             new java.util.WeakHashMap<View, Boolean>();
+    private final java.util.WeakHashMap<View, Boolean> orientationGeometryWatchers =
+            new java.util.WeakHashMap<View, Boolean>();
+    private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
+
+    private static final class WorkspaceGeometry {
+        final int page, left, top, width, height;
+        final float scaleX, scaleY, translationX, translationY, rotationX, rotationY;
+        WorkspaceGeometry(int page, int left, int top, int width, int height,
+                          float scaleX, float scaleY, float translationX, float translationY,
+                          float rotationX, float rotationY) {
+            this.page = page; this.left = left; this.top = top; this.width = width; this.height = height;
+            this.scaleX = scaleX; this.scaleY = scaleY; this.translationX = translationX;
+            this.translationY = translationY; this.rotationX = rotationX; this.rotationY = rotationY;
+        }
+    }
+
+    private boolean isLandscapeOrientation(LinearLayout strip) {
+        int orientation = activity.getResources().getConfiguration().orientation;
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) return true;
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) return false;
+        if (strip != null && strip.getChildCount() > 0) {
+            View page = strip.getChildAt(0);
+            return page.getWidth() > 0 && page.getWidth() > page.getHeight();
+        }
+        return false;
+    }
+
+    private boolean isPortraitOrientation() {
+        return !isLandscapeOrientation(host.getPagesStrip());
+    }
+
+    private boolean isOrientationManagedItem(View item) {
+        if (item == null || !(item.getTag() instanceof String)) return false;
+        String tag = (String) item.getTag();
+        return tag.startsWith("launcher_widget:")
+                || tag.contains("shortcut")
+                || tag.contains("group")
+                || tag.contains("clock_widget");
+    }
+
+    private String portraitGeometryKey(View item) {
+        return item == null || !(item.getTag() instanceof String)
+                ? null : PORTRAIT_GEOMETRY_PREFIX + item.getTag();
+    }
+
+    private int pageIndexOf(View item, LinearLayout strip) {
+        if (item == null || strip == null || !(item.getParent() instanceof FrameLayout)) return -1;
+        return strip.indexOfChild((View) item.getParent());
+    }
+
+    private WorkspaceGeometry readPortraitGeometry(View item) {
+        String key = portraitGeometryKey(item);
+        if (key == null) return null;
+        String value = prefs.getString(key, null);
+        if (value == null) return null;
+        String[] parts = value.split(",");
+        if (parts.length < 11) return null;
+        try {
+            return new WorkspaceGeometry(
+                    Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+                    Integer.parseInt(parts[3]), Integer.parseInt(parts[4]),
+                    Float.parseFloat(parts[5]), Float.parseFloat(parts[6]),
+                    Float.parseFloat(parts[7]), Float.parseFloat(parts[8]),
+                    Float.parseFloat(parts[9]), Float.parseFloat(parts[10]));
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void savePortraitGeometry(View item, LinearLayout strip) {
+        if (!isPortraitOrientation() || !isOrientationManagedItem(item)
+                || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+        int width = lp.width > 0 ? lp.width : item.getWidth();
+        int height = lp.height > 0 ? lp.height : item.getHeight();
+        int page = pageIndexOf(item, strip);
+        if (page < 0 || width <= 0 || height <= 0) return;
+        String value = page + "," + lp.leftMargin + "," + lp.topMargin + ","
+                + width + "," + height + "," + item.getScaleX() + "," + item.getScaleY() + ","
+                + item.getTranslationX() + "," + item.getTranslationY() + ","
+                + item.getRotationX() + "," + item.getRotationY();
+        prefs.edit().putString(portraitGeometryKey(item), value).apply();
+    }
+
+    private void watchOrientationGeometry(View item, LinearLayout strip) {
+        if (!isOrientationManagedItem(item) || orientationGeometryWatchers.containsKey(item)) return;
+        item.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> savePortraitGeometry(view, strip));
+        item.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) {
+                savePortraitGeometry(view, strip);
+            }
+            @Override public void onViewDetachedFromWindow(View view) { }
+        });
+        orientationGeometryWatchers.put(item, Boolean.TRUE);
+    }
+
+    private ArrayList<View> collectManagedItems(LinearLayout strip) {
+        ArrayList<View> items = new ArrayList<>();
+        if (strip == null) return items;
+        for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
+            View pageView = strip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                View child = page.getChildAt(childIndex);
+                if (isOrientationManagedItem(child)) items.add(child);
+            }
+        }
+        return items;
+    }
+
+    private FrameLayout.LayoutParams copyWorkspaceParams(View item, int width, int height,
+                                                          int left, int top) {
+        ViewGroup.LayoutParams raw = item.getLayoutParams();
+        FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
+                ? new FrameLayout.LayoutParams((FrameLayout.LayoutParams) raw)
+                : new FrameLayout.LayoutParams(width, height, Gravity.TOP | Gravity.LEFT);
+        lp.width = width;
+        lp.height = height;
+        lp.leftMargin = left;
+        lp.topMargin = top;
+        return lp;
+    }
+
+    private void syncWidgetGeometryPreference(View item, int pageIndex, FrameLayout.LayoutParams lp) {
+        if (!isPortraitOrientation() || !(item.getTag() instanceof String)) return;
+        String tag = (String) item.getTag();
+        if (!tag.startsWith("launcher_widget:")) return;
+        String idText = tag.substring("launcher_widget:".length());
+        int widgetId;
+        try { widgetId = Integer.parseInt(idText); }
+        catch (NumberFormatException ignored) { return; }
+
+        SharedPreferences.Editor editor = prefs.edit()
+                .putInt("widget_x_" + widgetId, lp.leftMargin)
+                .putInt("widget_y_" + widgetId, lp.topMargin)
+                .putInt("widget_w_" + widgetId, lp.width)
+                .putInt("widget_h_" + widgetId, lp.height);
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+            if (!entry.getKey().toLowerCase(Locale.US).contains("widget")
+                    || !(entry.getValue() instanceof String)) continue;
+            String stored = (String) entry.getValue();
+            String[] lines = stored.split("\\n");
+            boolean changed = false;
+            StringBuilder updated = new StringBuilder();
+            for (String line : lines) {
+                String[] parts = line.split(":");
+                if (parts.length == 2 && parts[0].trim().equals(String.valueOf(widgetId))) {
+                    line = widgetId + ":" + pageIndex;
+                    changed = true;
+                }
+                if (updated.length() > 0) updated.append('\n');
+                updated.append(line);
+            }
+            if (changed) editor.putString(entry.getKey(), updated.toString());
+        }
+        editor.apply();
+        if (item instanceof ViewGroup && ((ViewGroup) item).getChildCount() > 0
+                && ((ViewGroup) item).getChildAt(0) instanceof AppWidgetHostView
+                && lp.width > 0 && lp.height > 0) {
+            WidgetController.updateWidgetSize(AppWidgetManager.getInstance(activity), widgetId,
+                    (AppWidgetHostView) ((ViewGroup) item).getChildAt(0),
+                    activity.getResources().getDisplayMetrics().density, lp.width, lp.height);
+        }
+    }
+
+    private void restoreSavedWorkspaceGeometry(LinearLayout strip) {
+        if (strip == null) return;
+        ArrayList<View> items = collectManagedItems(strip);
+        for (View item : items) {
+            WorkspaceGeometry geometry = readPortraitGeometry(item);
+            if (geometry == null) {
+                watchOrientationGeometry(item, strip);
+                continue;
+            }
+            int targetPageIndex = Math.max(0, Math.min(strip.getChildCount() - 1, geometry.page));
+            if (targetPageIndex < 0 || !(strip.getChildAt(targetPageIndex) instanceof FrameLayout)) continue;
+            FrameLayout targetPage = (FrameLayout) strip.getChildAt(targetPageIndex);
+            ViewParent parent = item.getParent();
+            FrameLayout.LayoutParams lp = copyWorkspaceParams(item, geometry.width, geometry.height,
+                    geometry.left, geometry.top);
+            if (parent != targetPage) {
+                if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(item);
+                targetPage.addView(item, lp);
+            } else {
+                item.setLayoutParams(lp);
+            }
+            item.setScaleX(geometry.scaleX);
+            item.setScaleY(geometry.scaleY);
+            item.setTranslationX(geometry.translationX);
+            item.setTranslationY(geometry.translationY);
+            item.setRotationX(geometry.rotationX);
+            item.setRotationY(geometry.rotationY);
+            watchOrientationGeometry(item, strip);
+            syncWidgetGeometryPreference(item, targetPageIndex, lp);
+        }
+    }
+
+    private void snapshotPortraitWorkspaceGeometry(LinearLayout strip) {
+        if (strip == null || !isPortraitOrientation()) return;
+        for (View item : collectManagedItems(strip)) {
+            watchOrientationGeometry(item, strip);
+            savePortraitGeometry(item, strip);
+        }
+    }
+
+    private Rect workspaceBounds(View item, int left, int top, int width, int height) {
+        float sx = Math.max(0.01f, item.getScaleX());
+        float sy = Math.max(0.01f, item.getScaleY());
+        int visualLeft = Math.round(left + item.getTranslationX() + item.getPivotX() * (1f - sx));
+        int visualTop = Math.round(top + item.getTranslationY() + item.getPivotY() * (1f - sy));
+        int visualWidth = Math.max(1, Math.round(Math.max(1, width) * sx));
+        int visualHeight = Math.max(1, Math.round(Math.max(1, height) * sy));
+        return new Rect(visualLeft, visualTop, visualLeft + visualWidth, visualTop + visualHeight);
+    }
+
+    private Rect visibleAppBounds(View item) {
+        if (!(item instanceof ViewGroup) || !(item.getTag() instanceof String)
+                || !((String) item.getTag()).startsWith("launcher_app:")) return null;
+        ViewGroup cell = (ViewGroup) item;
+        Rect result = null;
+        int rootLeft = item.getLeft();
+        int rootTop = item.getTop();
+        int count = Math.min(2, cell.getChildCount());
+        for (int i = 0; i < count; i++) {
+            View child = cell.getChildAt(i);
+            if (child == null || child.getVisibility() != View.VISIBLE) continue;
+            int childWidth = child.getWidth();
+            int childHeight = child.getHeight();
+            if (childWidth <= 0 || childHeight <= 0) continue;
+            int left = rootLeft + child.getLeft();
+            int top = rootTop + child.getTop();
+            int width = childWidth;
+            int height = childHeight;
+            if (i == 1 && child instanceof TextView) {
+                TextView label = (TextView) child;
+                CharSequence text = label.getText();
+                if (text == null || text.length() == 0) continue;
+                android.graphics.Paint paint = label.getPaint();
+                android.graphics.Paint.FontMetrics metrics = paint.getFontMetrics();
+                int paintedWidth = Math.min(Math.max(0, childWidth
+                        - label.getCompoundPaddingLeft() - label.getCompoundPaddingRight()),
+                        Math.round(paint.measureText(text.toString())));
+                width = Math.max(1, paintedWidth);
+                height = Math.max(1, Math.round(metrics.descent - metrics.ascent));
+                left += label.getCompoundPaddingLeft()
+                        + Math.max(0, (childWidth - label.getCompoundPaddingLeft()
+                                - label.getCompoundPaddingRight() - width) / 2);
+                top += label.getCompoundPaddingTop()
+                        + Math.max(0, (childHeight - label.getCompoundPaddingTop()
+                                - label.getCompoundPaddingBottom() - height) / 2);
+            }
+            Rect part = new Rect(left, top, left + width, top + height);
+            if (result == null) result = part;
+            else result.union(part);
+        }
+        return result;
+    }
+
+    private ArrayList<Integer> orderedPositions(int max, int preferred, int step) {
+        TreeSet<Integer> positions = new TreeSet<>();
+        positions.add(0);
+        positions.add(Math.max(0, max));
+        positions.add(Math.max(0, Math.min(max, preferred)));
+        for (int value = 0; value <= max; value += Math.max(1, step)) positions.add(value);
+        ArrayList<Integer> ordered = new ArrayList<>(positions);
+        final int reference = Math.max(0, Math.min(max, preferred));
+        Collections.sort(ordered, (a, b) -> {
+            int distance = Integer.compare(Math.abs(a - reference), Math.abs(b - reference));
+            return distance != 0 ? distance : Integer.compare(a, b);
+        });
+        return ordered;
+    }
+
+    private int[] findFreePosition(View item, int preferredLeft, int preferredTop, int width, int height,
+                                   int pageWidth, int pageHeight, ArrayList<Rect> occupied, int step) {
+        if (width <= 0 || height <= 0 || width > pageWidth || height > pageHeight) return null;
+        int maxLeft = pageWidth - width;
+        int maxTop = pageHeight - height;
+        ArrayList<Integer> topPositions = orderedPositions(maxTop, preferredTop, step);
+        ArrayList<Integer> leftPositions = orderedPositions(maxLeft, preferredLeft, step);
+        for (int top : topPositions) {
+            for (int left : leftPositions) {
+                Rect candidate = workspaceBounds(item, left, top, width, height);
+                boolean intersects = false;
+                for (Rect used : occupied) {
+                    if (Rect.intersects(candidate, used)) { intersects = true; break; }
+                }
+                if (!intersects) return new int[]{left, top};
+            }
+        }
+        return null;
+    }
+
+    private boolean isResizableLandscapeItem(View item) {
+        if (!(item.getTag() instanceof String)) return false;
+        String tag = (String) item.getTag();
+        return tag.startsWith("launcher_widget:") || tag.contains("clock_widget");
+    }
+
+    private void resizeAppWidgetForLandscape(View item, int width, int height) {
+        if (!(item instanceof ViewGroup) || !(item.getTag() instanceof String)
+                || !((String) item.getTag()).startsWith("launcher_widget:")) return;
+        ViewGroup container = (ViewGroup) item;
+        if (container.getChildCount() == 0 || !(container.getChildAt(0) instanceof AppWidgetHostView)) return;
+        try {
+            int widgetId = Integer.parseInt(((String) item.getTag()).substring("launcher_widget:".length()));
+            WidgetController.updateWidgetSize(AppWidgetManager.getInstance(activity), widgetId,
+                    (AppWidgetHostView) container.getChildAt(0),
+                    activity.getResources().getDisplayMetrics().density, width, height);
+        } catch (NumberFormatException ignored) {
+            // Keep the container at its landscape-selected dimensions.
+        }
+    }
+
+    private void adaptLandscapeWorkspace(LinearLayout strip) {
+        if (strip == null) return;
+        int step = Math.max(1, LauncherUiUtils.dp(activity, 4));
+        int fineStep = Math.max(1, LauncherUiUtils.dp(activity, 1));
+        for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
+            View pageView = strip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            int pageWidth = page.getWidth();
+            int pageHeight = page.getHeight();
+            if (pageWidth <= 0 || pageHeight <= 0) continue;
+
+            ArrayList<Rect> occupied = new ArrayList<>();
+            ArrayList<View> items = new ArrayList<>();
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View child = page.getChildAt(i);
+                if (child.getVisibility() != View.VISIBLE) continue;
+                Object tag = child.getTag();
+                if (!(tag instanceof String)) continue;
+                String name = (String) tag;
+                if (name.startsWith("launcher_app:")) {
+                    Rect iconBounds = visibleAppBounds(child);
+                    if (iconBounds != null && !iconBounds.isEmpty()) occupied.add(iconBounds);
+                } else if (isOrientationManagedItem(child)) {
+                    items.add(child);
+                }
+            }
+            // Keep shortcuts and groups in their rows where possible. Flexible widgets/clocks
+            // are packed afterwards so they yield space before fixed-size launcher items.
+            Collections.sort(items, (first, second) -> {
+                int flexCompare = Boolean.compare(isResizableLandscapeItem(first), isResizableLandscapeItem(second));
+                if (flexCompare != 0) return flexCompare;
+                FrameLayout.LayoutParams a = first.getLayoutParams() instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) first.getLayoutParams() : null;
+                FrameLayout.LayoutParams b = second.getLayoutParams() instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) second.getLayoutParams() : null;
+                int topA = a == null ? first.getTop() : a.topMargin;
+                int topB = b == null ? second.getTop() : b.topMargin;
+                int rowCompare = Integer.compare(topA, topB);
+                if (rowCompare != 0) return rowCompare;
+                int leftA = a == null ? first.getLeft() : a.leftMargin;
+                int leftB = b == null ? second.getLeft() : b.leftMargin;
+                return Integer.compare(leftA, leftB);
+            });
+
+            for (View item : items) {
+                if (!(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+                FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) item.getLayoutParams();
+                int originalLeft = current.leftMargin;
+                int originalTop = current.topMargin;
+                int originalWidth = current.width > 0 ? current.width : item.getWidth();
+                int originalHeight = current.height > 0 ? current.height : item.getHeight();
+                if (originalWidth <= 0 || originalHeight <= 0) continue;
+                int width = Math.min(pageWidth, originalWidth);
+                int height = Math.min(pageHeight, originalHeight);
+                int[] position = findFreePosition(item, originalLeft, originalTop, width, height,
+                        pageWidth, pageHeight, occupied, step);
+                if (position == null) {
+                    position = findFreePosition(item, originalLeft, originalTop, width, height,
+                            pageWidth, pageHeight, occupied, fineStep);
+                }
+                boolean resizable = isResizableLandscapeItem(item);
+                while (position == null && resizable && (width > 1 || height > 1)) {
+                    int reducedWidth = Math.max(1, Math.round(width * 0.8f));
+                    int reducedHeight = Math.max(1, Math.round(height * 0.8f));
+                    if (reducedWidth == width && width > 1) reducedWidth--;
+                    if (reducedHeight == height && height > 1) reducedHeight--;
+                    width = reducedWidth;
+                    height = reducedHeight;
+                    position = findFreePosition(item, originalLeft, originalTop, width, height,
+                            pageWidth, pageHeight, occupied, step);
+                    if (position == null) {
+                        position = findFreePosition(item, originalLeft, originalTop, width, height,
+                                pageWidth, pageHeight, occupied, fineStep);
+                    }
+                }
+                if (position == null) {
+                    // Keep a final fallback for an already completely saturated workspace.
+                    position = new int[]{Math.max(0, Math.min(pageWidth - width, originalLeft)),
+                            Math.max(0, Math.min(pageHeight - height, originalTop))};
+                }
+                FrameLayout.LayoutParams placed = copyWorkspaceParams(item, width, height,
+                        position[0], position[1]);
+                item.setLayoutParams(placed);
+                Rect placedBounds = workspaceBounds(item, position[0], position[1], width, height);
+                occupied.add(placedBounds);
+                if (width != originalWidth || height != originalHeight) {
+                    resizeAppWidgetForLandscape(item, width, height);
+                }
+                item.invalidate();
+            }
+        }
+    }
+
+    private void scheduleOrientationWorkspaceRepair(LinearLayout strip) {
+        if (strip == null) return;
+        // Two posted passes let the regular app-cell corrections and widget restoration finish
+        // before collision bounds are calculated for the current orientation.
+        strip.post(() -> strip.post(() -> {
+            restoreSavedWorkspaceGeometry(strip);
+            if (isLandscapeOrientation(strip)) {
+                adaptLandscapeWorkspace(strip);
+            } else {
+                snapshotPortraitWorkspaceGeometry(strip);
+            }
+        }));
+    }
 
     HomePageController(Activity activity, SharedPreferences prefs, PackageManager packageManager,
                        Host host, String iconXKey, String iconYKey, String showLabelsKey, String iconSizeKey, String fontSizeKey, String showPageIndicatorKey, int homeRows) {
@@ -373,6 +805,7 @@ final class HomePageController {
 
         host.restoreWidgetsOnPages();
         normalizeMovedWorkspaceItemVisibility(strip, requiredPages);
+        scheduleOrientationWorkspaceRepair(strip);
         if (host.getPageIndicator() != null) {
             boolean showIndicator = requiredPages > 1
                     && prefs.getBoolean(showPageIndicatorKey, true);

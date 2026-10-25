@@ -2,6 +2,8 @@ package com.dsann.launcher;
 
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
+import android.content.res.Resources;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +14,23 @@ import java.util.List;
  */
 final class HomePageModel {
     static final int PAGE_COUNT = 2;
+
+    private static final String PORTRAIT_PAGE_PREFIX = "__portrait_icon_page__";
+    private static final String PORTRAIT_X_PREFIX = "__portrait_icon_x__";
+    private static final String PORTRAIT_Y_PREFIX = "__portrait_icon_y__";
+    private static final String LAST_LANDSCAPE_KEY = "__workspace_last_was_landscape";
+    private static final String PORTRAIT_ROWS_KEY = "__workspace_portrait_grid_rows";
+
+    private static boolean isLandscapeConfiguration(SharedPreferences prefs, int rows) {
+        try {
+            int orientation = Resources.getSystem().getConfiguration().orientation;
+            if (orientation == Configuration.ORIENTATION_LANDSCAPE) return true;
+            if (orientation == Configuration.ORIENTATION_PORTRAIT) return false;
+        } catch (RuntimeException ignored) {
+            // Fall back to the last known portrait grid when system configuration is unavailable.
+        }
+        return rows < prefs.getInt(PORTRAIT_ROWS_KEY, rows);
+    }
 
     static final class Result {
         final List<List<String>> pages;
@@ -31,6 +50,11 @@ final class HomePageModel {
         columns = Math.max(1, columns);
         rows = Math.max(1, rows);
 
+        boolean landscapeLayout = isLandscapeConfiguration(prefs, rows);
+        boolean restorePortraitLayout = !landscapeLayout
+                && prefs.getBoolean(LAST_LANDSCAPE_KEY, false);
+        boolean usePortraitCoordinates = landscapeLayout || restorePortraitLayout;
+
         List<List<String>> pages = new ArrayList<>();
         pages.add(new ArrayList<String>());
         pages.add(new ArrayList<String>());
@@ -49,7 +73,10 @@ final class HomePageModel {
         // many apps on one page, migrate the overflow to the other page instead of
         // letting the renderer silently omit shortcuts below the dock.
         for (String name : unique) {
-            int preferredPage = clampPage(prefs.getInt(iconPagePrefix + name, 0));
+            String portraitPageKey = PORTRAIT_PAGE_PREFIX + name;
+            int storedPage = prefs.getInt(iconPagePrefix + name, 0);
+            int preferredPage = clampPage(usePortraitCoordinates && prefs.contains(portraitPageKey)
+                    ? prefs.getInt(portraitPageKey, storedPage) : storedPage);
             int otherPage = 1 - preferredPage;
             int page = preferredPage;
             if (pageLoads[page] >= pageCapacity && pageLoads[otherPage] < pageCapacity) {
@@ -69,10 +96,16 @@ final class HomePageModel {
                 String name = items.get(index);
                 int defaultCol = index % columns;
                 int defaultRow = index / columns;
-                float sx = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXPrefix + name,
+                float storedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXPrefix + name,
                         defaultCol / (float) Math.max(1, columns - 1));
-                float sy = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYPrefix + name,
+                float storedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYPrefix + name,
                         defaultRow / (float) Math.max(1, effectiveRows - 1));
+                String portraitXKey = PORTRAIT_X_PREFIX + name;
+                String portraitYKey = PORTRAIT_Y_PREFIX + name;
+                float sx = usePortraitCoordinates && prefs.contains(portraitXKey)
+                        ? prefs.getFloat(portraitXKey, storedX) : storedX;
+                float sy = usePortraitCoordinates && prefs.contains(portraitYKey)
+                        ? prefs.getFloat(portraitYKey, storedY) : storedY;
                 int wantedCol = Math.max(0, Math.min(columns - 1,
                         Math.round(sx * Math.max(1, columns - 1))));
                 int wantedRow = Math.max(0, Math.min(effectiveRows - 1,
@@ -96,9 +129,17 @@ final class HomePageModel {
                     }
                 }
                 used[row][col] = true;
+                float normalizedX = col / (float) Math.max(1, columns - 1);
+                float normalizedY = row / (float) Math.max(1, effectiveRows - 1);
                 edit.putInt(iconPagePrefix + name, pageIndex);
-                edit.putFloat(iconXPrefix + name, col / (float) Math.max(1, columns - 1));
-                edit.putFloat(iconYPrefix + name, row / (float) Math.max(1, effectiveRows - 1));
+                edit.putFloat(iconXPrefix + name, normalizedX);
+                edit.putFloat(iconYPrefix + name, normalizedY);
+                if (!landscapeLayout) {
+                    // Portrait-only values remain the source of truth after rotation back.
+                    edit.putInt(PORTRAIT_PAGE_PREFIX + name, pageIndex);
+                    edit.putFloat(PORTRAIT_X_PREFIX + name, normalizedX);
+                    edit.putFloat(PORTRAIT_Y_PREFIX + name, normalizedY);
+                }
             }
         }
 
@@ -132,6 +173,8 @@ final class HomePageModel {
             normalizedWidgets.append(widgetIds.get(i)).append(':').append(widgetPages.get(i));
         }
         edit.putString(widgetIdsKey, normalizedWidgets.toString());
+        edit.putBoolean(LAST_LANDSCAPE_KEY, landscapeLayout);
+        if (!landscapeLayout) edit.putInt(PORTRAIT_ROWS_KEY, rows);
         edit.apply();
 
         return new Result(pages, clampPage(requestedPage));
