@@ -3094,6 +3094,34 @@ public class MainActivity extends Activity {
         // drawer receives a genuine PackageManager ResolveInfo on every refresh.
         List<ResolveInfo> result = new ArrayList<>(
                 packageManager.queryIntentActivities(query, 0));
+
+        // A few Android builds temporarily omit an app's own launcher component from
+        // queryIntentActivities while returning from an activity in the same package.
+        // Keep exactly one real BlankActivity ResolveInfo so the D.S Launcher icon survives
+        // every onResume/package refresh instead of disappearing after Back.
+        boolean hasBlankActivity = false;
+        for (int index = result.size() - 1; index >= 0; index--) {
+            ResolveInfo candidate = result.get(index);
+            if (candidate == null || candidate.activityInfo == null
+                    || !getPackageName().equals(candidate.activityInfo.packageName)) continue;
+            if (BlankActivity.class.getName().equals(candidate.activityInfo.name)) {
+                if (hasBlankActivity) result.remove(index);
+                else hasBlankActivity = true;
+            } else {
+                result.remove(index);
+            }
+        }
+        if (!hasBlankActivity) {
+            try {
+                ResolveInfo ownEntry = new ResolveInfo();
+                ownEntry.activityInfo = packageManager.getActivityInfo(
+                        new Intent(this, BlankActivity.class).getComponent(), 0);
+                result.add(ownEntry);
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // Keep the rest of the app drawer available if package metadata is unavailable.
+            }
+        }
+
         // PackageManager label loading is relatively expensive on older devices. Sort
         // by a single precomputed label per activity instead of loading both labels for
         // every comparator invocation (O(n log n) resource lookups).
@@ -3688,7 +3716,11 @@ public class MainActivity extends Activity {
      * This is deliberately independent of icon and label dimensions.
      */
     private int homeGridBottomGapPx() {
-        return LauncherUiUtils.dp(this, 40);
+        // In landscape use half the portrait dock clearance, placing the bottom app
+        // row 20dp from the dock edge instead of the portrait 40dp clearance.
+        boolean landscape = getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+        return LauncherUiUtils.dp(this, landscape ? 20 : 40);
     }
 
     /**

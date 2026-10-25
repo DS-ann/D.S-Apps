@@ -64,6 +64,9 @@ final class HomePageController {
             new java.util.WeakHashMap<View, Boolean>();
     private final java.util.WeakHashMap<View, float[]> landscapeClockBaseScales =
             new java.util.WeakHashMap<View, float[]>();
+    private final java.util.WeakHashMap<View, View.OnLayoutChangeListener>
+            pendingLandscapeClockFitListeners =
+                    new java.util.WeakHashMap<View, View.OnLayoutChangeListener>();
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
 
     private static final String PORTRAIT_APP_ROW_WIDTH_DP_KEY =
@@ -427,6 +430,94 @@ final class HomePageController {
                 && ((String) item.getTag()).startsWith("launcher_widget:");
     }
 
+    private String landscapeWidgetSizePreferenceKey(View item, String kind, String axis) {
+        if (!isWidgetWorkspaceItem(item)) return null;
+        String id = ((String) item.getTag()).substring("launcher_widget:".length());
+        return "__landscape_widget_" + kind + "_" + axis + "_" + id;
+    }
+
+    /**
+     * Return the widget's intended size, not a size reduced by a previous landscape
+     * repair. The last fitted dimensions distinguish an automatic reduction from a
+     * deliberate resize performed by the user while the launcher remains in landscape.
+     */
+    private int[] getLandscapeWidgetBaseSize(View item, int currentWidth, int currentHeight) {
+        WorkspaceGeometry portrait = readPortraitGeometry(item);
+        String baseWidthKey = landscapeWidgetSizePreferenceKey(item, "base", "width");
+        String baseHeightKey = landscapeWidgetSizePreferenceKey(item, "base", "height");
+        String fittedWidthKey = landscapeWidgetSizePreferenceKey(item, "fitted", "width");
+        String fittedHeightKey = landscapeWidgetSizePreferenceKey(item, "fitted", "height");
+
+        int baseWidth = prefs.getInt(baseWidthKey, -1);
+        int baseHeight = prefs.getInt(baseHeightKey, -1);
+        int lastFittedWidth = prefs.getInt(fittedWidthKey, -1);
+        int lastFittedHeight = prefs.getInt(fittedHeightKey, -1);
+
+        if (baseWidth <= 0) {
+            baseWidth = portrait != null && portrait.width > 0 ? portrait.width : currentWidth;
+        } else if (lastFittedWidth > 0 && currentWidth > 0
+                && currentWidth != lastFittedWidth) {
+            // A changed live layout size is a user resize or a portrait restoration;
+            // treat it as the new intended width rather than compounding the old shrink.
+            baseWidth = portrait != null && currentWidth == portrait.width
+                    ? portrait.width : currentWidth;
+        }
+
+        if (baseHeight <= 0) {
+            baseHeight = portrait != null && portrait.height > 0 ? portrait.height : currentHeight;
+        } else if (lastFittedHeight > 0 && currentHeight > 0
+                && currentHeight != lastFittedHeight) {
+            baseHeight = portrait != null && currentHeight == portrait.height
+                    ? portrait.height : currentHeight;
+        }
+
+        baseWidth = Math.max(1, baseWidth);
+        baseHeight = Math.max(1, baseHeight);
+        prefs.edit().putInt(baseWidthKey, baseWidth).putInt(baseHeightKey, baseHeight).apply();
+        return new int[]{baseWidth, baseHeight};
+    }
+
+    private void saveLandscapeWidgetFittedSize(View item, int width, int height) {
+        if (!isWidgetWorkspaceItem(item) || width <= 0 || height <= 0) return;
+        prefs.edit()
+                .putInt(landscapeWidgetSizePreferenceKey(item, "fitted", "width"), width)
+                .putInt(landscapeWidgetSizePreferenceKey(item, "fitted", "height"), height)
+                .apply();
+    }
+
+    private void reserveAppGroupGridSlots(FrameLayout page, boolean[][] occupiedSlots,
+            int columns, int rows, int pageHeight, int cellWidth, int cellHeight) {
+        if (page == null || occupiedSlots == null || columns <= 0 || rows <= 0
+                || cellWidth <= 0 || cellHeight <= 0) return;
+        for (int index = 0; index < page.getChildCount(); index++) {
+            View group = page.getChildAt(index);
+            if (!isAppGroupWorkspaceItem(group) || group.getVisibility() != View.VISIBLE) continue;
+            int width = group.getWidth();
+            int height = group.getHeight();
+            int left = group.getLeft();
+            int top = group.getTop();
+            ViewGroup.LayoutParams raw = group.getLayoutParams();
+            if (raw instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                if (lp.width > 0) width = lp.width;
+                if (lp.height > 0) height = lp.height;
+                if (group.getWidth() <= 0) left = lp.leftMargin;
+                if (group.getHeight() <= 0) top = lp.topMargin;
+            }
+            if (width <= 0 || height <= 0) continue;
+            Rect groupBounds = workspaceBounds(group, left, top, width, height);
+            for (int row = 0; row < rows; row++) {
+                int slotTop = host.getHomeGridRowTop(row, rows, pageHeight, cellHeight);
+                for (int col = 0; col < columns; col++) {
+                    int slotLeft = col * cellWidth;
+                    Rect slot = new Rect(slotLeft, slotTop,
+                            slotLeft + cellWidth, slotTop + cellHeight);
+                    if (Rect.intersects(groupBounds, slot)) occupiedSlots[row][col] = true;
+                }
+            }
+        }
+    }
+
     private String landscapeClockAutoScaleKey(int pageIndex, boolean horizontal) {
         return "workspace_landscape_clock_auto_scale_"
                 + (horizontal ? "x" : "y") + "_page_" + pageIndex;
@@ -598,6 +689,27 @@ final class HomePageController {
      * for collision clearance. The base dimensions are saved independently so a stale
      * landscape factor cannot make a clock remain tiny when a later pass has room.
      */
+    private void scheduleClockFitAfterMeasurement(View clock) {
+        if (clock == null || pendingLandscapeClockFitListeners.containsKey(clock)) return;
+        View.OnLayoutChangeListener listener = new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                view.removeOnLayoutChangeListener(this);
+                pendingLandscapeClockFitListeners.remove(view);
+                LinearLayout strip = host.getPagesStrip();
+                if (strip != null && isLandscapeOrientation(strip)) {
+                    // The initial repair can run before wrap-content clock panels have
+                    // measured their date line. Re-run after the first real measurement,
+                    // so a stale auto-shrink factor cannot leave the clock tiny or overlapping.
+                    strip.post(() -> adaptLandscapeWorkspace(strip));
+                }
+            }
+        };
+        pendingLandscapeClockFitListeners.put(clock, listener);
+        clock.addOnLayoutChangeListener(listener);
+    }
+
     private void fitClockAtFixedPosition(View clock, FrameLayout page,
             ArrayList<Rect> occupied) {
         if (!(clock.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
@@ -610,7 +722,10 @@ final class HomePageController {
         final int top = clock.getTop();
         int width = current.width > 0 ? current.width : clock.getWidth();
         int height = current.height > 0 ? current.height : clock.getHeight();
-        if (width <= 0 || height <= 0) return;
+        if (width <= 0 || height <= 0) {
+            scheduleClockFitAfterMeasurement(clock);
+            return;
+        }
 
         String keyX = landscapeClockAutoScaleKey(pageIndex, true);
         String keyY = landscapeClockAutoScaleKey(pageIndex, false);
@@ -794,25 +909,32 @@ final class HomePageController {
                 FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) item.getLayoutParams();
                 int originalLeft = current.leftMargin;
                 int originalTop = current.topMargin;
-                int originalWidth = current.width > 0 ? current.width : item.getWidth();
-                int originalHeight = current.height > 0 ? current.height : item.getHeight();
-                if (originalWidth <= 0 || originalHeight <= 0) continue;
+                int currentWidth = current.width > 0 ? current.width : item.getWidth();
+                int currentHeight = current.height > 0 ? current.height : item.getHeight();
+                if (currentWidth <= 0 || currentHeight <= 0) continue;
 
+                boolean widget = isWidgetWorkspaceItem(item);
+                int originalWidth = currentWidth;
+                int originalHeight = currentHeight;
+                if (widget) {
+                    int[] baseSize = getLandscapeWidgetBaseSize(item, currentWidth, currentHeight);
+                    originalWidth = baseSize[0];
+                    originalHeight = baseSize[1];
+                    originalWidgetSizes.put(item, baseSize);
+                }
                 int width = Math.min(pageWidth, originalWidth);
                 int height = Math.min(pageHeight, originalHeight);
-                boolean widget = isWidgetWorkspaceItem(item);
-                boolean sizeChanged = width != originalWidth || height != originalHeight;
+                boolean sizeChanged = width != currentWidth || height != currentHeight;
                 int[] position = null;
 
                 if (widget) {
-                    originalWidgetSizes.put(item, new int[]{originalWidth, originalHeight});
                     int[] fit = findLandscapeWidgetFit(item, originalLeft, originalTop,
                             width, height, pageWidth, pageHeight, occupied, step, fineStep);
                     if (fit != null) {
                         position = new int[]{fit[0], fit[1]};
                         width = fit[2];
                         height = fit[3];
-                        sizeChanged = width != originalWidth || height != originalHeight;
+                        sizeChanged = width != currentWidth || height != currentHeight;
                     } else {
                         // No legal placement on this page even after dimensional shrink.
                         // Queue this widget for the other page without sacrificing its
@@ -820,7 +942,7 @@ final class HomePageController {
                         widgetsNeedingOtherPage.add(item);
                         width = Math.min(width, LauncherUiUtils.dp(activity, 64));
                         height = Math.min(height, LauncherUiUtils.dp(activity, 48));
-                        sizeChanged = width != originalWidth || height != originalHeight;
+                        sizeChanged = width != currentWidth || height != currentHeight;
                         position = new int[]{
                                 Math.max(0, Math.min(Math.max(0, pageWidth - width), originalLeft)),
                                 Math.max(0, Math.min(Math.max(0, pageHeight - height), originalTop))};
@@ -851,6 +973,7 @@ final class HomePageController {
                 Rect placedBounds = workspaceBounds(item, position[0], position[1], width, height);
                 if (!widget || !widgetsNeedingOtherPage.contains(item)) occupied.add(placedBounds);
                 if (sizeChanged && widget) resizeAppWidgetForLandscape(item, width, height);
+                if (widget) saveLandscapeWidgetFittedSize(item, width, height);
                 item.invalidate();
             }
         }
@@ -871,11 +994,11 @@ final class HomePageController {
             if (targetWidth <= 0 || targetHeight <= 0) continue;
             if (!(widget.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
             FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) widget.getLayoutParams();
+            int currentWidth = current.width > 0 ? current.width : widget.getWidth();
+            int currentHeight = current.height > 0 ? current.height : widget.getHeight();
             int[] originalSize = originalWidgetSizes.get(widget);
-            int originalWidth = originalSize == null
-                    ? (current.width > 0 ? current.width : widget.getWidth()) : originalSize[0];
-            int originalHeight = originalSize == null
-                    ? (current.height > 0 ? current.height : widget.getHeight()) : originalSize[1];
+            int originalWidth = originalSize == null ? currentWidth : originalSize[0];
+            int originalHeight = originalSize == null ? currentHeight : originalSize[1];
             int width = Math.min(targetWidth, originalWidth);
             int height = Math.min(targetHeight, originalHeight);
             int preferredLeft = Math.max(0,
@@ -889,7 +1012,7 @@ final class HomePageController {
             int[] position = new int[]{fit[0], fit[1]};
             width = fit[2];
             height = fit[3];
-            boolean sizeChanged = width != originalWidth || height != originalHeight;
+            boolean sizeChanged = width != currentWidth || height != currentHeight;
 
             FrameLayout.LayoutParams moved = copyWorkspaceParams(
                     widget, width, height, position[0], position[1]);
@@ -900,6 +1023,7 @@ final class HomePageController {
             widget.setTranslationY(0f);
             widget.setLayoutParams(moved);
             if (sizeChanged) resizeAppWidgetForLandscape(widget, width, height);
+            saveLandscapeWidgetFittedSize(widget, width, height);
             host.moveWorkspaceWidgetToPage(widget, targetPageIndex, position[0], position[1]);
             widget.bringToFront();
             widget.requestLayout();
@@ -1138,6 +1262,10 @@ final class HomePageController {
             // label-enabled 25dp clearance above the dock through the shared host rule.
             final int rows = host.getHomeGridRowsForHeight(pageHeight, cellHeight);
             boolean[][] occupiedSlots = new boolean[rows][columns];
+            int initialPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
+            final int appCellWidth = homeAppCellWidthPx(page, strip, columns, initialPageWidth);
+            reserveAppGroupGridSlots(page, occupiedSlots, columns, rows,
+                    pageHeight, appCellWidth, cellHeight);
             LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
                     false, iconSizeKey, fontSizeKey, showLabelsKey,
@@ -1154,8 +1282,7 @@ final class HomePageController {
                 if (app == null) continue;
                 View cell = homeAdapter.getViewForApp(app, null, page);
                 cell.setTag("launcher_app:" + packageName);
-                int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
-                int cellWidth = homeAppCellWidthPx(page, strip, columns, actualPageWidth);
+                int cellWidth = appCellWidth;
                 // In landscape, this cell pitch is derived from the saved portrait row span
                 // in dp, so the app grid cannot stretch across the wider landscape page.
                 int maxArtworkSize = Math.max(1,
