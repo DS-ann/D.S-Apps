@@ -16994,8 +16994,11 @@ public class MainActivity extends Activity {
         // old page dimensions; that pass may scan hundreds of coarse pixel positions per item.
         String lastAppliedOrientationKey = "__workspace_geometry_last_applied_landscape";
         boolean currentLandscape = isLandscapeWorkspace();
-        if (prefs.contains(lastAppliedOrientationKey)
-                && prefs.getBoolean(lastAppliedOrientationKey, currentLandscape) != currentLandscape) return;
+        // On initial setup or during a rotation, let the bounded orientation solver own
+        // placement. The generic collision resolver can otherwise run a second expensive
+        // search before the page has settled, especially on a cold landscape launch.
+        if (!prefs.contains(lastAppliedOrientationKey)
+                || prefs.getBoolean(lastAppliedOrientationKey, currentLandscape) != currentLandscape) return;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
             View pageView = pagesStrip.getChildAt(i);
             if (!(pageView instanceof FrameLayout)) continue;
