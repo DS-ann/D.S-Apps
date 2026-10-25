@@ -3090,28 +3090,10 @@ public class MainActivity extends Activity {
     private void loadApps() {
         Intent query = new Intent(Intent.ACTION_MAIN, null);
         query.addCategory(Intent.CATEGORY_LAUNCHER);
+        // BlankActivity is the package's sole CATEGORY_LAUNCHER component, so the
+        // drawer receives a genuine PackageManager ResolveInfo on every refresh.
         List<ResolveInfo> result = new ArrayList<>(
                 packageManager.queryIntentActivities(query, 0));
-
-        // Replace this launcher's own HOME/launcher activity in the app catalogue with a
-        // normal, empty Activity. PackageManager still knows MainActivity for HOME/system
-        // launches, but this drawer gets exactly one D.S Launcher icon that opens BlankActivity.
-        String ownPackage = getPackageName();
-        for (int index = result.size() - 1; index >= 0; index--) {
-            ResolveInfo app = result.get(index);
-            if (app.activityInfo != null
-                    && ownPackage.equals(app.activityInfo.packageName)) {
-                result.remove(index);
-            }
-        }
-        try {
-            ResolveInfo blankEntry = new ResolveInfo();
-            blankEntry.activityInfo = packageManager.getActivityInfo(
-                    new Intent(this, BlankActivity.class).getComponent(), 0);
-            result.add(blankEntry);
-        } catch (PackageManager.NameNotFoundException ignored) {
-            // The app drawer remains usable if the dedicated blank Activity is unavailable.
-        }
         // PackageManager label loading is relatively expensive on older devices. Sort
         // by a single precomputed label per activity instead of loading both labels for
         // every comparator invocation (O(n log n) resource lookups).
@@ -13205,6 +13187,11 @@ public class MainActivity extends Activity {
                 + (horizontal ? "x" : "y") + "_page_" + page;
     }
 
+    private String landscapeClockBaseScaleKey(int page, boolean horizontal) {
+        return "workspace_landscape_clock_base_scale_"
+                + (horizontal ? "x" : "y") + "_page_" + page;
+    }
+
     private float getLandscapeClockAutoScale(int page, boolean horizontal) {
         if (getResources().getConfiguration().orientation
                 != android.content.res.Configuration.ORIENTATION_LANDSCAPE) return 1f;
@@ -18257,6 +18244,17 @@ public class MainActivity extends Activity {
         final float lengthScale = Math.min(stylePreservedScale,
                 Math.max(0.01f, availablePanelWidth
                         / (Math.max(1f, widthForScaleCap) * automaticShrinkX)));
+        // Store the user's uncompressed clock scale so landscape collision repair never
+        // treats an old shrink factor as the intended size.
+        if (getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE && prefs != null) {
+            prefs.edit()
+                    .putFloat(landscapeClockBaseScaleKey(targetPage, true),
+                            Math.max(0.01f, lengthScale * automaticShrinkX))
+                    .putFloat(landscapeClockBaseScaleKey(targetPage, false),
+                            Math.max(0.01f, automaticShrinkY))
+                    .apply();
+        }
         if (clockStyleChanged && previousClockPanelGeometry[2] > 0 && prefs != null) {
             // A preset can have a different intrinsic width because of tracking,
             // marker clearance, or typography. Save the compensating scale so later

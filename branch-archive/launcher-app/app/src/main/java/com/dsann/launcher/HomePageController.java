@@ -432,6 +432,11 @@ final class HomePageController {
                 + (horizontal ? "x" : "y") + "_page_" + pageIndex;
     }
 
+    private String landscapeClockBaseScaleKey(int pageIndex, boolean horizontal) {
+        return "workspace_landscape_clock_base_scale_"
+                + (horizontal ? "x" : "y") + "_page_" + pageIndex;
+    }
+
     private float clampLandscapeClockAutoScale(float value) {
         return Math.max(0.08f, Math.min(1f, value));
     }
@@ -496,8 +501,19 @@ final class HomePageController {
                 pageWidth, pageHeight, occupied)) {
             return new int[]{preferredLeft, preferredTop, baseWidth, baseHeight};
         }
+        // Preserve full size when the item can fit elsewhere on this same screen.
+        int[] fullSizePosition = findFreePosition(widget, preferredLeft, preferredTop,
+                baseWidth, baseHeight, pageWidth, pageHeight, occupied, step);
+        if (fullSizePosition == null) {
+            fullSizePosition = findFreePosition(widget, preferredLeft, preferredTop,
+                    baseWidth, baseHeight, pageWidth, pageHeight, occupied, fineStep);
+        }
+        if (fullSizePosition != null) {
+            return new int[]{fullSizePosition[0], fullSizePosition[1], baseWidth, baseHeight};
+        }
 
         // Modes: reduce length only, reduce height only, then reduce both dimensions.
+        // Use 5% steps so sizing does not jump far past the actual free space.
         for (int mode = 0; mode < 3; mode++) {
             int width = baseWidth;
             int height = baseHeight;
@@ -508,11 +524,11 @@ final class HomePageController {
                 int nextHeight = height;
                 if (mode == 0 || mode == 2) {
                     nextWidth = width > minWidth
-                            ? Math.max(minWidth, Math.round(width * 0.8f)) : width;
+                            ? Math.max(minWidth, Math.round(width * 0.95f)) : width;
                 }
                 if (mode == 1 || mode == 2) {
                     nextHeight = height > minHeight
-                            ? Math.max(minHeight, Math.round(height * 0.8f)) : height;
+                            ? Math.max(minHeight, Math.round(height * 0.95f)) : height;
                 }
                 if (nextWidth == width && nextHeight == height) break;
                 width = nextWidth;
@@ -550,6 +566,38 @@ final class HomePageController {
      * separately from the user's clock size so MainActivity's normal measurement pass
      * cannot silently restore the oversized transform.
      */
+    private boolean clockBoundsFitAtScale(View clock, int left, int top, int width, int height,
+            int pageWidth, int pageHeight, ArrayList<Rect> occupied,
+            float scaleX, float scaleY) {
+        clock.setScaleX(scaleX);
+        clock.setScaleY(scaleY);
+        Rect bounds = workspaceBounds(clock, left, top, width, height);
+        return bounds.left >= 0 && bounds.top >= 0
+                && bounds.right <= pageWidth && bounds.bottom <= pageHeight
+                && !overlapsAny(bounds, occupied);
+    }
+
+    private float largestClockAxisFactor(View clock, int left, int top, int width, int height,
+            int pageWidth, int pageHeight, ArrayList<Rect> occupied,
+            float baseScaleX, float baseScaleY, boolean horizontal, float minimumFactor) {
+        float low = minimumFactor;
+        float high = 1f;
+        for (int pass = 0; pass < 12; pass++) {
+            float middle = (low + high) * 0.5f;
+            float sx = baseScaleX * (horizontal ? middle : 1f);
+            float sy = baseScaleY * (horizontal ? 1f : middle);
+            if (clockBoundsFitAtScale(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, sx, sy)) low = middle;
+            else high = middle;
+        }
+        return low;
+    }
+
+    /**
+     * Keep the clock at its existing page/anchor and reduce only the dimension needed
+     * for collision clearance. The base dimensions are saved independently so a stale
+     * landscape factor cannot make a clock remain tiny when a later pass has room.
+     */
     private void fitClockAtFixedPosition(View clock, FrameLayout page,
             ArrayList<Rect> occupied) {
         if (!(clock.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
@@ -558,7 +606,6 @@ final class HomePageController {
         if (pageIndex < 0) return;
 
         FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) clock.getLayoutParams();
-        // Actual laid-out coordinates respect LEFT/CENTER/RIGHT gravity; margins alone do not.
         final int left = clock.getLeft();
         final int top = clock.getTop();
         int width = current.width > 0 ? current.width : clock.getWidth();
@@ -567,34 +614,61 @@ final class HomePageController {
 
         String keyX = landscapeClockAutoScaleKey(pageIndex, true);
         String keyY = landscapeClockAutoScaleKey(pageIndex, false);
+        String baseKeyX = landscapeClockBaseScaleKey(pageIndex, true);
+        String baseKeyY = landscapeClockBaseScaleKey(pageIndex, false);
         float previousLandscapeX = clampLandscapeClockAutoScale(
                 LauncherUiUtils.getFloatPreferenceCompat(prefs, keyX, 1f));
         float previousLandscapeY = clampLandscapeClockAutoScale(
                 LauncherUiUtils.getFloatPreferenceCompat(prefs, keyY, 1f));
-        float currentScaleX = Math.max(0.01f, Math.abs(clock.getScaleX()));
-        float currentScaleY = Math.max(0.01f, Math.abs(clock.getScaleY()));
-        float baseScaleX = currentScaleX / previousLandscapeX;
-        float baseScaleY = currentScaleY / previousLandscapeY;
+        float actualScaleX = Math.max(0.01f, Math.abs(clock.getScaleX()));
+        float actualScaleY = Math.max(0.01f, Math.abs(clock.getScaleY()));
+        float baseScaleX = Math.max(0.01f, LauncherUiUtils.getFloatPreferenceCompat(
+                prefs, baseKeyX, actualScaleX / previousLandscapeX));
+        float baseScaleY = Math.max(0.01f, LauncherUiUtils.getFloatPreferenceCompat(
+                prefs, baseKeyY, actualScaleY / previousLandscapeY));
         landscapeClockBaseScales.put(clock, new float[]{baseScaleX, baseScaleY});
 
         int pageWidth = page.getWidth();
         int pageHeight = page.getHeight();
-        final float minimumAutoScale = 0.08f;
-        float factor = 1f;
-        Rect candidate;
-        while (true) {
-            clock.setScaleX(baseScaleX * factor);
-            clock.setScaleY(baseScaleY * factor);
-            candidate = workspaceBounds(clock, left, top, width, height);
-            boolean insidePage = candidate.left >= 0 && candidate.top >= 0
-                    && candidate.right <= pageWidth && candidate.bottom <= pageHeight;
-            if (insidePage && !overlapsAny(candidate, occupied)) break;
-            if (factor <= minimumAutoScale + 0.0001f) break;
-            factor = Math.max(minimumAutoScale, factor * 0.8f);
+        final float minimumFactor = 0.025f;
+        float factorX = 1f;
+        float factorY = 1f;
+        boolean fits = clockBoundsFitAtScale(clock, left, top, width, height,
+                pageWidth, pageHeight, occupied, baseScaleX, baseScaleY);
+
+        if (!fits) {
+            // Prefer horizontal length reduction so the clock height/date line is retained.
+            if (clockBoundsFitAtScale(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, baseScaleX * minimumFactor, baseScaleY)) {
+                factorX = largestClockAxisFactor(clock, left, top, width, height,
+                        pageWidth, pageHeight, occupied, baseScaleX, baseScaleY,
+                        true, minimumFactor);
+            } else if (clockBoundsFitAtScale(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, baseScaleX, baseScaleY * minimumFactor)) {
+                factorY = largestClockAxisFactor(clock, left, top, width, height,
+                        pageWidth, pageHeight, occupied, baseScaleX, baseScaleY,
+                        false, minimumFactor);
+            } else {
+                // If the obstacle crosses both dimensions, use the largest proportional
+                // fit rather than repeated coarse reductions.
+                float low = minimumFactor;
+                float high = 1f;
+                for (int pass = 0; pass < 12; pass++) {
+                    float middle = (low + high) * 0.5f;
+                    if (clockBoundsFitAtScale(clock, left, top, width, height,
+                            pageWidth, pageHeight, occupied,
+                            baseScaleX * middle, baseScaleY * middle)) low = middle;
+                    else high = middle;
+                }
+                factorX = low;
+                factorY = low;
+            }
         }
 
-        // Persist landscape-only factors; normal clock layout passes must respect this.
-        prefs.edit().putFloat(keyX, factor).putFloat(keyY, factor).apply();
+        clock.setScaleX(baseScaleX * factorX);
+        clock.setScaleY(baseScaleY * factorY);
+        Rect candidate = workspaceBounds(clock, left, top, width, height);
+        prefs.edit().putFloat(keyX, factorX).putFloat(keyY, factorY).apply();
         occupied.add(candidate);
         clock.requestLayout();
         clock.invalidate();
@@ -621,8 +695,13 @@ final class HomePageController {
             }
             for (boolean horizontal : new boolean[]{true, false}) {
                 String key = landscapeClockAutoScaleKey(pageIndex, horizontal);
+                String baseKey = landscapeClockBaseScaleKey(pageIndex, horizontal);
                 if (prefs.contains(key)) {
                     editor.remove(key);
+                    changed = true;
+                }
+                if (prefs.contains(baseKey)) {
+                    editor.remove(baseKey);
                     changed = true;
                 }
             }
@@ -1153,6 +1232,28 @@ final class HomePageController {
                 // Re-map normalized positions only through an occupied-slot grid so two
                 // portrait rows can never collapse onto the same landscape cell.
                 boolean[][] laidOutSlots = new boolean[actualRows][columns];
+                // Group containers are fixed-size, not part of the resizable widget set.
+                // Reserve the grid slots they visually occupy before placing app cells.
+                for (int groupIndex = 0; groupIndex < page.getChildCount(); groupIndex++) {
+                    View groupChild = page.getChildAt(groupIndex);
+                    if (!isAppGroupWorkspaceItem(groupChild)
+                            || groupChild.getVisibility() != View.VISIBLE
+                            || groupChild.getWidth() <= 0 || groupChild.getHeight() <= 0) continue;
+                    Rect groupBounds = workspaceBounds(groupChild, groupChild.getLeft(),
+                            groupChild.getTop(), groupChild.getWidth(), groupChild.getHeight());
+                    for (int groupRow = 0; groupRow < actualRows; groupRow++) {
+                        int slotTop = host.getHomeGridRowTop(
+                                groupRow, actualRows, page.getHeight(), actualCellHeight);
+                        for (int groupCol = 0; groupCol < columns; groupCol++) {
+                            int slotLeft = groupCol * actualCellWidth;
+                            Rect slotBounds = new Rect(slotLeft, slotTop,
+                                    slotLeft + actualCellWidth, slotTop + actualCellHeight);
+                            if (Rect.intersects(groupBounds, slotBounds)) {
+                                laidOutSlots[groupRow][groupCol] = true;
+                            }
+                        }
+                    }
+                }
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
