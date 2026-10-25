@@ -3090,7 +3090,28 @@ public class MainActivity extends Activity {
     private void loadApps() {
         Intent query = new Intent(Intent.ACTION_MAIN, null);
         query.addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> result = packageManager.queryIntentActivities(query, 0);
+        List<ResolveInfo> result = new ArrayList<>(
+                packageManager.queryIntentActivities(query, 0));
+
+        // Replace this launcher's own HOME/launcher activity in the app catalogue with a
+        // normal, empty Activity. PackageManager still knows MainActivity for HOME/system
+        // launches, but this drawer gets exactly one D.S Launcher icon that opens BlankActivity.
+        String ownPackage = getPackageName();
+        for (int index = result.size() - 1; index >= 0; index--) {
+            ResolveInfo app = result.get(index);
+            if (app.activityInfo != null
+                    && ownPackage.equals(app.activityInfo.packageName)) {
+                result.remove(index);
+            }
+        }
+        try {
+            ResolveInfo blankEntry = new ResolveInfo();
+            blankEntry.activityInfo = packageManager.getActivityInfo(
+                    new Intent(this, BlankActivity.class).getComponent(), 0);
+            result.add(blankEntry);
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // The app drawer remains usable if the dedicated blank Activity is unavailable.
+        }
         // PackageManager label loading is relatively expensive on older devices. Sort
         // by a single precomputed label per activity instead of loading both labels for
         // every comparator invocation (O(n log n) resource lookups).
@@ -3126,14 +3147,10 @@ public class MainActivity extends Activity {
         allApps.clear();
         allApps.addAll(result);
         drawerApps.clear();
-        // The launcher is a system-facing app, not a user app shortcut: keep it
-        // discoverable by PackageManager for internal lookups, but hide it from its own drawer.
-        String launcherPackage = getPackageName();
-        for (ResolveInfo app : result) {
-            if (app.activityInfo != null && !launcherPackage.equals(app.activityInfo.packageName)) {
-                drawerApps.add(app);
-            }
-        }
+        // result contains the dedicated blank-page activity for this package, not MainActivity.
+        // Use the same resolved activity entry for sorting, icon artwork, long-press actions,
+        // search, and Add to Home so the icon behaves like every other app icon.
+        drawerApps.addAll(result);
         // Keep saved home entries and position preferences stable if PackageManager
         // temporarily omits launcher activities during an application update. A full
         // uninstall is handled directly by packageChangesReceiver.
@@ -11350,7 +11367,15 @@ public class MainActivity extends Activity {
 
     private void launchApp(ResolveInfo app, View sourceView) {
         if (app == null || app.activityInfo == null || !canLaunchAppFromSource(sourceView)) return;
-        Intent intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
+        Intent intent;
+        if (getPackageName().equals(app.activityInfo.packageName)
+                && BlankActivity.class.getName().equals(app.activityInfo.name)) {
+            // The drawer's own-app entry intentionally opens a blank normal Activity,
+            // never the launcher's HOME interface.
+            intent = new Intent(this, BlankActivity.class);
+        } else {
+            intent = packageManager.getLaunchIntentForPackage(app.activityInfo.packageName);
+        }
         if (intent != null) {
             try {
                 if (android.os.Build.VERSION.SDK_INT >= 16 && sourceView != null
