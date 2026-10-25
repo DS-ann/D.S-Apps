@@ -95,8 +95,7 @@ final class HomePageController {
         String tag = (String) item.getTag();
         return tag.startsWith("launcher_widget:")
                 || tag.contains("shortcut")
-                || tag.contains("group")
-                || tag.contains("clock_widget");
+                || tag.contains("group");
     }
 
     private String portraitGeometryKey(View item) {
@@ -454,7 +453,9 @@ final class HomePageController {
                 if (name.startsWith("launcher_app:")) {
                     Rect iconBounds = visibleAppBounds(child);
                     if (iconBounds != null && !iconBounds.isEmpty()) occupied.add(iconBounds);
-                } else if (isOrientationManagedItem(child)) {
+                } else if (isOrientationManagedItem(child) || isClockWorkspaceItem(child)) {
+                    // Clock panels are distinct per page. They may be fitted in place,
+                    // but must never enter the shared portrait-geometry save/restore path.
                     items.add(child);
                 }
             }
@@ -781,13 +782,19 @@ final class HomePageController {
                 View cell = homeAdapter.getViewForApp(app, null, page);
                 cell.setTag("launcher_app:" + packageName);
                 int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
-                int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
+                int artworkCellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
                         actualPageWidth / columns);
-                // Keep artwork inside its assigned slot. Otherwise larger configured
-                // icons overlap neighbouring items and collision repair moves them to
-                // another row even though the user's grid position has not changed.
+                boolean compactLandscapeRow = isLandscapeOrientation(strip);
+                int cellWidth = compactLandscapeRow
+                        ? Math.max(LauncherUiUtils.dp(activity, 1),
+                                Math.round(artworkCellWidth * 0.88f))
+                        : artworkCellWidth;
+                int cellRowInset = Math.max(0, (actualPageWidth - cellWidth * columns) / 2);
+                // Narrow the cell pitch only in landscape. Keep artwork at the configured
+                // size; the centered row gains a smaller inter-icon gap without changing
+                // portrait slots or the underlying saved grid coordinates.
                 int maxArtworkSize = Math.max(1,
-                        cellWidth - LauncherUiUtils.dp(activity, 4));
+                        artworkCellWidth - LauncherUiUtils.dp(activity, 4));
                 if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 0
                         && ((ViewGroup) cell).getChildAt(0) instanceof android.widget.ImageView) {
                     View iconView = ((ViewGroup) cell).getChildAt(0);
@@ -836,7 +843,7 @@ final class HomePageController {
                     // than silently omitting this app from the rendered page.
                 }
                 occupiedSlots[row][col] = true;
-                lp.leftMargin = col * cellWidth;
+                lp.leftMargin = cellRowInset + col * cellWidth;
                 // Keep rows at their original fixed grid positions. In particular,
                 // the lowest row stays one cell above the workspace edge instead of
                 // being stretched down toward the dock.
@@ -846,8 +853,14 @@ final class HomePageController {
             }
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
-                int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                // Keep post-layout correction aligned with the same font-aware grid metric.
+                int artworkCellWidth = Math.max(1, page.getWidth() / columns);
+                boolean compactLandscapeRow = isLandscapeOrientation(strip);
+                int actualCellWidth = compactLandscapeRow
+                        ? Math.max(1, Math.round(artworkCellWidth * 0.88f))
+                        : artworkCellWidth;
+                int actualCellRowInset = Math.max(0,
+                        (page.getWidth() - actualCellWidth * columns) / 2);
+                // Match the initial compact landscape pitch after Android measures the page.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         host.getHomeCellHeightDp(configuredIconSize));
                 int actualRows = host.getHomeGridRowsForHeight(page.getHeight(), actualCellHeight);
@@ -872,7 +885,7 @@ final class HomePageController {
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
-                    actual.leftMargin = col * actualCellWidth;
+                    actual.leftMargin = actualCellRowInset + col * actualCellWidth;
                     actual.topMargin = host.getHomeGridRowTop(
                             row, actualRows, page.getHeight(), actualCellHeight);
                     child.setLayoutParams(actual);
