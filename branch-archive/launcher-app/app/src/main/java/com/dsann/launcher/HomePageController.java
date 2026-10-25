@@ -133,6 +133,15 @@ final class HomePageController {
         }
     }
 
+    private static final class LandscapeClockFit {
+        final int left, top;
+        final float scaleX, scaleY;
+        LandscapeClockFit(int left, int top, float scaleX, float scaleY) {
+            this.left = left; this.top = top; this.scaleX = scaleX; this.scaleY = scaleY;
+        }
+        float retainedScaleArea() { return scaleX * scaleY; }
+    }
+
     private boolean isLandscapeOrientation(LinearLayout strip) {
         int orientation = activity.getResources().getConfiguration().orientation;
         if (orientation == Configuration.ORIENTATION_LANDSCAPE) return true;
@@ -817,20 +826,62 @@ final class HomePageController {
                 && !overlapsAny(bounds, occupied);
     }
 
-    private float largestClockAxisFactor(View clock, int left, int top, int width, int height,
-            int pageWidth, int pageHeight, ArrayList<Rect> occupied,
+    private int[] findClockPositionAtScale(View clock, int left, int top, int width, int height,
+            int pageWidth, int pageHeight, ArrayList<Rect> occupied, float scaleX, float scaleY) {
+        clock.setScaleX(scaleX);
+        clock.setScaleY(scaleY);
+        if (fitsWorkspacePosition(clock, left, top, width, height,
+                pageWidth, pageHeight, occupied)) return new int[]{left, top};
+        int step = Math.max(1, LauncherUiUtils.dp(activity, 4));
+        int[] position = findFreePosition(clock, left, top, width, height,
+                pageWidth, pageHeight, occupied, step);
+        if (position == null) {
+            position = findFreePosition(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, Math.max(1, LauncherUiUtils.dp(activity, 1)));
+        }
+        return position;
+    }
+
+    private LandscapeClockFit findLargestClockAxisFit(View clock, int left, int top,
+            int width, int height, int pageWidth, int pageHeight, ArrayList<Rect> occupied,
             float baseScaleX, float baseScaleY, boolean horizontal, float minimumFactor) {
-        float low = minimumFactor;
-        float high = 1f;
-        for (int pass = 0; pass < 12; pass++) {
+        float low = minimumFactor, high = 1f;
+        LandscapeClockFit best = null;
+        for (int pass = 0; pass < 14; pass++) {
             float middle = (low + high) * 0.5f;
             float sx = baseScaleX * (horizontal ? middle : 1f);
             float sy = baseScaleY * (horizontal ? 1f : middle);
-            if (clockBoundsFitAtScale(clock, left, top, width, height,
-                    pageWidth, pageHeight, occupied, sx, sy)) low = middle;
-            else high = middle;
+            int[] position = findClockPositionAtScale(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, sx, sy);
+            if (position != null) {
+                best = new LandscapeClockFit(position[0], position[1], sx, sy);
+                low = middle;
+            } else {
+                high = middle;
+            }
         }
-        return low;
+        return best;
+    }
+
+    private LandscapeClockFit findLargestProportionalClockFit(View clock, int left, int top,
+            int width, int height, int pageWidth, int pageHeight, ArrayList<Rect> occupied,
+            float baseScaleX, float baseScaleY, float minimumFactor) {
+        float low = minimumFactor, high = 1f;
+        LandscapeClockFit best = null;
+        for (int pass = 0; pass < 14; pass++) {
+            float middle = (low + high) * 0.5f;
+            float sx = baseScaleX * middle;
+            float sy = baseScaleY * middle;
+            int[] position = findClockPositionAtScale(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, sx, sy);
+            if (position != null) {
+                best = new LandscapeClockFit(position[0], position[1], sx, sy);
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        return best;
     }
 
     /**
@@ -895,44 +946,56 @@ final class HomePageController {
         int pageWidth = page.getWidth();
         int pageHeight = page.getHeight();
         final float minimumFactor = 0.025f;
-        float factorX = 1f;
-        float factorY = 1f;
-        boolean fits = clockBoundsFitAtScale(clock, left, top, width, height,
-                pageWidth, pageHeight, occupied, baseScaleX, baseScaleY);
 
-        if (!fits) {
-            // Prefer horizontal length reduction so the clock height/date line is retained.
-            if (clockBoundsFitAtScale(clock, left, top, width, height,
-                    pageWidth, pageHeight, occupied, baseScaleX * minimumFactor, baseScaleY)) {
-                factorX = largestClockAxisFactor(clock, left, top, width, height,
-                        pageWidth, pageHeight, occupied, baseScaleX, baseScaleY,
-                        true, minimumFactor);
-            } else if (clockBoundsFitAtScale(clock, left, top, width, height,
-                    pageWidth, pageHeight, occupied, baseScaleX, baseScaleY * minimumFactor)) {
-                factorY = largestClockAxisFactor(clock, left, top, width, height,
-                        pageWidth, pageHeight, occupied, baseScaleX, baseScaleY,
-                        false, minimumFactor);
-            } else {
-                // If the obstacle crosses both dimensions, use the largest proportional
-                // fit rather than repeated coarse reductions.
-                float low = minimumFactor;
-                float high = 1f;
-                for (int pass = 0; pass < 12; pass++) {
-                    float middle = (low + high) * 0.5f;
-                    if (clockBoundsFitAtScale(clock, left, top, width, height,
-                            pageWidth, pageHeight, occupied,
-                            baseScaleX * middle, baseScaleY * middle)) low = middle;
-                    else high = middle;
-                }
-                factorX = low;
-                factorY = low;
-            }
+        // Keep the user's saved anchor if it fits. Otherwise look for a full-size
+        // position elsewhere on this same page before shrinking; clocks never transfer pages.
+        int[] fullPosition = findClockPositionAtScale(clock, left, top, width, height,
+                pageWidth, pageHeight, occupied, baseScaleX, baseScaleY);
+        LandscapeClockFit chosen = fullPosition == null ? null
+                : new LandscapeClockFit(fullPosition[0], fullPosition[1], baseScaleX, baseScaleY);
+
+        if (chosen == null) {
+            LandscapeClockFit widthFit = findLargestClockAxisFit(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, baseScaleX, baseScaleY, true, minimumFactor);
+            LandscapeClockFit heightFit = findLargestClockAxisFit(clock, left, top, width, height,
+                    pageWidth, pageHeight, occupied, baseScaleX, baseScaleY, false, minimumFactor);
+            LandscapeClockFit proportionalFit = findLargestProportionalClockFit(
+                    clock, left, top, width, height, pageWidth, pageHeight, occupied,
+                    baseScaleX, baseScaleY, minimumFactor);
+
+            chosen = widthFit;
+            if (chosen == null || (heightFit != null
+                    && heightFit.retainedScaleArea() > chosen.retainedScaleArea())) chosen = heightFit;
+            if (chosen == null || (proportionalFit != null
+                    && proportionalFit.retainedScaleArea() > chosen.retainedScaleArea())) chosen = proportionalFit;
         }
 
-        clock.setScaleX(baseScaleX * factorX);
-        clock.setScaleY(baseScaleY * factorY);
-        Rect candidate = workspaceBounds(clock, left, top, width, height);
+        if (chosen == null) {
+            // Only an actually saturated page reaches this fallback.
+            chosen = new LandscapeClockFit(left, top,
+                    baseScaleX * minimumFactor, baseScaleY * minimumFactor);
+        }
+
+        clock.setScaleX(chosen.scaleX);
+        clock.setScaleY(chosen.scaleY);
+        clock.setTranslationX(clock.getTranslationX() + chosen.left - left);
+        clock.setTranslationY(clock.getTranslationY() + chosen.top - top);
+        float factorX = clampLandscapeClockAutoScale(chosen.scaleX / baseScaleX);
+        float factorY = clampLandscapeClockAutoScale(chosen.scaleY / baseScaleY);
         prefs.edit().putFloat(keyX, factorX).putFloat(keyY, factorY).apply();
+
+        // Save any automatic in-page relocation only to landscape clock coordinates. This
+        // stabilizes the next landscape render without touching the portrait configuration.
+        if (chosen.left != left || chosen.top != top) {
+            String xKey = pageIndex == 0
+                    ? "__landscape_clock_widget_x" : "__landscape_clock_widget_x_page_2";
+            String yKey = pageIndex == 0
+                    ? "__landscape_clock_widget_y" : "__landscape_clock_widget_y_page_2";
+            prefs.edit().putFloat(xKey, clock.getTranslationX())
+                    .putFloat(yKey, clock.getTranslationY()).apply();
+        }
+
+        Rect candidate = workspaceBounds(clock, left, top, width, height);
         occupied.add(candidate);
         clock.requestLayout();
         clock.invalidate();

@@ -16989,6 +16989,13 @@ public class MainActivity extends Activity {
 
     private void validateWorkspacePagesAfterLayout() {
         if (pagesStrip == null || homeIconResizeRepairPending) return;
+        // The HomePageController performs one bounded orientation-specific pass when the
+        // page geometry changes. Do not simultaneously run the generic resolver against the
+        // old page dimensions; that pass may scan hundreds of coarse pixel positions per item.
+        String lastAppliedOrientationKey = "__workspace_geometry_last_applied_landscape";
+        boolean currentLandscape = isLandscapeWorkspace();
+        if (prefs.contains(lastAppliedOrientationKey)
+                && prefs.getBoolean(lastAppliedOrientationKey, currentLandscape) != currentLandscape) return;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
             View pageView = pagesStrip.getChildAt(i);
             if (!(pageView instanceof FrameLayout)) continue;
