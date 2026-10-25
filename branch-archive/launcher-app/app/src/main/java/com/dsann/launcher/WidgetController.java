@@ -129,6 +129,10 @@ final class WidgetController {
                 .remove("__landscape_widget_y_" + widgetId)
                 .remove("__landscape_widget_w_" + widgetId)
                 .remove("__landscape_widget_h_" + widgetId)
+                .remove("__landscape_widget_base_width_" + widgetId)
+                .remove("__landscape_widget_base_height_" + widgetId)
+                .remove("__landscape_widget_fitted_width_" + widgetId)
+                .remove("__landscape_widget_fitted_height_" + widgetId)
                 .remove("__portrait_workspace_geometry__launcher_widget:" + widgetId)
                 .remove("__landscape_workspace_geometry__launcher_widget:" + widgetId).commit();
     }

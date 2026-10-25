@@ -66,23 +66,15 @@ final class HomePageModel {
         }
 
         SharedPreferences.Editor edit = prefs.edit();
-        int pageCapacity = Math.max(1, Math.min(capacity, columns * rows));
-        int[] pageLoads = new int[PAGE_COUNT];
-        // Keep each screen within its real visible grid. If old versions stored too
-        // many apps on one page, migrate the overflow to the other page instead of
-        // letting the renderer silently omit shortcuts below the dock.
+        // Page membership is structural shared state. Never rebalance apps between screens
+        // merely because rotation changes the number of visible rows: a user must explicitly
+        // move an icon to the other screen for its page assignment to change.
         for (String name : unique) {
             String portraitPageKey = PORTRAIT_PAGE_PREFIX + name;
             int storedPage = prefs.getInt(iconPagePrefix + name,
                     prefs.getInt(portraitPageKey, 0));
-            int preferredPage = clampPage(storedPage);
-            int otherPage = 1 - preferredPage;
-            int page = preferredPage;
-            if (pageLoads[page] >= pageCapacity && pageLoads[otherPage] < pageCapacity) {
-                page = otherPage;
-            }
+            int page = clampPage(storedPage);
             pages.get(page).add(name);
-            pageLoads[page]++;
             edit.putInt(iconPagePrefix + name, page);
         }
 
