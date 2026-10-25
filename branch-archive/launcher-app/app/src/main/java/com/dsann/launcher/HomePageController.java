@@ -77,29 +77,36 @@ final class HomePageController {
      * The preference stores the total row span in dp, not a percentage of the
      * current orientation's page width.
      */
-    private int homeAppCellWidthPx(FrameLayout page, LinearLayout strip,
-                                   int columns, int fallbackPageWidth) {
+    int homeAppCellWidthPx(FrameLayout page, LinearLayout strip,
+                            int columns, int fallbackPageWidth) {
         int safeColumns = Math.max(1, columns);
         android.util.DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
         float density = metrics.density > 0f ? metrics.density : 1f;
         int minimumCellWidth = LauncherUiUtils.dp(activity, 1);
+        int availablePageWidth = page != null && page.getWidth() > 0
+                ? page.getWidth() : fallbackPageWidth;
 
         if (!isLandscapeOrientation(strip)) {
-            int width = page != null && page.getWidth() > 0
-                    ? page.getWidth() : fallbackPageWidth;
+            int width = availablePageWidth > 0 ? availablePageWidth : fallbackPageWidth;
             return Math.max(minimumCellWidth, width / safeColumns);
         }
 
         float portraitRowWidthDp = prefs.getFloat(PORTRAIT_APP_ROW_WIDTH_DP_KEY, -1f);
+        int portraitRowWidthPx;
         if (portraitRowWidthDp > 0f) {
-            return Math.max(minimumCellWidth,
-                    Math.round(portraitRowWidthDp * density / safeColumns));
+            portraitRowWidthPx = Math.round(portraitRowWidthDp * density);
+        } else {
+            // Cold start directly in landscape: approximate the portrait page's
+            // content width, excluding the home screen's 20dp side paddings.
+            int shortSidePx = Math.min(metrics.widthPixels, metrics.heightPixels);
+            portraitRowWidthPx = Math.max(minimumCellWidth,
+                    shortSidePx - LauncherUiUtils.dp(activity, 40));
         }
-
-        // Cold start directly in landscape: use the display's short side as a
-        // portrait-width fallback until a real portrait measurement is available.
-        int shortSidePx = Math.min(metrics.widthPixels, metrics.heightPixels);
-        return Math.max(minimumCellWidth, shortSidePx / safeColumns);
+        // Never place the preserved portrait row outside a narrower measured page.
+        if (availablePageWidth > 0) {
+            portraitRowWidthPx = Math.min(portraitRowWidthPx, availablePageWidth);
+        }
+        return Math.max(minimumCellWidth, portraitRowWidthPx / safeColumns);
     }
 
     private void savePortraitHomeAppRowWidthDp(int cellWidthPx, int columns) {

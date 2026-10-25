@@ -3330,9 +3330,9 @@ public class MainActivity extends Activity {
             return;
         }
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
-        int cellWidth = Math.max(1, pageViewport != null && pageViewport.getWidth() > 0
-                ? pageViewport.getWidth() / Math.max(1, getHomeColumns())
-                : LauncherUiUtils.dp(this, 90));
+        int fallbackGridWidth = pageViewport != null && pageViewport.getWidth() > 0
+                ? pageViewport.getWidth() : LauncherUiUtils.dp(this, 90);
+        int cellWidth = homeGridCellWidthPx(null, getHomeColumns(), fallbackGridWidth);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
             if (!(pagesStrip.getChildAt(i) instanceof FrameLayout)) continue;
@@ -3709,6 +3709,22 @@ public class MainActivity extends Activity {
         }
         int requiredHeight = 14 + iconSize + 1 + homeLabelHeightDp() + 7;
         return Math.max(baseHeight, requiredHeight);
+    }
+
+    /**
+     * Single horizontal grid metric shared by rendering, drag/drop, snapping,
+     * persistence and collision recovery. Landscape preserves the saved portrait pitch.
+     */
+    private int homeGridCellWidthPx(View pageView, int columns, int fallbackPageWidth) {
+        int safeColumns = Math.max(1, columns);
+        FrameLayout page = pageView instanceof FrameLayout ? (FrameLayout) pageView : null;
+        if (homePageController != null && pagesStrip != null) {
+            return homePageController.homeAppCellWidthPx(
+                    page, pagesStrip, safeColumns, fallbackPageWidth);
+        }
+        int width = page != null && page.getWidth() > 0
+                ? page.getWidth() : fallbackPageWidth;
+        return Math.max(1, width / safeColumns);
     }
 
     /**
@@ -4271,7 +4287,7 @@ public class MainActivity extends Activity {
 
         ArrayList<String> ids = getAppGroupIds();
         int columns = Math.max(1, getHomeColumns());
-        int fallbackCellWidth = Math.max(1, pageViewport.getWidth() / columns);
+        int fallbackCellWidth = homeGridCellWidthPx(null, columns, pageViewport.getWidth());
         int iconSizeDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int iconSizePx = LauncherUiUtils.dp(this, iconSizeDp);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSizeDp));
@@ -4281,8 +4297,8 @@ public class MainActivity extends Activity {
                     || !(pagesStrip.getChildAt(pageIndex) instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(pageIndex);
             int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageViewport.getWidth();
-            int cellWidth = Math.max(1, actualPageWidth > 0
-                    ? actualPageWidth / columns : fallbackCellWidth);
+            int cellWidth = homeGridCellWidthPx(page, columns,
+                    actualPageWidth > 0 ? actualPageWidth : fallbackCellWidth);
             int rows = homeGridRowsForHeight(page.getHeight() > 0
                     ? page.getHeight() : pageViewport.getHeight(), cellHeight);
             boolean hasX = prefs.contains(appGroupKey("x", id));
@@ -4359,7 +4375,7 @@ public class MainActivity extends Activity {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
         int columns = Math.max(1, getHomeColumns());
         int width = Math.max(1, page.getWidth());
-        int cellWidth = Math.max(1, width / columns);
+        int cellWidth = homeGridCellWidthPx(page, columns, width);
         int iconDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconDp));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -6620,7 +6636,8 @@ public class MainActivity extends Activity {
                     boolean movingAcrossPages = sourcePage != null && targetPage != sourcePage;
                     if (sourcePage == null || targetPage == null) commit = false;
                     int columns = Math.max(1, getHomeColumns());
-                    int cellWidth = Math.max(1, targetPage == null ? 1 : targetPage.getWidth() / columns);
+                    int cellWidth = targetPage == null ? 1
+                            : homeGridCellWidthPx(targetPage, columns, targetPage.getWidth());
                     int iconDp = Math.max(24, Math.min(84, prefs.getInt(KEY_ICON_SIZE, 48)));
                     int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconDp));
                     int rows = targetPage == null ? 1
@@ -6887,7 +6904,7 @@ public class MainActivity extends Activity {
     private void syncShortcutCellsToPageGeometry(FrameLayout page) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0
                 || pagesStrip == null || page.getParent() != pagesStrip) return;
-        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -6967,7 +6984,10 @@ public class MainActivity extends Activity {
         // Grid-slot coordinates are separate from the actual icon bounds.
         int columns = 4;
         int rows = getHomeGridRows();
-        int cellW = Math.max(1, pageViewport.getWidth() / columns);
+        int cellW = homeGridCellWidthPx(
+                pagesStrip.getChildAt(desiredPage) instanceof FrameLayout
+                        ? (View) pagesStrip.getChildAt(desiredPage) : null,
+                columns, pageViewport.getWidth());
         int cellH = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) return;
@@ -7048,7 +7068,7 @@ public class MainActivity extends Activity {
             } else {
                 int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageViewport.getWidth();
                 int actualPageHeight = page.getHeight() > 0 ? page.getHeight() : pageViewport.getHeight();
-                int actualCellWidth = Math.max(1, actualPageWidth / columns);
+                int actualCellWidth = homeGridCellWidthPx(page, columns, actualPageWidth);
                 int actualCellHeight = LauncherUiUtils.dp(this,
                         homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                 int actualRows = homeGridRowsForHeight(actualPageHeight, actualCellHeight);
@@ -7324,7 +7344,7 @@ public class MainActivity extends Activity {
                         left = Math.max(0, Math.min(Math.max(0, targetPage.getWidth() - tile.getWidth()), left));
                         top = Math.max(0, Math.min(Math.max(0, targetPage.getHeight() - tile.getHeight()), top));
                         if (commit && targetPage.getWidth() > 0 && targetPage.getHeight() > 0) {
-                            int shortcutCellWidth = Math.max(1, targetPage.getWidth() / 4);
+                            int shortcutCellWidth = homeGridCellWidthPx(targetPage, 4, targetPage.getWidth());
                             int shortcutCellHeight = LauncherUiUtils.dp(this,
                                     homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
                             int shortcutRows = homeGridRowsForHeight(targetPage.getHeight(), shortcutCellHeight);
@@ -7548,7 +7568,7 @@ public class MainActivity extends Activity {
     private int[] findFreeContactShortcutGridPosition(
             FrameLayout page, String shortcutId, int preferredX, int preferredY, View ignore) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
-        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -7577,7 +7597,7 @@ public class MainActivity extends Activity {
     private boolean isContactShortcutPositionFree(FrameLayout page, View ignore, int left, int top,
             int width, int height, String shortcutId) {
         if (page == null || width <= 0 || height <= 0) return false;
-        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -7639,7 +7659,7 @@ public class MainActivity extends Activity {
     private int[] findContactShortcutGridPosition(
             FrameLayout page, String shortcutId, int preferredX, int preferredY, View ignore) {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return null;
-        final int cellWidth = Math.max(1, page.getWidth() / 4);
+        final int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
         final int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
         final int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -7701,7 +7721,7 @@ public class MainActivity extends Activity {
         }
         if (shortcuts.isEmpty()) return;
 
-        int cellWidth = Math.max(1, page.getWidth() / 4);
+        int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -7743,7 +7763,7 @@ public class MainActivity extends Activity {
             View pageView = pagesStrip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pageView;
-            int cellWidth = Math.max(1, page.getWidth() / 4);
+            int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
             int cellHeight = LauncherUiUtils.dp(this,
                     homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -8004,7 +8024,8 @@ public class MainActivity extends Activity {
             if (labelRawParams instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams labelParams = (FrameLayout.LayoutParams) labelRawParams;
                 labelParams.width = shortcutTile.getParent() instanceof View
-                        ? Math.max(1, ((View) shortcutTile.getParent()).getWidth() / 4)
+                        ? homeGridCellWidthPx((View) shortcutTile.getParent(), 4,
+                                ((View) shortcutTile.getParent()).getWidth())
                         : Math.max(1, shortcutTile.getWidth());
                 labelParams.height = labelHeight;
                 labelParams.leftMargin = 0;
@@ -8015,7 +8036,8 @@ public class MainActivity extends Activity {
             if (tileRawParams instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) tileRawParams;
                 if (shortcutTile.getParent() instanceof View && tileRawParams.width != ViewGroup.LayoutParams.MATCH_PARENT) {
-                    tileParams.width = Math.max(1, ((View) shortcutTile.getParent()).getWidth() / 4);
+                    tileParams.width = homeGridCellWidthPx((View) shortcutTile.getParent(), 4,
+                                ((View) shortcutTile.getParent()).getWidth());
                 }
                 int iconSizeDp = Math.max(32, Math.min(74,
                         prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
@@ -9084,7 +9106,7 @@ public class MainActivity extends Activity {
                             ? targetPage.getHeight() : pageViewport.getHeight());
                     int[] viewportLocation = new int[2];
                     pageViewport.getLocationOnScreen(viewportLocation);
-                    int cellWidth = Math.max(1, targetWidth / columns);
+                    int cellWidth = homeGridCellWidthPx(targetPage, columns, targetWidth);
                     int cellHeight = slotHeight;
                     rows = homeGridRowsForHeight(targetHeight, cellHeight);
 
@@ -9212,7 +9234,8 @@ public class MainActivity extends Activity {
                         }
                         return true;
                     }
-                    int sourceCellWidth = Math.max(1, sourceView.getWidth() / columns);
+                    int sourceCellWidth = homeGridCellWidthPx(
+                            sourceView, columns, sourceView.getWidth());
                     int sourceCellHeight = slotHeight;
                     int sourceRows = homeGridRowsForHeight(
                             sourceView.getHeight(), sourceCellHeight);
@@ -10132,7 +10155,7 @@ public class MainActivity extends Activity {
                 : Math.max(LauncherUiUtils.dp(this, 360),
                         getResources().getDisplayMetrics().heightPixels
                                 - LauncherUiUtils.dp(this, 260));
-        int cellWidth = Math.max(1, width / columns);
+        int cellWidth = homeGridCellWidthPx(null, columns, width);
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
         int rows = Math.max(1, height / cellHeight);
@@ -12745,7 +12768,7 @@ public class MainActivity extends Activity {
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
 
         int columns = homeGridColumnsForItem(seed);
-        int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -12938,7 +12961,7 @@ public class MainActivity extends Activity {
                 preferredX, preferredY, pushDx, pushDy)) return true;
 
         int columns = homeGridColumnsForItem(seed);
-        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -13438,7 +13461,7 @@ public class MainActivity extends Activity {
                 || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return null;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
         int columns = homeGridColumnsForItem(item);
-        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int col = Math.max(0, Math.min(columns - 1,
                 Math.round(lp.leftMargin / (float) cellWidth)));
         int row = homeGridRowFromTop(lp.topMargin, rows, page.getHeight(), cellHeight);
@@ -13553,7 +13576,7 @@ public class MainActivity extends Activity {
             return null;
         }
         int columns = getHomeColumns();
-        int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -14511,7 +14534,7 @@ public class MainActivity extends Activity {
             if (isHomeGridIcon(other)) {
                 // App cells must remain snapped to the home grid during displacement.
                 int columns = homeGridColumnsForItem(other);
-                int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+                int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -14878,7 +14901,7 @@ public class MainActivity extends Activity {
         boolean appIcon = isHomeGridIcon(item);
         if (appIcon) {
             int columns = homeGridColumnsForItem(item);
-            int cellWidth = Math.max(1, page.getWidth() / columns);
+            int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
             int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -15146,7 +15169,7 @@ public class MainActivity extends Activity {
                 xs.clear();
                 ys.clear();
                 int columns = homeGridColumnsForItem(item);
-                int cellWidth = Math.max(1, page.getWidth() / Math.max(1, columns));
+                int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -15178,7 +15201,7 @@ public class MainActivity extends Activity {
             boolean currentOnLegalGridSlot = true;
             if (isHomeGridIcon(item)) {
                 int gridColumns = homeGridColumnsForItem(item);
-                int gridCellWidth = Math.max(1, page.getWidth() / Math.max(1, gridColumns));
+                int gridCellWidth = homeGridCellWidthPx(page, gridColumns, page.getWidth());
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int gridCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int gridRows = homeGridRowsForHeight(page.getHeight(), gridCellHeight);
@@ -15367,7 +15390,7 @@ public class MainActivity extends Activity {
             catch (NumberFormatException ignored) {}
         } else if (tag.startsWith("launcher_app:")) {
             int columns = getHomeColumns();
-            int cellWidth = Math.max(1, page.getWidth() / columns);
+            int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
             String pkg = tag.substring("launcher_app:".length());
             int col = Math.max(0, Math.min(columns - 1, Math.round((float) x / cellWidth)));
@@ -15394,7 +15417,7 @@ public class MainActivity extends Activity {
         } else if (tag.startsWith(APP_GROUP_TAG_PREFIX)) {
             String id = tag.substring(APP_GROUP_TAG_PREFIX.length());
             int columns = Math.max(1, getHomeColumns());
-            int cellWidth = Math.max(1, page.getWidth() / columns);
+            int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
             int cellHeight = LauncherUiUtils.dp(this,
                     homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -16049,7 +16072,7 @@ public class MainActivity extends Activity {
         if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0) return;
         int pageIndex = Math.max(0, pagesStrip.indexOfChild(page));
         int columns = Math.max(1, getHomeColumns());
-        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int iconSize = Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)));
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -16177,7 +16200,7 @@ public class MainActivity extends Activity {
         int maxX = Math.max(0, page.getWidth() - width);
         int maxY = Math.max(0, page.getHeight() - height);
         int columns = Math.max(1, getHomeColumns());
-        int cellWidth = Math.max(1, page.getWidth() / columns);
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int cellHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(Math.max(32, Math.min(74, prefs.getInt(KEY_ICON_SIZE, 48)))));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
