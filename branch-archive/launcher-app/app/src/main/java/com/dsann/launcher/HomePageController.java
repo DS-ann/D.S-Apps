@@ -61,6 +61,8 @@ final class HomePageController {
             new java.util.WeakHashMap<View, Boolean>();
     private final java.util.WeakHashMap<View, Boolean> orientationGeometryWatchers =
             new java.util.WeakHashMap<View, Boolean>();
+    private final java.util.WeakHashMap<View, float[]> landscapeClockBaseScales =
+            new java.util.WeakHashMap<View, float[]>();
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
 
     private static final class WorkspaceGeometry {
@@ -94,8 +96,7 @@ final class HomePageController {
         if (item == null || !(item.getTag() instanceof String)) return false;
         String tag = (String) item.getTag();
         return tag.startsWith("launcher_widget:")
-                || tag.contains("shortcut")
-                || tag.contains("group");
+                || tag.contains("shortcut");
     }
 
     private String portraitGeometryKey(View item) {
@@ -318,6 +319,12 @@ final class HomePageController {
                         + Math.max(0, (childHeight - label.getCompoundPaddingTop()
                                 - label.getCompoundPaddingBottom() - height) / 2);
             }
+            float childScaleX = Math.max(0.01f, Math.abs(child.getScaleX()));
+            float childScaleY = Math.max(0.01f, Math.abs(child.getScaleY()));
+            left = Math.round(left + child.getPivotX() * (1f - childScaleX));
+            top = Math.round(top + child.getPivotY() * (1f - childScaleY));
+            width = Math.max(1, Math.round(width * childScaleX));
+            height = Math.max(1, Math.round(height * childScaleY));
             Rect part = new Rect(left, top, left + width, top + height);
             if (result == null) result = part;
             else result.union(part);
@@ -364,6 +371,11 @@ final class HomePageController {
         return item != null && "launcher_clock_widget".equals(item.getTag());
     }
 
+    private boolean isAppGroupWorkspaceItem(View item) {
+        return item != null && item.getTag() instanceof String
+                && ((String) item.getTag()).startsWith("launcher_app_group:");
+    }
+
     private boolean isResizableLandscapeItem(View item) {
         if (!(item.getTag() instanceof String)) return false;
         String tag = (String) item.getTag();
@@ -378,8 +390,8 @@ final class HomePageController {
     }
 
     /**
-     * Landscape rotation may reduce a clock's footprint, but must never change its
-     * page or left/top coordinates. Other workspace items are moved around this anchor.
+     * Landscape rotation reduces the clock's actual rendered scale, not just its
+     * container dimensions. The original layout rectangle and position are retained.
      */
     private void fitClockAtFixedPosition(View clock, FrameLayout page,
             ArrayList<Rect> occupied) {
@@ -391,28 +403,51 @@ final class HomePageController {
         int height = current.height > 0 ? current.height : clock.getHeight();
         if (width <= 0 || height <= 0) return;
 
-        int pageWidth = page.getWidth();
-        int pageHeight = page.getHeight();
-        if (left >= 0 && left < pageWidth) width = Math.min(width, Math.max(1, pageWidth - left));
-        if (top >= 0 && top < pageHeight) height = Math.min(height, Math.max(1, pageHeight - top));
-
-        while (width > 1 || height > 1) {
-            Rect candidate = workspaceBounds(clock, left, top, width, height);
-            if (left >= 0 && top >= 0 && left + width <= pageWidth
-                    && top + height <= pageHeight && !overlapsAny(candidate, occupied)) break;
-            int reducedWidth = Math.max(1, Math.round(width * 0.8f));
-            int reducedHeight = Math.max(1, Math.round(height * 0.8f));
-            if (reducedWidth == width && width > 1) reducedWidth--;
-            if (reducedHeight == height && height > 1) reducedHeight--;
-            if (reducedWidth == width && reducedHeight == height) break;
-            width = reducedWidth;
-            height = reducedHeight;
+        float[] baseScale = landscapeClockBaseScales.get(clock);
+        if (baseScale == null) {
+            baseScale = new float[]{Math.max(0.01f, Math.abs(clock.getScaleX())),
+                    Math.max(0.01f, Math.abs(clock.getScaleY()))};
+            landscapeClockBaseScales.put(clock, baseScale);
         }
 
-        FrameLayout.LayoutParams placed = copyWorkspaceParams(clock, width, height, left, top);
-        clock.setLayoutParams(placed);
-        occupied.add(workspaceBounds(clock, left, top, width, height));
+        int pageWidth = page.getWidth();
+        int pageHeight = page.getHeight();
+        float factor = 1f;
+        Rect candidate;
+        while (true) {
+            clock.setScaleX(baseScale[0] * factor);
+            clock.setScaleY(baseScale[1] * factor);
+            candidate = workspaceBounds(clock, left, top, width, height);
+            boolean insidePage = candidate.left >= 0 && candidate.top >= 0
+                    && candidate.right <= pageWidth && candidate.bottom <= pageHeight;
+            if (insidePage && !overlapsAny(candidate, occupied)) break;
+            if (factor <= 0.025f) break;
+            factor = Math.max(0.025f, factor * 0.8f);
+        }
+
+        // Do not modify layout params or translations: the clock only shrinks.
+        occupied.add(candidate);
+        clock.requestLayout();
         clock.invalidate();
+    }
+
+    private void restorePortraitClockScales(LinearLayout strip) {
+        if (strip == null) return;
+        for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
+            View pageView = strip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                View child = page.getChildAt(childIndex);
+                if (!isClockWorkspaceItem(child)) continue;
+                float[] baseScale = landscapeClockBaseScales.remove(child);
+                if (baseScale == null) continue;
+                child.setScaleX(baseScale[0]);
+                child.setScaleY(baseScale[1]);
+                child.requestLayout();
+                child.invalidate();
+            }
+        }
     }
 
     private void resizeAppWidgetForLandscape(View item, int width, int height) {
@@ -453,6 +488,12 @@ final class HomePageController {
                 if (name.startsWith("launcher_app:")) {
                     Rect iconBounds = visibleAppBounds(child);
                     if (iconBounds != null && !iconBounds.isEmpty()) occupied.add(iconBounds);
+                } else if (isAppGroupWorkspaceItem(child)) {
+                    // App groups are already rendered at this orientation's grid row.
+                    // Reserve their slots instead of sending them through pixel-based packing.
+                    Rect groupBounds = workspaceBounds(child, child.getLeft(), child.getTop(),
+                            child.getWidth(), child.getHeight());
+                    if (!groupBounds.isEmpty()) occupied.add(groupBounds);
                 } else if (isOrientationManagedItem(child) || isClockWorkspaceItem(child)) {
                     // Clock panels are distinct per page. They may be fitted in place,
                     // but must never enter the shared portrait-geometry save/restore path.
@@ -555,6 +596,7 @@ final class HomePageController {
             if (landscape) {
                 adaptLandscapeWorkspace(strip);
             } else {
+                restorePortraitClockScales(strip);
                 snapshotPortraitWorkspaceGeometry(strip);
             }
             prefs.edit().putBoolean(LAST_GEOMETRY_LANDSCAPE_KEY, landscape).apply();
@@ -782,19 +824,14 @@ final class HomePageController {
                 View cell = homeAdapter.getViewForApp(app, null, page);
                 cell.setTag("launcher_app:" + packageName);
                 int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
-                int artworkCellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
+                int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
                         actualPageWidth / columns);
-                boolean compactLandscapeRow = isLandscapeOrientation(strip);
-                int cellWidth = compactLandscapeRow
-                        ? Math.max(LauncherUiUtils.dp(activity, 1),
-                                Math.round(artworkCellWidth * 0.88f))
-                        : artworkCellWidth;
-                int cellRowInset = Math.max(0, (actualPageWidth - cellWidth * columns) / 2);
-                // Narrow the cell pitch only in landscape. Keep artwork at the configured
-                // size; the centered row gains a smaller inter-icon gap without changing
-                // portrait slots or the underlying saved grid coordinates.
+                boolean compactLandscapeGaps = isLandscapeOrientation(strip);
+                // Keep every logical cell at the same width as portrait so the row's total
+                // span stays edge-to-edge. Landscape reduces visual gaps by widening only
+                // the painted icon inside its unchanged cell.
                 int maxArtworkSize = Math.max(1,
-                        artworkCellWidth - LauncherUiUtils.dp(activity, 4));
+                        cellWidth - LauncherUiUtils.dp(activity, 4));
                 if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 0
                         && ((ViewGroup) cell).getChildAt(0) instanceof android.widget.ImageView) {
                     View iconView = ((ViewGroup) cell).getChildAt(0);
@@ -805,6 +842,11 @@ final class HomePageController {
                         iconParams.width = fittedSize;
                         iconParams.height = fittedSize;
                         iconView.setLayoutParams(iconParams);
+                        float maxLandscapeScale = (cellWidth - LauncherUiUtils.dp(activity, 2))
+                                / (float) Math.max(1, fittedSize);
+                        float iconScaleX = compactLandscapeGaps
+                                ? Math.max(1f, Math.min(1.12f, maxLandscapeScale)) : 1f;
+                        iconView.setScaleX(iconScaleX);
                     }
                 }
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
@@ -843,7 +885,7 @@ final class HomePageController {
                     // than silently omitting this app from the rendered page.
                 }
                 occupiedSlots[row][col] = true;
-                lp.leftMargin = cellRowInset + col * cellWidth;
+                lp.leftMargin = col * cellWidth;
                 // Keep rows at their original fixed grid positions. In particular,
                 // the lowest row stays one cell above the workspace edge instead of
                 // being stretched down toward the dock.
@@ -853,14 +895,8 @@ final class HomePageController {
             }
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
-                int artworkCellWidth = Math.max(1, page.getWidth() / columns);
-                boolean compactLandscapeRow = isLandscapeOrientation(strip);
-                int actualCellWidth = compactLandscapeRow
-                        ? Math.max(1, Math.round(artworkCellWidth * 0.88f))
-                        : artworkCellWidth;
-                int actualCellRowInset = Math.max(0,
-                        (page.getWidth() - actualCellWidth * columns) / 2);
-                // Match the initial compact landscape pitch after Android measures the page.
+                int actualCellWidth = Math.max(1, page.getWidth() / columns);
+                // Keep the post-layout grid at full width in both orientations.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         host.getHomeCellHeightDp(configuredIconSize));
                 int actualRows = host.getHomeGridRowsForHeight(page.getHeight(), actualCellHeight);
@@ -885,7 +921,7 @@ final class HomePageController {
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
-                    actual.leftMargin = actualCellRowInset + col * actualCellWidth;
+                    actual.leftMargin = col * actualCellWidth;
                     actual.topMargin = host.getHomeGridRowTop(
                             row, actualRows, page.getHeight(), actualCellHeight);
                     child.setLayoutParams(actual);
