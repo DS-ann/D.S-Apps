@@ -3250,7 +3250,14 @@ public class MainActivity extends Activity {
                     @Override public void installHomeIconTouch(View cell, String packageName) { MainActivity.this.installHomeIconTouch(cell, packageName); }
                     @Override public void restoreWidgetsOnPages() { MainActivity.this.restoreWidgetsOnPages(); }
                     @Override public void syncWidgetViewsToPages() { MainActivity.this.syncWidgetViewsToPages(); }
-                    @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
+                    @Override public void moveWorkspaceWidgetToPage(
+                             View widget, int targetPageIndex, int left, int top) {
+                         if (widget != null && widget.getParent() instanceof FrameLayout) {
+                             MainActivity.this.moveResizeWidgetToOtherPage(
+                                     (FrameLayout) widget.getParent(), widget, targetPageIndex, left, top);
+                         }
+                     }
+                     @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome, View sourceView) { MainActivity.this.showAppOptions(app, onHome, sourceView); }
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
         renderHomePages(false);
@@ -13164,6 +13171,22 @@ public class MainActivity extends Activity {
         return Math.max(0.25f, Math.min(1f, value));
     }
 
+    private float clampLandscapeClockAutoScale(float value) {
+        return Math.max(0.08f, Math.min(1f, value));
+    }
+
+    private String landscapeClockAutoScaleKey(int page, boolean horizontal) {
+        return "workspace_landscape_clock_auto_scale_"
+                + (horizontal ? "x" : "y") + "_page_" + page;
+    }
+
+    private float getLandscapeClockAutoScale(int page, boolean horizontal) {
+        if (getResources().getConfiguration().orientation
+                != android.content.res.Configuration.ORIENTATION_LANDSCAPE) return 1f;
+        return clampLandscapeClockAutoScale(getFloatPreferenceCompat(
+                landscapeClockAutoScaleKey(page, horizontal), 1f));
+    }
+
     private void migrateLegacyClockAutoShrinkScalePreferences() {
         if (prefs == null) return;
         String legacyX = KEY_RESIZE_AUTO_SCALE_X_PREFIX + "launcher_clock_widget";
@@ -18198,6 +18221,9 @@ public class MainActivity extends Activity {
                 getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(targetPanel, true), 1f));
         final float automaticShrinkY = clampWorkspaceAutoScale(
                 getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(targetPanel, false), 1f));
+        // Keep the landscape collision factor separate from the user-selected clock length.
+        final float landscapeAutoX = getLandscapeClockAutoScale(targetPage, true);
+        final float landscapeAutoY = getLandscapeClockAutoScale(targetPage, false);
         final float stylePreservedScale = clockStyleChanged
                 && previousClockPanelGeometry[2] > 0
                 ? previousClockPanelGeometry[2]
@@ -18240,7 +18266,7 @@ public class MainActivity extends Activity {
         clockPanel.setElevation(LauncherUiUtils.dp(this, 8));
         // Breadth is expressed by real row height; only collision auto-shrink uses
         // this outer transform, independent of the user's breadth percentage.
-        clockPanel.setScaleY(automaticShrinkY);
+        clockPanel.setScaleY(automaticShrinkY * landscapeAutoY);
         ViewGroup.LayoutParams rawPanelParams = clockPanel.getLayoutParams();
         FrameLayout.LayoutParams panelParams = rawPanelParams instanceof FrameLayout.LayoutParams
                 ? (FrameLayout.LayoutParams) rawPanelParams
@@ -18257,7 +18283,7 @@ public class MainActivity extends Activity {
         // positioning remain visually stable while changing the clock length.
         clockPanel.setPivotX(alignment == Gravity.RIGHT ? panelParams.width
                 : (alignment == Gravity.CENTER_HORIZONTAL ? panelParams.width / 2f : 0f));
-        clockPanel.setScaleX(lengthScale * automaticShrinkX);
+        clockPanel.setScaleX(lengthScale * automaticShrinkX * landscapeAutoX);
         targetPanel.post(() -> {
             // This callback belongs to the specific page panel measured above. Never
             // consult mutable clockPanel/activeClockPage here: they can point at the

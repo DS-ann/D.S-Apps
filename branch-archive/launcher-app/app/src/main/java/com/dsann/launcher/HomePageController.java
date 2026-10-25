@@ -42,6 +42,7 @@ final class HomePageController {
         void installHomeIconTouch(View cell, String packageName);
         void restoreWidgetsOnPages();
         void syncWidgetViewsToPages();
+        void moveWorkspaceWidgetToPage(View widget, int targetPageIndex, int left, int top);
         void launchApp(ResolveInfo app, View sourceView);
         void showAppOptions(ResolveInfo app, boolean onHome, View sourceView);
     }
@@ -418,9 +419,60 @@ final class HomePageController {
     }
 
     private boolean isResizableLandscapeItem(View item) {
-        if (!(item.getTag() instanceof String)) return false;
-        String tag = (String) item.getTag();
-        return tag.startsWith("launcher_widget:") || tag.contains("clock_widget");
+        return isWidgetWorkspaceItem(item);
+    }
+
+    private boolean isWidgetWorkspaceItem(View item) {
+        return item != null && item.getTag() instanceof String
+                && ((String) item.getTag()).startsWith("launcher_widget:");
+    }
+
+    private String landscapeClockAutoScaleKey(int pageIndex, boolean horizontal) {
+        return "workspace_landscape_clock_auto_scale_"
+                + (horizontal ? "x" : "y") + "_page_" + pageIndex;
+    }
+
+    private float clampLandscapeClockAutoScale(float value) {
+        return Math.max(0.08f, Math.min(1f, value));
+    }
+
+    private boolean fitsWorkspacePosition(View item, int left, int top,
+            int width, int height, int pageWidth, int pageHeight, ArrayList<Rect> occupied) {
+        Rect candidate = workspaceBounds(item, left, top, width, height);
+        return candidate.left >= 0 && candidate.top >= 0
+                && candidate.right <= pageWidth && candidate.bottom <= pageHeight
+                && !overlapsAny(candidate, occupied);
+    }
+
+    private ArrayList<Rect> collectOccupiedWorkspaceBounds(FrameLayout page, View ignoredItem) {
+        ArrayList<Rect> occupied = new ArrayList<>();
+        if (page == null) return occupied;
+        for (int index = 0; index < page.getChildCount(); index++) {
+            View child = page.getChildAt(index);
+            if (child == ignoredItem || child.getVisibility() != View.VISIBLE) continue;
+            Object rawTag = child.getTag();
+            if (!(rawTag instanceof String)) continue;
+            String tag = (String) rawTag;
+            Rect bounds = null;
+            if (tag.startsWith("launcher_app:")) {
+                bounds = visibleAppBounds(child);
+            } else if (isAppGroupWorkspaceItem(child) || isClockWorkspaceItem(child)
+                    || isOrientationManagedItem(child)) {
+                int width = child.getWidth();
+                int height = child.getHeight();
+                ViewGroup.LayoutParams raw = child.getLayoutParams();
+                if (raw instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                    if (lp.width > 0) width = lp.width;
+                    if (lp.height > 0) height = lp.height;
+                }
+                if (width > 0 && height > 0) {
+                    bounds = workspaceBounds(child, child.getLeft(), child.getTop(), width, height);
+                }
+            }
+            if (bounds != null && !bounds.isEmpty()) occupied.add(bounds);
+        }
+        return occupied;
     }
 
     private boolean overlapsAny(Rect candidate, ArrayList<Rect> occupied) {
@@ -434,39 +486,56 @@ final class HomePageController {
      * Landscape rotation reduces the clock's actual rendered scale, not just its
      * container dimensions. The original layout rectangle and position are retained.
      */
+    /**
+     * Fit the clock at its existing visual anchor. The landscape scale is persisted
+     * separately from the user's clock size so MainActivity's normal measurement pass
+     * cannot silently restore the oversized transform.
+     */
     private void fitClockAtFixedPosition(View clock, FrameLayout page,
             ArrayList<Rect> occupied) {
         if (!(clock.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        LinearLayout strip = host.getPagesStrip();
+        int pageIndex = strip == null ? -1 : strip.indexOfChild(page);
+        if (pageIndex < 0) return;
+
         FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) clock.getLayoutParams();
-        final int left = current.leftMargin;
-        final int top = current.topMargin;
+        // Actual laid-out coordinates respect LEFT/CENTER/RIGHT gravity; margins alone do not.
+        final int left = clock.getLeft();
+        final int top = clock.getTop();
         int width = current.width > 0 ? current.width : clock.getWidth();
         int height = current.height > 0 ? current.height : clock.getHeight();
         if (width <= 0 || height <= 0) return;
 
-        float[] baseScale = landscapeClockBaseScales.get(clock);
-        if (baseScale == null) {
-            baseScale = new float[]{Math.max(0.01f, Math.abs(clock.getScaleX())),
-                    Math.max(0.01f, Math.abs(clock.getScaleY()))};
-            landscapeClockBaseScales.put(clock, baseScale);
-        }
+        String keyX = landscapeClockAutoScaleKey(pageIndex, true);
+        String keyY = landscapeClockAutoScaleKey(pageIndex, false);
+        float previousLandscapeX = clampLandscapeClockAutoScale(
+                LauncherUiUtils.getFloatPreferenceCompat(prefs, keyX, 1f));
+        float previousLandscapeY = clampLandscapeClockAutoScale(
+                LauncherUiUtils.getFloatPreferenceCompat(prefs, keyY, 1f));
+        float currentScaleX = Math.max(0.01f, Math.abs(clock.getScaleX()));
+        float currentScaleY = Math.max(0.01f, Math.abs(clock.getScaleY()));
+        float baseScaleX = currentScaleX / previousLandscapeX;
+        float baseScaleY = currentScaleY / previousLandscapeY;
+        landscapeClockBaseScales.put(clock, new float[]{baseScaleX, baseScaleY});
 
         int pageWidth = page.getWidth();
         int pageHeight = page.getHeight();
+        final float minimumAutoScale = 0.08f;
         float factor = 1f;
         Rect candidate;
         while (true) {
-            clock.setScaleX(baseScale[0] * factor);
-            clock.setScaleY(baseScale[1] * factor);
+            clock.setScaleX(baseScaleX * factor);
+            clock.setScaleY(baseScaleY * factor);
             candidate = workspaceBounds(clock, left, top, width, height);
             boolean insidePage = candidate.left >= 0 && candidate.top >= 0
                     && candidate.right <= pageWidth && candidate.bottom <= pageHeight;
             if (insidePage && !overlapsAny(candidate, occupied)) break;
-            if (factor <= 0.025f) break;
-            factor = Math.max(0.025f, factor * 0.8f);
+            if (factor <= minimumAutoScale + 0.0001f) break;
+            factor = Math.max(minimumAutoScale, factor * 0.8f);
         }
 
-        // Do not modify layout params or translations: the clock only shrinks.
+        // Persist landscape-only factors; normal clock layout passes must respect this.
+        prefs.edit().putFloat(keyX, factor).putFloat(keyY, factor).apply();
         occupied.add(candidate);
         clock.requestLayout();
         clock.invalidate();
@@ -474,6 +543,8 @@ final class HomePageController {
 
     private void restorePortraitClockScales(LinearLayout strip) {
         if (strip == null) return;
+        SharedPreferences.Editor editor = prefs.edit();
+        boolean changed = false;
         for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
             View pageView = strip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
@@ -482,13 +553,22 @@ final class HomePageController {
                 View child = page.getChildAt(childIndex);
                 if (!isClockWorkspaceItem(child)) continue;
                 float[] baseScale = landscapeClockBaseScales.remove(child);
-                if (baseScale == null) continue;
-                child.setScaleX(baseScale[0]);
-                child.setScaleY(baseScale[1]);
-                child.requestLayout();
-                child.invalidate();
+                if (baseScale != null) {
+                    child.setScaleX(baseScale[0]);
+                    child.setScaleY(baseScale[1]);
+                    child.requestLayout();
+                    child.invalidate();
+                }
+            }
+            for (boolean horizontal : new boolean[]{true, false}) {
+                String key = landscapeClockAutoScaleKey(pageIndex, horizontal);
+                if (prefs.contains(key)) {
+                    editor.remove(key);
+                    changed = true;
+                }
             }
         }
+        if (changed) editor.apply();
     }
 
     private void resizeAppWidgetForLandscape(View item, int width, int height) {
@@ -510,6 +590,7 @@ final class HomePageController {
         if (strip == null) return;
         int step = Math.max(1, LauncherUiUtils.dp(activity, 4));
         int fineStep = Math.max(1, LauncherUiUtils.dp(activity, 1));
+        ArrayList<View> widgetsNeedingOtherPage = new ArrayList<>();
         for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
             View pageView = strip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
@@ -576,44 +657,147 @@ final class HomePageController {
                 int originalWidth = current.width > 0 ? current.width : item.getWidth();
                 int originalHeight = current.height > 0 ? current.height : item.getHeight();
                 if (originalWidth <= 0 || originalHeight <= 0) continue;
+
                 int width = Math.min(pageWidth, originalWidth);
                 int height = Math.min(pageHeight, originalHeight);
-                int[] position = findFreePosition(item, originalLeft, originalTop, width, height,
-                        pageWidth, pageHeight, occupied, step);
-                if (position == null) {
-                    position = findFreePosition(item, originalLeft, originalTop, width, height,
-                            pageWidth, pageHeight, occupied, fineStep);
-                }
-                boolean resizable = isResizableLandscapeItem(item);
-                while (position == null && resizable && (width > 1 || height > 1)) {
-                    int reducedWidth = Math.max(1, Math.round(width * 0.8f));
-                    int reducedHeight = Math.max(1, Math.round(height * 0.8f));
-                    if (reducedWidth == width && width > 1) reducedWidth--;
-                    if (reducedHeight == height && height > 1) reducedHeight--;
-                    width = reducedWidth;
-                    height = reducedHeight;
+                boolean widget = isWidgetWorkspaceItem(item);
+                boolean sizeChanged = width != originalWidth || height != originalHeight;
+                int[] position = null;
+
+                if (widget) {
+                    // First priority: preserve the existing anchor and resize the real widget
+                    // rectangle until it no longer collides with apps, groups, the clock,
+                    // or other widgets already secured on this page.
+                    int minWidth = Math.min(width, LauncherUiUtils.dp(activity, 64));
+                    int minHeight = Math.min(height, LauncherUiUtils.dp(activity, 48));
+                    if (fitsWorkspacePosition(item, originalLeft, originalTop, width, height,
+                            pageWidth, pageHeight, occupied)) {
+                        position = new int[]{originalLeft, originalTop};
+                    }
+                    while (position == null && (width > minWidth || height > minHeight)) {
+                        int reducedWidth = width > minWidth
+                                ? Math.max(minWidth, Math.round(width * 0.8f)) : width;
+                        int reducedHeight = height > minHeight
+                                ? Math.max(minHeight, Math.round(height * 0.8f)) : height;
+                        if (reducedWidth == width && reducedHeight == height) break;
+                        width = reducedWidth;
+                        height = reducedHeight;
+                        sizeChanged = true;
+                        if (fitsWorkspacePosition(item, originalLeft, originalTop, width, height,
+                                pageWidth, pageHeight, occupied)) {
+                            position = new int[]{originalLeft, originalTop};
+                        }
+                    }
+
+                    // Reposition inside the same page only after shrinking in place fails.
+                    if (position == null) {
+                        position = findFreePosition(item, originalLeft, originalTop, width, height,
+                                pageWidth, pageHeight, occupied, step);
+                    }
+                    if (position == null) {
+                        position = findFreePosition(item, originalLeft, originalTop, width, height,
+                                pageWidth, pageHeight, occupied, fineStep);
+                    }
+                    if (position == null) {
+                        // Retain a visible minimum-sized widget until the other page is checked.
+                        widgetsNeedingOtherPage.add(item);
+                        position = new int[]{
+                                Math.max(0, Math.min(Math.max(0, pageWidth - width), originalLeft)),
+                                Math.max(0, Math.min(Math.max(0, pageHeight - height), originalTop))};
+                    }
+                } else {
+                    // Shortcuts keep their size and page; they never use the widget transfer path.
                     position = findFreePosition(item, originalLeft, originalTop, width, height,
                             pageWidth, pageHeight, occupied, step);
                     if (position == null) {
                         position = findFreePosition(item, originalLeft, originalTop, width, height,
                                 pageWidth, pageHeight, occupied, fineStep);
                     }
+                    if (position == null) {
+                        position = new int[]{
+                                Math.max(0, Math.min(Math.max(0, pageWidth - width), originalLeft)),
+                                Math.max(0, Math.min(Math.max(0, pageHeight - height), originalTop))};
+                    }
                 }
-                if (position == null) {
-                    // Keep a final fallback for an already completely saturated workspace.
-                    position = new int[]{Math.max(0, Math.min(pageWidth - width, originalLeft)),
-                            Math.max(0, Math.min(pageHeight - height, originalTop))};
-                }
+
                 FrameLayout.LayoutParams placed = copyWorkspaceParams(item, width, height,
                         position[0], position[1]);
+                if (widget) {
+                    placed.gravity = Gravity.TOP | Gravity.LEFT;
+                    placed.rightMargin = 0;
+                    placed.bottomMargin = 0;
+                }
                 item.setLayoutParams(placed);
                 Rect placedBounds = workspaceBounds(item, position[0], position[1], width, height);
                 occupied.add(placedBounds);
-                if (width != originalWidth || height != originalHeight) {
-                    resizeAppWidgetForLandscape(item, width, height);
-                }
+                if (sizeChanged && widget) resizeAppWidgetForLandscape(item, width, height);
                 item.invalidate();
             }
+        }
+
+        // Only widgets may transfer screens, and only after shrinking and same-page
+        // placement have both failed. The destination's final workspace bounds are rechecked.
+        for (View widget : widgetsNeedingOtherPage) {
+            if (!isWidgetWorkspaceItem(widget) || !(widget.getParent() instanceof FrameLayout)) continue;
+            FrameLayout sourcePage = (FrameLayout) widget.getParent();
+            int sourcePageIndex = strip.indexOfChild(sourcePage);
+            if (sourcePageIndex < 0) continue;
+            int targetPageIndex = sourcePageIndex == 0 ? 1 : 0;
+            if (targetPageIndex >= strip.getChildCount()
+                    || !(strip.getChildAt(targetPageIndex) instanceof FrameLayout)) continue;
+            FrameLayout targetPage = (FrameLayout) strip.getChildAt(targetPageIndex);
+            int targetWidth = targetPage.getWidth();
+            int targetHeight = targetPage.getHeight();
+            if (targetWidth <= 0 || targetHeight <= 0) continue;
+            if (!(widget.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) widget.getLayoutParams();
+            int width = Math.min(targetWidth, current.width > 0 ? current.width : widget.getWidth());
+            int height = Math.min(targetHeight, current.height > 0 ? current.height : widget.getHeight());
+            int minWidth = Math.min(width, LauncherUiUtils.dp(activity, 64));
+            int minHeight = Math.min(height, LauncherUiUtils.dp(activity, 48));
+            int preferredLeft = Math.max(0, Math.min(Math.max(0, targetWidth - width), current.leftMargin));
+            int preferredTop = Math.max(0, Math.min(Math.max(0, targetHeight - height), current.topMargin));
+            ArrayList<Rect> destinationOccupied = collectOccupiedWorkspaceBounds(targetPage, widget);
+            int[] position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
+                    targetWidth, targetHeight, destinationOccupied, step);
+            if (position == null) {
+                position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
+                        targetWidth, targetHeight, destinationOccupied, fineStep);
+            }
+            boolean sizeChanged = false;
+            while (position == null && (width > minWidth || height > minHeight)) {
+                int reducedWidth = width > minWidth
+                        ? Math.max(minWidth, Math.round(width * 0.8f)) : width;
+                int reducedHeight = height > minHeight
+                        ? Math.max(minHeight, Math.round(height * 0.8f)) : height;
+                if (reducedWidth == width && reducedHeight == height) break;
+                width = reducedWidth;
+                height = reducedHeight;
+                sizeChanged = true;
+                preferredLeft = Math.max(0, Math.min(Math.max(0, targetWidth - width), current.leftMargin));
+                preferredTop = Math.max(0, Math.min(Math.max(0, targetHeight - height), current.topMargin));
+                position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
+                        targetWidth, targetHeight, destinationOccupied, step);
+                if (position == null) {
+                    position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
+                            targetWidth, targetHeight, destinationOccupied, fineStep);
+                }
+            }
+            if (position == null) continue; // Both pages are saturated; preserve the visible minimum.
+
+            FrameLayout.LayoutParams moved = copyWorkspaceParams(
+                    widget, width, height, position[0], position[1]);
+            moved.gravity = Gravity.TOP | Gravity.LEFT;
+            moved.rightMargin = 0;
+            moved.bottomMargin = 0;
+            widget.setTranslationX(0f);
+            widget.setTranslationY(0f);
+            widget.setLayoutParams(moved);
+            if (sizeChanged) resizeAppWidgetForLandscape(widget, width, height);
+            host.moveWorkspaceWidgetToPage(widget, targetPageIndex, position[0], position[1]);
+            widget.bringToFront();
+            widget.requestLayout();
+            widget.invalidate();
         }
     }
 
