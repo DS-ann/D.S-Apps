@@ -144,8 +144,12 @@ final class LauncherDrawerController {
             drawerApps.clear();
             String ownPackage = activity.getPackageName();
             for (ResolveInfo app : allApps) {
-                if (app == null || app.activityInfo == null
-                        || ownPackage.equals(app.activityInfo.packageName)) continue;
+                if (app == null || app.activityInfo == null) continue;
+                // Keep the synthetic self-app drawer entry when the query is refreshed
+                // after tapping it or returning from BlankActivity. MainActivity remains
+                // excluded; only BlankActivity is meant to appear as a user-facing app icon.
+                if (ownPackage.equals(app.activityInfo.packageName)
+                        && !BlankActivity.class.getName().equals(app.activityInfo.name)) continue;
                 String label = adapter.cachedLabel(app);
                 if (needle.isEmpty()
                         || label.toLowerCase(java.util.Locale.ROOT).contains(needle)) {

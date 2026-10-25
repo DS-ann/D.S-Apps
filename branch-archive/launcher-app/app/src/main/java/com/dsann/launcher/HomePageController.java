@@ -475,6 +475,65 @@ final class HomePageController {
         return occupied;
     }
 
+    /**
+     * Finds a collision-free landscape widget geometry with the smallest practical
+     * dimensional change: horizontal length first, then height, and only then both.
+     * Each candidate is tested at its original anchor before searching elsewhere on
+     * the same page, so a widget does not lose height just because it needs less width.
+     * Returns {left, top, width, height}, or null when the page cannot hold it.
+     */
+    private int[] findLandscapeWidgetFit(View widget, int preferredLeft, int preferredTop,
+            int originalWidth, int originalHeight, int pageWidth, int pageHeight,
+            ArrayList<Rect> occupied, int step, int fineStep) {
+        if (widget == null || pageWidth <= 0 || pageHeight <= 0) return null;
+        int baseWidth = Math.min(pageWidth, originalWidth);
+        int baseHeight = Math.min(pageHeight, originalHeight);
+        if (baseWidth <= 0 || baseHeight <= 0) return null;
+        int minWidth = Math.min(baseWidth, LauncherUiUtils.dp(activity, 64));
+        int minHeight = Math.min(baseHeight, LauncherUiUtils.dp(activity, 48));
+
+        if (fitsWorkspacePosition(widget, preferredLeft, preferredTop, baseWidth, baseHeight,
+                pageWidth, pageHeight, occupied)) {
+            return new int[]{preferredLeft, preferredTop, baseWidth, baseHeight};
+        }
+
+        // Modes: reduce length only, reduce height only, then reduce both dimensions.
+        for (int mode = 0; mode < 3; mode++) {
+            int width = baseWidth;
+            int height = baseHeight;
+            while ((mode == 0 && width > minWidth)
+                    || (mode == 1 && height > minHeight)
+                    || (mode == 2 && (width > minWidth || height > minHeight))) {
+                int nextWidth = width;
+                int nextHeight = height;
+                if (mode == 0 || mode == 2) {
+                    nextWidth = width > minWidth
+                            ? Math.max(minWidth, Math.round(width * 0.8f)) : width;
+                }
+                if (mode == 1 || mode == 2) {
+                    nextHeight = height > minHeight
+                            ? Math.max(minHeight, Math.round(height * 0.8f)) : height;
+                }
+                if (nextWidth == width && nextHeight == height) break;
+                width = nextWidth;
+                height = nextHeight;
+
+                if (fitsWorkspacePosition(widget, preferredLeft, preferredTop, width, height,
+                        pageWidth, pageHeight, occupied)) {
+                    return new int[]{preferredLeft, preferredTop, width, height};
+                }
+                int[] position = findFreePosition(widget, preferredLeft, preferredTop,
+                        width, height, pageWidth, pageHeight, occupied, step);
+                if (position == null) {
+                    position = findFreePosition(widget, preferredLeft, preferredTop,
+                            width, height, pageWidth, pageHeight, occupied, fineStep);
+                }
+                if (position != null) return new int[]{position[0], position[1], width, height};
+            }
+        }
+        return null;
+    }
+
     private boolean overlapsAny(Rect candidate, ArrayList<Rect> occupied) {
         for (Rect used : occupied) {
             if (Rect.intersects(candidate, used)) return true;
@@ -591,6 +650,8 @@ final class HomePageController {
         int step = Math.max(1, LauncherUiUtils.dp(activity, 4));
         int fineStep = Math.max(1, LauncherUiUtils.dp(activity, 1));
         ArrayList<View> widgetsNeedingOtherPage = new ArrayList<>();
+        java.util.IdentityHashMap<View, int[]> originalWidgetSizes =
+                new java.util.IdentityHashMap<>();
         for (int pageIndex = 0; pageIndex < strip.getChildCount(); pageIndex++) {
             View pageView = strip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
@@ -665,42 +726,22 @@ final class HomePageController {
                 int[] position = null;
 
                 if (widget) {
-                    // First priority: preserve the existing anchor and resize the real widget
-                    // rectangle until it no longer collides with apps, groups, the clock,
-                    // or other widgets already secured on this page.
-                    int minWidth = Math.min(width, LauncherUiUtils.dp(activity, 64));
-                    int minHeight = Math.min(height, LauncherUiUtils.dp(activity, 48));
-                    if (fitsWorkspacePosition(item, originalLeft, originalTop, width, height,
-                            pageWidth, pageHeight, occupied)) {
-                        position = new int[]{originalLeft, originalTop};
-                    }
-                    while (position == null && (width > minWidth || height > minHeight)) {
-                        int reducedWidth = width > minWidth
-                                ? Math.max(minWidth, Math.round(width * 0.8f)) : width;
-                        int reducedHeight = height > minHeight
-                                ? Math.max(minHeight, Math.round(height * 0.8f)) : height;
-                        if (reducedWidth == width && reducedHeight == height) break;
-                        width = reducedWidth;
-                        height = reducedHeight;
-                        sizeChanged = true;
-                        if (fitsWorkspacePosition(item, originalLeft, originalTop, width, height,
-                                pageWidth, pageHeight, occupied)) {
-                            position = new int[]{originalLeft, originalTop};
-                        }
-                    }
-
-                    // Reposition inside the same page only after shrinking in place fails.
-                    if (position == null) {
-                        position = findFreePosition(item, originalLeft, originalTop, width, height,
-                                pageWidth, pageHeight, occupied, step);
-                    }
-                    if (position == null) {
-                        position = findFreePosition(item, originalLeft, originalTop, width, height,
-                                pageWidth, pageHeight, occupied, fineStep);
-                    }
-                    if (position == null) {
-                        // Retain a visible minimum-sized widget until the other page is checked.
+                    originalWidgetSizes.put(item, new int[]{originalWidth, originalHeight});
+                    int[] fit = findLandscapeWidgetFit(item, originalLeft, originalTop,
+                            width, height, pageWidth, pageHeight, occupied, step, fineStep);
+                    if (fit != null) {
+                        position = new int[]{fit[0], fit[1]};
+                        width = fit[2];
+                        height = fit[3];
+                        sizeChanged = width != originalWidth || height != originalHeight;
+                    } else {
+                        // No legal placement on this page even after dimensional shrink.
+                        // Queue this widget for the other page without sacrificing its
+                        // original size before the destination gets a chance to fit it.
                         widgetsNeedingOtherPage.add(item);
+                        width = Math.min(width, LauncherUiUtils.dp(activity, 64));
+                        height = Math.min(height, LauncherUiUtils.dp(activity, 48));
+                        sizeChanged = width != originalWidth || height != originalHeight;
                         position = new int[]{
                                 Math.max(0, Math.min(Math.max(0, pageWidth - width), originalLeft)),
                                 Math.max(0, Math.min(Math.max(0, pageHeight - height), originalTop))};
@@ -729,7 +770,7 @@ final class HomePageController {
                 }
                 item.setLayoutParams(placed);
                 Rect placedBounds = workspaceBounds(item, position[0], position[1], width, height);
-                occupied.add(placedBounds);
+                if (!widget || !widgetsNeedingOtherPage.contains(item)) occupied.add(placedBounds);
                 if (sizeChanged && widget) resizeAppWidgetForLandscape(item, width, height);
                 item.invalidate();
             }
@@ -751,39 +792,25 @@ final class HomePageController {
             if (targetWidth <= 0 || targetHeight <= 0) continue;
             if (!(widget.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
             FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) widget.getLayoutParams();
-            int width = Math.min(targetWidth, current.width > 0 ? current.width : widget.getWidth());
-            int height = Math.min(targetHeight, current.height > 0 ? current.height : widget.getHeight());
-            int minWidth = Math.min(width, LauncherUiUtils.dp(activity, 64));
-            int minHeight = Math.min(height, LauncherUiUtils.dp(activity, 48));
-            int preferredLeft = Math.max(0, Math.min(Math.max(0, targetWidth - width), current.leftMargin));
-            int preferredTop = Math.max(0, Math.min(Math.max(0, targetHeight - height), current.topMargin));
+            int[] originalSize = originalWidgetSizes.get(widget);
+            int originalWidth = originalSize == null
+                    ? (current.width > 0 ? current.width : widget.getWidth()) : originalSize[0];
+            int originalHeight = originalSize == null
+                    ? (current.height > 0 ? current.height : widget.getHeight()) : originalSize[1];
+            int width = Math.min(targetWidth, originalWidth);
+            int height = Math.min(targetHeight, originalHeight);
+            int preferredLeft = Math.max(0,
+                    Math.min(Math.max(0, targetWidth - width), current.leftMargin));
+            int preferredTop = Math.max(0,
+                    Math.min(Math.max(0, targetHeight - height), current.topMargin));
             ArrayList<Rect> destinationOccupied = collectOccupiedWorkspaceBounds(targetPage, widget);
-            int[] position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
-                    targetWidth, targetHeight, destinationOccupied, step);
-            if (position == null) {
-                position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
-                        targetWidth, targetHeight, destinationOccupied, fineStep);
-            }
-            boolean sizeChanged = false;
-            while (position == null && (width > minWidth || height > minHeight)) {
-                int reducedWidth = width > minWidth
-                        ? Math.max(minWidth, Math.round(width * 0.8f)) : width;
-                int reducedHeight = height > minHeight
-                        ? Math.max(minHeight, Math.round(height * 0.8f)) : height;
-                if (reducedWidth == width && reducedHeight == height) break;
-                width = reducedWidth;
-                height = reducedHeight;
-                sizeChanged = true;
-                preferredLeft = Math.max(0, Math.min(Math.max(0, targetWidth - width), current.leftMargin));
-                preferredTop = Math.max(0, Math.min(Math.max(0, targetHeight - height), current.topMargin));
-                position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
-                        targetWidth, targetHeight, destinationOccupied, step);
-                if (position == null) {
-                    position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
-                            targetWidth, targetHeight, destinationOccupied, fineStep);
-                }
-            }
-            if (position == null) continue; // Both pages are saturated; preserve the visible minimum.
+            int[] fit = findLandscapeWidgetFit(widget, preferredLeft, preferredTop,
+                    width, height, targetWidth, targetHeight, destinationOccupied, step, fineStep);
+            if (fit == null) continue; // Both screens are saturated; retain the smallest visible source fallback.
+            int[] position = new int[]{fit[0], fit[1]};
+            width = fit[2];
+            height = fit[3];
+            boolean sizeChanged = width != originalWidth || height != originalHeight;
 
             FrameLayout.LayoutParams moved = copyWorkspaceParams(
                     widget, width, height, position[0], position[1]);
@@ -1120,7 +1147,12 @@ final class HomePageController {
                 // landscape page width overwrite the row's saved portrait span.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         host.getHomeCellHeightDp(configuredIconSize));
-                int actualRows = host.getHomeGridRowsForHeight(page.getHeight(), actualCellHeight);
+                int actualRows = Math.max(1,
+                        host.getHomeGridRowsForHeight(page.getHeight(), actualCellHeight));
+                // The measured page can have fewer rows than the first render calculated.
+                // Re-map normalized positions only through an occupied-slot grid so two
+                // portrait rows can never collapse onto the same landscape cell.
+                boolean[][] laidOutSlots = new boolean[actualRows][columns];
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
@@ -1130,7 +1162,7 @@ final class HomePageController {
                     int orderIndex = pagePackages.indexOf(childPackage);
                     if (orderIndex < 0) continue;
                     int defaultCol = orderIndex % columns;
-                    int defaultRow = (orderIndex / columns) % rows;
+                    int defaultRow = (orderIndex / columns) % actualRows;
                     float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + childPackage,
                             defaultCol / (float) Math.max(1, columns - 1));
                     float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + childPackage,
@@ -1139,6 +1171,26 @@ final class HomePageController {
                             Math.round(savedX * Math.max(1, columns - 1))));
                     int row = Math.max(0, Math.min(actualRows - 1,
                             Math.round(savedY * Math.max(1, actualRows - 1))));
+                    if (laidOutSlots[row][col]) {
+                        int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
+                        for (int candidateRow = 0; candidateRow < actualRows; candidateRow++) {
+                            for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                                if (laidOutSlots[candidateRow][candidateCol]) continue;
+                                int distance = Math.abs(candidateCol - col)
+                                        + Math.abs(candidateRow - row);
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    bestCol = candidateCol;
+                                    bestRow = candidateRow;
+                                }
+                            }
+                        }
+                        if (bestCol >= 0) {
+                            col = bestCol;
+                            row = bestRow;
+                        }
+                    }
+                    laidOutSlots[row][col] = true;
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
