@@ -229,7 +229,14 @@ final class HomePageController {
     private void restoreSavedWorkspaceGeometry(LinearLayout strip) {
         if (strip == null) return;
         ArrayList<View> items = collectManagedItems(strip);
+        boolean landscape = isLandscapeOrientation(strip);
         for (View item : items) {
+            // Keep the clock on its current page while in landscape. Its portrait page
+            // is restored only after returning to portrait, never during rotation itself.
+            if (landscape && isClockWorkspaceItem(item)) {
+                watchOrientationGeometry(item, strip);
+                continue;
+            }
             WorkspaceGeometry geometry = readPortraitGeometry(item);
             if (geometry == null) {
                 watchOrientationGeometry(item, strip);
@@ -354,10 +361,59 @@ final class HomePageController {
         return null;
     }
 
+    private boolean isClockWorkspaceItem(View item) {
+        return item != null && "launcher_clock_widget".equals(item.getTag());
+    }
+
     private boolean isResizableLandscapeItem(View item) {
         if (!(item.getTag() instanceof String)) return false;
         String tag = (String) item.getTag();
         return tag.startsWith("launcher_widget:") || tag.contains("clock_widget");
+    }
+
+    private boolean overlapsAny(Rect candidate, ArrayList<Rect> occupied) {
+        for (Rect used : occupied) {
+            if (Rect.intersects(candidate, used)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Landscape rotation may reduce a clock's footprint, but must never change its
+     * page or left/top coordinates. Other workspace items are moved around this anchor.
+     */
+    private void fitClockAtFixedPosition(View clock, FrameLayout page,
+            ArrayList<Rect> occupied) {
+        if (!(clock.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) clock.getLayoutParams();
+        final int left = current.leftMargin;
+        final int top = current.topMargin;
+        int width = current.width > 0 ? current.width : clock.getWidth();
+        int height = current.height > 0 ? current.height : clock.getHeight();
+        if (width <= 0 || height <= 0) return;
+
+        int pageWidth = page.getWidth();
+        int pageHeight = page.getHeight();
+        if (left >= 0 && left < pageWidth) width = Math.min(width, Math.max(1, pageWidth - left));
+        if (top >= 0 && top < pageHeight) height = Math.min(height, Math.max(1, pageHeight - top));
+
+        while (width > 1 || height > 1) {
+            Rect candidate = workspaceBounds(clock, left, top, width, height);
+            if (left >= 0 && top >= 0 && left + width <= pageWidth
+                    && top + height <= pageHeight && !overlapsAny(candidate, occupied)) break;
+            int reducedWidth = Math.max(1, Math.round(width * 0.8f));
+            int reducedHeight = Math.max(1, Math.round(height * 0.8f));
+            if (reducedWidth == width && width > 1) reducedWidth--;
+            if (reducedHeight == height && height > 1) reducedHeight--;
+            if (reducedWidth == width && reducedHeight == height) break;
+            width = reducedWidth;
+            height = reducedHeight;
+        }
+
+        FrameLayout.LayoutParams placed = copyWorkspaceParams(clock, width, height, left, top);
+        clock.setLayoutParams(placed);
+        occupied.add(workspaceBounds(clock, left, top, width, height));
+        clock.invalidate();
     }
 
     private void resizeAppWidgetForLandscape(View item, int width, int height) {
@@ -402,7 +458,16 @@ final class HomePageController {
                     items.add(child);
                 }
             }
-            // Keep shortcuts and groups in their rows where possible. Flexible widgets/clocks
+            // The clock is anchored to its existing page and coordinates. Resize it first
+            // and reserve its footprint so every other movable item yields space to it.
+            for (int i = items.size() - 1; i >= 0; i--) {
+                View candidate = items.get(i);
+                if (!isClockWorkspaceItem(candidate)) continue;
+                fitClockAtFixedPosition(candidate, page, occupied);
+                items.remove(i);
+            }
+
+            // Keep shortcuts and groups in their rows where possible. Flexible widgets
             // are packed afterwards so they yield space before fixed-size launcher items.
             Collections.sort(items, (first, second) -> {
                 int flexCompare = Boolean.compare(isResizableLandscapeItem(first), isResizableLandscapeItem(second));
@@ -469,17 +534,29 @@ final class HomePageController {
         }
     }
 
+    private static final String LAST_GEOMETRY_LANDSCAPE_KEY =
+            "__workspace_geometry_last_applied_landscape";
+
     private void scheduleOrientationWorkspaceRepair(LinearLayout strip) {
         if (strip == null) return;
-        // Two posted passes let the regular app-cell corrections and widget restoration finish
-        // before collision bounds are calculated for the current orientation.
+        // Wait for page measurement, icon grid correction, and widget restoration.
         strip.post(() -> strip.post(() -> {
-            restoreSavedWorkspaceGeometry(strip);
-            if (isLandscapeOrientation(strip)) {
+            boolean landscape = isLandscapeOrientation(strip);
+            boolean hasPreviousOrientation = prefs.contains(LAST_GEOMETRY_LANDSCAPE_KEY);
+            boolean previousLandscape = prefs.getBoolean(
+                    LAST_GEOMETRY_LANDSCAPE_KEY, landscape);
+
+            // Restore portrait coordinates only once when entering landscape, and once
+            // when returning to portrait. Repeated portrait renders must not undo user moves.
+            if (!hasPreviousOrientation || landscape != previousLandscape) {
+                restoreSavedWorkspaceGeometry(strip);
+            }
+            if (landscape) {
                 adaptLandscapeWorkspace(strip);
             } else {
                 snapshotPortraitWorkspaceGeometry(strip);
             }
+            prefs.edit().putBoolean(LAST_GEOMETRY_LANDSCAPE_KEY, landscape).apply();
         }));
     }
 
