@@ -90,19 +90,23 @@ final class WidgetController {
             if (updated.length() > 0) updated.append('\n');
             updated.append(widgetId).append(':').append(pageIndex);
         }
+        boolean portrait = isPortraitConfiguration();
+        String coordinatePrefix = portrait ? "" : "__landscape_";
         SharedPreferences.Editor editor = prefs.edit()
-                .putInt("widget_x_" + widgetId, lp.leftMargin)
-                .putInt("widget_y_" + widgetId, lp.topMargin)
-                .putInt("widget_w_" + widgetId, lp.width)
-                .putInt("widget_h_" + widgetId, lp.height)
+                .putInt(coordinatePrefix + "widget_x_" + widgetId, lp.leftMargin)
+                .putInt(coordinatePrefix + "widget_y_" + widgetId, lp.topMargin)
+                .putInt(coordinatePrefix + "widget_w_" + widgetId, lp.width)
+                .putInt(coordinatePrefix + "widget_h_" + widgetId, lp.height)
                 .putString(widgetIdsKey, updated.toString());
-        if (isPortraitConfiguration()) {
-            editor.putString("__portrait_workspace_geometry__launcher_widget:" + widgetId,
-                    pageIndex + "," + lp.leftMargin + "," + lp.topMargin + ","
-                            + lp.width + "," + lp.height + "," + container.getScaleX() + ","
-                            + container.getScaleY() + "," + container.getTranslationX() + ","
-                            + container.getTranslationY() + "," + container.getRotationX() + ","
-                            + container.getRotationY());
+        String geometry = pageIndex + "," + lp.leftMargin + "," + lp.topMargin + ","
+                + lp.width + "," + lp.height + "," + container.getScaleX() + ","
+                + container.getScaleY() + "," + container.getTranslationX() + ","
+                + container.getTranslationY() + "," + container.getRotationX() + ","
+                + container.getRotationY();
+        if (portrait) {
+            editor.putString("__portrait_workspace_geometry__launcher_widget:" + widgetId, geometry);
+        } else {
+            editor.putString("__landscape_workspace_geometry__launcher_widget:" + widgetId, geometry);
         }
         editor.commit();
     }
@@ -121,6 +125,11 @@ final class WidgetController {
         prefs.edit().putString(widgetIdsKey, updated.toString())
                 .remove("widget_x_" + widgetId).remove("widget_y_" + widgetId)
                 .remove("widget_w_" + widgetId).remove("widget_h_" + widgetId)
-                .remove("__portrait_workspace_geometry__launcher_widget:" + widgetId).commit();
+                .remove("__landscape_widget_x_" + widgetId)
+                .remove("__landscape_widget_y_" + widgetId)
+                .remove("__landscape_widget_w_" + widgetId)
+                .remove("__landscape_widget_h_" + widgetId)
+                .remove("__portrait_workspace_geometry__launcher_widget:" + widgetId)
+                .remove("__landscape_workspace_geometry__launcher_widget:" + widgetId).commit();
     }
 }

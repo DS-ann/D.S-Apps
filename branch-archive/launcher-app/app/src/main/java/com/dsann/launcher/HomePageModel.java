@@ -18,6 +18,8 @@ final class HomePageModel {
     private static final String PORTRAIT_PAGE_PREFIX = "__portrait_icon_page__";
     private static final String PORTRAIT_X_PREFIX = "__portrait_icon_x__";
     private static final String PORTRAIT_Y_PREFIX = "__portrait_icon_y__";
+    private static final String LANDSCAPE_X_PREFIX = "__landscape_icon_x__";
+    private static final String LANDSCAPE_Y_PREFIX = "__landscape_icon_y__";
     private static final String LAST_LANDSCAPE_KEY = "__workspace_last_was_landscape";
     private static final String PORTRAIT_ROWS_KEY = "__workspace_portrait_grid_rows";
 
@@ -51,9 +53,6 @@ final class HomePageModel {
         rows = Math.max(1, rows);
 
         boolean landscapeLayout = isLandscapeConfiguration(prefs, rows);
-        boolean restorePortraitLayout = !landscapeLayout
-                && prefs.getBoolean(LAST_LANDSCAPE_KEY, false);
-        boolean usePortraitCoordinates = landscapeLayout || restorePortraitLayout;
 
         List<List<String>> pages = new ArrayList<>();
         pages.add(new ArrayList<String>());
@@ -74,9 +73,9 @@ final class HomePageModel {
         // letting the renderer silently omit shortcuts below the dock.
         for (String name : unique) {
             String portraitPageKey = PORTRAIT_PAGE_PREFIX + name;
-            int storedPage = prefs.getInt(iconPagePrefix + name, 0);
-            int preferredPage = clampPage(usePortraitCoordinates && prefs.contains(portraitPageKey)
-                    ? prefs.getInt(portraitPageKey, storedPage) : storedPage);
+            int storedPage = prefs.getInt(iconPagePrefix + name,
+                    prefs.getInt(portraitPageKey, 0));
+            int preferredPage = clampPage(storedPage);
             int otherPage = 1 - preferredPage;
             int page = preferredPage;
             if (pageLoads[page] >= pageCapacity && pageLoads[otherPage] < pageCapacity) {
@@ -102,10 +101,16 @@ final class HomePageModel {
                         defaultRow / (float) Math.max(1, effectiveRows - 1));
                 String portraitXKey = PORTRAIT_X_PREFIX + name;
                 String portraitYKey = PORTRAIT_Y_PREFIX + name;
-                float sx = usePortraitCoordinates && prefs.contains(portraitXKey)
-                        ? prefs.getFloat(portraitXKey, storedX) : storedX;
-                float sy = usePortraitCoordinates && prefs.contains(portraitYKey)
-                        ? prefs.getFloat(portraitYKey, storedY) : storedY;
+                String landscapeXKey = LANDSCAPE_X_PREFIX + name;
+                String landscapeYKey = LANDSCAPE_Y_PREFIX + name;
+                float portraitX = prefs.getFloat(portraitXKey, storedX);
+                float portraitY = prefs.getFloat(portraitYKey, storedY);
+                // Seed landscape from the portrait arrangement only when no landscape
+                // placement exists. Subsequent manual changes are orientation-local.
+                float sx = landscapeLayout
+                        ? prefs.getFloat(landscapeXKey, portraitX) : portraitX;
+                float sy = landscapeLayout
+                        ? prefs.getFloat(landscapeYKey, portraitY) : portraitY;
                 int wantedCol = Math.max(0, Math.min(columns - 1,
                         Math.round(sx * Math.max(1, columns - 1))));
                 int wantedRow = Math.max(0, Math.min(effectiveRows - 1,
@@ -134,9 +139,12 @@ final class HomePageModel {
                 edit.putInt(iconPagePrefix + name, pageIndex);
                 edit.putFloat(iconXPrefix + name, normalizedX);
                 edit.putFloat(iconYPrefix + name, normalizedY);
-                if (!landscapeLayout) {
-                    // Portrait-only values remain the source of truth after rotation back.
-                    edit.putInt(PORTRAIT_PAGE_PREFIX + name, pageIndex);
+                // The page is shared structural state; only X/Y are orientation-specific.
+                edit.putInt(PORTRAIT_PAGE_PREFIX + name, pageIndex);
+                if (landscapeLayout) {
+                    edit.putFloat(LANDSCAPE_X_PREFIX + name, normalizedX);
+                    edit.putFloat(LANDSCAPE_Y_PREFIX + name, normalizedY);
+                } else {
                     edit.putFloat(PORTRAIT_X_PREFIX + name, normalizedX);
                     edit.putFloat(PORTRAIT_Y_PREFIX + name, normalizedY);
                 }

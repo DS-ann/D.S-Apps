@@ -3711,6 +3711,11 @@ public class MainActivity extends Activity {
         return Math.max(baseHeight, requiredHeight);
     }
 
+    private boolean isLandscapeWorkspace() {
+        return getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+    }
+
     /**
      * Single horizontal grid metric shared by rendering, drag/drop, snapping,
      * persistence and collision recovery. Landscape preserves the saved portrait pitch.
@@ -3829,7 +3834,20 @@ public class MainActivity extends Activity {
     }
 
     private String clockPrefKey(String key, int page) {
-        return page == 0 ? key : key + "_page_2";
+        String portraitKey = page == 0 ? key : key + "_page_2";
+        if (!isLandscapeWorkspace()) return portraitKey;
+        String landscapeKey = "__landscape_" + portraitKey;
+        if (!prefs.contains(landscapeKey) && prefs.contains(portraitKey)) {
+            Object prior = prefs.getAll().get(portraitKey);
+            SharedPreferences.Editor edit = prefs.edit();
+            if (prior instanceof Float) edit.putFloat(landscapeKey, (Float) prior);
+            else if (prior instanceof Integer) edit.putInt(landscapeKey, (Integer) prior);
+            else if (prior instanceof Long) edit.putLong(landscapeKey, (Long) prior);
+            else if (prior instanceof Boolean) edit.putBoolean(landscapeKey, (Boolean) prior);
+            else if (prior instanceof String) edit.putString(landscapeKey, (String) prior);
+            edit.apply();
+        }
+        return landscapeKey;
     }
 
     private void activateClockForPage(int requestedPage) {
@@ -4041,6 +4059,21 @@ public class MainActivity extends Activity {
     // Their members remain installed apps; adding/removing membership never uninstalls anything.
     private String appGroupKey(String field, String id) {
         return "home_app_group_" + field + "_" + id;
+    }
+
+    private String appGroupPositionKey(String field, String id) {
+        String portraitKey = appGroupKey(field, id);
+        if (!"x".equals(field) && !"y".equals(field)) return portraitKey;
+        String activeKey = isLandscapeWorkspace()
+                ? "__landscape_app_group_" + field + "_" + id : portraitKey;
+        if (!prefs.contains(activeKey)) {
+            String otherKey = isLandscapeWorkspace()
+                    ? portraitKey : "__landscape_app_group_" + field + "_" + id;
+            if (prefs.contains(otherKey)) {
+                prefs.edit().putFloat(activeKey, prefs.getFloat(otherKey, 0f)).apply();
+            }
+        }
+        return activeKey;
     }
 
     private boolean isAppGroupItem(View view) {
@@ -4301,15 +4334,15 @@ public class MainActivity extends Activity {
                     actualPageWidth > 0 ? actualPageWidth : fallbackCellWidth);
             int rows = homeGridRowsForHeight(page.getHeight() > 0
                     ? page.getHeight() : pageViewport.getHeight(), cellHeight);
-            boolean hasX = prefs.contains(appGroupKey("x", id));
-            boolean hasY = prefs.contains(appGroupKey("y", id));
+            boolean hasX = prefs.contains(appGroupPositionKey("x", id));
+            boolean hasY = prefs.contains(appGroupPositionKey("y", id));
             int col, row;
             if (hasX && hasY) {
                 col = Math.max(0, Math.min(columns - 1, Math.round(
-                        prefs.getFloat(appGroupKey("x", id), 0f)
+                        prefs.getFloat(appGroupPositionKey("x", id), 0f)
                                 * Math.max(1, columns - 1))));
                 row = Math.max(0, Math.min(rows - 1, Math.round(
-                        prefs.getFloat(appGroupKey("y", id), 0f)
+                        prefs.getFloat(appGroupPositionKey("y", id), 0f)
                                 * Math.max(1, rows - 1))));
             } else {
                 int[] free = findFreeAppGroupSlot(page, null);
@@ -4317,8 +4350,8 @@ public class MainActivity extends Activity {
                 col = Math.max(0, Math.min(columns - 1, free[0]));
                 row = Math.max(0, Math.min(rows - 1, free[1]));
                 prefs.edit().putInt(appGroupKey("page", id), pageIndex)
-                        .putFloat(appGroupKey("x", id), col / (float) Math.max(1, columns - 1))
-                        .putFloat(appGroupKey("y", id), row / (float) Math.max(1, rows - 1))
+                        .putFloat(appGroupPositionKey("x", id), col / (float) Math.max(1, columns - 1))
+                        .putFloat(appGroupPositionKey("y", id), row / (float) Math.max(1, rows - 1))
                         .apply();
             }
 
@@ -4466,8 +4499,8 @@ public class MainActivity extends Activity {
             int rows = homeGridRowsForHeight(height, cellHeight);
             prefs.edit()
                     .putInt(appGroupKey("page", id), chosenPage)
-                    .putFloat(appGroupKey("x", id), slot[0] / (float) Math.max(1, columns - 1))
-                    .putFloat(appGroupKey("y", id), slot[1] / (float) Math.max(1, rows - 1))
+                    .putFloat(appGroupPositionKey("x", id), slot[0] / (float) Math.max(1, columns - 1))
+                    .putFloat(appGroupPositionKey("y", id), slot[1] / (float) Math.max(1, rows - 1))
                     .putString(appGroupKey("label", id), "App Group")
                     .putString(appGroupKey("members", id), "")
                     .apply();
@@ -5181,8 +5214,8 @@ public class MainActivity extends Activity {
         prefs.edit().remove(appGroupKey("members", groupId))
                 .remove(appGroupKey("label", groupId))
                 .remove(appGroupKey("page", groupId))
-                .remove(appGroupKey("x", groupId))
-                .remove(appGroupKey("y", groupId))
+                .remove(appGroupPositionKey("x", groupId))
+                .remove(appGroupPositionKey("y", groupId))
                 .remove("workspace_scale_x_" + APP_GROUP_TAG_PREFIX + groupId)
                 .remove("workspace_scale_y_" + APP_GROUP_TAG_PREFIX + groupId)
                 .remove("workspace_base_scale_x_" + APP_GROUP_TAG_PREFIX + groupId)
@@ -6796,7 +6829,18 @@ public class MainActivity extends Activity {
 
 
     private String shortcutPrefKey(String base, String id) {
-        return base + "_" + id;
+        String portraitKey = base + "_" + id;
+        if (!KEY_SHORTCUT_X.equals(base) && !KEY_SHORTCUT_Y.equals(base)) return portraitKey;
+        String activeKey = isLandscapeWorkspace()
+                ? "__landscape_" + base + "_" + id : portraitKey;
+        if (!prefs.contains(activeKey)) {
+            String otherKey = isLandscapeWorkspace()
+                    ? portraitKey : "__landscape_" + base + "_" + id;
+            if (prefs.contains(otherKey)) {
+                prefs.edit().putFloat(activeKey, prefs.getFloat(otherKey, -1f)).apply();
+            }
+        }
+        return activeKey;
     }
 
     private java.util.ArrayList<String> getSavedShortcutIds() {
@@ -11191,6 +11235,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String widgetGeometryPreferenceKey(String prefix, int widgetId) {
+        return isLandscapeWorkspace() ? "__landscape_" + prefix + widgetId : prefix + widgetId;
+    }
+
+    private int widgetGeometryPreference(String prefix, int widgetId, int fallback) {
+        String key = widgetGeometryPreferenceKey(prefix, widgetId);
+        if (prefs.contains(key)) return prefs.getInt(key, fallback);
+        // Migrate legacy widgets by using the known geometry only as the initial fallback.
+        return prefs.getInt(prefix + widgetId, fallback);
+    }
+
     private void restoreWidgetsOnPages() {
         if (pagesStrip == null) return;
         // Restore only after layout: providers often need real dimensions to render
@@ -11244,14 +11299,14 @@ public class MainActivity extends Activity {
                     // app icons/provider views are still rebuilding after an app/launcher update.
                     // Only clamp to the current page bounds if the available workspace changed.
                     int width = Math.max(1, Math.min(
-                            prefs.getInt("widget_w_" + id, defaultWidth), availableWidth));
+                            widgetGeometryPreference("widget_w_", id, defaultWidth), availableWidth));
                     int height = Math.max(1, Math.min(
-                            prefs.getInt("widget_h_" + id, defaultHeight), availableHeight));
+                            widgetGeometryPreference("widget_h_", id, defaultHeight), availableHeight));
                     int x = Math.max(0, Math.min(
-                            prefs.getInt("widget_x_" + id, LauncherUiUtils.dp(this, 8)),
+                            widgetGeometryPreference("widget_x_", id, LauncherUiUtils.dp(this, 8)),
                             Math.max(0, availableWidth - width)));
                     int y = Math.max(0, Math.min(
-                            prefs.getInt("widget_y_" + id, LauncherUiUtils.dp(this, 8)),
+                            widgetGeometryPreference("widget_y_", id, LauncherUiUtils.dp(this, 8)),
                             Math.max(0, availableHeight - height)));
                     FrameLayout restorePage = page;
                     int resolvedPageIndex = pageIndex;
@@ -15424,8 +15479,8 @@ public class MainActivity extends Activity {
             int col = Math.max(0, Math.min(columns - 1, Math.round(x / (float) cellWidth)));
             int row = homeGridRowFromTop(y, rows, page.getHeight(), cellHeight);
             prefs.edit().putInt(appGroupKey("page", id), pageIndex)
-                    .putFloat(appGroupKey("x", id), col / (float) Math.max(1, columns - 1))
-                    .putFloat(appGroupKey("y", id), row / (float) Math.max(1, rows - 1))
+                    .putFloat(appGroupPositionKey("x", id), col / (float) Math.max(1, columns - 1))
+                    .putFloat(appGroupPositionKey("y", id), row / (float) Math.max(1, rows - 1))
                     .apply();
         } else if ("launcher_clock_widget".equals(tag)) {
             prefs.edit().putFloat(clockPrefKey(KEY_CLOCK_WIDGET_X, pageIndex), item.getTranslationX())
@@ -15826,8 +15881,8 @@ public class MainActivity extends Activity {
                         if (prefs.getInt(appGroupKey("page", groupId), pageIndex) != pageIndex) {
                             edit.putInt(appGroupKey("page", groupId), pageIndex);
                         }
-                        if (updateX) edit.putFloat(appGroupKey("x", groupId), normalizedX);
-                        if (updateY) edit.putFloat(appGroupKey("y", groupId), normalizedY);
+                        if (updateX) edit.putFloat(appGroupPositionKey("x", groupId), normalizedX);
+                        if (updateY) edit.putFloat(appGroupPositionKey("y", groupId), normalizedY);
                     }
                 } else if (isWorkspaceAppIcon(item)) {
                     String tag = String.valueOf(item.getTag());
@@ -16143,9 +16198,9 @@ public class MainActivity extends Activity {
             String groupId = appGroupId(group);
             if (groupId != null) {
                 prefs.edit().putInt(appGroupKey("page", groupId), pageIndex)
-                        .putFloat(appGroupKey("x", groupId),
+                        .putFloat(appGroupPositionKey("x", groupId),
                                 col / (float) Math.max(1, columns - 1))
-                        .putFloat(appGroupKey("y", groupId),
+                        .putFloat(appGroupPositionKey("y", groupId),
                                 row / (float) Math.max(1, rows - 1))
                         .apply();
             }
@@ -16955,8 +17010,16 @@ public class MainActivity extends Activity {
                         - LauncherUiUtils.dp(this, 260));
         int rows = homeGridRowsForHeight(usableHeight, slotHeight);
         int safeRow = Math.max(0, Math.min(rows - 1, row));
-        prefs.edit().putFloat(KEY_ICON_X + packageName, col / (float) Math.max(1, columns - 1))
-                .putFloat(KEY_ICON_Y + packageName, safeRow / (float) Math.max(1, rows - 1)).apply();
+        float normalizedX = col / (float) Math.max(1, columns - 1);
+        float normalizedY = safeRow / (float) Math.max(1, rows - 1);
+        String activeXPrefix = isLandscapeWorkspace()
+                ? "__landscape_icon_x__" : "__portrait_icon_x__";
+        String activeYPrefix = isLandscapeWorkspace()
+                ? "__landscape_icon_y__" : "__portrait_icon_y__";
+        prefs.edit().putFloat(KEY_ICON_X + packageName, normalizedX)
+                .putFloat(KEY_ICON_Y + packageName, normalizedY)
+                .putFloat(activeXPrefix + packageName, normalizedX)
+                .putFloat(activeYPrefix + packageName, normalizedY).apply();
     }
 
     private GradientDrawable drawerBackground() {
