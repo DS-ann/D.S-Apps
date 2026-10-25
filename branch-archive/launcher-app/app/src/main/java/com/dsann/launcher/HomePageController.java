@@ -67,7 +67,11 @@ final class HomePageController {
     private final java.util.WeakHashMap<View, View.OnLayoutChangeListener>
             pendingLandscapeClockFitListeners =
                     new java.util.WeakHashMap<View, View.OnLayoutChangeListener>();
+    private boolean orientationRepairScheduled;
+    private boolean landscapeRepairScheduled;
+    private boolean landscapeFitRunning;
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
+    private static final String LANDSCAPE_GEOMETRY_PREFIX = "__landscape_workspace_geometry__";
 
     private static final String PORTRAIT_APP_ROW_WIDTH_DP_KEY =
             "__portrait_home_app_row_width_dp";
@@ -151,9 +155,10 @@ final class HomePageController {
                 || tag.contains("shortcut");
     }
 
-    private String portraitGeometryKey(View item) {
-        return item == null || !(item.getTag() instanceof String)
-                ? null : PORTRAIT_GEOMETRY_PREFIX + item.getTag();
+    private String workspaceGeometryKey(View item, boolean landscape) {
+        if (item == null || !(item.getTag() instanceof String)) return null;
+        return (landscape ? LANDSCAPE_GEOMETRY_PREFIX : PORTRAIT_GEOMETRY_PREFIX)
+                + item.getTag();
     }
 
     private int pageIndexOf(View item, LinearLayout strip) {
@@ -161,10 +166,7 @@ final class HomePageController {
         return strip.indexOfChild((View) item.getParent());
     }
 
-    private WorkspaceGeometry readPortraitGeometry(View item) {
-        String key = portraitGeometryKey(item);
-        if (key == null) return null;
-        String value = prefs.getString(key, null);
+    private WorkspaceGeometry parseWorkspaceGeometry(String value) {
         if (value == null) return null;
         String[] parts = value.split(",");
         if (parts.length < 11) return null;
@@ -180,28 +182,79 @@ final class HomePageController {
         }
     }
 
-    private void savePortraitGeometry(View item, LinearLayout strip) {
-        if (!isPortraitOrientation() || !isOrientationManagedItem(item)
+    private WorkspaceGeometry readPortraitGeometry(View item) {
+        String key = workspaceGeometryKey(item, false);
+        return key == null ? null : parseWorkspaceGeometry(prefs.getString(key, null));
+    }
+
+    private WorkspaceGeometry readWorkspaceGeometry(View item, boolean landscape) {
+        String key = workspaceGeometryKey(item, landscape);
+        if (key == null) return null;
+        WorkspaceGeometry current = parseWorkspaceGeometry(prefs.getString(key, null));
+        if (current != null) return current;
+        // Seed a missing orientation from the other one once; after that their
+        // manual positions and sizes stay independent.
+        String otherKey = workspaceGeometryKey(item, !landscape);
+        return otherKey == null ? null : parseWorkspaceGeometry(prefs.getString(otherKey, null));
+    }
+
+    private void saveCurrentOrientationGeometry(View item, LinearLayout strip) {
+        if (!isOrientationManagedItem(item)
                 || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+        boolean landscape = isLandscapeOrientation(strip);
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
         int width = lp.width > 0 ? lp.width : item.getWidth();
         int height = lp.height > 0 ? lp.height : item.getHeight();
         int page = pageIndexOf(item, strip);
         if (page < 0 || width <= 0 || height <= 0) return;
+        String key = workspaceGeometryKey(item, landscape);
+        if (key == null) return;
         String value = page + "," + lp.leftMargin + "," + lp.topMargin + ","
                 + width + "," + height + "," + item.getScaleX() + "," + item.getScaleY() + ","
                 + item.getTranslationX() + "," + item.getTranslationY() + ","
                 + item.getRotationX() + "," + item.getRotationY();
-        prefs.edit().putString(portraitGeometryKey(item), value).apply();
+        if (!value.equals(prefs.getString(key, null))) {
+            prefs.edit().putString(key, value).apply();
+        }
+    }
+
+    private int sharedPageIndex(View item, int fallbackPage) {
+        if (item == null || !(item.getTag() instanceof String)) {
+            return HomePageModel.clampPage(fallbackPage);
+        }
+        String tag = (String) item.getTag();
+        if (tag.startsWith("launcher_widget:")) {
+            String id = tag.substring("launcher_widget:".length());
+            String stored = prefs.getString("widget_ids", "");
+            if (stored != null) {
+                for (String line : stored.split("\\n")) {
+                    String[] pair = line.split(":");
+                    if (pair.length < 2 || !id.equals(pair[0].trim())) continue;
+                    try { return HomePageModel.clampPage(Integer.parseInt(pair[1].trim())); }
+                    catch (NumberFormatException ignored) { break; }
+                }
+            }
+        } else if (tag.contains("shortcut")) {
+            CharSequence description = item.getContentDescription();
+            String value = description == null ? "" : description.toString();
+            String prefix = "launcher_shortcut_id:";
+            if (value.startsWith(prefix)) {
+                String id = value.substring(prefix.length());
+                return HomePageModel.clampPage(
+                        prefs.getInt("contact_shortcut_page_" + id, fallbackPage));
+            }
+        }
+        return HomePageModel.clampPage(fallbackPage);
     }
 
     private void watchOrientationGeometry(View item, LinearLayout strip) {
         if (!isOrientationManagedItem(item) || orientationGeometryWatchers.containsKey(item)) return;
         item.addOnLayoutChangeListener((view, left, top, right, bottom,
-                oldLeft, oldTop, oldRight, oldBottom) -> savePortraitGeometry(view, strip));
+                oldLeft, oldTop, oldRight, oldBottom) ->
+                saveCurrentOrientationGeometry(view, strip));
         item.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
             @Override public void onViewAttachedToWindow(View view) {
-                savePortraitGeometry(view, strip);
+                saveCurrentOrientationGeometry(view, strip);
             }
             @Override public void onViewDetachedFromWindow(View view) { }
         });
@@ -289,12 +342,13 @@ final class HomePageController {
                 watchOrientationGeometry(item, strip);
                 continue;
             }
-            WorkspaceGeometry geometry = readPortraitGeometry(item);
+            WorkspaceGeometry geometry = readWorkspaceGeometry(item, landscape);
             if (geometry == null) {
                 watchOrientationGeometry(item, strip);
                 continue;
             }
-            int targetPageIndex = Math.max(0, Math.min(strip.getChildCount() - 1, geometry.page));
+            int targetPageIndex = Math.max(0, Math.min(strip.getChildCount() - 1,
+                    sharedPageIndex(item, geometry.page)));
             if (targetPageIndex < 0 || !(strip.getChildAt(targetPageIndex) instanceof FrameLayout)) continue;
             FrameLayout targetPage = (FrameLayout) strip.getChildAt(targetPageIndex);
             ViewParent parent = item.getParent();
@@ -321,7 +375,7 @@ final class HomePageController {
         if (strip == null || !isPortraitOrientation()) return;
         for (View item : collectManagedItems(strip)) {
             watchOrientationGeometry(item, strip);
-            savePortraitGeometry(item, strip);
+            saveCurrentOrientationGeometry(item, strip);
         }
     }
 
@@ -384,14 +438,36 @@ final class HomePageController {
         return result;
     }
 
-    private ArrayList<Integer> orderedPositions(int max, int preferred, int step) {
-        TreeSet<Integer> positions = new TreeSet<>();
-        positions.add(0);
-        positions.add(Math.max(0, max));
-        positions.add(Math.max(0, Math.min(max, preferred)));
-        for (int value = 0; value <= max; value += Math.max(1, step)) positions.add(value);
-        ArrayList<Integer> ordered = new ArrayList<>(positions);
-        final int reference = Math.max(0, Math.min(max, preferred));
+    private void addBoundedCandidate(TreeSet<Integer> candidates, int value, int maximum,
+            int step) {
+        candidates.add(Math.max(0, Math.min(maximum, value)));
+        if (step > 1) {
+            candidates.add(Math.max(0, Math.min(maximum, value - step)));
+            candidates.add(Math.max(0, Math.min(maximum, value + step)));
+        }
+    }
+
+    private ArrayList<Integer> candidateAxisPositions(View item, int maximum, int preferred,
+            int extent, boolean horizontal, ArrayList<Rect> occupied, int step) {
+        TreeSet<Integer> candidates = new TreeSet<>();
+        addBoundedCandidate(candidates, 0, maximum, step);
+        addBoundedCandidate(candidates, maximum, maximum, step);
+        addBoundedCandidate(candidates, preferred, maximum, step);
+        float scale = horizontal ? Math.max(0.01f, Math.abs(item.getScaleX()))
+                : Math.max(0.01f, Math.abs(item.getScaleY()));
+        float translation = horizontal ? item.getTranslationX() : item.getTranslationY();
+        float pivot = horizontal ? item.getPivotX() : item.getPivotY();
+        int visualExtent = Math.max(1, Math.round(extent * scale));
+        int visualOffset = Math.round(translation + pivot * (1f - scale));
+        for (Rect obstacle : occupied) {
+            int nearEdge = horizontal ? obstacle.left : obstacle.top;
+            int farEdge = horizontal ? obstacle.right : obstacle.bottom;
+            addBoundedCandidate(candidates, nearEdge - visualExtent - visualOffset,
+                    maximum, step);
+            addBoundedCandidate(candidates, farEdge - visualOffset, maximum, step);
+        }
+        ArrayList<Integer> ordered = new ArrayList<>(candidates);
+        final int reference = Math.max(0, Math.min(maximum, preferred));
         Collections.sort(ordered, (a, b) -> {
             int distance = Integer.compare(Math.abs(a - reference), Math.abs(b - reference));
             return distance != 0 ? distance : Integer.compare(a, b);
@@ -399,21 +475,23 @@ final class HomePageController {
         return ordered;
     }
 
+    /**
+     * Search anchor, page edges and obstacle edges only. Runtime scales with item
+     * count, not screen pixel area, avoiding huge UI-thread 1dp scans on rotation.
+     */
     private int[] findFreePosition(View item, int preferredLeft, int preferredTop, int width, int height,
                                    int pageWidth, int pageHeight, ArrayList<Rect> occupied, int step) {
         if (width <= 0 || height <= 0 || width > pageWidth || height > pageHeight) return null;
         int maxLeft = pageWidth - width;
         int maxTop = pageHeight - height;
-        ArrayList<Integer> topPositions = orderedPositions(maxTop, preferredTop, step);
-        ArrayList<Integer> leftPositions = orderedPositions(maxLeft, preferredLeft, step);
+        ArrayList<Integer> topPositions = candidateAxisPositions(
+                item, maxTop, preferredTop, height, false, occupied, step);
+        ArrayList<Integer> leftPositions = candidateAxisPositions(
+                item, maxLeft, preferredLeft, width, true, occupied, step);
         for (int top : topPositions) {
             for (int left : leftPositions) {
-                Rect candidate = workspaceBounds(item, left, top, width, height);
-                boolean intersects = false;
-                for (Rect used : occupied) {
-                    if (Rect.intersects(candidate, used)) { intersects = true; break; }
-                }
-                if (!intersects) return new int[]{left, top};
+                if (fitsWorkspacePosition(item, left, top, width, height,
+                        pageWidth, pageHeight, occupied)) return new int[]{left, top};
             }
         }
         return null;
@@ -486,10 +564,10 @@ final class HomePageController {
 
     private void saveLandscapeWidgetFittedSize(View item, int width, int height) {
         if (!isWidgetWorkspaceItem(item) || width <= 0 || height <= 0) return;
-        prefs.edit()
-                .putInt(landscapeWidgetSizePreferenceKey(item, "fitted", "width"), width)
-                .putInt(landscapeWidgetSizePreferenceKey(item, "fitted", "height"), height)
-                .apply();
+        String widthKey = landscapeWidgetSizePreferenceKey(item, "fitted", "width");
+        String heightKey = landscapeWidgetSizePreferenceKey(item, "fitted", "height");
+        if (prefs.getInt(widthKey, -1) == width && prefs.getInt(heightKey, -1) == height) return;
+        prefs.edit().putInt(widthKey, width).putInt(heightKey, height).apply();
     }
 
     private void reserveAppGroupGridSlots(FrameLayout page, boolean[][] occupiedSlots,
@@ -578,12 +656,69 @@ final class HomePageController {
         return occupied;
     }
 
+    private int[] findLargestWidthFit(View widget, int left, int top, int baseWidth,
+            int fixedHeight, int minWidth, int pageWidth, int pageHeight,
+            ArrayList<Rect> occupied, int step, int fineStep) {
+        int low = minWidth, high = baseWidth - 1;
+        int[] best = null;
+        int bestWidth = -1;
+        while (low <= high) {
+            int candidateWidth = low + (high - low) / 2;
+            int[] position = findFreePosition(widget, left, top, candidateWidth, fixedHeight,
+                    pageWidth, pageHeight, occupied, step);
+            if (position == null && fineStep != step) {
+                position = findFreePosition(widget, left, top, candidateWidth, fixedHeight,
+                        pageWidth, pageHeight, occupied, fineStep);
+            }
+            if (position != null) {
+                bestWidth = candidateWidth;
+                best = new int[]{position[0], position[1], candidateWidth, fixedHeight};
+                low = candidateWidth + 1;
+            } else {
+                high = candidateWidth - 1;
+            }
+        }
+        return bestWidth < minWidth ? null : best;
+    }
+
+    private int[] findLargestHeightFit(View widget, int left, int top, int fixedWidth,
+            int baseHeight, int minHeight, int pageWidth, int pageHeight,
+            ArrayList<Rect> occupied, int step, int fineStep) {
+        int low = minHeight, high = baseHeight - 1;
+        int[] best = null;
+        int bestHeight = -1;
+        while (low <= high) {
+            int candidateHeight = low + (high - low) / 2;
+            int[] position = findFreePosition(widget, left, top, fixedWidth, candidateHeight,
+                    pageWidth, pageHeight, occupied, step);
+            if (position == null && fineStep != step) {
+                position = findFreePosition(widget, left, top, fixedWidth, candidateHeight,
+                        pageWidth, pageHeight, occupied, fineStep);
+            }
+            if (position != null) {
+                bestHeight = candidateHeight;
+                best = new int[]{position[0], position[1], fixedWidth, candidateHeight};
+                low = candidateHeight + 1;
+            } else {
+                high = candidateHeight - 1;
+            }
+        }
+        return bestHeight < minHeight ? null : best;
+    }
+
+    private long fitArea(int[] fit) {
+        return fit == null ? -1L : (long) fit[2] * fit[3];
+    }
+
+    private int fitMovementCost(int[] fit, int preferredLeft, int preferredTop) {
+        return fit == null ? Integer.MAX_VALUE
+                : Math.abs(fit[0] - preferredLeft) + Math.abs(fit[1] - preferredTop);
+    }
+
     /**
-     * Finds a collision-free landscape widget geometry with the smallest practical
-     * dimensional change: horizontal length first, then height, and only then both.
-     * Each candidate is tested at its original anchor before searching elsewhere on
-     * the same page, so a widget does not lose height just because it needs less width.
-     * Returns {left, top, width, height}, or null when the page cannot hold it.
+     * Keep widget geometry as normal as possible: preserve its anchor and full size if
+     * possible, then choose the largest width-only or height-only fit. Proportional
+     * shrinking is the final on-page option. Work is bounded by obstacles and log(size).
      */
     private int[] findLandscapeWidgetFit(View widget, int preferredLeft, int preferredTop,
             int originalWidth, int originalHeight, int pageWidth, int pageHeight,
@@ -599,10 +734,9 @@ final class HomePageController {
                 pageWidth, pageHeight, occupied)) {
             return new int[]{preferredLeft, preferredTop, baseWidth, baseHeight};
         }
-        // Preserve full size when the item can fit elsewhere on this same screen.
         int[] fullSizePosition = findFreePosition(widget, preferredLeft, preferredTop,
                 baseWidth, baseHeight, pageWidth, pageHeight, occupied, step);
-        if (fullSizePosition == null) {
+        if (fullSizePosition == null && fineStep != step) {
             fullSizePosition = findFreePosition(widget, preferredLeft, preferredTop,
                     baseWidth, baseHeight, pageWidth, pageHeight, occupied, fineStep);
         }
@@ -610,42 +744,50 @@ final class HomePageController {
             return new int[]{fullSizePosition[0], fullSizePosition[1], baseWidth, baseHeight};
         }
 
-        // Modes: reduce length only, reduce height only, then reduce both dimensions.
-        // Use 5% steps so sizing does not jump far past the actual free space.
-        for (int mode = 0; mode < 3; mode++) {
-            int width = baseWidth;
-            int height = baseHeight;
-            while ((mode == 0 && width > minWidth)
-                    || (mode == 1 && height > minHeight)
-                    || (mode == 2 && (width > minWidth || height > minHeight))) {
-                int nextWidth = width;
-                int nextHeight = height;
-                if (mode == 0 || mode == 2) {
-                    nextWidth = width > minWidth
-                            ? Math.max(minWidth, Math.round(width * 0.95f)) : width;
-                }
-                if (mode == 1 || mode == 2) {
-                    nextHeight = height > minHeight
-                            ? Math.max(minHeight, Math.round(height * 0.95f)) : height;
-                }
-                if (nextWidth == width && nextHeight == height) break;
-                width = nextWidth;
-                height = nextHeight;
+        int[] widthFit = findLargestWidthFit(widget, preferredLeft, preferredTop,
+                baseWidth, baseHeight, minWidth, pageWidth, pageHeight, occupied, step, fineStep);
+        int[] heightFit = findLargestHeightFit(widget, preferredLeft, preferredTop,
+                baseWidth, baseHeight, minHeight, pageWidth, pageHeight, occupied, step, fineStep);
+        long widthArea = fitArea(widthFit), heightArea = fitArea(heightFit);
+        if (widthFit != null || heightFit != null) {
+            if (widthArea > heightArea) return widthFit;
+            if (heightArea > widthArea) return heightFit;
+            return fitMovementCost(widthFit, preferredLeft, preferredTop)
+                    <= fitMovementCost(heightFit, preferredLeft, preferredTop)
+                    ? widthFit : heightFit;
+        }
 
-                if (fitsWorkspacePosition(widget, preferredLeft, preferredTop, width, height,
-                        pageWidth, pageHeight, occupied)) {
-                    return new int[]{preferredLeft, preferredTop, width, height};
-                }
-                int[] position = findFreePosition(widget, preferredLeft, preferredTop,
-                        width, height, pageWidth, pageHeight, occupied, step);
-                if (position == null) {
-                    position = findFreePosition(widget, preferredLeft, preferredTop,
-                            width, height, pageWidth, pageHeight, occupied, fineStep);
-                }
-                if (position != null) return new int[]{position[0], position[1], width, height};
+        float minimumScale = Math.max(minWidth / (float) baseWidth,
+                minHeight / (float) baseHeight);
+        int lowPercent = Math.max(1, (int) Math.ceil(minimumScale * 1000f));
+        int highPercent = 999;
+        int[] minimumPosition = findFreePosition(widget, preferredLeft, preferredTop,
+                minWidth, minHeight, pageWidth, pageHeight, occupied, step);
+        if (minimumPosition == null && fineStep != step) {
+            minimumPosition = findFreePosition(widget, preferredLeft, preferredTop,
+                    minWidth, minHeight, pageWidth, pageHeight, occupied, fineStep);
+        }
+        if (minimumPosition == null) return null;
+        int[] best = new int[]{minimumPosition[0], minimumPosition[1], minWidth, minHeight};
+        while (lowPercent <= highPercent) {
+            int percent = lowPercent + (highPercent - lowPercent) / 2;
+            float factor = percent / 1000f;
+            int width = Math.max(minWidth, Math.min(baseWidth, Math.round(baseWidth * factor)));
+            int height = Math.max(minHeight, Math.min(baseHeight, Math.round(baseHeight * factor)));
+            int[] position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
+                    pageWidth, pageHeight, occupied, step);
+            if (position == null && fineStep != step) {
+                position = findFreePosition(widget, preferredLeft, preferredTop, width, height,
+                        pageWidth, pageHeight, occupied, fineStep);
+            }
+            if (position != null) {
+                best = new int[]{position[0], position[1], width, height};
+                lowPercent = percent + 1;
+            } else {
+                highPercent = percent - 1;
             }
         }
-        return null;
+        return best;
     }
 
     private boolean overlapsAny(Rect candidate, ArrayList<Rect> occupied) {
@@ -709,7 +851,7 @@ final class HomePageController {
                     // The initial repair can run before wrap-content clock panels have
                     // measured their date line. Re-run after the first real measurement,
                     // so a stale auto-shrink factor cannot leave the clock tiny or overlapping.
-                    strip.post(() -> adaptLandscapeWorkspace(strip));
+                    postLandscapeRepair(strip);
                 }
             }
         };
@@ -846,7 +988,28 @@ final class HomePageController {
         }
     }
 
+    private void postLandscapeRepair(LinearLayout strip) {
+        if (strip == null || landscapeRepairScheduled || landscapeFitRunning) return;
+        landscapeRepairScheduled = true;
+        strip.post(() -> {
+            landscapeRepairScheduled = false;
+            if (strip != host.getPagesStrip() || !isLandscapeOrientation(strip)
+                    || landscapeFitRunning) return;
+            adaptLandscapeWorkspace(strip);
+        });
+    }
+
     private void adaptLandscapeWorkspace(LinearLayout strip) {
+        if (strip == null || landscapeFitRunning || !isLandscapeOrientation(strip)) return;
+        landscapeFitRunning = true;
+        try {
+            adaptLandscapeWorkspaceNow(strip);
+        } finally {
+            landscapeFitRunning = false;
+        }
+    }
+
+    private void adaptLandscapeWorkspaceNow(LinearLayout strip) {
         if (strip == null) return;
         int step = Math.max(1, LauncherUiUtils.dp(activity, 4));
         int fineStep = Math.max(1, LauncherUiUtils.dp(activity, 1));
@@ -1042,21 +1205,22 @@ final class HomePageController {
             "__workspace_geometry_last_applied_landscape";
 
     private void scheduleOrientationWorkspaceRepair(LinearLayout strip) {
-        if (strip == null) return;
-        // Wait for page measurement, icon grid correction, and widget restoration.
+        if (strip == null || orientationRepairScheduled) return;
+        orientationRepairScheduled = true;
+        // Coalesce renders during rotation into one measured repair; competing passes
+        // previously overlapped work while Android was recalculating page bounds.
         strip.post(() -> strip.post(() -> {
+            orientationRepairScheduled = false;
+            if (strip != host.getPagesStrip()) return;
             boolean landscape = isLandscapeOrientation(strip);
             boolean hasPreviousOrientation = prefs.contains(LAST_GEOMETRY_LANDSCAPE_KEY);
             boolean previousLandscape = prefs.getBoolean(
                     LAST_GEOMETRY_LANDSCAPE_KEY, landscape);
-
-            // Restore portrait coordinates only once when entering landscape, and once
-            // when returning to portrait. Repeated portrait renders must not undo user moves.
             if (!hasPreviousOrientation || landscape != previousLandscape) {
                 restoreSavedWorkspaceGeometry(strip);
             }
             if (landscape) {
-                adaptLandscapeWorkspace(strip);
+                postLandscapeRepair(strip);
             } else {
                 restorePortraitClockScales(strip);
                 snapshotPortraitWorkspaceGeometry(strip);
@@ -1334,8 +1498,14 @@ final class HomePageController {
                         row = bestRow;
                         savedX = col / (float) Math.max(1, columns - 1);
                         savedY = row / (float) Math.max(1, rows - 1);
+                        String activeXPrefix = isLandscapeOrientation(strip)
+                                ? "__landscape_icon_x__" : "__portrait_icon_x__";
+                        String activeYPrefix = isLandscapeOrientation(strip)
+                                ? "__landscape_icon_y__" : "__portrait_icon_y__";
                         prefs.edit().putFloat(iconXKey + packageName, savedX)
-                                .putFloat(iconYKey + packageName, savedY).apply();
+                                .putFloat(iconYKey + packageName, savedY)
+                                .putFloat(activeXPrefix + packageName, savedX)
+                                .putFloat(activeYPrefix + packageName, savedY).apply();
                     }
                     // If every slot is occupied, keep the app attached at its saved slot.
                     // Size-change validation can then report/repair its real collision rather
@@ -1426,6 +1596,16 @@ final class HomePageController {
                         }
                     }
                     laidOutSlots[row][col] = true;
+                    float finalSavedX = col / (float) Math.max(1, columns - 1);
+                    float finalSavedY = row / (float) Math.max(1, actualRows - 1);
+                    String activeXPrefix = isLandscapeOrientation(strip)
+                            ? "__landscape_icon_x__" : "__portrait_icon_x__";
+                    String activeYPrefix = isLandscapeOrientation(strip)
+                            ? "__landscape_icon_y__" : "__portrait_icon_y__";
+                    prefs.edit().putFloat(iconXKey + childPackage, finalSavedX)
+                            .putFloat(iconYKey + childPackage, finalSavedY)
+                            .putFloat(activeXPrefix + childPackage, finalSavedX)
+                            .putFloat(activeYPrefix + childPackage, finalSavedY).apply();
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
