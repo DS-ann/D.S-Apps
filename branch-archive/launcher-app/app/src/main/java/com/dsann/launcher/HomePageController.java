@@ -65,6 +65,47 @@ final class HomePageController {
             new java.util.WeakHashMap<View, float[]>();
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
 
+    private static final String PORTRAIT_APP_ROW_WIDTH_DP_KEY =
+            "__portrait_home_app_row_width_dp";
+
+    /**
+     * Keeps the full app grid row at its portrait physical width in landscape.
+     * The preference stores the total row span in dp, not a percentage of the
+     * current orientation's page width.
+     */
+    private int homeAppCellWidthPx(FrameLayout page, LinearLayout strip,
+                                   int columns, int fallbackPageWidth) {
+        int safeColumns = Math.max(1, columns);
+        android.util.DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
+        float density = metrics.density > 0f ? metrics.density : 1f;
+        int minimumCellWidth = LauncherUiUtils.dp(activity, 1);
+
+        if (!isLandscapeOrientation(strip)) {
+            int width = page != null && page.getWidth() > 0
+                    ? page.getWidth() : fallbackPageWidth;
+            return Math.max(minimumCellWidth, width / safeColumns);
+        }
+
+        float portraitRowWidthDp = prefs.getFloat(PORTRAIT_APP_ROW_WIDTH_DP_KEY, -1f);
+        if (portraitRowWidthDp > 0f) {
+            return Math.max(minimumCellWidth,
+                    Math.round(portraitRowWidthDp * density / safeColumns));
+        }
+
+        // Cold start directly in landscape: use the display's short side as a
+        // portrait-width fallback until a real portrait measurement is available.
+        int shortSidePx = Math.min(metrics.widthPixels, metrics.heightPixels);
+        return Math.max(minimumCellWidth, shortSidePx / safeColumns);
+    }
+
+    private void savePortraitHomeAppRowWidthDp(int cellWidthPx, int columns) {
+        if (cellWidthPx <= 0 || columns <= 0) return;
+        float density = activity.getResources().getDisplayMetrics().density;
+        if (density <= 0f) density = 1f;
+        float rowWidthDp = (cellWidthPx * (float) columns) / density;
+        prefs.edit().putFloat(PORTRAIT_APP_ROW_WIDTH_DP_KEY, rowWidthDp).apply();
+    }
+
     private static final class WorkspaceGeometry {
         final int page, left, top, width, height;
         final float scaleX, scaleY, translationX, translationY, rotationX, rotationY;
@@ -824,12 +865,9 @@ final class HomePageController {
                 View cell = homeAdapter.getViewForApp(app, null, page);
                 cell.setTag("launcher_app:" + packageName);
                 int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
-                int cellWidth = Math.max(LauncherUiUtils.dp(activity, 1),
-                        actualPageWidth / columns);
-                boolean compactLandscapeGaps = isLandscapeOrientation(strip);
-                // Keep every logical cell at the same width as portrait so the row's total
-                // span stays edge-to-edge. Landscape reduces visual gaps by widening only
-                // the painted icon inside its unchanged cell.
+                int cellWidth = homeAppCellWidthPx(page, strip, columns, actualPageWidth);
+                // In landscape, this cell pitch is derived from the saved portrait row span
+                // in dp, so the app grid cannot stretch across the wider landscape page.
                 int maxArtworkSize = Math.max(1,
                         cellWidth - LauncherUiUtils.dp(activity, 4));
                 if (cell instanceof ViewGroup && ((ViewGroup) cell).getChildCount() > 0
@@ -842,11 +880,6 @@ final class HomePageController {
                         iconParams.width = fittedSize;
                         iconParams.height = fittedSize;
                         iconView.setLayoutParams(iconParams);
-                        float maxLandscapeScale = (cellWidth - LauncherUiUtils.dp(activity, 2))
-                                / (float) Math.max(1, fittedSize);
-                        float iconScaleX = compactLandscapeGaps
-                                ? Math.max(1f, Math.min(1.12f, maxLandscapeScale)) : 1f;
-                        iconView.setScaleX(iconScaleX);
                     }
                 }
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
@@ -895,8 +928,12 @@ final class HomePageController {
             }
             page.post(() -> {
                 if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
-                int actualCellWidth = Math.max(1, page.getWidth() / columns);
-                // Keep the post-layout grid at full width in both orientations.
+                int actualCellWidth = homeAppCellWidthPx(page, strip, columns, page.getWidth());
+                if (!isLandscapeOrientation(strip)) {
+                    savePortraitHomeAppRowWidthDp(actualCellWidth, columns);
+                }
+                // Apply the same physical cell pitch in the post-layout pass; do not let
+                // landscape page width overwrite the row's saved portrait span.
                 int actualCellHeight = LauncherUiUtils.dp(activity,
                         host.getHomeCellHeightDp(configuredIconSize));
                 int actualRows = host.getHomeGridRowsForHeight(page.getHeight(), actualCellHeight);
