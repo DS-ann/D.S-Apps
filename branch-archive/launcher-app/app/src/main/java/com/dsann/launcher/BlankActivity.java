@@ -325,21 +325,124 @@ public final class BlankActivity extends Activity {
 
     private void showBlankInstructionPopup() {
         Dialog dialog = new Dialog(this);
-        FrameLayout panel = new FrameLayout(this);
-        panel.setPadding(dp(1), dp(1), dp(1), dp(1));
-        panel.setBackground(gradientRounded(new int[]{
-                Color.rgb(68, 230, 255), Color.rgb(131, 99, 255),
-                Color.rgb(255, 96, 190)}, dp(30)));
-        panel.setContentDescription("Blank instructions popup. Press Back or tap outside to close.");
-        panel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
 
-        View blankSurface = new View(this);
-        blankSurface.setBackground(gradientRounded(new int[]{
-                Color.rgb(12, 16, 36), Color.rgb(9, 12, 29)}, dp(29)));
-        panel.addView(blankSurface, new FrameLayout.LayoutParams(
+        FrameLayout border = new FrameLayout(this);
+        border.setPadding(dp(1), dp(1), dp(1), dp(1));
+        border.setBackground(gradientRounded(new int[]{
+                Color.rgb(76, 234, 255), Color.rgb(130, 101, 255),
+                Color.rgb(255, 104, 194), Color.rgb(255, 205, 120)}, dp(28)));
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(15), dp(14), dp(15), dp(12));
+        panel.setBackground(gradientRounded(new int[]{
+                Color.rgb(12, 16, 36), Color.rgb(8, 11, 27)}, dp(27)));
+        border.addView(panel, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        dialog.setContentView(panel);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        FixedGradientTextView heading = fixedGradientText("QUICK GUIDE", 14f, true);
+        heading.setLetterSpacing(0.14f);
+        header.addView(heading, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView close = makeText("×", 23f, Color.WHITE, true);
+        close.setTypeface(android.graphics.Typeface.create(
+                "monospace", android.graphics.Typeface.BOLD));
+        close.setGravity(Gravity.CENTER);
+        close.setContentDescription("Close instructions");
+        close.setBackground(solidRounded(Color.argb(80, 108, 137, 193), dp(12)));
+        close.setPadding(dp(8), 0, dp(8), 0);
+        header.addView(close, new LinearLayout.LayoutParams(dp(38), dp(34)));
+        panel.addView(header);
+        close.setOnClickListener(v -> dialog.dismiss());
+
+        View topBoundary = new View(this);
+        topBoundary.setBackground(gradientRounded(new int[]{
+                Color.rgb(76, 234, 255), Color.rgb(138, 112, 255),
+                Color.rgb(255, 108, 195), Color.rgb(255, 202, 124)}, dp(2)));
+        LinearLayout.LayoutParams boundaryParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2));
+        boundaryParams.topMargin = dp(10);
+        boundaryParams.bottomMargin = dp(8);
+        panel.addView(topBoundary, boundaryParams);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scroll.setClipToPadding(false);
+        LinearLayout guide = new LinearLayout(this);
+        guide.setOrientation(LinearLayout.VERTICAL);
+        guide.setPadding(dp(2), dp(4), dp(2), dp(8));
+        scroll.addView(guide, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        addGuideSection(guide, "GESTURES",
+                "HOLD EMPTY HOME 1 ~2S  →  HOME STUDIO",
+                "HOME 2: HOLD EMPTY  →  ADD WIDGET / APPS",
+                "HOME SWIPE DOWN  →  CONTROL CENTRE",
+                "SWIPE LEFT / RIGHT  →  CHANGE HOME PAGE",
+                "DRAWER: SWIPE DOWN / BACK  →  CLOSE",
+                "DRAWER: TAP ⌕  →  SEARCH");
+
+        addGuideSection(guide, "APPS & DOCK",
+                "DRAWER: HOLD APP  →  ADD / INFO / UNINSTALL",
+                "HOME: HOLD ~1S + DRAG  →  MOVE",
+                "HOLD HOME APP STILL ~2S  →  OPTIONS",
+                "REMOVE FROM HOME  ≠  UNINSTALL",
+                "UNINSTALL  →  CONFIRM IN ANDROID",
+                "DRAG HOME APP TO DOCK  →  PIN",
+                "HOLD DOCK APP  →  REMOVE / MOVE TO HOME");
+
+        addGuideSection(guide, "PAGES & PLACEMENT",
+                "DRAG TO SCREEN EDGE; PAUSE ~200MS",
+                "WHEN PAGE SWITCHES, DROP IN FREE SPACE",
+                "DROP APP ON GROUP TO ADD; HOME ICON STAYS");
+
+        addGuideSection(guide, "WIDGETS & SHORTCUTS",
+                "STUDIO > WIDGETS > ADD WIDGET",
+                "CHOOSE WIDGET OR SHORTCUT; FOLLOW SETUP",
+                "HOME 2: HOLD EMPTY  >  ADD WIDGET / APPS",
+                "WIDGET: HOLD ~1S + DRAG  →  MOVE",
+                "HOLD WIDGET ~2S  →  REMOVE / RESIZE",
+                "DRAG RESIZE HANDLES; TAP OUTSIDE TO EXIT",
+                "CONTACT TILE: HOLD  →  MOVE PAGE / REMOVE / RECREATE",
+                "DIRECT DIAL MAY ASK FOR PHONE PERMISSION");
+
+        addGuideSection(guide, "CLOCK",
+                "HOLD CLOCK ~1S + DRAG  →  MOVE",
+                "HOLD CLOCK ~2S  →  RESIZE MODE",
+                "DRAG EDGE HANDLES; TAP OUTSIDE TO EXIT",
+                "STUDIO > CLOCKS  →  STYLE / SIZE / DATE / FONTS");
+
+        addGuideSection(guide, "APP GROUPS",
+                "STUDIO > WIDGETS > ADD AN APP GROUP",
+                "TAP GROUP TO OPEN; HOLD GROUP  →  OPTIONS",
+                "OPTIONS: ADD / REMOVE APPS, RENAME, SHARE, DELETE",
+                "HOLD MEMBER  →  REMOVE FROM GROUP / INFO / UNINSTALL");
+
+        addGuideSection(guide, "CUSTOMIZE",
+                "STUDIO: GRID, ICON SIZE / SHAPE / THEME, LABELS",
+                "WALLPAPER, COLOURS, CLOCK, PAGE / DRAWER EFFECTS",
+                "RESET HOME LAYOUT  →  DEFAULT GRID / SHORTCUTS",
+                "RESET ALL CUSTOMIZATIONS  →  LAUNCHER DEFAULTS");
+
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        panel.addView(scroll, scrollParams);
+
+        FixedGradientTextView footer = fixedGradientText(
+                "BACK / OUTSIDE TAP  →  CLOSE", 9.5f, true);
+        footer.setGravity(Gravity.CENTER);
+        footer.setLetterSpacing(0.06f);
+        footer.setPadding(0, dp(10), 0, dp(1));
+        panel.addView(footer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        dialog.setContentView(border);
         dialog.setCancelable(true);
         dialog.setCanceledOnTouchOutside(true);
         dialog.show();
@@ -349,23 +452,104 @@ public final class BlankActivity extends Activity {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
             WindowManager.LayoutParams attributes = window.getAttributes();
-            attributes.dimAmount = 0.76f;
+            attributes.dimAmount = 0.78f;
+            attributes.gravity = Gravity.CENTER;
             window.setAttributes(attributes);
+
             int displayWidth = getResources().getDisplayMetrics().widthPixels;
-            int popupWidth = Math.max(dp(260), Math.min(dp(460), displayWidth - dp(44)));
-            window.setLayout(popupWidth, dp(232));
+            int displayHeight = getResources().getDisplayMetrics().heightPixels;
+            int popupWidth = Math.max(dp(260),
+                    Math.min(dp(460), displayWidth - dp(24)));
+            // The former popup was 232dp tall. Double it, while respecting shorter displays.
+            int popupHeight = Math.min(dp(464), Math.max(dp(280), displayHeight - dp(48)));
+            window.setLayout(popupWidth, popupHeight);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
 
-        panel.setAlpha(0f);
-        panel.setScaleX(0.9f);
-        panel.setScaleY(0.9f);
-        panel.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(280)
-                .setInterpolator(new DecelerateInterpolator(1.6f))
+        border.setAlpha(0f);
+        border.setScaleX(0.96f);
+        border.setScaleY(0.96f);
+        border.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(260)
+                .setInterpolator(new DecelerateInterpolator(1.5f))
                 .start();
+    }
+
+    private void addGuideSection(LinearLayout parent, String title, String... lines) {
+        FixedGradientTextView heading = fixedGradientText(title, 11.5f, true);
+        heading.setLetterSpacing(0.12f);
+        heading.setPadding(0, dp(8), 0, dp(4));
+        parent.addView(heading, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        for (String line : lines) {
+            FixedGradientTextView row = fixedGradientText("› " + line, 10.5f, false);
+            row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            row.setLineSpacing(dp(2), 1f);
+            row.setMaxWidth(Math.max(dp(220),
+                    getResources().getDisplayMetrics().widthPixels - dp(88)));
+            row.setPadding(0, dp(2), 0, dp(2));
+            parent.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        View divider = new View(this);
+        divider.setBackground(gradientRounded(new int[]{
+                Color.argb(0, 76, 234, 255), Color.argb(165, 130, 101, 255),
+                Color.argb(165, 255, 104, 194), Color.argb(0, 255, 205, 120)}, dp(2)));
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        dividerParams.topMargin = dp(7);
+        parent.addView(divider, dividerParams);
+    }
+
+    private FixedGradientTextView fixedGradientText(CharSequence value,
+            float sizeSp, boolean bold) {
+        FixedGradientTextView text = new FixedGradientTextView();
+        text.setText(value);
+        text.setTextSize(sizeSp);
+        text.setTextColor(Color.WHITE);
+        text.setIncludeFontPadding(false);
+        text.setTypeface(android.graphics.Typeface.create(
+                "monospace", bold ? android.graphics.Typeface.BOLD
+                        : android.graphics.Typeface.NORMAL));
+        text.setGravity(Gravity.CENTER_VERTICAL);
+        return text;
+    }
+
+    /** Fixed multicolour glyph fill; unlike the page title, this gradient never moves. */
+    private final class FixedGradientTextView extends TextView {
+        FixedGradientTextView() {
+            super(BlankActivity.this);
+        }
+
+        @Override
+        protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight);
+            applyFixedGradient(width);
+        }
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            applyFixedGradient(getWidth());
+        }
+
+        private void applyFixedGradient(int viewWidth) {
+            int availableWidth = Math.max(1, viewWidth - getPaddingLeft() - getPaddingRight());
+            float measuredTextWidth = getPaint().measureText(getText().toString());
+            float shaderWidth = Math.max(1f, Math.min(availableWidth,
+                    measuredTextWidth > 1f ? measuredTextWidth : availableWidth));
+            getPaint().setShader(new LinearGradient(0f, 0f, shaderWidth, 0f,
+                    new int[]{
+                            Color.rgb(83, 246, 255),
+                            Color.rgb(105, 157, 255),
+                            Color.rgb(174, 126, 255),
+                            Color.rgb(255, 112, 205),
+                            Color.rgb(255, 207, 127)
+                    }, null, Shader.TileMode.CLAMP));
+            invalidate();
+        }
     }
 
     private CharSequence getApplicationLabel() {
