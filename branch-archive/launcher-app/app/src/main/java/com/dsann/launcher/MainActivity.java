@@ -6511,6 +6511,18 @@ public class MainActivity extends Activity {
         rows.requestLayout();
     }
 
+    private void removeAppGroupMemberDragGhost(android.widget.ImageView ghost,
+            android.graphics.Bitmap bitmap) {
+        if (ghost != null) {
+            ghost.animate().cancel();
+            if (ghost.getParent() instanceof ViewGroup) {
+                ((ViewGroup) ghost.getParent()).removeView(ghost);
+            }
+            ghost.setImageDrawable(null);
+        }
+        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+    }
+
     private void installAppGroupMemberTouch(View item, View icon, Dialog groupDialog,
             LinearLayout popupPanel, String groupId, String packageName, ResolveInfo app) {
         final android.os.Handler touchHandler = new android.os.Handler(
@@ -6530,6 +6542,12 @@ public class MainActivity extends Activity {
         final float[] sourceRowTranslationZ = new float[1];
         final View[] sourceScrollRef = new View[1];
         final int[] sourceScrollLayerType = new int[1];
+        final ViewGroup[] dragOverlayRef = new ViewGroup[1];
+        final android.widget.ImageView[] dragGhostRef = new android.widget.ImageView[1];
+        final android.graphics.Bitmap[] dragGhostBitmapRef = new android.graphics.Bitmap[1];
+        final float[] dragFingerOffset = new float[2];
+        final int[] dragOverlayScreenOrigin = new int[2];
+        final float[] originalMemberAlpha = {1f};
 
         final Runnable armMove = () -> {
             if (movedTooEarly[0] || draggingOut[0] || memberDragging[0]
@@ -6566,6 +6584,17 @@ public class MainActivity extends Activity {
                 previewTargetPackage[0] = null;
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
+                originalMemberAlpha[0] = memberView.getAlpha();
+                ViewParent overlayParent = popupPanel.getParent();
+                dragOverlayRef[0] = overlayParent instanceof ViewGroup
+                        ? (ViewGroup) overlayParent : null;
+                if (dragOverlayRef[0] != null) {
+                    dragOverlayRef[0].getLocationOnScreen(dragOverlayScreenOrigin);
+                }
+                int[] initialMemberLocation = new int[2];
+                memberView.getLocationOnScreen(initialMemberLocation);
+                dragFingerOffset[0] = event.getRawX() - initialMemberLocation[0];
+                dragFingerOffset[1] = event.getRawY() - initialMemberLocation[1];
                 android.view.ViewParent sourceParent = memberView.getParent();
                 sourceRowRef[0] = sourceParent instanceof View ? (View) sourceParent : null;
                 sourceRowElevation[0] = Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null
@@ -6608,9 +6637,62 @@ public class MainActivity extends Activity {
                     android.view.ViewParent parent = memberView.getParent();
                     if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
                     if (firstDragFrame) {
-                        // Disable the cached scroll layer only for active member drags.
-                        // A stale layer can paint a later row over the translated member even
-                        // after row elevation changes, especially on older Android renderers.
+                        // A lifted row alone is not reliable on every renderer: later rows
+                        // can still paint over the translated member. Draw a bitmap copy in
+                        // the dialog's top-level overlay for the duration of the gesture.
+                        if (dragOverlayRef[0] instanceof FrameLayout
+                                && memberView.getWidth() > 0 && memberView.getHeight() > 0) {
+                            android.graphics.Bitmap ghostBitmap = null;
+                            try {
+                                ghostBitmap = android.graphics.Bitmap.createBitmap(
+                                        memberView.getWidth(), memberView.getHeight(),
+                                        android.graphics.Bitmap.Config.ARGB_8888);
+                                memberView.draw(new android.graphics.Canvas(ghostBitmap));
+                                android.widget.ImageView ghost =
+                                        new android.widget.ImageView(MainActivity.this);
+                                ghost.setTag("app_group_member_drag_ghost");
+                                ghost.setImageBitmap(ghostBitmap);
+                                ghost.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+                                ghost.setClickable(false);
+                                ghost.setFocusable(false);
+                                ghost.setImportantForAccessibility(
+                                        View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                                ghost.setAlpha(originalMemberAlpha[0]);
+                                FrameLayout.LayoutParams ghostParams =
+                                        new FrameLayout.LayoutParams(memberView.getWidth(),
+                                                memberView.getHeight(),
+                                                Gravity.TOP | Gravity.LEFT);
+                                int[] memberLocation = new int[2];
+                                memberView.getLocationOnScreen(memberLocation);
+                                ghostParams.leftMargin = memberLocation[0]
+                                        - dragOverlayScreenOrigin[0];
+                                ghostParams.topMargin = memberLocation[1]
+                                        - dragOverlayScreenOrigin[1];
+                                if (Build.VERSION.SDK_INT >= 21) {
+                                    ghost.setElevation(LauncherUiUtils.dp(MainActivity.this, 80));
+                                    ghost.setTranslationZ(LauncherUiUtils.dp(MainActivity.this, 80));
+                                }
+                                dragOverlayRef[0].addView(ghost, ghostParams);
+                                ghost.bringToFront();
+                                dragGhostRef[0] = ghost;
+                                dragGhostBitmapRef[0] = ghostBitmap;
+                                // Re-anchor after the long-press scale hint, so the ghost
+                                // starts exactly beneath the current pointer without jumping.
+                                dragFingerOffset[0] = event.getRawX() - memberLocation[0];
+                                dragFingerOffset[1] = event.getRawY() - memberLocation[1];
+                                memberView.setAlpha(0f);
+                            } catch (OutOfMemoryError memoryError) {
+                                if (ghostBitmap != null && !ghostBitmap.isRecycled()) {
+                                    ghostBitmap.recycle();
+                                }
+                            } catch (RuntimeException drawingError) {
+                                if (ghostBitmap != null && !ghostBitmap.isRecycled()) {
+                                    ghostBitmap.recycle();
+                                }
+                            }
+                        }
+                        // Keep the legacy row/layer lift as a fallback and to preserve
+                        // collision preview behavior beneath the visible overlay copy.
                         if (sourceScrollRef[0] != null
                                 && sourceScrollLayerType[0] == View.LAYER_TYPE_HARDWARE) {
                             sourceScrollRef[0].setLayerType(View.LAYER_TYPE_NONE, null);
@@ -6632,7 +6714,17 @@ public class MainActivity extends Activity {
                             || event.getRawY() < panelLocation[1] - margin
                             || event.getRawX() > panelLocation[0] + popupPanel.getWidth() + margin
                             || event.getRawY() > panelLocation[1] + popupPanel.getHeight() + margin;
-                    memberView.setAlpha(draggingOut[0] ? 0.78f : 1f);
+                    if (dragGhostRef[0] != null) {
+                        android.widget.ImageView ghost = dragGhostRef[0];
+                        ghost.setX(event.getRawX() - dragOverlayScreenOrigin[0]
+                                - dragFingerOffset[0]);
+                        ghost.setY(event.getRawY() - dragOverlayScreenOrigin[1]
+                                - dragFingerOffset[1]);
+                        ghost.setAlpha(draggingOut[0] ? 0.78f : 1f);
+                        memberView.setAlpha(0f);
+                    } else {
+                        memberView.setAlpha(draggingOut[0] ? 0.78f : originalMemberAlpha[0]);
+                    }
                     View displacementTarget = draggingOut[0] ? null
                             : findAppGroupMemberAtBaseSlot(popupPanel,
                                     event.getRawX(), event.getRawY(), memberView);
@@ -6674,7 +6766,11 @@ public class MainActivity extends Activity {
                 touchHandler.removeCallbacks(showOptions);
                 memberView.setTranslationX(0f);
                 memberView.setTranslationY(0f);
-                memberView.setAlpha(1f);
+                memberView.setAlpha(originalMemberAlpha[0]);
+                removeAppGroupMemberDragGhost(dragGhostRef[0], dragGhostBitmapRef[0]);
+                dragGhostRef[0] = null;
+                dragGhostBitmapRef[0] = null;
+                dragOverlayRef[0] = null;
                 if (Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null) {
                     sourceRowRef[0].setElevation(sourceRowElevation[0]);
                     sourceRowRef[0].setTranslationZ(sourceRowTranslationZ[0]);
@@ -8790,14 +8886,11 @@ public class MainActivity extends Activity {
     private void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
-        ViewGroup.LayoutParams rawParams = movingView.getLayoutParams();
-        int left = movingView.getLeft();
-        int top = movingView.getTop();
-        if (rawParams instanceof FrameLayout.LayoutParams) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawParams;
-            left = lp.leftMargin;
-            top = lp.topMargin;
-        }
+        // Geometry must include translations: same-page app dragging no longer mutates
+        // layout margins on each MOVE frame.
+        int[] geometry = itemGeometry(movingView);
+        int left = geometry[0];
+        int top = geometry[1];
         int threshold = Math.max(1, LauncherUiUtils.dp(this, 8));
         if (lastLiveDisplacementPage == page && lastLiveDisplacementMover == movingView
                 && Math.abs(left - lastLiveDisplacementX) < threshold
@@ -8807,8 +8900,25 @@ public class MainActivity extends Activity {
         lastLiveDisplacementX = left;
         lastLiveDisplacementY = top;
         liveDragRejectedMoves.remove(movingView);
-        // Coalesce dense MOVE streams and avoid rerunning collision planning for tiny
-        // sub-cell finger changes. The dragged view still tracks every event immediately.
+
+        boolean appIconMove = isWorkspaceAppIcon(movingView)
+                || ("workspace_transfer_proxy".equals(movingView.getTag())
+                    && isWorkspaceAppIcon(workspaceTransferItem));
+        long now = android.os.SystemClock.uptimeMillis();
+        long remaining = APP_ICON_LIVE_PLAN_INTERVAL_MS
+                - (now - lastAppIconLivePlanUptimeMs);
+        if (appIconMove && lastAppIconLivePlanUptimeMs > 0L && remaining > 0L) {
+            // Do not cancel/restart the pending callback for every MOVE event. Keep one
+            // delayed planner pass queued; it will read the mover's latest live geometry.
+            if (pendingLiveDisplacementPage == page
+                    && pendingLiveDisplacementMover == movingView) return;
+            cancelPendingLiveDisplacementUpdate();
+            pendingLiveDisplacementPage = page;
+            pendingLiveDisplacementMover = movingView;
+            page.postDelayed(liveDisplacementFrame, remaining);
+            return;
+        }
+
         cancelPendingLiveDisplacementUpdate();
         pendingLiveDisplacementPage = page;
         pendingLiveDisplacementMover = movingView;
@@ -9329,17 +9439,30 @@ public class MainActivity extends Activity {
                     // Convert screen coordinates into the source page's own coordinate space.
                     // When the visible target is the other page, the source cell deliberately
                     // extends beyond its own bounds so it can remain under the finger.
-                    float pageOffsetX = view.getTranslationX();
+                    boolean samePageDrag = iconDragPageIndex == sourcePageIndex
+                            && iconDragPageAnimator == null;
+                    float pageOffsetX = samePageDrag ? 0f : view.getTranslationX();
                     int desiredLeft = Math.round(event.getRawX() - pageLocation[0]
                             - view.getWidth() / 2f - pageOffsetX);
-                    lp.leftMargin = iconDragPageIndex == sourcePageIndex
+                    desiredLeft = iconDragPageIndex == sourcePageIndex
                             ? Math.max(0, Math.min(maxX, desiredLeft)) : desiredLeft;
-                    int requestedTop = Math.round(event.getRawY()
-                            - pageLocation[1] - iconDragFingerOffsetY);
-                    // The guide grid remains active, but the dragged app follows the
-                    // finger continuously. Grid snapping is applied only at drop time.
-                    lp.topMargin = Math.max(0, Math.min(maxY, requestedTop));
-                    view.setLayoutParams(lp);
+                    int requestedTop = Math.max(0, Math.min(maxY, Math.round(event.getRawY()
+                            - pageLocation[1] - iconDragFingerOffsetY)));
+                    // Same-page drags use translation properties instead of requesting a
+                    // fresh FrameLayout layout on every touch event. Keep margins unchanged
+                    // until drop; cross-page preview retains its existing transfer geometry.
+                    if (samePageDrag) {
+                        float sx = Math.max(0.01f, view.getScaleX());
+                        float sy = Math.max(0.01f, view.getScaleY());
+                        view.setTranslationX(desiredLeft - view.getLeft()
+                                - view.getPivotX() * (1f - sx));
+                        view.setTranslationY(requestedTop - view.getTop()
+                                - view.getPivotY() * (1f - sy));
+                    } else {
+                        lp.leftMargin = desiredLeft;
+                        lp.topMargin = requestedTop;
+                        view.setLayoutParams(lp);
+                    }
                     // Preview collision displacement during an app drag on its current
                     // page. When the edge switch starts, that page's preview is rolled back
                     // and the destination page gets its own independent placement transaction.
