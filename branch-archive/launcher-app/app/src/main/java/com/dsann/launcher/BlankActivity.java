@@ -1,12 +1,15 @@
 package com.dsann.launcher;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.content.Context;
 import android.app.Dialog;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RadialGradient;
@@ -21,6 +24,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -84,7 +88,8 @@ public final class BlankActivity extends Activity {
 
         stack.addView(buildIconMedallion(), new LinearLayout.LayoutParams(dp(132), dp(132)));
 
-        TextView appName = makeText(getApplicationLabel(), 34f, Color.WHITE, true);
+        ColorFlowTextView appName = makeGradientText(getApplicationLabel(), 34f,
+                "cursive", android.graphics.Typeface.BOLD);
         appName.setGravity(Gravity.CENTER);
         appName.setShadowLayer(dp(18), 0f, dp(3), Color.argb(115, 109, 91, 255));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
@@ -97,7 +102,8 @@ public final class BlankActivity extends Activity {
                     topMargin = dp(17);
                 }});
 
-        TextView version = makeText(getVersionLabel(), 10.5f, Color.rgb(177, 223, 255), true);
+        ColorFlowTextView version = makeGradientText(getVersionLabel(), 10.5f,
+                "monospace", android.graphics.Typeface.BOLD);
         version.setLetterSpacing(0.13f);
         version.setGravity(Gravity.CENTER);
         version.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -247,14 +253,14 @@ public final class BlankActivity extends Activity {
         outer.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView overline = makeText("CREATOR CREDIT", 10f,
-                Color.rgb(116, 228, 255), true);
+        ColorFlowTextView overline = makeGradientText("CREATOR CREDIT", 10f,
+                "monospace", android.graphics.Typeface.BOLD);
         overline.setLetterSpacing(0.2f);
         overline.setGravity(Gravity.CENTER);
         inner.addView(overline);
 
-        TextView credit = makeText("Created by Debarghya Sannigrahi", 15.5f,
-                Color.rgb(248, 247, 255), true);
+        ColorFlowTextView credit = makeGradientText("Created by Debarghya Sannigrahi", 15.5f,
+                "monospace", android.graphics.Typeface.BOLD);
         credit.setGravity(Gravity.CENTER);
         credit.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams creditParams = new LinearLayout.LayoutParams(
@@ -299,8 +305,8 @@ public final class BlankActivity extends Activity {
         LinearLayout.LayoutParams questionParams = new LinearLayout.LayoutParams(dp(26), dp(26));
         inside.addView(question, questionParams);
 
-        TextView label = makeText("Instructions", 13.5f,
-                Color.rgb(248, 247, 255), true);
+        ColorFlowTextView label = makeGradientText("Instructions", 13.5f,
+                "monospace", android.graphics.Typeface.BOLD);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         labelParams.leftMargin = dp(9);
@@ -391,6 +397,107 @@ public final class BlankActivity extends Activity {
                         : android.graphics.Typeface.NORMAL));
         text.setGravity(Gravity.CENTER_VERTICAL);
         return text;
+    }
+
+    private ColorFlowTextView makeGradientText(CharSequence value, float sizeSp,
+            String family, int style) {
+        ColorFlowTextView text = new ColorFlowTextView(this);
+        text.setText(value);
+        text.setTextSize(sizeSp);
+        text.setIncludeFontPadding(false);
+        text.setTypeface(android.graphics.Typeface.create(family, style));
+        text.setGravity(Gravity.CENTER_VERTICAL);
+        text.setGradientColors(new int[]{
+                Color.rgb(83, 246, 255),
+                Color.rgb(105, 157, 255),
+                Color.rgb(174, 126, 255),
+                Color.rgb(255, 112, 205),
+                Color.rgb(255, 207, 127),
+                Color.rgb(83, 246, 255)
+        });
+        return text;
+    }
+
+    /**
+     * Animated shader text: the colour blend moves through the glyph fill rather than
+     * tinting the rectangular text view. Animation runs only while attached to the window.
+     * This keeps the effect smooth without a permanently active animator when the page closes.
+     */
+    private final class ColorFlowTextView extends TextView {
+        private final Matrix shaderMatrix = new Matrix();
+        private int[] gradientColors = new int[]{
+                Color.rgb(83, 246, 255), Color.rgb(105, 157, 255),
+                Color.rgb(174, 126, 255), Color.rgb(255, 112, 205),
+                Color.rgb(255, 207, 127), Color.rgb(83, 246, 255)
+        };
+        private LinearGradient textGradient;
+        private ValueAnimator animator;
+        private float shaderSpan = 1f;
+        private float gradientPhase;
+
+        ColorFlowTextView(Context context) {
+            super(context);
+            setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
+
+        void setGradientColors(int[] colors) {
+            if (colors == null || colors.length < 2) return;
+            gradientColors = colors.clone();
+            rebuildGradient();
+        }
+
+        @Override
+        protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight);
+            rebuildGradient();
+        }
+
+        private void rebuildGradient() {
+            int width = getWidth() - getPaddingLeft() - getPaddingRight();
+            if (width <= 1) return;
+            shaderSpan = Math.max(1f, width);
+            textGradient = new LinearGradient(0f, 0f, shaderSpan, 0f,
+                    gradientColors, null, Shader.TileMode.REPEAT);
+            getPaint().setShader(textGradient);
+            applyGradientPhase();
+            invalidate();
+        }
+
+        private void applyGradientPhase() {
+            if (textGradient == null) return;
+            shaderMatrix.setTranslate(-gradientPhase * shaderSpan, 0f);
+            textGradient.setLocalMatrix(shaderMatrix);
+            invalidate();
+        }
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            rebuildGradient();
+            if (animator == null) {
+                animator = ValueAnimator.ofFloat(0f, 1f);
+                animator.setDuration(6200L);
+                animator.setRepeatCount(ValueAnimator.INFINITE);
+                animator.setRepeatMode(ValueAnimator.RESTART);
+                animator.setInterpolator(new LinearInterpolator());
+                animator.addUpdateListener(animation -> {
+                    Object animatedValue = animation.getAnimatedValue();
+                    if (animatedValue instanceof Float) {
+                        gradientPhase = (Float) animatedValue;
+                        applyGradientPhase();
+                    }
+                });
+            }
+            if (!animator.isStarted()) animator.start();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            if (animator != null) animator.cancel();
+            getPaint().setShader(null);
+            textGradient = null;
+            super.onDetachedFromWindow();
+        }
     }
 
     private GradientDrawable gradientRounded(int[] colors, float radiusDp) {
