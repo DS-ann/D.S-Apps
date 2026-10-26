@@ -12,7 +12,7 @@ ARCHIVED	cd28a2e316f2acc00b6d8345b5cea8f306cda933	app/src/main/java/com/dsann/la
 ARCHIVED	4936d124799db2742297ae81a6fb6581982fdd6d	app/src/main/java/com/dsann/launcher/HomePageModel.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageModel.java	100644
 ARCHIVED	3ca3acb5adb9de7436c002de3992878eb761541a	app/src/main/java/com/dsann/launcher/LauncherAppAdapter.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherAppAdapter.java	100644
 ARCHIVED	a16d8c0c1c082d4123453ba4f7c30714b979197c	app/src/main/java/com/dsann/launcher/LauncherClockStyler.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherClockStyler.java	100644
-ARCHIVED	2651659445ebbbc2604754ecd5aa1bdfd30479ae	app/src/main/java/com/dsann/launcher/LauncherDrawerController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherDrawerController.java	100644
+ARCHIVED	d3f75754a5d5172537d9defbe1a14bc84c86f00b	app/src/main/java/com/dsann/launcher/LauncherDrawerController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherDrawerController.java	100644
 ARCHIVED	148be13407ff95647c9e187ee9a1699ab5e2d203	app/src/main/java/com/dsann/launcher/LauncherIconDrawable.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherIconDrawable.java	100644
 ARCHIVED	a2aa464c5f67a3886f01f1bdfc8ba5d553d58be5	app/src/main/java/com/dsann/launcher/LauncherMotion.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherMotion.java	100644
 ARCHIVED	945e69ae190d5ea788cd2b74875e062bc0452744	app/src/main/java/com/dsann/launcher/LauncherScreenTransitions.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherScreenTransitions.java	100644

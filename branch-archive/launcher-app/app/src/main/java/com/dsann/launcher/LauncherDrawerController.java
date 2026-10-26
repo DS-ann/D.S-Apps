@@ -61,7 +61,7 @@ final class LauncherDrawerController {
     private static boolean isOwnBlankPageEntry(Activity activity, ResolveInfo app) {
         return app != null && app.activityInfo != null
                 && activity.getPackageName().equals(app.activityInfo.packageName)
-                && MainActivity.class.getName().equals(app.activityInfo.name);
+                && BlankActivity.class.getName().equals(app.activityInfo.name);
     }
 
     private static void launchSelectedApp(Activity activity, Actions actions,
