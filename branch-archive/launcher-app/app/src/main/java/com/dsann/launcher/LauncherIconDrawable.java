@@ -167,7 +167,11 @@ final class LauncherIconDrawable extends Drawable {
         final int theme = clampArtworkTheme(selectedTheme);
         final File root = new File(context.getFilesDir(), "launcher-icon-artwork-v3");
         final File legacyRoot = new File(context.getCacheDir(), "launcher-icon-artwork-v2");
-        final File active = new File(root, "theme-" + theme);
+        // The Ocean palette changed to the cyan-on-deep-blue treatment. Use a
+        // theme-specific cache revision so older blue/ice artwork is regenerated after update.
+        final String activeThemeDirectory = theme == ARTWORK_OCEAN_GRADIENT
+                ? "theme-" + theme + "-cyan-v1" : "theme-" + theme;
+        final File active = new File(root, activeThemeDirectory);
         File priorRoot = DISK_ARTWORK_CACHE_ROOT;
         boolean rootChanged = priorRoot == null || !priorRoot.equals(root);
         if (!rootChanged && selectedPersistentArtworkTheme == theme) return;
@@ -572,11 +576,11 @@ final class LauncherIconDrawable extends Drawable {
             Color.rgb(39, 117, 255), Color.rgb(139, 78, 220), Color.rgb(255, 74, 153)
     };
     private static final int[] OCEAN_PALETTE = {
-            Color.rgb(5, 12, 30),       // Blue-black
-            Color.rgb(10, 55, 145),     // Deep cobalt
-            Color.rgb(24, 112, 255),    // Electric blue
-            Color.rgb(83, 174, 255),    // Sky blue
-            Color.rgb(190, 224, 255)    // Ice blue
+            Color.rgb(3, 21, 35),       // Deep blue-black
+            Color.rgb(0, 68, 110),      // Midnight ocean blue
+            Color.rgb(0, 127, 190),     // Ocean blue
+            Color.rgb(0, 183, 232),     // Vivid cyan-blue
+            Color.rgb(72, 215, 245)     // Bright aqua-cyan
     };
     private static final int[] SUNSET_PALETTE = {
             Color.rgb(255, 155, 39), Color.rgb(255, 79, 118), Color.rgb(138, 69, 234)
