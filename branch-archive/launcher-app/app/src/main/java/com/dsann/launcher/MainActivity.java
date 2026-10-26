@@ -277,8 +277,6 @@ public class MainActivity extends Activity {
     // planning is deferred. Drop/cancel paths flush or cancel this work synchronously.
     private FrameLayout pendingLiveDisplacementPage;
     private View pendingLiveDisplacementMover;
-    // An unresolved live overlap must bypass normal planner throttling.
-    private boolean pendingLiveDisplacementForceImmediate;
     // Last position used for expensive live collision planning; finger motion itself remains immediate.
     private FrameLayout lastLiveDisplacementPage;
     private View lastLiveDisplacementMover;
@@ -300,22 +298,34 @@ public class MainActivity extends Activity {
             boolean appIconMove = isWorkspaceAppIcon(mover)
                     || ("workspace_transfer_proxy".equals(mover.getTag())
                         && isWorkspaceAppIcon(workspaceTransferItem));
-            boolean forceImmediate = pendingLiveDisplacementForceImmediate;
             long now = android.os.SystemClock.uptimeMillis();
-            if (appIconMove && !forceImmediate && lastAppIconLivePlanUptimeMs > 0L) {
+            if (appIconMove && lastAppIconLivePlanUptimeMs > 0L) {
                 long remaining = APP_ICON_LIVE_PLAN_INTERVAL_MS
                         - (now - lastAppIconLivePlanUptimeMs);
                 if (remaining > 0L) {
-                    // Keep the latest geometry pending and defer only non-colliding passes.
-                    // A detected overlap has priority over the low-RAM planning throttle.
+                    // Keep a single delayed pass queued; it will inspect the latest position.
                     page.postDelayed(this, remaining);
                     return;
                 }
             }
             pendingLiveDisplacementPage = null;
             pendingLiveDisplacementMover = null;
-            pendingLiveDisplacementForceImmediate = false;
-            if (appIconMove) lastAppIconLivePlanUptimeMs = now;
+            if (appIconMove) {
+                lastAppIconLivePlanUptimeMs = now;
+                // Normal movement should not run the expensive cascade planner when no
+                // collision exists. Keep the fast path to a single bounds scan, and only
+                // invoke the full planner when an item overlaps or a neighbour needs to
+                // be restored after the dragged icon moves away.
+                boolean unresolvedCollision =
+                        hasUnresolvedLiveWorkspaceCollision(page, mover);
+                if (!unresolvedCollision && !hasLiveDisplacedItemsOnPage(page)) {
+                    liveDragGeometryCache.clear();
+                    liveDragAppVisualBoundsCache.clear();
+                    liveDragPlanningCacheActive = false;
+                    liveDragRejectedMoves.remove(mover);
+                    return;
+                }
+            }
             updateLiveDisplacements(page, mover);
         }
     };
@@ -8885,7 +8895,14 @@ public class MainActivity extends Activity {
         if (pendingPage != null) pendingPage.removeCallbacks(liveDisplacementFrame);
         pendingLiveDisplacementPage = null;
         pendingLiveDisplacementMover = null;
-        pendingLiveDisplacementForceImmediate = false;
+    }
+
+    private boolean hasLiveDisplacedItemsOnPage(FrameLayout page) {
+        if (page == null || liveDisplacedItems.isEmpty()) return false;
+        for (View item : liveDisplacedItems.keySet()) {
+            if (item != null && item.getParent() == page) return true;
+        }
+        return false;
     }
 
     private boolean hasUnresolvedLiveWorkspaceCollision(FrameLayout page, View movingView) {
@@ -8914,56 +8931,45 @@ public class MainActivity extends Activity {
     private void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
-        // Use transformed geometry: same-page app dragging now leaves layout margins intact.
+        // Touch movement itself stays immediate. Coalesce the costly collision planner
+        // instead of scanning every child for overlap on every ACTION_MOVE event.
         int[] geometry = itemGeometry(movingView);
         int left = geometry[0];
         int top = geometry[1];
         boolean appIconMove = isWorkspaceAppIcon(movingView)
                 || ("workspace_transfer_proxy".equals(movingView.getTag())
                     && isWorkspaceAppIcon(workspaceTransferItem));
-        boolean unresolvedCollision = appIconMove
-                && hasUnresolvedLiveWorkspaceCollision(page, movingView);
-        int threshold = Math.max(1, LauncherUiUtils.dp(this, appIconMove ? 2 : 8));
+        int threshold = Math.max(1, LauncherUiUtils.dp(this, appIconMove ? 4 : 8));
         if (lastLiveDisplacementPage == page && lastLiveDisplacementMover == movingView
                 && Math.abs(left - lastLiveDisplacementX) < threshold
-                && Math.abs(top - lastLiveDisplacementY) < threshold
-                && !unresolvedCollision) return;
+                && Math.abs(top - lastLiveDisplacementY) < threshold) {
+            // An existing callback will always consume the latest geometry. Do not
+            // recreate or restart it during a dense touch-event stream.
+            if (pendingLiveDisplacementPage == page
+                    && pendingLiveDisplacementMover == movingView) return;
+            return;
+        }
         lastLiveDisplacementPage = page;
         lastLiveDisplacementMover = movingView;
         lastLiveDisplacementX = left;
         lastLiveDisplacementY = top;
         liveDragRejectedMoves.remove(movingView);
 
-        long now = android.os.SystemClock.uptimeMillis();
-        long remaining = APP_ICON_LIVE_PLAN_INTERVAL_MS
-                - (now - lastAppIconLivePlanUptimeMs);
-        if (appIconMove && !unresolvedCollision
-                && lastAppIconLivePlanUptimeMs > 0L && remaining > 0L) {
-            // Throttle ordinary planning on low-RAM devices, but never throttle a live
-            // overlap. Keep one delayed pass queued to consume the latest translated bounds.
-            if (pendingLiveDisplacementPage == page
-                    && pendingLiveDisplacementMover == movingView) return;
-            cancelPendingLiveDisplacementUpdate();
-            pendingLiveDisplacementPage = page;
-            pendingLiveDisplacementMover = movingView;
-            pendingLiveDisplacementForceImmediate = false;
-            page.postDelayed(liveDisplacementFrame, remaining);
-            return;
-        }
-
-        // If a delayed pass is already queued, promote it to the next display frame when
-        // an unresolved collision appears. This prevents the clock from being skipped
-        // merely because the icon entered it between two 24 ms planning slots.
         if (pendingLiveDisplacementPage == page
-                && pendingLiveDisplacementMover == movingView) {
-            if (!unresolvedCollision || pendingLiveDisplacementForceImmediate) return;
-            cancelPendingLiveDisplacementUpdate();
-        } else {
-            cancelPendingLiveDisplacementUpdate();
-        }
+                && pendingLiveDisplacementMover == movingView) return;
+
+        cancelPendingLiveDisplacementUpdate();
         pendingLiveDisplacementPage = page;
         pendingLiveDisplacementMover = movingView;
-        pendingLiveDisplacementForceImmediate = unresolvedCollision;
+        if (appIconMove && lastAppIconLivePlanUptimeMs > 0L) {
+            long remaining = APP_ICON_LIVE_PLAN_INTERVAL_MS
+                    - (android.os.SystemClock.uptimeMillis() - lastAppIconLivePlanUptimeMs);
+            if (remaining > 0L) {
+                // One timer per planning interval, not one collision scan per touch event.
+                page.postDelayed(liveDisplacementFrame, remaining);
+                return;
+            }
+        }
         page.postOnAnimation(liveDisplacementFrame);
     }
 
