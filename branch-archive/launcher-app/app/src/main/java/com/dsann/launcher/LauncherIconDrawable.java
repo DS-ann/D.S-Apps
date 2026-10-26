@@ -572,7 +572,11 @@ final class LauncherIconDrawable extends Drawable {
             Color.rgb(39, 117, 255), Color.rgb(139, 78, 220), Color.rgb(255, 74, 153)
     };
     private static final int[] OCEAN_PALETTE = {
-            Color.rgb(21, 94, 239), Color.rgb(0, 184, 217), Color.rgb(104, 224, 181)
+            Color.rgb(5, 12, 30),       // Blue-black
+            Color.rgb(10, 55, 145),     // Deep cobalt
+            Color.rgb(24, 112, 255),    // Electric blue
+            Color.rgb(83, 174, 255),    // Sky blue
+            Color.rgb(190, 224, 255)    // Ice blue
     };
     private static final int[] SUNSET_PALETTE = {
             Color.rgb(255, 155, 39), Color.rgb(255, 79, 118), Color.rgb(138, 69, 234)
