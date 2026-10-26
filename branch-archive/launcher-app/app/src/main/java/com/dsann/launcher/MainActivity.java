@@ -6629,8 +6629,10 @@ public class MainActivity extends Activity {
                         int targetIndex = members.indexOf(reorderTargetPackage);
                         if (sourceIndex >= 0 && targetIndex >= 0) {
                             members.remove(sourceIndex);
-                            targetIndex = members.indexOf(reorderTargetPackage);
-                            members.add(Math.max(0, targetIndex), packageName);
+                            // Insert at the target's original slot. The live preview shifts
+                            // every intervening member into that slot as the finger moves.
+                            targetIndex = Math.max(0, Math.min(targetIndex, members.size()));
+                            members.add(targetIndex, packageName);
                             saveAppGroupMembers(groupId, members);
                             clearAppGroupMemberMoveMode();
                             // Reuse the current dialog and loaded icon views after a drop.
