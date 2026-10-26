@@ -2,8 +2,6 @@ package com.dsann.launcher;
 
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
-import android.content.res.Resources;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,17 +21,6 @@ final class HomePageModel {
     private static final String LAST_LANDSCAPE_KEY = "__workspace_last_was_landscape";
     private static final String PORTRAIT_ROWS_KEY = "__workspace_portrait_grid_rows";
 
-    private static boolean isLandscapeConfiguration(SharedPreferences prefs, int rows) {
-        try {
-            int orientation = Resources.getSystem().getConfiguration().orientation;
-            if (orientation == Configuration.ORIENTATION_LANDSCAPE) return true;
-            if (orientation == Configuration.ORIENTATION_PORTRAIT) return false;
-        } catch (RuntimeException ignored) {
-            // Fall back to the last known portrait grid when system configuration is unavailable.
-        }
-        return rows < prefs.getInt(PORTRAIT_ROWS_KEY, rows);
-    }
-
     static final class Result {
         final List<List<String>> pages;
         final int currentPage;
@@ -48,11 +35,9 @@ final class HomePageModel {
     static Result rebuild(SharedPreferences prefs, List<String> homePackages,
             AppWidgetManager widgetManager, int requestedPage, int capacity,
             String iconPagePrefix, String widgetIdsKey, String iconXPrefix, String iconYPrefix,
-            int columns, int rows) {
+            int columns, int rows, boolean landscapeLayout) {
         columns = Math.max(1, columns);
         rows = Math.max(1, rows);
-
-        boolean landscapeLayout = isLandscapeConfiguration(prefs, rows);
 
         List<List<String>> pages = new ArrayList<>();
         pages.add(new ArrayList<String>());
@@ -78,68 +63,53 @@ final class HomePageModel {
             edit.putInt(iconPagePrefix + name, page);
         }
 
-        // Normalize positions against the same row count used by the visible grid.
+        // Keep saved placement orientation-local and stable across recreation.
+        // Re-normalizing Y against an estimated row count on every rebuild caused icons
+        // to drift when the first startup pass used fallback viewport dimensions.
+        // HomePageController repairs actual cell collisions once the page is measured.
         for (int pageIndex = 0; pageIndex < PAGE_COUNT; pageIndex++) {
             List<String> items = pages.get(pageIndex);
-            int effectiveRows = Math.max(rows, (items.size() + columns - 1) / columns);
-            boolean[][] used = new boolean[effectiveRows][columns];
             for (int index = 0; index < items.size(); index++) {
                 String name = items.get(index);
                 int defaultCol = index % columns;
-                int defaultRow = index / columns;
-                float storedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXPrefix + name,
-                        defaultCol / (float) Math.max(1, columns - 1));
-                float storedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYPrefix + name,
-                        defaultRow / (float) Math.max(1, effectiveRows - 1));
+                int defaultRow = (index / columns) % rows;
+                float defaultX = defaultCol / (float) Math.max(1, columns - 1);
+                float defaultY = defaultRow / (float) Math.max(1, rows - 1);
+                float storedX = LauncherUiUtils.getFloatPreferenceCompat(
+                        prefs, iconXPrefix + name, defaultX);
+                float storedY = LauncherUiUtils.getFloatPreferenceCompat(
+                        prefs, iconYPrefix + name, defaultY);
                 String portraitXKey = PORTRAIT_X_PREFIX + name;
                 String portraitYKey = PORTRAIT_Y_PREFIX + name;
                 String landscapeXKey = LANDSCAPE_X_PREFIX + name;
                 String landscapeYKey = LANDSCAPE_Y_PREFIX + name;
-                float portraitX = prefs.getFloat(portraitXKey, storedX);
-                float portraitY = prefs.getFloat(portraitYKey, storedY);
-                // Seed landscape from the portrait arrangement only when no landscape
-                // placement exists. Subsequent manual changes are orientation-local.
-                float sx = landscapeLayout
-                        ? prefs.getFloat(landscapeXKey, portraitX) : portraitX;
-                float sy = landscapeLayout
-                        ? prefs.getFloat(landscapeYKey, portraitY) : portraitY;
-                int wantedCol = Math.max(0, Math.min(columns - 1,
-                        Math.round(sx * Math.max(1, columns - 1))));
-                int wantedRow = Math.max(0, Math.min(effectiveRows - 1,
-                        Math.round(sy * Math.max(1, effectiveRows - 1))));
-                int col = wantedCol;
-                int row = wantedRow;
-                if (used[row][col]) {
-                    boolean found = false;
-                    for (int distance = 1; distance <= effectiveRows * columns && !found; distance++) {
-                        for (int rr = 0; rr < effectiveRows && !found; rr++) {
-                            for (int cc = 0; cc < columns; cc++) {
-                                if (!used[rr][cc]
-                                        && Math.abs(cc - wantedCol) + Math.abs(rr - wantedRow) == distance) {
-                                    col = cc;
-                                    row = rr;
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                used[row][col] = true;
-                float normalizedX = col / (float) Math.max(1, columns - 1);
-                float normalizedY = row / (float) Math.max(1, effectiveRows - 1);
-                edit.putInt(iconPagePrefix + name, pageIndex);
-                edit.putFloat(iconXPrefix + name, normalizedX);
-                edit.putFloat(iconYPrefix + name, normalizedY);
-                // The page is shared structural state; only X/Y are orientation-specific.
-                edit.putInt(PORTRAIT_PAGE_PREFIX + name, pageIndex);
+                float portraitX = clampNormalized(
+                        LauncherUiUtils.getFloatPreferenceCompat(prefs, portraitXKey, storedX));
+                float portraitY = clampNormalized(
+                        LauncherUiUtils.getFloatPreferenceCompat(prefs, portraitYKey, storedY));
+                if (!prefs.contains(portraitXKey)) edit.putFloat(portraitXKey, portraitX);
+                if (!prefs.contains(portraitYKey)) edit.putFloat(portraitYKey, portraitY);
+
+                float activeX = landscapeLayout
+                        ? clampNormalized(LauncherUiUtils.getFloatPreferenceCompat(
+                                prefs, landscapeXKey, portraitX))
+                        : portraitX;
+                float activeY = landscapeLayout
+                        ? clampNormalized(LauncherUiUtils.getFloatPreferenceCompat(
+                                prefs, landscapeYKey, portraitY))
+                        : portraitY;
                 if (landscapeLayout) {
-                    edit.putFloat(LANDSCAPE_X_PREFIX + name, normalizedX);
-                    edit.putFloat(LANDSCAPE_Y_PREFIX + name, normalizedY);
+                    edit.putFloat(landscapeXKey, activeX);
+                    edit.putFloat(landscapeYKey, activeY);
                 } else {
-                    edit.putFloat(PORTRAIT_X_PREFIX + name, normalizedX);
-                    edit.putFloat(PORTRAIT_Y_PREFIX + name, normalizedY);
+                    edit.putFloat(portraitXKey, activeX);
+                    edit.putFloat(portraitYKey, activeY);
                 }
+                // Legacy consumers read base keys; mirror the active orientation without
+                // overwriting the saved coordinates of the other orientation.
+                edit.putFloat(iconXPrefix + name, activeX);
+                edit.putFloat(iconYPrefix + name, activeY);
+                edit.putInt(PORTRAIT_PAGE_PREFIX + name, pageIndex);
             }
         }
 
@@ -178,6 +148,10 @@ final class HomePageModel {
         edit.apply();
 
         return new Result(pages, clampPage(requestedPage));
+    }
+
+    private static float clampNormalized(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     static int clampPage(int page) {

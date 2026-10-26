@@ -143,13 +143,17 @@ final class HomePageController {
     }
 
     private boolean isLandscapeOrientation(LinearLayout strip) {
+        // Resources can report the new orientation before the workspace children have
+        // completed their layout pass. Prefer the measured page frame whenever available.
+        if (strip != null && strip.getChildCount() > 0) {
+            View page = strip.getChildAt(0);
+            if (page.getWidth() > 0 && page.getHeight() > 0) {
+                return page.getWidth() > page.getHeight();
+            }
+        }
         int orientation = activity.getResources().getConfiguration().orientation;
         if (orientation == Configuration.ORIENTATION_LANDSCAPE) return true;
         if (orientation == Configuration.ORIENTATION_PORTRAIT) return false;
-        if (strip != null && strip.getChildCount() > 0) {
-            View page = strip.getChildAt(0);
-            return page.getWidth() > 0 && page.getWidth() > page.getHeight();
-        }
         return false;
     }
 
@@ -211,6 +215,10 @@ final class HomePageController {
         if (!isOrientationManagedItem(item)
                 || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
         boolean landscape = isLandscapeOrientation(strip);
+        // Ignore transient layout/attach callbacks while the destination orientation is
+        // still being restored. Otherwise stale bounds overwrite the saved opposite layout.
+        if (prefs.contains(LAST_GEOMETRY_LANDSCAPE_KEY)
+                && prefs.getBoolean(LAST_GEOMETRY_LANDSCAPE_KEY, landscape) != landscape) return;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
         int width = lp.width > 0 ? lp.width : item.getWidth();
         int height = lp.height > 0 ? lp.height : item.getHeight();
@@ -1286,9 +1294,10 @@ final class HomePageController {
                 postLandscapeRepair(strip);
             } else {
                 restorePortraitClockScales(strip);
-                snapshotPortraitWorkspaceGeometry(strip);
             }
+            // The save guard above must see the current orientation before taking a snapshot.
             prefs.edit().putBoolean(LAST_GEOMETRY_LANDSCAPE_KEY, landscape).apply();
+            if (!landscape) snapshotPortraitWorkspaceGeometry(strip);
         }));
     }
 
@@ -1561,14 +1570,19 @@ final class HomePageController {
                         row = bestRow;
                         savedX = col / (float) Math.max(1, columns - 1);
                         savedY = row / (float) Math.max(1, rows - 1);
-                        String activeXPrefix = isLandscapeOrientation(strip)
-                                ? "__landscape_icon_x__" : "__portrait_icon_x__";
-                        String activeYPrefix = isLandscapeOrientation(strip)
-                                ? "__landscape_icon_y__" : "__portrait_icon_y__";
-                        prefs.edit().putFloat(iconXKey + packageName, savedX)
-                                .putFloat(iconYKey + packageName, savedY)
-                                .putFloat(activeXPrefix + packageName, savedX)
-                                .putFloat(activeYPrefix + packageName, savedY).apply();
+                        // Do not persist collisions found using a fallback page height.
+                        // The measured post-layout pass saves the final legal cell instead.
+                        if (page.getWidth() > 0
+                                && page.getHeight() > LauncherUiUtils.dp(activity, 100)) {
+                            String activeXPrefix = isLandscapeOrientation(strip)
+                                    ? "__landscape_icon_x__" : "__portrait_icon_x__";
+                            String activeYPrefix = isLandscapeOrientation(strip)
+                                    ? "__landscape_icon_y__" : "__portrait_icon_y__";
+                            prefs.edit().putFloat(iconXKey + packageName, savedX)
+                                    .putFloat(iconYKey + packageName, savedY)
+                                    .putFloat(activeXPrefix + packageName, savedX)
+                                    .putFloat(activeYPrefix + packageName, savedY).apply();
+                        }
                     }
                     // If every slot is occupied, keep the app attached at its saved slot.
                     // Size-change validation can then report/repair its real collision rather

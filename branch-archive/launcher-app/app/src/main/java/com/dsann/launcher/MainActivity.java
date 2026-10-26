@@ -193,6 +193,9 @@ public class MainActivity extends Activity {
     private boolean clockUpdatesActive = false;
     // Avoid reopening the system Home-role prompt repeatedly during a single Activity lifetime.
     private boolean homeRoleRequestAttempted = false;
+    private int lastWorkspaceViewportWidth = -1;
+    private int lastWorkspaceViewportHeight = -1;
+    private boolean workspaceViewportRefreshPending;
     // Registered on Android 13+ because targetSdk 37 no longer relies on legacy Back dispatch.
     private Object backInvokedCallback;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
@@ -3268,7 +3271,8 @@ public class MainActivity extends Activity {
         // The model always returns exactly two stable screens; it never compacts empty pages.
         HomePageModel.Result result = HomePageModel.rebuild(
                 prefs, homePackages, widgetManager, currentPage, pageCapacity(),
-                KEY_ICON_PAGE, KEY_WIDGET_IDS, KEY_ICON_X, KEY_ICON_Y, getHomeColumns(), getHomeGridRows());
+                KEY_ICON_PAGE, KEY_WIDGET_IDS, KEY_ICON_X, KEY_ICON_Y,
+                getHomeColumns(), getHomeGridRows(), isLandscapeWorkspace());
         pages.clear();
         pages.addAll(result.pages);
         currentPage = result.currentPage;
@@ -3346,6 +3350,7 @@ public class MainActivity extends Activity {
                      @Override public void launchApp(ResolveInfo app, View sourceView) { MainActivity.this.launchApp(app, sourceView); }
                     @Override public void showAppOptions(ResolveInfo app, boolean onHome, View sourceView) { MainActivity.this.showAppOptions(app, onHome, sourceView); }
                 }, KEY_ICON_X, KEY_ICON_Y, KEY_SHOW_HOME_LABELS, KEY_ICON_SIZE, KEY_HOME_FONT_SIZE, KEY_SHOW_PAGE_INDICATOR, HOME_ROWS);
+        installPageViewportLayoutWatcher();
         renderHomePages(false);
         showHomeImmediately();
         // The first clock text/layout pass must happen after the page viewport has
@@ -4094,6 +4099,38 @@ public class MainActivity extends Activity {
         drawerAdapter.prewarmAllDrawerArtwork();
         // The full per-app artwork cache is then prepared in private internal storage.
         scheduleDrawerArtworkPrewarm();
+    }
+
+    /**
+     * Reconcile page widths and geometry after the viewport receives its measured,
+     * post-inset dimensions. A stale fallback width can offset page 2 incorrectly and
+     * allow its children to bleed into the first page on some devices.
+     */
+    private void installPageViewportLayoutWatcher() {
+        if (pageViewport == null) return;
+        lastWorkspaceViewportWidth = pageViewport.getWidth();
+        lastWorkspaceViewportHeight = pageViewport.getHeight();
+        pageViewport.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> {
+            int measuredWidth = right - left;
+            int measuredHeight = bottom - top;
+            if (measuredWidth <= 0 || measuredHeight <= 0) return;
+            if (measuredWidth == lastWorkspaceViewportWidth
+                    && measuredHeight == lastWorkspaceViewportHeight) return;
+            lastWorkspaceViewportWidth = measuredWidth;
+            lastWorkspaceViewportHeight = measuredHeight;
+            if (workspaceViewportRefreshPending || homePageController == null
+                    || pagesStrip == null || isFinishing()) return;
+            workspaceViewportRefreshPending = true;
+            pageViewport.post(() -> {
+                workspaceViewportRefreshPending = false;
+                if (isFinishing() || pageViewport == null || pagesStrip == null
+                        || homePageController == null || pageViewport.getWidth() <= 0
+                        || pageViewport.getHeight() <= 0) return;
+                renderHomePages(false);
+                showPage(currentPage, false);
+            });
+        });
     }
 
     private void renderHomePages(boolean animate) {
@@ -7525,6 +7562,12 @@ public class MainActivity extends Activity {
                 chosenLeft = resolved[0];
                 chosenTop = resolved[1];
             } else {
+                if (!deferShortcutCollisionRecovery) {
+                    // Do not create a new shortcut over existing content. The creation
+                    // callback detects the missing view, deletes its temporary preferences,
+                    // and reports that no free place exists.
+                    return;
+                }
                 int actualPageWidth = page.getWidth() > 0 ? page.getWidth() : pageViewport.getWidth();
                 int actualPageHeight = page.getHeight() > 0 ? page.getHeight() : pageViewport.getHeight();
                 int actualCellWidth = homeGridCellWidthPx(page, columns, actualPageWidth);
@@ -7542,9 +7585,7 @@ public class MainActivity extends Activity {
                 provisionalCollisionFallback = true;
             }
         }
-
-        // If no unused slot exists, keep the shortcut visible at its previous/default slot.
-        // The resize validator will surface any real collision instead of hiding this item.
+        if (chosenPage == null) return;
 
         int chosenCol = Math.max(0, Math.min(columns - 1,
                 Math.round(chosenLeft / (float) cellW)));
@@ -7568,7 +7609,8 @@ public class MainActivity extends Activity {
         tile.setContentDescription("launcher_shortcut_id:" + shortcutId);
         tile.setClipChildren(false);
         tile.setClipToPadding(false);
-        chosenPage.setClipChildren(false);
+        // Keep page clipping enabled; otherwise second-screen shortcut artwork can bleed
+        // across the page seam into screen 1 on narrow/rotated displays.
 
         ImageView icon = new ImageView(this);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -11374,6 +11416,38 @@ public class MainActivity extends Activity {
             }
             FrameLayout page = (FrameLayout) pagesStrip.getChildAt(targetPage);
             if (page == null) return;
+            if (page.getWidth() <= 0 || page.getHeight() <= 0) {
+                // A width-only measurement is not sufficient for collision checks. Wait
+                // until both dimensions are real rather than placing then clamping a widget
+                // into an occupied area on devices with delayed first layout.
+                final View.OnLayoutChangeListener[] measurementWatcher =
+                        new View.OnLayoutChangeListener[1];
+                measurementWatcher[0] = (view, left, top, right, bottom,
+                        oldLeft, oldTop, oldRight, oldBottom) -> {
+                    if (right - left <= 0 || bottom - top <= 0) return;
+                    page.removeOnLayoutChangeListener(measurementWatcher[0]);
+                    measurementWatcher[0] = null;
+                    if (isFinishing() || pagesStrip == null || page.getParent() != pagesStrip) {
+                        try { widgetHost.deleteAppWidgetId(widgetId); } catch (Exception ignored) {}
+                        Toast.makeText(this, "The home page could not be measured. Try again.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    addWidgetToPage(info, widgetId, targetPage);
+                };
+                page.addOnLayoutChangeListener(measurementWatcher[0]);
+                page.post(() -> {
+                    if (measurementWatcher[0] != null && page.getWidth() > 0
+                            && page.getHeight() > 0) {
+                        page.removeOnLayoutChangeListener(measurementWatcher[0]);
+                        measurementWatcher[0] = null;
+                        if (!isFinishing() && pagesStrip != null && page.getParent() == pagesStrip) {
+                            addWidgetToPage(info, widgetId, targetPage);
+                        }
+                    }
+                });
+                return;
+            }
             int resolvedPage = targetPage;
             int availableWidth = page.getWidth() > 0 ? page.getWidth()
                     : Math.max(LauncherUiUtils.dp(this, 180), getResources().getDisplayMetrics().widthPixels - LauncherUiUtils.dp(this, 40));
