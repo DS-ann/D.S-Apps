@@ -6495,6 +6495,11 @@ public class MainActivity extends Activity {
         final boolean[] memberDragging = new boolean[1];
         final boolean[] optionsShown = new boolean[1];
         final String[] previewTargetPackage = new String[1];
+        // Lift the source row above the other rows while a member is dragged. Without
+        // this, a later row can paint over the translated icon and make it appear
+        // to disappear when crossing row boundaries.
+        final View[] sourceRowRef = new View[1];
+        final float[] sourceRowElevation = new float[1];
 
         final Runnable armMove = () -> {
             if (movedTooEarly[0] || draggingOut[0] || memberDragging[0]
@@ -6531,6 +6536,10 @@ public class MainActivity extends Activity {
                 previewTargetPackage[0] = null;
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
+                android.view.ViewParent sourceParent = memberView.getParent();
+                sourceRowRef[0] = sourceParent instanceof View ? (View) sourceParent : null;
+                sourceRowElevation[0] = Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null
+                        ? sourceRowRef[0].getElevation() : 0f;
                 armed[0] = resumeMove;
                 movedTooEarly[0] = false;
                 draggingOut[0] = false;
@@ -6558,6 +6567,10 @@ public class MainActivity extends Activity {
                     touchHandler.removeCallbacks(showOptions);
                     android.view.ViewParent parent = memberView.getParent();
                     if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
+                    if (Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null) {
+                        sourceRowRef[0].setElevation(Math.max(sourceRowElevation[0],
+                                LauncherUiUtils.dp(MainActivity.this, 32)));
+                    }
                     memberView.setTranslationX(dx);
                     memberView.setTranslationY(dy);
                     int[] panelLocation = new int[2];
@@ -6610,6 +6623,10 @@ public class MainActivity extends Activity {
                 memberView.setTranslationX(0f);
                 memberView.setTranslationY(0f);
                 memberView.setAlpha(1f);
+                if (Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null) {
+                    sourceRowRef[0].setElevation(sourceRowElevation[0]);
+                }
+                sourceRowRef[0] = null;
                 clearAppGroupMemberDisplacementPreview(popupPanel, memberView, true);
                 previewTargetPackage[0] = null;
                 android.view.ViewParent parent = memberView.getParent();
