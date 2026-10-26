@@ -413,7 +413,7 @@ public final class BlankActivity extends Activity {
 
         addGuideSection(guide, "BASIC NAVIGATION",
                 "Tap an app icon to open that app.",
-                "Open Home Studio: Hold an empty area on Home screen 1 for 2 seconds.",
+                "To open Home Studio(Main Settings): Hold an empty area on Home screen 1 for 2 seconds.",
                 "Home screen 2: Hold an empty area to choose Add apps or Add widget.",
                 "Swipe left or right to switch between the two Home screens.",
                 "Swipe up on Home to open the App drawer.",
@@ -422,17 +422,17 @@ public final class BlankActivity extends Activity {
                 "Tap the search control in the drawer to find an app.");
 
         addGuideSection(guide, "ADD, MOVE OR REMOVE APPS",
-                "Add: Open the App drawer, hold an app, then choose Add to Home.",
+                "Add To Home Screen: Open the App drawer, hold an app, then choose Add to Home.",
                 "Or open Home Studio > Manage layout > Add apps to Home.",
-                "Move: Hold a Home icon for about 1 second, then drag it.",
-                "Options: Keep holding the Home icon still for about 2 seconds.",
+                "Move inside Home Screen: Hold a Home icon for about 1 second, then drag it.",
+                "Keep holding the app icon still for about 2 seconds to get options.",
                 "Remove from Home removes only the icon; the app stays installed.",
                 "Uninstall removes the app from the device. Confirm in Android.",
-                "Dock: Drag a Home icon to the bottom dock to pin it.",
+                "To move inside Dock(bottom most part of home screen): Drag a app icon to the dock to pin it.",
                 "Hold a dock icon to remove it from the dock or move it to Home.");
 
         addGuideSection(guide, "MOVE ITEMS BETWEEN SCREENS",
-                "Start moving the icon, widget or shortcut.",
+                "Start moving the icon, widget or shortcut (by 1 sec press).",
                 "Drag to the left or right edge; pause until the other screen appears.",
                 "Then drop the item in a free space. Avoid covering another item.");
 
@@ -444,7 +444,7 @@ public final class BlankActivity extends Activity {
                 "Hold a widget still for about 2 seconds to open its options.",
                 "Choose Resize widget, drag its edge handles, then tap outside.",
                 "Choose Remove widget to delete it from Home.",
-                "Contact shortcut: Hold it to move pages, remove or recreate it.",
+                "Shortcuts: Hold it to move pages, remove or recreate it.",
                 "Direct Dial shortcuts may ask for phone permission.");
 
         addGuideSection(guide, "CLOCK",
@@ -462,7 +462,7 @@ public final class BlankActivity extends Activity {
                 "Choose Uninstall only to remove the app from the device.");
 
         addGuideSection(guide, "HOME STUDIO & RESET",
-                "Home Studio changes the grid, icon size, shape, artwork and labels.",
+                "Inside Home Studio you can change the grid, icon size, shape, artwork and labels (Almost anything).",
                 "It also changes clocks, wallpaper, colours and page/drawer effects.",
                 "Reset Home layout restores the default Home layout and shortcuts.",
                 "Reset all customizations resets the launcher's settings.");
