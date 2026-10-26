@@ -6585,7 +6585,7 @@ public class MainActivity extends Activity {
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
                 originalMemberAlpha[0] = memberView.getAlpha();
-                ViewParent overlayParent = popupPanel.getParent();
+                android.view.ViewParent overlayParent = popupPanel.getParent();
                 dragOverlayRef[0] = overlayParent instanceof ViewGroup
                         ? (ViewGroup) overlayParent : null;
                 if (dragOverlayRef[0] != null) {
