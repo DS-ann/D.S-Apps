@@ -411,56 +411,62 @@ public final class BlankActivity extends Activity {
         scroll.addView(guide, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        addGuideSection(guide, "GESTURES",
-                "HOLD EMPTY HOME 1 ~2S  →  HOME STUDIO",
-                "HOME 2: HOLD EMPTY  →  ADD WIDGET / APPS",
-                "HOME SWIPE DOWN  →  CONTROL CENTRE",
-                "SWIPE LEFT / RIGHT  →  CHANGE HOME PAGE",
-                "DRAWER: SWIPE DOWN / BACK  →  CLOSE",
-                "DRAWER: TAP ⌕  →  SEARCH");
+        addGuideSection(guide, "BASIC NAVIGATION",
+                "Tap an app icon to open that app.",
+                "Open Home Studio: Hold an empty area on Home screen 1 for 2 seconds.",
+                "Home screen 2: Hold an empty area to choose Add apps or Add widget.",
+                "Swipe left or right to switch between the two Home screens.",
+                "Swipe up on Home to open the App drawer.",
+                "Swipe down on Home to open Control Centre.",
+                "In the drawer, swipe down or press Back to close it.",
+                "Tap the search control in the drawer to find an app.");
 
-        addGuideSection(guide, "APPS & DOCK",
-                "DRAWER: HOLD APP  →  ADD / INFO / UNINSTALL",
-                "HOME: HOLD ~1S + DRAG  →  MOVE",
-                "HOLD HOME APP STILL ~2S  →  OPTIONS",
-                "REMOVE FROM HOME  ≠  UNINSTALL",
-                "UNINSTALL  →  CONFIRM IN ANDROID",
-                "DRAG HOME APP TO DOCK  →  PIN",
-                "HOLD DOCK APP  →  REMOVE / MOVE TO HOME");
+        addGuideSection(guide, "ADD, MOVE OR REMOVE APPS",
+                "Add: Open the App drawer, hold an app, then choose Add to Home.",
+                "Or open Home Studio > Manage layout > Add apps to Home.",
+                "Move: Hold a Home icon for about 1 second, then drag it.",
+                "Options: Keep holding the Home icon still for about 2 seconds.",
+                "Remove from Home removes only the icon; the app stays installed.",
+                "Uninstall removes the app from the device. Confirm in Android.",
+                "Dock: Drag a Home icon to the bottom dock to pin it.",
+                "Hold a dock icon to remove it from the dock or move it to Home.");
 
-        addGuideSection(guide, "PAGES & PLACEMENT",
-                "DRAG TO SCREEN EDGE; PAUSE ~200MS",
-                "WHEN PAGE SWITCHES, DROP IN FREE SPACE",
-                "DROP APP ON GROUP TO ADD; HOME ICON STAYS");
+        addGuideSection(guide, "MOVE ITEMS BETWEEN SCREENS",
+                "Start moving the icon, widget or shortcut.",
+                "Drag to the left or right edge; pause until the other screen appears.",
+                "Then drop the item in a free space. Avoid covering another item.");
 
         addGuideSection(guide, "WIDGETS & SHORTCUTS",
-                "STUDIO > WIDGETS > ADD WIDGET",
-                "CHOOSE WIDGET OR SHORTCUT; FOLLOW SETUP",
-                "HOME 2: HOLD EMPTY  >  ADD WIDGET / APPS",
-                "WIDGET: HOLD ~1S + DRAG  →  MOVE",
-                "HOLD WIDGET ~2S  →  REMOVE / RESIZE",
-                "DRAG RESIZE HANDLES; TAP OUTSIDE TO EXIT",
-                "CONTACT TILE: HOLD  →  MOVE PAGE / REMOVE / RECREATE",
-                "DIRECT DIAL MAY ASK FOR PHONE PERMISSION");
+                "Open Home Studio > Widgets > Add widget.",
+                "Choose a Widget or Shortcut from the list; finish its setup.",
+                "You can also hold empty space on Home screen 2 to add one.",
+                "Move a widget: Hold it for 1 second, then drag.",
+                "Hold a widget still for about 2 seconds to open its options.",
+                "Choose Resize widget, drag its edge handles, then tap outside.",
+                "Choose Remove widget to delete it from Home.",
+                "Contact shortcut: Hold it to move pages, remove or recreate it.",
+                "Direct Dial shortcuts may ask for phone permission.");
 
         addGuideSection(guide, "CLOCK",
-                "HOLD CLOCK ~1S + DRAG  →  MOVE",
-                "HOLD CLOCK ~2S  →  RESIZE MODE",
-                "DRAG EDGE HANDLES; TAP OUTSIDE TO EXIT",
-                "STUDIO > CLOCKS  →  STYLE / SIZE / DATE / FONTS");
+                "Move: Hold the clock for about 1 second, then drag it.",
+                "Resize: Keep holding for about 2 seconds to show resize handles.",
+                "Drag an edge to resize; tap outside the clock to finish.",
+                "Home Studio > Clocks changes clock style, size, date and fonts.");
 
         addGuideSection(guide, "APP GROUPS",
-                "STUDIO > WIDGETS > ADD AN APP GROUP",
-                "TAP GROUP TO OPEN; HOLD GROUP  →  OPTIONS",
-                "OPTIONS: ADD / REMOVE APPS, RENAME, SHARE, DELETE",
-                "HOLD MEMBER  →  REMOVE FROM GROUP / INFO / UNINSTALL");
+                "Create: Home Studio > Widgets > Add an app group.",
+                "Tap a group to open it. Hold the group to see its options.",
+                "Options: Add apps, Remove apps, Rename, Share or Delete group.",
+                "Hold an app inside a group to see its options.",
+                "Remove from group returns that app to Home; it does not uninstall it.",
+                "Choose Uninstall only to remove the app from the device.");
 
-        addGuideSection(guide, "CUSTOMIZE",
-                "STUDIO: GRID, ICON SIZE / SHAPE / THEME, LABELS",
-                "WALLPAPER, COLOURS, CLOCK, PAGE / DRAWER EFFECTS",
-                "RESET HOME LAYOUT  →  DEFAULT GRID / SHORTCUTS",
-                "RESET ALL CUSTOMIZATIONS  →  LAUNCHER DEFAULTS");
-
+        addGuideSection(guide, "HOME STUDIO & RESET",
+                "Home Studio changes the grid, icon size, shape, artwork and labels.",
+                "It also changes clocks, wallpaper, colours and page/drawer effects.",
+                "Reset Home layout restores the default Home layout and shortcuts.",
+                "Reset all customizations resets the launcher's settings.");
+ 
         LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         panel.addView(scroll, scrollParams);
@@ -534,7 +540,7 @@ public final class BlankActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         for (String line : lines) {
-            FixedGradientTextView row = fixedGradientText("› " + line, 10.5f, false);
+            FixedGradientTextView row = fixedGradientText("› " + line, 11f, false);
             row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             row.setLineSpacing(dp(2), 1f);
             row.setMaxWidth(Math.max(dp(220),
