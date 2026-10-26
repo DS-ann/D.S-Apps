@@ -6237,18 +6237,29 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Removed from group", Toast.LENGTH_SHORT).show();
     }
 
-    private void showAppGroupMemberOptions(String groupId, String packageName) {
+    private void showAppGroupMemberOptions(String groupId, String packageName,
+            Dialog groupDialog, View anchor) {
         ResolveInfo app = findApp(packageName);
         if (app == null || app.activityInfo == null) {
             Toast.makeText(this, "This app is no longer installed.", Toast.LENGTH_SHORT).show();
             return;
         }
         String label = String.valueOf(app.loadLabel(packageManager));
-        showActionDialog(label, new String[]{"−", "×", "ⓘ"},
-                new String[]{"Remove from group", "Uninstall app", "App info"},
+        // Match the compact, anchored action card used by Home and the app drawer.
+        // The group remains visible underneath while the app's options are displayed.
+        showCompactContextActionCardNear(anchor, label,
+                new String[]{"ⓘ", "⌫", "−"},
+                new String[]{"App info", "Uninstall", "Remove from group"},
                 (optionsDialog, which) -> {
             if (which == 0) {
-                moveAppGroupMemberToHome(groupId, packageName);
+                try {
+                    startActivity(new Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.parse("package:" + packageName)));
+                } catch (RuntimeException error) {
+                    Toast.makeText(this, "Unable to open app info.",
+                            Toast.LENGTH_SHORT).show();
+                }
             } else if (which == 1) {
                 try {
                     startActivity(new Intent(Intent.ACTION_DELETE,
@@ -6258,14 +6269,8 @@ public class MainActivity extends Activity {
                             Toast.LENGTH_SHORT).show();
                 }
             } else if (which == 2) {
-                try {
-                    startActivity(new Intent(
-                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            android.net.Uri.parse("package:" + packageName)));
-                } catch (RuntimeException error) {
-                    Toast.makeText(this, "Unable to open app info.",
-                            Toast.LENGTH_SHORT).show();
-                }
+                groupDialog.dismiss();
+                moveAppGroupMemberToHome(groupId, packageName);
             }
         });
     }
@@ -6293,6 +6298,192 @@ public class MainActivity extends Activity {
         return cell;
     }
 
+    private void collectAppGroupMemberViews(View current, ArrayList<View> output) {
+        if (current == null || output == null) return;
+        Object tag = current.getTag();
+        if (tag instanceof String
+                && ((String) tag).startsWith("launcher_app_group_member:")) {
+            output.add(current);
+            return;
+        }
+        if (current instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) current;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                collectAppGroupMemberViews(group.getChildAt(i), output);
+            }
+        }
+    }
+
+    private int[] appGroupMemberBaseLocation(View item) {
+        int[] location = new int[2];
+        item.getLocationOnScreen(location);
+        // Screen coordinates include the live drag/reorder translation. Remove it to
+        // keep target detection tied to the actual grid slots beneath the animation.
+        location[0] = Math.round(location[0] - item.getTranslationX());
+        location[1] = Math.round(location[1] - item.getTranslationY());
+        return location;
+    }
+
+    private ArrayList<View> orderedAppGroupMemberViews(View panel) {
+        ArrayList<View> items = new ArrayList<View>();
+        collectAppGroupMemberViews(panel, items);
+        java.util.Collections.sort(items, (left, right) -> {
+            int[] leftLocation = appGroupMemberBaseLocation(left);
+            int[] rightLocation = appGroupMemberBaseLocation(right);
+            if (leftLocation[1] != rightLocation[1]) {
+                return leftLocation[1] < rightLocation[1] ? -1 : 1;
+            }
+            if (leftLocation[0] != rightLocation[0]) {
+                return leftLocation[0] < rightLocation[0] ? -1 : 1;
+            }
+            return 0;
+        });
+        return items;
+    }
+
+    private View findAppGroupMemberAtBaseSlot(View panel, float rawX, float rawY,
+            View excluded) {
+        ArrayList<View> items = orderedAppGroupMemberViews(panel);
+        for (View item : items) {
+            if (item == excluded || !item.isShown()
+                    || item.getWidth() <= 0 || item.getHeight() <= 0) continue;
+            int[] location = appGroupMemberBaseLocation(item);
+            if (rawX >= location[0] && rawX < location[0] + item.getWidth()
+                    && rawY >= location[1] && rawY < location[1] + item.getHeight()) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private void clearAppGroupMemberDisplacementPreview(View panel, View draggedItem,
+            boolean animateBack) {
+        ArrayList<View> items = new ArrayList<View>();
+        collectAppGroupMemberViews(panel, items);
+        for (View item : items) {
+            if (item == draggedItem) continue;
+            item.animate().cancel();
+            if (animateBack) {
+                item.animate().translationX(0f).translationY(0f).setDuration(100L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                        .start();
+            } else {
+                item.setTranslationX(0f);
+                item.setTranslationY(0f);
+            }
+        }
+    }
+
+    private void updateAppGroupMemberDisplacementPreview(View panel, View draggedItem,
+            String sourcePackage, String targetPackage) {
+        ArrayList<View> items = orderedAppGroupMemberViews(panel);
+        int sourceIndex = -1;
+        int targetIndex = -1;
+        for (int i = 0; i < items.size(); i++) {
+            Object tag = items.get(i).getTag();
+            if (!(tag instanceof String)) continue;
+            String value = (String) tag;
+            String memberPackage = value.substring("launcher_app_group_member:".length());
+            if (sourcePackage.equals(memberPackage)) sourceIndex = i;
+            if (targetPackage.equals(memberPackage)) targetIndex = i;
+        }
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) {
+            clearAppGroupMemberDisplacementPreview(panel, draggedItem, true);
+            return;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            View item = items.get(i);
+            if (item == draggedItem) continue;
+            int destinationIndex = i;
+            if (sourceIndex < targetIndex && i > sourceIndex && i <= targetIndex) {
+                destinationIndex = i - 1;
+            } else if (sourceIndex > targetIndex && i >= targetIndex && i < sourceIndex) {
+                destinationIndex = i + 1;
+            }
+            int targetX = 0;
+            int targetY = 0;
+            if (destinationIndex != i) {
+                int[] currentLocation = appGroupMemberBaseLocation(item);
+                int[] destinationLocation = appGroupMemberBaseLocation(items.get(destinationIndex));
+                targetX = destinationLocation[0] - currentLocation[0];
+                targetY = destinationLocation[1] - currentLocation[1];
+            }
+            item.animate().cancel();
+            item.animate().translationX(targetX).translationY(targetY).setDuration(110L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                    .start();
+        }
+    }
+
+    private void reorderAppGroupMemberViewsInPanel(String groupId, View popupPanel) {
+        if (!(popupPanel instanceof ViewGroup)
+                || ((ViewGroup) popupPanel).getChildCount() < 3) return;
+        View scroll = ((ViewGroup) popupPanel).getChildAt(2);
+        if (!(scroll instanceof ViewGroup) || ((ViewGroup) scroll).getChildCount() == 0) return;
+        View rowsView = ((ViewGroup) scroll).getChildAt(0);
+        if (!(rowsView instanceof LinearLayout)) return;
+        LinearLayout rows = (LinearLayout) rowsView;
+
+        ArrayList<View> currentOrder = orderedAppGroupMemberViews(rows);
+        java.util.HashMap<String, View> byPackage =
+                new java.util.HashMap<String, View>();
+        for (View item : currentOrder) {
+            Object tag = item.getTag();
+            if (tag instanceof String) {
+                String value = (String) tag;
+                byPackage.put(value.substring("launcher_app_group_member:".length()), item);
+            }
+        }
+        ArrayList<View> newOrder = new ArrayList<View>();
+        for (String memberPackage : getAppGroupMembers(groupId)) {
+            View item = byPackage.remove(memberPackage);
+            if (item != null) newOrder.add(item);
+        }
+        // Preserve any live cells whose package was concurrently removed from saved membership.
+        for (View item : currentOrder) {
+            Object tag = item.getTag();
+            if (tag instanceof String) {
+                String memberPackage = ((String) tag)
+                        .substring("launcher_app_group_member:".length());
+                if (byPackage.containsKey(memberPackage)) {
+                    newOrder.add(item);
+                    byPackage.remove(memberPackage);
+                }
+            }
+        }
+        if (newOrder.isEmpty()) return;
+
+        for (View item : newOrder) {
+            item.animate().cancel();
+            item.setTranslationX(0f);
+            item.setTranslationY(0f);
+            item.setAlpha(1f);
+            if (item.getParent() instanceof ViewGroup) {
+                ((ViewGroup) item.getParent()).removeView(item);
+            }
+        }
+        rows.removeAllViews();
+        LinearLayout row = null;
+        for (int i = 0; i < newOrder.size(); i++) {
+            if (row == null || i % 3 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                row.setClipChildren(false);
+                row.setClipToPadding(false);
+                rows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+            }
+            row.addView(newOrder.get(i), new LinearLayout.LayoutParams(0, -2, 1f));
+        }
+        if (row != null && row.getChildCount() < 3) {
+            while (row.getChildCount() < 3) {
+                View spacer = new View(this);
+                row.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+            }
+        }
+        rows.requestLayout();
+    }
+
     private void installAppGroupMemberTouch(View item, View icon, Dialog groupDialog,
             LinearLayout popupPanel, String groupId, String packageName, ResolveInfo app) {
         final android.os.Handler touchHandler = new android.os.Handler(
@@ -6303,6 +6494,7 @@ public class MainActivity extends Activity {
         final boolean[] draggingOut = new boolean[1];
         final boolean[] memberDragging = new boolean[1];
         final boolean[] optionsShown = new boolean[1];
+        final String[] previewTargetPackage = new String[1];
 
         final Runnable armMove = () -> {
             if (movedTooEarly[0] || draggingOut[0] || memberDragging[0]
@@ -6323,8 +6515,7 @@ public class MainActivity extends Activity {
             optionsShown[0] = true;
             touchHandler.removeCallbacks(armMove);
             clearAppGroupMemberMoveMode();
-            groupDialog.dismiss();
-            showAppGroupMemberOptions(groupId, packageName);
+            showAppGroupMemberOptions(groupId, packageName, groupDialog, item);
         };
 
         item.setTag("launcher_app_group_member:" + packageName);
@@ -6336,6 +6527,8 @@ public class MainActivity extends Activity {
                 if (!resumeMove && activeAppGroupMemberMoveModeView != null) {
                     clearAppGroupMemberMoveMode();
                 }
+                clearAppGroupMemberDisplacementPreview(popupPanel, null, false);
+                previewTargetPackage[0] = null;
                 down[0] = event.getRawX();
                 down[1] = event.getRawY();
                 armed[0] = resumeMove;
@@ -6375,24 +6568,41 @@ public class MainActivity extends Activity {
                             || event.getRawX() > panelLocation[0] + popupPanel.getWidth() + margin
                             || event.getRawY() > panelLocation[1] + popupPanel.getHeight() + margin;
                     memberView.setAlpha(draggingOut[0] ? 0.78f : 1f);
+                    View displacementTarget = draggingOut[0] ? null
+                            : findAppGroupMemberAtBaseSlot(popupPanel,
+                                    event.getRawX(), event.getRawY(), memberView);
+                    String targetPackage = null;
+                    if (displacementTarget != null
+                            && displacementTarget.getTag() instanceof String) {
+                        String targetTag = (String) displacementTarget.getTag();
+                        targetPackage = targetTag.substring(
+                                "launcher_app_group_member:".length());
+                    }
+                    boolean targetChanged = previewTargetPackage[0] == null
+                            ? targetPackage != null
+                            : !previewTargetPackage[0].equals(targetPackage);
+                    if (targetChanged) {
+                        previewTargetPackage[0] = targetPackage;
+                        if (targetPackage == null) {
+                            clearAppGroupMemberDisplacementPreview(
+                                    popupPanel, memberView, true);
+                        } else {
+                            updateAppGroupMemberDisplacementPreview(
+                                    popupPanel, memberView, packageName, targetPackage);
+                        }
+                    }
                 }
                 return true;
             }
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 String reorderTargetPackage = null;
                 if (action == MotionEvent.ACTION_UP && memberDragging[0] && !draggingOut[0]) {
-                    View dropTarget = findViewAtExcluding(popupPanel,
-                            (int) event.getRawX(), (int) event.getRawY(), memberView);
-                    while (dropTarget != null && dropTarget != popupPanel) {
-                        Object tag = dropTarget.getTag();
-                        if (tag instanceof String
-                                && ((String) tag).startsWith("launcher_app_group_member:")) {
-                            reorderTargetPackage = ((String) tag)
-                                    .substring("launcher_app_group_member:".length());
-                            break;
-                        }
-                        android.view.ViewParent dropParent = dropTarget.getParent();
-                        dropTarget = dropParent instanceof View ? (View) dropParent : null;
+                    View dropTarget = findAppGroupMemberAtBaseSlot(popupPanel,
+                            event.getRawX(), event.getRawY(), memberView);
+                    if (dropTarget != null && dropTarget.getTag() instanceof String) {
+                        String targetTag = (String) dropTarget.getTag();
+                        reorderTargetPackage = targetTag.substring(
+                                "launcher_app_group_member:".length());
                     }
                 }
                 touchHandler.removeCallbacks(armMove);
@@ -6400,6 +6610,8 @@ public class MainActivity extends Activity {
                 memberView.setTranslationX(0f);
                 memberView.setTranslationY(0f);
                 memberView.setAlpha(1f);
+                clearAppGroupMemberDisplacementPreview(popupPanel, memberView, true);
+                previewTargetPackage[0] = null;
                 android.view.ViewParent parent = memberView.getParent();
                 if (parent != null) parent.requestDisallowInterceptTouchEvent(false);
                 if (optionsShown[0]) return true;
@@ -6421,9 +6633,8 @@ public class MainActivity extends Activity {
                             members.add(Math.max(0, targetIndex), packageName);
                             saveAppGroupMembers(groupId, members);
                             clearAppGroupMemberMoveMode();
-                            groupDialog.dismiss();
-                            long reopenDelay = Build.VERSION.SDK_INT <= 23 ? 350L : 100L;
-                            handler.postDelayed(() -> openAppGroup(groupId), reopenDelay);
+                            // Reuse the current dialog and loaded icon views after a drop.
+                            reorderAppGroupMemberViewsInPanel(groupId, popupPanel);
                             Toast.makeText(MainActivity.this, "Apps reordered",
                                     Toast.LENGTH_SHORT).show();
                             return true;
