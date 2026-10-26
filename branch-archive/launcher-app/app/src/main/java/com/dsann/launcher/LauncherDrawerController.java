@@ -1,6 +1,7 @@
 package com.dsann.launcher;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -57,6 +58,21 @@ final class LauncherDrawerController {
 
     private LauncherDrawerController() {}
 
+    private static boolean isOwnBlankPageEntry(Activity activity, ResolveInfo app) {
+        return app != null && app.activityInfo != null
+                && activity.getPackageName().equals(app.activityInfo.packageName)
+                && MainActivity.class.getName().equals(app.activityInfo.name);
+    }
+
+    private static void launchSelectedApp(Activity activity, Actions actions,
+                                          ResolveInfo app, View sourceView) {
+        if (isOwnBlankPageEntry(activity, app)) {
+            activity.startActivity(new Intent(activity, BlankActivity.class));
+        } else {
+            actions.launchApp(app, sourceView);
+        }
+    }
+
     static BuiltDrawer build(Activity activity, FrameLayout root, SharedPreferences prefs,
                              PackageManager packageManager, List<ResolveInfo> allApps,
                              List<ResolveInfo> drawerApps, Drawable background, int spacing,
@@ -110,7 +126,7 @@ final class LauncherDrawerController {
                     @Override public void onAppClick(ResolveInfo app, View sourceView) {
                         if (!actions.canLaunchApp(sourceView)) return;
                         if (closeSearchRef[0] != null) closeSearchRef[0].run();
-                        actions.launchApp(app, sourceView);
+                        launchSelectedApp(activity, actions, app, sourceView);
                     }
                     @Override public void onAppLongClick(ResolveInfo app, boolean onHome,
                             View sourceView) {
@@ -145,11 +161,10 @@ final class LauncherDrawerController {
             String ownPackage = activity.getPackageName();
             for (ResolveInfo app : allApps) {
                 if (app == null || app.activityInfo == null) continue;
-                // Keep the synthetic self-app drawer entry when the query is refreshed
-                // after tapping it or returning from BlankActivity. MainActivity remains
-                // excluded; only BlankActivity is meant to appear as a user-facing app icon.
+                // The system launcher entry resolves to MainActivity. Inside D.S Launcher,
+                // show that same icon as the app-owned BlankActivity page instead.
                 if (ownPackage.equals(app.activityInfo.packageName)
-                        && !BlankActivity.class.getName().equals(app.activityInfo.name)) continue;
+                        && !MainActivity.class.getName().equals(app.activityInfo.name)) continue;
                 String label = adapter.cachedLabel(app);
                 if (needle.isEmpty()
                         || label.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
@@ -216,7 +231,7 @@ final class LauncherDrawerController {
                         && !drawerApps.isEmpty()) {
                     ResolveInfo match = drawerApps.get(0);
                     closeSearch.run();
-                    actions.launchApp(match, null);
+                    launchSelectedApp(activity, actions, match, null);
                     return true;
                 }
                 return false;
