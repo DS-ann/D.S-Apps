@@ -161,10 +161,10 @@ final class LauncherDrawerController {
             String ownPackage = activity.getPackageName();
             for (ResolveInfo app : allApps) {
                 if (app == null || app.activityInfo == null) continue;
-                // The system launcher entry resolves to MainActivity. Inside D.S Launcher,
-                // show that same icon as the app-owned BlankActivity page instead.
+                // Keep only the app-owned BlankActivity destination in this package.
+                // MainActivity is the HOME component; BlankActivity is the persistent drawer icon.
                 if (ownPackage.equals(app.activityInfo.packageName)
-                        && !MainActivity.class.getName().equals(app.activityInfo.name)) continue;
+                        && !BlankActivity.class.getName().equals(app.activityInfo.name)) continue;
                 String label = adapter.cachedLabel(app);
                 if (needle.isEmpty()
                         || label.toLowerCase(java.util.Locale.ROOT).contains(needle)) {

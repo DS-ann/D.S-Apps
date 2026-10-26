@@ -282,15 +282,37 @@ public class MainActivity extends Activity {
     private View lastLiveDisplacementMover;
     private int lastLiveDisplacementX = Integer.MIN_VALUE;
     private int lastLiveDisplacementY = Integer.MIN_VALUE;
+    // App icon positions still follow every touch event. Limit the heavier collision
+    // planning pass on low-end devices so that planning cannot starve the drag itself.
+    private static final long APP_ICON_LIVE_PLAN_INTERVAL_MS = 24L;
+    private long lastAppIconLivePlanUptimeMs;
     private final Runnable liveDisplacementFrame = new Runnable() {
         @Override public void run() {
             FrameLayout page = pendingLiveDisplacementPage;
             View mover = pendingLiveDisplacementMover;
+            if (page == null || mover == null || mover.getParent() != page) {
+                pendingLiveDisplacementPage = null;
+                pendingLiveDisplacementMover = null;
+                return;
+            }
+            boolean appIconMove = isWorkspaceAppIcon(mover)
+                    || ("workspace_transfer_proxy".equals(mover.getTag())
+                        && isWorkspaceAppIcon(workspaceTransferItem));
+            long now = android.os.SystemClock.uptimeMillis();
+            if (appIconMove && lastAppIconLivePlanUptimeMs > 0L) {
+                long remaining = APP_ICON_LIVE_PLAN_INTERVAL_MS
+                        - (now - lastAppIconLivePlanUptimeMs);
+                if (remaining > 0L) {
+                    // Keep the latest geometry pending and defer only collision planning.
+                    // The directly dragged icon itself continues to track touch immediately.
+                    page.postDelayed(this, remaining);
+                    return;
+                }
+            }
             pendingLiveDisplacementPage = null;
             pendingLiveDisplacementMover = null;
-            if (page != null && mover != null && mover.getParent() == page) {
-                updateLiveDisplacements(page, mover);
-            }
+            if (appIconMove) lastAppIconLivePlanUptimeMs = now;
+            updateLiveDisplacements(page, mover);
         }
     };
     private final java.util.WeakHashMap<View, Boolean> workspaceScaleRestored =
@@ -6505,6 +6527,9 @@ public class MainActivity extends Activity {
         // to disappear when crossing row boundaries.
         final View[] sourceRowRef = new View[1];
         final float[] sourceRowElevation = new float[1];
+        final float[] sourceRowTranslationZ = new float[1];
+        final View[] sourceScrollRef = new View[1];
+        final int[] sourceScrollLayerType = new int[1];
 
         final Runnable armMove = () -> {
             if (movedTooEarly[0] || draggingOut[0] || memberDragging[0]
@@ -6545,6 +6570,15 @@ public class MainActivity extends Activity {
                 sourceRowRef[0] = sourceParent instanceof View ? (View) sourceParent : null;
                 sourceRowElevation[0] = Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null
                         ? sourceRowRef[0].getElevation() : 0f;
+                sourceRowTranslationZ[0] = Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null
+                        ? sourceRowRef[0].getTranslationZ() : 0f;
+                ViewGroup sourceRows = sourceRowRef[0] != null
+                        && sourceRowRef[0].getParent() instanceof ViewGroup
+                        ? (ViewGroup) sourceRowRef[0].getParent() : null;
+                sourceScrollRef[0] = sourceRows != null && sourceRows.getParent() instanceof View
+                        ? (View) sourceRows.getParent() : null;
+                sourceScrollLayerType[0] = sourceScrollRef[0] == null
+                        ? View.LAYER_TYPE_NONE : sourceScrollRef[0].getLayerType();
                 armed[0] = resumeMove;
                 movedTooEarly[0] = false;
                 draggingOut[0] = false;
@@ -6568,13 +6602,26 @@ public class MainActivity extends Activity {
                     return true;
                 }
                 if (pastSlop && armed[0]) {
+                    boolean firstDragFrame = !memberDragging[0];
                     memberDragging[0] = true;
                     touchHandler.removeCallbacks(showOptions);
                     android.view.ViewParent parent = memberView.getParent();
                     if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
-                    if (Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null) {
-                        sourceRowRef[0].setElevation(Math.max(sourceRowElevation[0],
-                                LauncherUiUtils.dp(MainActivity.this, 32)));
+                    if (firstDragFrame) {
+                        // Disable the cached scroll layer only for active member drags.
+                        // A stale layer can paint a later row over the translated member even
+                        // after row elevation changes, especially on older Android renderers.
+                        if (sourceScrollRef[0] != null
+                                && sourceScrollLayerType[0] == View.LAYER_TYPE_HARDWARE) {
+                            sourceScrollRef[0].setLayerType(View.LAYER_TYPE_NONE, null);
+                        }
+                        if (Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null) {
+                            float lift = LauncherUiUtils.dp(MainActivity.this, 48);
+                            sourceRowRef[0].setElevation(Math.max(sourceRowElevation[0], lift));
+                            sourceRowRef[0].setTranslationZ(
+                                    Math.max(sourceRowTranslationZ[0], lift));
+                            sourceRowRef[0].invalidate();
+                        }
                     }
                     memberView.setTranslationX(dx);
                     memberView.setTranslationY(dy);
@@ -6630,8 +6677,14 @@ public class MainActivity extends Activity {
                 memberView.setAlpha(1f);
                 if (Build.VERSION.SDK_INT >= 21 && sourceRowRef[0] != null) {
                     sourceRowRef[0].setElevation(sourceRowElevation[0]);
+                    sourceRowRef[0].setTranslationZ(sourceRowTranslationZ[0]);
+                    sourceRowRef[0].invalidate();
+                }
+                if (sourceScrollRef[0] != null) {
+                    sourceScrollRef[0].setLayerType(sourceScrollLayerType[0], null);
                 }
                 sourceRowRef[0] = null;
+                sourceScrollRef[0] = null;
                 clearAppGroupMemberDisplacementPreview(popupPanel, memberView, true);
                 previewTargetPackage[0] = null;
                 android.view.ViewParent parent = memberView.getParent();
