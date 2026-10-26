@@ -2478,6 +2478,23 @@ public class MainActivity extends Activity {
         return height + dateHeight;
     }
 
+    /**
+     * A compressed clock row must clip its glyph group at the row boundary so large
+     * typography cannot paint over the date line below it. Normal-height clocks retain
+     * their existing overflow styling.
+     */
+    private void applyClockDigitOverflowPolicy(int rowHeight) {
+        boolean compactRow = rowHeight < LauncherUiUtils.dp(this, 114);
+        if (clockRow != null) {
+            clockRow.setClipChildren(compactRow);
+            clockRow.setClipToPadding(compactRow);
+        }
+        if (clockGroup != null) {
+            clockGroup.setClipChildren(compactRow);
+            clockGroup.setClipToPadding(compactRow);
+        }
+    }
+
     private void applyClockResizeMove(float rawX, float rawY) {
         if (clockResizeEdge == 0 || !clockWidgetDragging) return;
         final LinearLayout resizePanel = clockGesturePanel != null
@@ -2681,6 +2698,7 @@ public class MainActivity extends Activity {
                                 : clockWidgetStartTextScaleY * targetRowHeight
                                         / (float) Math.max(1, clockWidgetStartRowHeight));
                     }
+                    applyClockDigitOverflowPolicy(targetRowHeight);
                     syncClockColonVerticalCenter();
                 }
 
@@ -13342,13 +13360,23 @@ public class MainActivity extends Activity {
         addAppShiftDirection(directions, seen, 0, 1);
         addAppShiftDirection(directions, seen, 0, -1);
 
+        // Prefer any safe complete row/column shift over a partial chain. Without this
+        // pre-pass, the first direction could move only some icons even when a later
+        // direction can move the entire lane and preserve every icon's relative slot.
         for (int[] direction : directions) {
             int dxCells = direction[0];
             int dyCells = direction[1];
             if (dxCells == 0 && dyCells == 0) continue;
-
             if (tryShiftWholeHomeIconLaneDirection(page, movingView, seed,
                     dxCells, dyCells, columns, cellWidth, rows, cellHeight)) return true;
+        }
+
+        // No complete lane shift is safe in any candidate direction; allow the minimum
+        // contiguous chain only as the fallback for a genuinely constrained workspace.
+        for (int[] direction : directions) {
+            int dxCells = direction[0];
+            int dyCells = direction[1];
+            if (dxCells == 0 && dyCells == 0) continue;
 
             java.util.ArrayList<View> cohort = new java.util.ArrayList<View>();
             java.util.IdentityHashMap<View, Boolean> cohortSet =
@@ -19040,6 +19068,7 @@ public class MainActivity extends Activity {
             clockGroup.setTranslationX(0f);
             clockGroup.setClipChildren(false);
             clockGroup.setClipToPadding(false);
+            applyClockDigitOverflowPolicy(rowHeight);
         }
 
         // Neon Circuit needs a little extra clearance only once the hour is two digits.
