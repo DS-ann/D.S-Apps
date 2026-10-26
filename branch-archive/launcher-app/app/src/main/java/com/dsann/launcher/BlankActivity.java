@@ -41,6 +41,10 @@ public final class BlankActivity extends Activity {
     private FrameLayout root;
     private ScrollView contentScroll;
     private View instructionControl;
+    private boolean compactLandscape;
+    private boolean instructionPopupShowing;
+    private final java.util.ArrayList<ColorFlowTextView> pageGradientViews =
+            new java.util.ArrayList<ColorFlowTextView>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,6 +67,8 @@ public final class BlankActivity extends Activity {
     }
 
     private void buildPage() {
+        compactLandscape = getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         root = new FrameLayout(this);
         root.setBackgroundColor(INK);
 
@@ -75,50 +81,62 @@ public final class BlankActivity extends Activity {
         contentScroll.setClipToPadding(false);
         contentScroll.setVerticalScrollBarEnabled(false);
         contentScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        contentScroll.setPadding(dp(24), dp(34), dp(24), dp(104));
+        contentScroll.setPadding(compactLandscape ? dp(14) : dp(24),
+                compactLandscape ? dp(4) : dp(34),
+                compactLandscape ? dp(14) : dp(24),
+                compactLandscape ? dp(52) : dp(104));
 
         LinearLayout stack = new LinearLayout(this);
         stack.setOrientation(LinearLayout.VERTICAL);
-        stack.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
-        stack.setPadding(dp(2), dp(24), dp(2), dp(22));
+        stack.setGravity(compactLandscape
+                ? Gravity.CENTER_HORIZONTAL | Gravity.TOP
+                : Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
+        stack.setPadding(dp(2), compactLandscape ? dp(4) : dp(24),
+                dp(2), compactLandscape ? dp(6) : dp(22));
         contentScroll.addView(stack, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(contentScroll, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        stack.addView(buildIconMedallion(), new LinearLayout.LayoutParams(dp(132), dp(132)));
+        int medallionSizeDp = compactLandscape ? 72 : 132;
+        stack.addView(buildIconMedallion(medallionSizeDp),
+                new LinearLayout.LayoutParams(dp(medallionSizeDp), dp(medallionSizeDp)));
 
-        ColorFlowTextView appName = makeGradientText(getApplicationLabel(), 34f,
+        ColorFlowTextView appName = makeGradientText(getApplicationLabel(), compactLandscape ? 23f : 34f,
                 "cursive", android.graphics.Typeface.BOLD);
         appName.setGravity(Gravity.CENTER);
         appName.setShadowLayer(dp(18), 0f, dp(3), Color.argb(115, 109, 91, 255));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleParams.topMargin = dp(20);
+        titleParams.topMargin = dp(compactLandscape ? 4 : 20);
         stack.addView(appName, titleParams);
 
-        stack.addView(buildColorBoundary(), new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(3)) {{
-                    topMargin = dp(17);
-                }});
+        LinearLayout.LayoutParams boundaryLineParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(3));
+        boundaryLineParams.topMargin = dp(compactLandscape ? 4 : 17);
+        stack.addView(buildColorBoundary(), boundaryLineParams);
 
-        ColorFlowTextView version = makeGradientText(getVersionLabel(), 10.5f,
+        ColorFlowTextView version = makeGradientText(getVersionLabel(), compactLandscape ? 8.5f : 10.5f,
                 "monospace", android.graphics.Typeface.BOLD);
         version.setLetterSpacing(0.13f);
         version.setGravity(Gravity.CENTER);
-        version.setPadding(dp(14), dp(8), dp(14), dp(8));
+        version.setPadding(dp(compactLandscape ? 8 : 14),
+                dp(compactLandscape ? 3 : 8), dp(compactLandscape ? 8 : 14),
+                dp(compactLandscape ? 3 : 8));
         version.setBackground(solidRounded(Color.argb(135, 25, 37, 70), dp(22)));
         LinearLayout.LayoutParams versionParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        versionParams.topMargin = dp(15);
+        versionParams.topMargin = dp(compactLandscape ? 4 : 15);
         stack.addView(version, versionParams);
 
-        int availableWidth = getResources().getDisplayMetrics().widthPixels - dp(56);
-        int cardWidth = Math.max(dp(260), Math.min(dp(440), availableWidth));
+        int availableWidth = getResources().getDisplayMetrics().widthPixels
+                - dp(compactLandscape ? 32 : 56);
+        int minimumCardWidth = dp(compactLandscape ? 220 : 260);
+        int cardWidth = Math.max(minimumCardWidth, Math.min(dp(440), availableWidth));
         LinearLayout.LayoutParams creatorParams = new LinearLayout.LayoutParams(
                 cardWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
-        creatorParams.topMargin = dp(31);
-        stack.addView(buildCreatorCard(), creatorParams);
+        creatorParams.topMargin = dp(compactLandscape ? 6 : 31);
+        stack.addView(buildCreatorCard(compactLandscape), creatorParams);
 
         instructionControl = buildInstructionControl();
         FrameLayout.LayoutParams instructionParams = new FrameLayout.LayoutParams(
@@ -135,7 +153,10 @@ public final class BlankActivity extends Activity {
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int topInset = insets.getSystemWindowInsetTop();
             int bottomInset = insets.getSystemWindowInsetBottom();
-            contentScroll.setPadding(dp(24), topInset + dp(18), dp(24), bottomInset + dp(104));
+            contentScroll.setPadding(compactLandscape ? dp(14) : dp(24),
+                    topInset + dp(compactLandscape ? 4 : 18),
+                    compactLandscape ? dp(14) : dp(24),
+                    bottomInset + dp(compactLandscape ? 52 : 104));
             FrameLayout.LayoutParams buttonParams =
                     (FrameLayout.LayoutParams) instructionControl.getLayoutParams();
             buttonParams.rightMargin = dp(20);
@@ -166,20 +187,21 @@ public final class BlankActivity extends Activity {
         });
     }
 
-    private FrameLayout buildIconMedallion() {
+    private FrameLayout buildIconMedallion(float sizeDp) {
         FrameLayout medallion = new FrameLayout(this);
         GradientDrawable halo = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{Color.rgb(75, 233, 255), Color.rgb(125, 94, 255),
                         Color.rgb(255, 91, 190)});
         halo.setShape(GradientDrawable.OVAL);
         medallion.setBackground(halo);
-        medallion.setElevation(dp(10));
+        medallion.setElevation(dp(sizeDp * 0.075f));
 
         FrameLayout darkRing = new FrameLayout(this);
         darkRing.setBackground(solidOval(Color.rgb(15, 18, 43)));
         FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-        ringParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+        int ringInset = Math.max(2, dp(sizeDp * 0.03f));
+        ringParams.setMargins(ringInset, ringInset, ringInset, ringInset);
         medallion.addView(darkRing, ringParams);
 
         ImageView appIcon = new ImageView(this);
@@ -187,30 +209,35 @@ public final class BlankActivity extends Activity {
         appIcon.setContentDescription(getApplicationLabel() + " app icon");
         appIcon.setBackground(gradientRounded(new int[]{
                 Color.rgb(35, 48, 85), Color.rgb(27, 27, 62)}, dp(26)));
-        appIcon.setPadding(dp(6), dp(6), dp(6), dp(6));
+        int appIconSize = Math.max(dp(46), dp(sizeDp * 0.66f));
+        float iconInsetDp = sizeDp * 0.045f;
+        appIcon.setPadding(dp(iconInsetDp), dp(iconInsetDp),
+                dp(iconInsetDp), dp(iconInsetDp));
         try {
             appIcon.setImageDrawable(getPackageManager().getApplicationIcon(getPackageName()));
         } catch (PackageManager.NameNotFoundException ignored) {
             appIcon.setImageResource(R.mipmap.ic_launcher);
         }
-        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(88), dp(88),
-                Gravity.CENTER);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
+                appIconSize, appIconSize, Gravity.CENTER);
         darkRing.addView(appIcon, iconParams);
 
         View cyanSpark = new View(this);
         cyanSpark.setBackground(solidOval(Color.rgb(110, 255, 225)));
-        FrameLayout.LayoutParams sparkParams = new FrameLayout.LayoutParams(dp(8), dp(8),
-                Gravity.TOP | Gravity.RIGHT);
-        sparkParams.topMargin = dp(15);
-        sparkParams.rightMargin = dp(11);
+        int cyanSparkSize = Math.max(dp(4), dp(sizeDp * 0.06f));
+        FrameLayout.LayoutParams sparkParams = new FrameLayout.LayoutParams(
+                cyanSparkSize, cyanSparkSize, Gravity.TOP | Gravity.RIGHT);
+        sparkParams.topMargin = dp(sizeDp * 0.11f);
+        sparkParams.rightMargin = dp(sizeDp * 0.08f);
         medallion.addView(cyanSpark, sparkParams);
 
         View pinkSpark = new View(this);
         pinkSpark.setBackground(solidOval(Color.rgb(255, 124, 213)));
-        FrameLayout.LayoutParams pinkParams = new FrameLayout.LayoutParams(dp(5), dp(5),
-                Gravity.BOTTOM | Gravity.LEFT);
-        pinkParams.bottomMargin = dp(17);
-        pinkParams.leftMargin = dp(12);
+        int pinkSparkSize = Math.max(dp(3), dp(sizeDp * 0.04f));
+        FrameLayout.LayoutParams pinkParams = new FrameLayout.LayoutParams(
+                pinkSparkSize, pinkSparkSize, Gravity.BOTTOM | Gravity.LEFT);
+        pinkParams.bottomMargin = dp(sizeDp * 0.13f);
+        pinkParams.leftMargin = dp(sizeDp * 0.09f);
         medallion.addView(pinkSpark, pinkParams);
         return medallion;
     }
@@ -236,7 +263,7 @@ public final class BlankActivity extends Activity {
         return line;
     }
 
-    private View buildCreatorCard() {
+    private View buildCreatorCard(boolean compact) {
         FrameLayout outer = new FrameLayout(this);
         outer.setBackground(gradientRounded(new int[]{
                 Color.rgb(65, 218, 255), Color.rgb(124, 101, 255),
@@ -247,25 +274,27 @@ public final class BlankActivity extends Activity {
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER);
-        inner.setPadding(dp(18), dp(20), dp(18), dp(20));
+        inner.setPadding(dp(compact ? 8 : 18), dp(compact ? 6 : 20),
+                dp(compact ? 8 : 18), dp(compact ? 6 : 20));
         inner.setBackground(gradientRounded(new int[]{
                 Color.argb(245, 18, 24, 49), Color.argb(248, 12, 16, 35)}, dp(22)));
         outer.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        ColorFlowTextView overline = makeGradientText("CREATOR CREDIT", 10f,
+        ColorFlowTextView overline = makeGradientText("CREATOR CREDIT", compact ? 8f : 10f,
                 "monospace", android.graphics.Typeface.BOLD);
         overline.setLetterSpacing(0.2f);
         overline.setGravity(Gravity.CENTER);
         inner.addView(overline);
 
-        ColorFlowTextView credit = makeGradientText("Created by Debarghya Sannigrahi", 15.5f,
+        ColorFlowTextView credit = makeGradientText("Created by Debarghya Sannigrahi",
+                compact ? 10.5f : 15.5f,
                 "monospace", android.graphics.Typeface.BOLD);
         credit.setGravity(Gravity.CENTER);
-        credit.setLineSpacing(dp(2), 1f);
+        credit.setLineSpacing(dp(compact ? 1 : 2), 1f);
         LinearLayout.LayoutParams creditParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        creditParams.topMargin = dp(9);
+        creditParams.topMargin = dp(compact ? 3 : 9);
         inner.addView(credit, creditParams);
 
         View boundary = new View(this);
@@ -274,7 +303,7 @@ public final class BlankActivity extends Activity {
                 Color.argb(0, 255, 102, 188)}, dp(2)));
         LinearLayout.LayoutParams boundaryParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
-        boundaryParams.topMargin = dp(16);
+        boundaryParams.topMargin = dp(compact ? 4 : 16);
         inner.addView(boundary, boundaryParams);
         return outer;
     }
@@ -324,7 +353,9 @@ public final class BlankActivity extends Activity {
     }
 
     private void showBlankInstructionPopup() {
+        pausePageGradientAnimations();
         Dialog dialog = new Dialog(this);
+        dialog.setOnDismissListener(ignored -> resumePageGradientAnimations());
 
         FrameLayout border = new FrameLayout(this);
         border.setPadding(dp(1), dp(1), dp(1), dp(1));
@@ -475,6 +506,26 @@ public final class BlankActivity extends Activity {
                 .start();
     }
 
+    private void pausePageGradientAnimations() {
+        instructionPopupShowing = true;
+        for (ColorFlowTextView text : pageGradientViews) {
+            if (text != null && text.animator != null
+                    && text.animator.isStarted() && !text.animator.isPaused()) {
+                text.animator.pause();
+            }
+        }
+    }
+
+    private void resumePageGradientAnimations() {
+        instructionPopupShowing = false;
+        for (ColorFlowTextView text : pageGradientViews) {
+            if (text != null && text.isAttachedToWindow()
+                    && text.animator != null && text.animator.isPaused()) {
+                text.animator.resume();
+            }
+        }
+    }
+
     private void addGuideSection(LinearLayout parent, String title, String... lines) {
         FixedGradientTextView heading = fixedGradientText(title, 11.5f, true);
         heading.setLetterSpacing(0.12f);
@@ -599,6 +650,7 @@ public final class BlankActivity extends Activity {
                 Color.rgb(255, 207, 127),
                 Color.rgb(83, 246, 255)
         });
+        pageGradientViews.add(text);
         return text;
     }
 
@@ -673,6 +725,9 @@ public final class BlankActivity extends Activity {
                 });
             }
             if (!animator.isStarted()) animator.start();
+            if (instructionPopupShowing && animator.isRunning() && !animator.isPaused()) {
+                animator.pause();
+            }
         }
 
         @Override
