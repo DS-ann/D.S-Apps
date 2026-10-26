@@ -277,6 +277,11 @@ public class MainActivity extends Activity {
     // planning is deferred. Drop/cancel paths flush or cancel this work synchronously.
     private FrameLayout pendingLiveDisplacementPage;
     private View pendingLiveDisplacementMover;
+    // Last position used for expensive live collision planning; finger motion itself remains immediate.
+    private FrameLayout lastLiveDisplacementPage;
+    private View lastLiveDisplacementMover;
+    private int lastLiveDisplacementX = Integer.MIN_VALUE;
+    private int lastLiveDisplacementY = Integer.MIN_VALUE;
     private final Runnable liveDisplacementFrame = new Runnable() {
         @Override public void run() {
             FrameLayout page = pendingLiveDisplacementPage;
@@ -6700,7 +6705,7 @@ public class MainActivity extends Activity {
         if (cell == null) return;
         if (active) {
             if (cell.getBackground() == null) cell.setBackground(appGroupMoveHighlight());
-            if (Build.VERSION.SDK_INT >= 21) cell.setElevation(LauncherUiUtils.dp(this, 8));
+            if (Build.VERSION.SDK_INT >= 21 && cell.getElevation() != 0f) cell.setElevation(0f);
         } else {
             if (cell.getBackground() != null) cell.setBackground(null);
             if (Build.VERSION.SDK_INT >= 21 && cell.getElevation() != 0f) {
@@ -8733,13 +8738,25 @@ public class MainActivity extends Activity {
     private void scheduleLiveDisplacementUpdate(FrameLayout page, View movingView) {
         if (page == null || movingView == null || movingView.getParent() != page
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return;
-        if (pendingLiveDisplacementPage == page && pendingLiveDisplacementMover == movingView) {
-            return;
+        ViewGroup.LayoutParams rawParams = movingView.getLayoutParams();
+        int left = movingView.getLeft();
+        int top = movingView.getTop();
+        if (rawParams instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) rawParams;
+            left = lp.leftMargin;
+            top = lp.topMargin;
         }
+        int threshold = Math.max(1, LauncherUiUtils.dp(this, 5));
+        if (lastLiveDisplacementPage == page && lastLiveDisplacementMover == movingView
+                && Math.abs(left - lastLiveDisplacementX) < threshold
+                && Math.abs(top - lastLiveDisplacementY) < threshold) return;
+        lastLiveDisplacementPage = page;
+        lastLiveDisplacementMover = movingView;
+        lastLiveDisplacementX = left;
+        lastLiveDisplacementY = top;
         liveDragRejectedMoves.remove(movingView);
-        // A launcher workspace has one active drag owner. If ownership changes before
-        // the next frame, keep only the newest owner instead of running stale collision
-        // work against the old item's geometry.
+        // Coalesce dense MOVE streams and avoid rerunning collision planning for tiny
+        // sub-cell finger changes. The dragged view still tracks every event immediately.
         cancelPendingLiveDisplacementUpdate();
         pendingLiveDisplacementPage = page;
         pendingLiveDisplacementMover = movingView;
