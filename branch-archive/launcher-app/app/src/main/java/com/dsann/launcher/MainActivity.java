@@ -17850,7 +17850,27 @@ public class MainActivity extends Activity {
             renderHomePages(false);
             rebuildContactShortcutViews();
             ensureShortcutLabelsNotClipped();
-            validateWorkspacePagesAfterIconResize("home-column change");
+
+            // Cancel must roll the column change back as well as dismiss the collision prompt.
+            // The resize-repair dialog only invokes this callback on cancellation; Move / shrink
+            // keeps the new column count and repairs the resulting collisions in place.
+            Runnable restorePreviousColumns = () -> {
+                homeIconResizeRepairPending = true;
+                int changedColumns = getHomeColumns();
+                remapHomeIconSlotsForColumnChange(
+                        changedColumns, oldColumns, iconSize, iconSize);
+                prefs.edit().putInt(KEY_COLUMNS, oldColumns).apply();
+                currentPage = Math.max(0, Math.min(1, currentPage));
+                rebuildPages();
+                renderHomePages(false);
+                rebuildContactShortcutViews();
+                ensureShortcutLabelsNotClipped();
+                homeIconResizeRepairPending = false;
+                refreshWorkspaceGrid();
+                showCustomizationMenu(dialog, scroll.getScrollY(), false);
+            };
+            validateWorkspacePagesAfterIconResize(
+                    "home-column change", restorePreviousColumns);
             showCustomizationMenu(dialog, scroll.getScrollY(), false);
         });
         addSliderRowOnStop(content, "Home icon size", 32, 74,
