@@ -6841,9 +6841,8 @@ public class MainActivity extends Activity {
                 if (pastSlop && armed[0] && !optionsShown[0]) {
                     boolean firstFrame = !dragging[0];
                     dragging[0] = true;
-                    // Keep the active group ID set during the live drag so every group
-                    // remains visibly blue until the move transaction finishes.
-                    refreshAppGroupMoveModeHighlights();
+                    // Move-mode highlighting was applied when the long-press armed.
+                    // Avoid walking both pages and every app group on each pointer event.
                     groupHandler.removeCallbacks(showOptions);
                     if (firstFrame) {
                         LauncherUiUtils.stopMoveHint(cell);
@@ -8746,7 +8745,7 @@ public class MainActivity extends Activity {
             left = lp.leftMargin;
             top = lp.topMargin;
         }
-        int threshold = Math.max(1, LauncherUiUtils.dp(this, 5));
+        int threshold = Math.max(1, LauncherUiUtils.dp(this, 8));
         if (lastLiveDisplacementPage == page && lastLiveDisplacementMover == movingView
                 && Math.abs(left - lastLiveDisplacementX) < threshold
                 && Math.abs(top - lastLiveDisplacementY) < threshold) return;
