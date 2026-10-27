@@ -581,6 +581,10 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Integer> clockPositionStyleSignatures =
             new java.util.WeakHashMap<>();
+    // Stores the intended vertical scale before compact-row fitting. Live resize must use
+    // this value so expanding a compact clock restores its normal digit proportions.
+    private final java.util.WeakHashMap<TextView, Float> clockDesiredVerticalScales =
+            new java.util.WeakHashMap<>();
     private final java.util.WeakHashMap<TextView, Boolean> clockDigitInnerBorderModeApplied =
             new java.util.WeakHashMap<>();
     // Forces a fresh text/span buffer after renderer and package refreshes.
@@ -1544,7 +1548,11 @@ public class MainActivity extends Activity {
                             getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(clockPanel, true), 1f));
                     clockWidgetStartAutoScaleY = clampWorkspaceAutoScale(
                             getFloatPreferenceCompat(workspaceAutoShrinkScaleKey(clockPanel, false), 1f));
-                    clockWidgetStartTextScaleY = clockText == null ? 1f : clockText.getScaleY();
+                    Float desiredClockScaleY = clockText == null
+                            ? null : clockDesiredVerticalScales.get(clockText);
+                    clockWidgetStartTextScaleY = clockText == null ? 1f
+                            : (desiredClockScaleY != null && desiredClockScaleY > 0f
+                                    ? desiredClockScaleY : clockText.getScaleY());
                     clockWidgetLiveResizeLength = clockWidgetStartLength;
                     clockWidgetLiveResizeBreadth = clockWidgetStartBreadth;
                     int[] startGeometry = itemGeometry(clockPanel);
@@ -2487,12 +2495,15 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * A compressed clock row must clip its glyph group at the row boundary so large
-     * typography cannot paint over the date line below it. Normal-height clocks retain
-     * their existing overflow styling.
+     * Keep the clock digits inside their own row whenever there is a date line below.
+     * Clipping alone can cut off enlarged glyphs without making room for the date, so
+     * compact typography clocks are also scaled to fit the row's real font metrics.
+     * The desired scale is retained separately, allowing a later expansion to restore
+     * the normal clock proportions without accumulating scale loss.
      */
     private void applyClockDigitOverflowPolicy(int rowHeight) {
-        boolean compactRow = rowHeight < LauncherUiUtils.dp(this, 114);
+        final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
+        final boolean compactRow = rowHeight < naturalRowHeight;
         if (clockRow != null) {
             clockRow.setClipChildren(compactRow);
             clockRow.setClipToPadding(compactRow);
@@ -2500,6 +2511,34 @@ public class MainActivity extends Activity {
         if (clockGroup != null) {
             clockGroup.setClipChildren(compactRow);
             clockGroup.setClipToPadding(compactRow);
+        }
+        if (clockText == null) return;
+
+        final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
+                && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        final boolean dateVisible = prefs == null || prefs.getBoolean(KEY_SHOW_DATE, true);
+        final float requestedScale = Math.max(0.01f, Math.abs(clockText.getScaleY()));
+        clockDesiredVerticalScales.put(clockText, requestedScale);
+
+        if (compactRow && dateVisible && !sevenSegment) {
+            // A centered TextView is transformed around its center. Fit its font line box
+            // (rather than merely its view bounds) above the date line, and remove the
+            // normal-height downward offset that would otherwise use up that clearance.
+            android.graphics.Paint.FontMetrics metrics = clockText.getPaint().getFontMetrics();
+            float fontLineHeight = Math.max(1f, metrics.descent - metrics.ascent);
+            float availableHeight = Math.max(1f,
+                    rowHeight - LauncherUiUtils.dp(this, 2));
+            float maxScale = Math.max(0.1f,
+                    Math.min(1f, availableHeight / fontLineHeight));
+            clockText.setPivotY(rowHeight / 2f);
+            clockText.setTranslationY(0f);
+            clockText.setScaleY(Math.min(requestedScale, maxScale));
+        } else if (!sevenSegment) {
+            // Preserve the established 5dp visual offset in normal-height clocks and
+            // restore the requested scale when the user expands a compact row.
+            clockText.setPivotY(rowHeight / 2f);
+            clockText.setTranslationY(LauncherUiUtils.dp(this, 5));
+            clockText.setScaleY(requestedScale);
         }
     }
 
@@ -19232,7 +19271,6 @@ public class MainActivity extends Activity {
             clockGroup.setTranslationX(0f);
             clockGroup.setClipChildren(false);
             clockGroup.setClipToPadding(false);
-            applyClockDigitOverflowPolicy(rowHeight);
         }
 
         // Neon Circuit needs a little extra clearance only once the hour is two digits.
@@ -19346,6 +19384,9 @@ public class MainActivity extends Activity {
             textParams.gravity = Gravity.LEFT | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
+        // Apply after the final glyph scale/translation is calculated; doing this earlier
+        // lets the regular typography pass overwrite compact-row fitting.
+        applyClockDigitOverflowPolicy(rowHeight);
 
         if (dateText != null) {
             // Center the date inside the clock panel regardless of the clock's
