@@ -631,7 +631,7 @@ final class HomePageController {
                 || cellWidth <= 0 || cellHeight <= 0) return;
         for (int index = 0; index < page.getChildCount(); index++) {
             View item = page.getChildAt(index);
-            if (item == null || item.getVisibility() == View.GONE || !isWorkspaceItem(item)) continue;
+            if (item == null || item.getVisibility() != View.VISIBLE || !isWorkspaceItem(item)) continue;
             Object rawTag = item.getTag();
             if (rawTag instanceof String && ((String) rawTag).startsWith("launcher_app:")) {
                 // App icons are resolved in pagePackages order below.
@@ -661,6 +661,136 @@ final class HomePageController {
                 }
             }
         }
+    }
+
+    /**
+     * Uses the nearest cell that is genuinely free, preferring the app's saved anchor.
+     */
+    private int[] findNearestFreeGridSlot(boolean[][] occupied, int rows, int columns,
+            int preferredRow, int preferredCol) {
+        int bestRow = -1, bestCol = -1, bestDistance = Integer.MAX_VALUE;
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < columns; col++) {
+                if (occupied[row][col]) continue;
+                int distance = Math.abs(col - preferredCol) + Math.abs(row - preferredRow);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestRow = row;
+                    bestCol = col;
+                }
+            }
+        }
+        return bestRow < 0 ? null : new int[]{bestRow, bestCol};
+    }
+
+    /**
+     * Collects complete workspace/touch bounds while a widget is being relocated.
+     * App cells are deliberately reserved by their complete bounds here so a widget
+     * repair cannot move a widget underneath an app cell's touch target.
+     */
+    private ArrayList<Rect> collectGridRepairOccupiedBounds(FrameLayout page, View ignoredItem) {
+        ArrayList<Rect> occupied = new ArrayList<>();
+        if (page == null) return occupied;
+        for (int index = 0; index < page.getChildCount(); index++) {
+            View item = page.getChildAt(index);
+            if (item == ignoredItem || item == null || item.getVisibility() != View.VISIBLE
+                    || !isWorkspaceItem(item)) continue;
+
+            int width = item.getWidth();
+            int height = item.getHeight();
+            int left = item.getLeft();
+            int top = item.getTop();
+            ViewGroup.LayoutParams raw = item.getLayoutParams();
+            if (raw instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                if (lp.width > 0) width = lp.width;
+                if (lp.height > 0) height = lp.height;
+                if (item.isLayoutRequested() || item.getWidth() <= 0) left = lp.leftMargin;
+                if (item.isLayoutRequested() || item.getHeight() <= 0) top = lp.topMargin;
+            }
+            if (width <= 0 || height <= 0) continue;
+            occupied.add(workspaceBounds(item, left, top, width, height));
+        }
+        return occupied;
+    }
+
+    /**
+     * If a grid cell is blocked only by a widget, move or shrink that widget out of
+     * the cell. This is a last-resort capacity repair: ordinary placement never changes
+     * widget geometry, and the user's preferred app positions still win whenever possible.
+     */
+    private boolean tryMoveWidgetAwayFromGridSlot(FrameLayout page, Rect targetSlot,
+            int pageWidth, int pageHeight) {
+        if (page == null || targetSlot == null || pageWidth <= 0 || pageHeight <= 0) return false;
+
+        View blockedWidget = null;
+        for (int index = 0; index < page.getChildCount(); index++) {
+            View item = page.getChildAt(index);
+            if (item == null || item.getVisibility() != View.VISIBLE || !isWorkspaceItem(item)) continue;
+            Object tag = item.getTag();
+            if (tag instanceof String && ((String) tag).startsWith("launcher_app:")) continue;
+
+            int width = item.getWidth();
+            int height = item.getHeight();
+            int left = item.getLeft();
+            int top = item.getTop();
+            ViewGroup.LayoutParams raw = item.getLayoutParams();
+            if (raw instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+                if (lp.width > 0) width = lp.width;
+                if (lp.height > 0) height = lp.height;
+                if (item.isLayoutRequested() || item.getWidth() <= 0) left = lp.leftMargin;
+                if (item.isLayoutRequested() || item.getHeight() <= 0) top = lp.topMargin;
+            }
+            if (width <= 0 || height <= 0
+                    || !Rect.intersects(workspaceBounds(item, left, top, width, height), targetSlot)) {
+                continue;
+            }
+            if (!isWidgetWorkspaceItem(item) || blockedWidget != null) {
+                // Do not move a widget through a clock, shortcut, group, or another widget.
+                return false;
+            }
+            blockedWidget = item;
+        }
+        if (blockedWidget == null
+                || !(blockedWidget.getLayoutParams() instanceof FrameLayout.LayoutParams)) return false;
+
+        FrameLayout.LayoutParams current = (FrameLayout.LayoutParams) blockedWidget.getLayoutParams();
+        int width = current.width > 0 ? current.width : blockedWidget.getWidth();
+        int height = current.height > 0 ? current.height : blockedWidget.getHeight();
+        if (width <= 0 || height <= 0) return false;
+
+        ArrayList<Rect> occupied = collectGridRepairOccupiedBounds(page, blockedWidget);
+        occupied.add(new Rect(targetSlot));
+        int step = Math.max(1, LauncherUiUtils.dp(activity, 4));
+        int fineStep = Math.max(1, LauncherUiUtils.dp(activity, 1));
+        int[] fit = findLandscapeWidgetFit(blockedWidget, current.leftMargin, current.topMargin,
+                width, height, pageWidth, pageHeight, occupied, step, fineStep);
+        if (fit == null) return false;
+        Rect fittedBounds = workspaceBounds(blockedWidget, fit[0], fit[1], fit[2], fit[3]);
+        if (Rect.intersects(fittedBounds, targetSlot)) return false;
+        if (fit[0] == current.leftMargin && fit[1] == current.topMargin
+                && fit[2] == width && fit[3] == height) return false;
+
+        FrameLayout.LayoutParams placed = copyWorkspaceParams(
+                blockedWidget, fit[2], fit[3], fit[0], fit[1]);
+        placed.gravity = Gravity.TOP | Gravity.LEFT;
+        placed.rightMargin = 0;
+        placed.bottomMargin = 0;
+        blockedWidget.setLayoutParams(placed);
+
+        LinearLayout strip = host.getPagesStrip();
+        int pageIndex = strip == null ? -1 : strip.indexOfChild(page);
+        if (isLandscapeOrientation(strip)) {
+            resizeAppWidgetForLandscape(blockedWidget, fit[2], fit[3]);
+            saveLandscapeWidgetFittedSize(blockedWidget, fit[2], fit[3]);
+        } else if (pageIndex >= 0) {
+            syncWidgetGeometryPreference(blockedWidget, pageIndex, placed);
+        }
+        if (strip != null) saveCurrentOrientationGeometry(blockedWidget, strip);
+        blockedWidget.requestLayout();
+        blockedWidget.invalidate();
+        return true;
     }
 
     private String landscapeClockAutoScaleKey(int pageIndex, boolean horizontal) {
@@ -1663,10 +1793,11 @@ final class HomePageController {
                 // Re-map normalized positions only through an occupied-slot grid so two
                 // portrait rows can never collapse onto the same landscape cell.
                 boolean[][] laidOutSlots = new boolean[actualRows][columns];
+                boolean[][] placedAppSlots = new boolean[actualRows][columns];
                 final boolean[] noFreeMeasuredSlot = {false};
-                // Reserve widgets, shortcuts, clocks and app groups before laying out
-                // app cells. Reserving only groups let the measured pass place app icons
-                // through other items, then move them again after restart/rotation.
+                // Reserve visible workspace items before laying out app cells. Invisible
+                // transient children no longer consume capacity, and a blocked cell can
+                // trigger a widget fit attempt before an app icon is hidden.
                 reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
                         page.getHeight(), actualCellWidth, actualCellHeight);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
@@ -1689,31 +1820,61 @@ final class HomePageController {
                             Math.round(savedY * Math.max(1, actualRows - 1))));
                     int requestedCol = col;
                     int requestedRow = row;
-                    if (laidOutSlots[row][col]) {
-                        int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
-                        for (int candidateRow = 0; candidateRow < actualRows; candidateRow++) {
+                    int[] freeCell = findNearestFreeGridSlot(
+                            laidOutSlots, actualRows, columns, row, col);
+
+                    // The previous pass can exhaust grid cells merely because a widget
+                    // touches a cell boundary. Before hiding an app, try freeing a cell
+                    // covered by exactly one widget; the fit routine preserves its size
+                    // when possible and shrinks it only when relocation alone cannot fit.
+                    int repairAttempts = 0;
+                    while (freeCell == null && repairAttempts++ < page.getChildCount()) {
+                        boolean repaired = false;
+                        for (int candidateRow = 0; candidateRow < actualRows && !repaired;
+                                candidateRow++) {
                             for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
-                                if (laidOutSlots[candidateRow][candidateCol]) continue;
-                                int distance = Math.abs(candidateCol - col)
-                                        + Math.abs(candidateRow - row);
-                                if (distance < bestDistance) {
-                                    bestDistance = distance;
-                                    bestCol = candidateCol;
-                                    bestRow = candidateRow;
+                                if (!laidOutSlots[candidateRow][candidateCol]
+                                        || placedAppSlots[candidateRow][candidateCol]) continue;
+                                int slotLeft = candidateCol * actualCellWidth;
+                                int slotTop = host.getHomeGridRowTop(candidateRow, actualRows,
+                                        page.getHeight(), actualCellHeight);
+                                Rect targetSlot = new Rect(slotLeft, slotTop,
+                                        slotLeft + actualCellWidth, slotTop + actualCellHeight);
+                                if (tryMoveWidgetAwayFromGridSlot(page, targetSlot,
+                                        page.getWidth(), page.getHeight())) {
+                                    repaired = true;
+                                    break;
                                 }
                             }
                         }
-                        if (bestCol >= 0) {
-                            col = bestCol;
-                            row = bestRow;
-                        } else {
-                            child.setVisibility(View.INVISIBLE);
-                            noFreeMeasuredSlot[0] = true;
-                            continue;
+                        if (!repaired) break;
+
+                        for (boolean[] slotRow : laidOutSlots) {
+                            java.util.Arrays.fill(slotRow, false);
                         }
+                        reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
+                                page.getHeight(), actualCellWidth, actualCellHeight);
+                        for (int usedRow = 0; usedRow < actualRows; usedRow++) {
+                            for (int usedCol = 0; usedCol < columns; usedCol++) {
+                                if (placedAppSlots[usedRow][usedCol]) {
+                                    laidOutSlots[usedRow][usedCol] = true;
+                                }
+                            }
+                        }
+                        freeCell = findNearestFreeGridSlot(
+                                laidOutSlots, actualRows, columns, row, col);
                     }
+
+                    if (freeCell == null) {
+                        child.setVisibility(View.INVISIBLE);
+                        noFreeMeasuredSlot[0] = true;
+                        continue;
+                    }
+                    row = freeCell[0];
+                    col = freeCell[1];
                     child.setVisibility(View.VISIBLE);
                     laidOutSlots[row][col] = true;
+                    placedAppSlots[row][col] = true;
                     if (col != requestedCol || row != requestedRow) {
                         float finalSavedX = col / (float) Math.max(1, columns - 1);
                         float finalSavedY = row / (float) Math.max(1, actualRows - 1);
