@@ -564,7 +564,15 @@ final class HomePageController {
         if (strip == null) return;
         ArrayList<View> items = collectManagedItems(strip);
         boolean landscape = isLandscapeOrientation(strip);
+        java.util.HashMap<Integer, java.util.HashSet<Integer>> restoredShortcutSlots =
+                new java.util.HashMap<Integer, java.util.HashSet<Integer>>();
         for (View item : items) {
+            if (item.getTag() instanceof String
+                    && ((String) item.getTag()).contains("shortcut")) {
+                restoreShortcutGridGeometry(item, strip, landscape, restoredShortcutSlots);
+                watchOrientationGeometry(item, strip);
+                continue;
+            }
             // Keep the clock on its current page while in landscape. Its portrait page
             // is restored only after returning to portrait, never during rotation itself.
             if (landscape && isClockWorkspaceItem(item)) {
@@ -597,6 +605,116 @@ final class HomePageController {
             item.setRotationY(geometry.rotationY);
             watchOrientationGeometry(item, strip);
             syncWidgetGeometryPreference(item, targetPageIndex, lp);
+        }
+    }
+
+    /**
+     * Contact shortcuts are four-column grid items. Restore their orientation-local
+     * normalized grid coordinates instead of reusing pixel margins from the last
+     * orientation. A per-page slot set repairs duplicate legacy anchors as well.
+     */
+    private void restoreShortcutGridGeometry(View item, LinearLayout strip, boolean landscape,
+            java.util.HashMap<Integer, java.util.HashSet<Integer>> restoredSlots) {
+        CharSequence description = item.getContentDescription();
+        String value = description == null ? "" : description.toString();
+        String prefix = "launcher_shortcut_id:";
+        if (!value.startsWith(prefix) || value.length() <= prefix.length()) return;
+        String id = value.substring(prefix.length());
+        int currentPage = pageIndexOf(item, strip);
+        if (strip.getChildCount() == 0) return;
+        int pageIndex = Math.max(0, Math.min(strip.getChildCount() - 1,
+                sharedPageIndex(item, Math.max(0, currentPage))));
+        if (!(strip.getChildAt(pageIndex) instanceof FrameLayout)) return;
+        FrameLayout page = (FrameLayout) strip.getChildAt(pageIndex);
+        if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
+
+        String portraitX = "contact_shortcut_x_" + id;
+        String portraitY = "contact_shortcut_y_" + id;
+        String landscapeX = "__landscape_contact_shortcut_x_" + id;
+        String landscapeY = "__landscape_contact_shortcut_y_" + id;
+        String activeX = landscape ? landscapeX : portraitX;
+        String activeY = landscape ? landscapeY : portraitY;
+        String otherX = landscape ? portraitX : landscapeX;
+        String otherY = landscape ? portraitY : landscapeY;
+        SharedPreferences.Editor seed = prefs.edit();
+        if (!prefs.contains(activeX)) {
+            seed.putFloat(activeX, LauncherUiUtils.getFloatPreferenceCompat(prefs, otherX, 0f));
+        }
+        if (!prefs.contains(activeY)) {
+            seed.putFloat(activeY, LauncherUiUtils.getFloatPreferenceCompat(prefs, otherY, 0f));
+        }
+        seed.apply();
+
+        final int columns = 4;
+        int cellWidth = Math.max(1,
+                homeAppCellWidthPx(page, strip, columns, page.getWidth()));
+        int cellHeight = LauncherUiUtils.dp(activity,
+                host.getHomeCellHeightDp(prefs.getInt(iconSizeKey, 48)));
+        int rows = Math.max(1,
+                host.getHomeGridRowsForHeight(page.getHeight(), cellHeight));
+        float normalizedX = Math.max(0f, Math.min(1f,
+                LauncherUiUtils.getFloatPreferenceCompat(prefs, activeX, 0f)));
+        float normalizedY = Math.max(0f, Math.min(1f,
+                LauncherUiUtils.getFloatPreferenceCompat(prefs, activeY, 0f)));
+        int preferredCol = Math.max(0, Math.min(columns - 1,
+                Math.round(normalizedX * (columns - 1))));
+        int preferredRow = Math.max(0, Math.min(rows - 1,
+                Math.round(normalizedY * Math.max(1, rows - 1))));
+        int col = preferredCol;
+        int row = preferredRow;
+
+        java.util.HashSet<Integer> used = restoredSlots.get(pageIndex);
+        if (used == null) {
+            used = new java.util.HashSet<Integer>();
+            restoredSlots.put(pageIndex, used);
+        }
+        if (used.contains(row * columns + col)) {
+            int bestDistance = Integer.MAX_VALUE;
+            int bestCol = -1;
+            int bestRow = -1;
+            for (int candidateRow = 0; candidateRow < rows; candidateRow++) {
+                for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                    if (used.contains(candidateRow * columns + candidateCol)) continue;
+                    int distance = Math.abs(candidateCol - preferredCol)
+                            + Math.abs(candidateRow - preferredRow);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestCol = candidateCol;
+                        bestRow = candidateRow;
+                    }
+                }
+            }
+            if (bestCol >= 0) {
+                col = bestCol;
+                row = bestRow;
+            }
+        }
+        used.add(row * columns + col);
+
+        FrameLayout.LayoutParams lp = item.getLayoutParams()
+                instanceof FrameLayout.LayoutParams
+                ? (FrameLayout.LayoutParams) item.getLayoutParams()
+                : new FrameLayout.LayoutParams(cellWidth, cellHeight,
+                        Gravity.TOP | Gravity.LEFT);
+        lp.width = cellWidth;
+        lp.height = cellHeight;
+        lp.leftMargin = col * cellWidth;
+        lp.topMargin = host.getHomeGridRowTop(row, rows, page.getHeight(), cellHeight);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        ViewParent parent = item.getParent();
+        if (parent != page) {
+            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(item);
+            page.addView(item, lp);
+        } else {
+            item.setLayoutParams(lp);
+        }
+        item.setTranslationX(0f);
+        item.setTranslationY(0f);
+        item.setRotationX(0f);
+        item.setRotationY(0f);
+        if (col != preferredCol || row != preferredRow) {
+            prefs.edit().putFloat(activeX, col / (float) (columns - 1))
+                    .putFloat(activeY, row / (float) Math.max(1, rows - 1)).apply();
         }
     }
 

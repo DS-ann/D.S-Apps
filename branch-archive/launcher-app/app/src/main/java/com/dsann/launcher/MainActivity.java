@@ -9915,6 +9915,15 @@ public class MainActivity extends Activity {
                                         moveHomeAppIntoGroup(dropTargetGroupId, packageName));
                         return true;
                     }
+                    // Landscape app placement uses a deterministic grid transaction at release.
+                    // The live push planner is only a preview: its animation-frame geometry
+                    // must not decide whether the committed grid slot is accepted.
+                    if (isLandscapeWorkspace()) {
+                        finishLandscapeManualAppDrop(view, sourceView, targetPage,
+                                sourcePage, destinationPage, movedAcrossPage, targetCol, targetRow,
+                                columns, rows, cellWidth, cellHeight, boundaryHasMajorityCell);
+                        return true;
+                    }
                     int proposedIconLeft = targetCol * cellWidth;
                     int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
                     FrameLayout.LayoutParams snappedCandidate =
@@ -17948,6 +17957,339 @@ public class MainActivity extends Activity {
                 resolveAllWorkspaceOverlaps(page, null);
             });
         }
+    }
+
+    /**
+     * Ends a landscape app drag without letting animated preview positions become
+     * canonical. Roll back temporary displacement first, then validate and commit one
+     * complete grid transaction on the destination page.
+     */
+    private void finishLandscapeManualAppDrop(View movingView, FrameLayout sourcePageView,
+            FrameLayout targetPage, int sourcePage, int destinationPage, boolean movedAcrossPage,
+            int targetCol, int targetRow, int columns, int rows, int cellWidth, int cellHeight,
+            boolean validGridDrop) {
+        if (movingView == null || sourcePageView == null || targetPage == null
+                || !(movingView.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
+
+        int sourceCellWidth = Math.max(1, homeGridCellWidthPx(
+                sourcePageView, getHomeColumns(), sourcePageView.getWidth()));
+        int sourceCellHeight = LauncherUiUtils.dp(this,
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+        movingView.animate().cancel();
+        movingView.setTranslationX(0f);
+        movingView.setTranslationY(0f);
+        movingView.setScaleX(1f);
+        movingView.setScaleY(1f);
+        movingView.setAlpha(1f);
+        movingView.setVisibility(View.VISIBLE);
+        FrameLayout.LayoutParams origin =
+                (FrameLayout.LayoutParams) movingView.getLayoutParams();
+        origin.leftMargin = iconOriginalLeft;
+        origin.topMargin = iconOriginalTop;
+        origin.width = sourceCellWidth;
+        origin.height = sourceCellHeight;
+        origin.gravity = Gravity.TOP | Gravity.LEFT;
+        movingView.setLayoutParams(origin);
+
+        // A cross-page preview displaces items around its temporary proxy. Same-page
+        // preview displaces items around the real icon. Both are rolled back identically.
+        View previewMover = workspaceTransferProxy != null
+                ? workspaceTransferProxy : movingView;
+        if (!liveDisplacedItems.isEmpty() || !liveDisplacementTargets.isEmpty()) {
+            finishLiveDisplacements(false, previewMover);
+        }
+        liveDragRejectedMoves.remove(movingView);
+        finishWorkspaceTransferDrag(movingView, false);
+
+        if (validGridDrop && movedAcrossPage) {
+            ViewParent parent = movingView.getParent();
+            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(movingView);
+            FrameLayout.LayoutParams destinationParams = new FrameLayout.LayoutParams(
+                    cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
+            destinationParams.leftMargin = iconOriginalLeft;
+            destinationParams.topMargin = iconOriginalTop;
+            targetPage.addView(movingView, destinationParams);
+        }
+
+        boolean committed = validGridDrop && commitLandscapeAppGridDrop(
+                targetPage, movingView, sourcePage, destinationPage, targetCol, targetRow,
+                columns, rows, cellWidth, cellHeight);
+        if (!committed && movedAcrossPage && movingView.getParent() == targetPage) {
+            ViewParent parent = movingView.getParent();
+            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(movingView);
+            FrameLayout.LayoutParams rollback = new FrameLayout.LayoutParams(
+                    sourceCellWidth, sourceCellHeight, Gravity.TOP | Gravity.LEFT);
+            rollback.leftMargin = iconOriginalLeft;
+            rollback.topMargin = iconOriginalTop;
+            sourcePageView.addView(movingView, rollback);
+        }
+        if (validGridDrop && !committed) showWorkspaceOverlapRejected();
+        if (!validGridDrop) {
+            Toast.makeText(this,
+                    "Move at least half of the drag boundary into a grid cell.",
+                    Toast.LENGTH_SHORT).show();
+        }
+
+        if (committed && movedAcrossPage) rebuildPages();
+        restoreIconDragPageVisuals();
+        setWorkspaceGridVisible(false, null);
+        iconDragging = false;
+        iconDragArmed = false;
+        activeDragView = null;
+        activeDragPackage = null;
+        iconDragPageIndex = -1;
+        iconOriginalPageIndex = -1;
+        iconEdgeLatch = 0;
+        currentPage = committed ? destinationPage : sourcePage;
+        renderHomePages(false);
+        showPage(currentPage, false);
+    }
+
+    /**
+     * Resolves a manual landscape drop as an all-at-once grid assignment. If the
+     * requested cell is occupied, push the contiguous app chain toward a free slot;
+     * if no straight chain fits, move the target occupant to the nearest legal cell.
+     * Widgets, groups, clocks and shortcuts remain non-bypassable obstacles.
+     */
+    private boolean commitLandscapeAppGridDrop(FrameLayout page, View movingView,
+            int sourcePage, int destinationPage, int targetCol, int targetRow,
+            int columns, int rows, int cellWidth, int cellHeight) {
+        if (page == null || movingView == null || !isWorkspaceAppIcon(movingView)
+                || page.getWidth() <= 0 || page.getHeight() <= 0
+                || columns <= 0 || rows <= 0 || cellWidth <= 0 || cellHeight <= 0
+                || targetCol < 0 || targetCol >= columns
+                || targetRow < 0 || targetRow >= rows || !isLandscapeWorkspace()) return false;
+
+        int targetLeft = targetCol * cellWidth;
+        int targetTop = homeGridRowTop(targetRow, rows, page.getHeight(), cellHeight);
+        if (targetLeft < 0 || targetTop < 0
+                || targetLeft + cellWidth > page.getWidth()
+                || targetTop + cellHeight > page.getHeight()
+                || landscapeAppSlotBlockedByFixedItem(page, movingView, targetCol, targetRow,
+                        columns, rows, cellWidth, cellHeight)) return false;
+
+        int sourceCol = Math.max(0, Math.min(columns - 1,
+                Math.round(iconOriginalLeft / (float) cellWidth)));
+        int sourceRow = homeGridRowFromTop(iconOriginalTop, rows, page.getHeight(), cellHeight);
+        int targetKey = targetRow * columns + targetCol;
+        java.util.HashMap<Integer, java.util.ArrayList<View>> slotItems =
+                new java.util.HashMap<Integer, java.util.ArrayList<View>>();
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingView || !isWorkspaceAppIcon(other)
+                    || !(other.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) other.getLayoutParams();
+            int col = Math.max(0, Math.min(columns - 1,
+                    Math.round(lp.leftMargin / (float) cellWidth)));
+            int row = homeGridRowFromTop(lp.topMargin, rows, page.getHeight(), cellHeight);
+            int key = row * columns + col;
+            java.util.ArrayList<View> members = slotItems.get(key);
+            if (members == null) {
+                members = new java.util.ArrayList<View>();
+                slotItems.put(key, members);
+            }
+            members.add(other);
+        }
+
+        boolean[][] occupied = new boolean[rows][columns];
+        for (java.util.Map.Entry<Integer, java.util.ArrayList<View>> entry : slotItems.entrySet()) {
+            int key = entry.getKey();
+            if (key != targetKey) occupied[key / columns][key % columns] = true;
+        }
+        occupied[targetRow][targetCol] = true;
+
+        java.util.IdentityHashMap<View, int[]> destinations =
+                new java.util.IdentityHashMap<View, int[]>();
+        java.util.ArrayList<View> overflowedDuplicates = new java.util.ArrayList<View>();
+        java.util.ArrayList<View> targetOccupants = slotItems.get(targetKey);
+
+        // Clear legacy duplicate app slots as part of this same assignment.
+        for (java.util.Map.Entry<Integer, java.util.ArrayList<View>> entry : slotItems.entrySet()) {
+            if (entry.getKey() == targetKey || entry.getValue().size() < 2) continue;
+            for (int i = 1; i < entry.getValue().size(); i++) {
+                overflowedDuplicates.add(entry.getValue().get(i));
+            }
+        }
+
+        int pushX = Integer.signum(targetCol - sourceCol);
+        int pushY = Integer.signum(targetRow - sourceRow);
+        if (targetOccupants != null && !targetOccupants.isEmpty()) {
+            View primaryOccupant = targetOccupants.get(0);
+            java.util.ArrayList<int[]> directions = new java.util.ArrayList<int[]>();
+            java.util.HashSet<String> seenDirections = new java.util.HashSet<String>();
+            if (Math.abs(pushX) >= Math.abs(pushY)) {
+                addLandscapePushDirection(directions, seenDirections, pushX, 0);
+                addLandscapePushDirection(directions, seenDirections, 0, pushY);
+                addLandscapePushDirection(directions, seenDirections, 0, -pushY);
+                addLandscapePushDirection(directions, seenDirections, -pushX, 0);
+            } else {
+                addLandscapePushDirection(directions, seenDirections, 0, pushY);
+                addLandscapePushDirection(directions, seenDirections, pushX, 0);
+                addLandscapePushDirection(directions, seenDirections, -pushX, 0);
+                addLandscapePushDirection(directions, seenDirections, 0, -pushY);
+            }
+            addLandscapePushDirection(directions, seenDirections, 1, 0);
+            addLandscapePushDirection(directions, seenDirections, -1, 0);
+            addLandscapePushDirection(directions, seenDirections, 0, 1);
+            addLandscapePushDirection(directions, seenDirections, 0, -1);
+
+            java.util.ArrayList<int[]> selectedPath = null;
+            for (int[] direction : directions) {
+                if (direction[0] == 0 && direction[1] == 0) continue;
+                java.util.ArrayList<int[]> path = new java.util.ArrayList<int[]>();
+                path.add(new int[]{targetCol, targetRow});
+                boolean foundFreeEnd = false;
+                for (int step = 1; step <= Math.max(columns, rows); step++) {
+                    int col = targetCol + direction[0] * step;
+                    int row = targetRow + direction[1] * step;
+                    if (col < 0 || col >= columns || row < 0 || row >= rows) break;
+                    if (landscapeAppSlotBlockedByFixedItem(page, primaryOccupant,
+                            col, row, columns, rows, cellWidth, cellHeight)) break;
+                    path.add(new int[]{col, row});
+                    java.util.ArrayList<View> members = slotItems.get(row * columns + col);
+                    if (members == null || members.isEmpty()) {
+                        foundFreeEnd = true;
+                        break;
+                    }
+                }
+                if (foundFreeEnd) {
+                    selectedPath = path;
+                    break;
+                }
+            }
+
+            if (selectedPath != null && selectedPath.size() >= 2) {
+                // Assign from the free end back toward the requested cell.
+                for (int pathIndex = selectedPath.size() - 2; pathIndex >= 0; pathIndex--) {
+                    int[] from = selectedPath.get(pathIndex);
+                    int[] to = selectedPath.get(pathIndex + 1);
+                    java.util.ArrayList<View> members = pathIndex == 0
+                            ? targetOccupants : slotItems.get(from[1] * columns + from[0]);
+                    if (members == null || members.isEmpty()) continue;
+                    destinations.put(members.get(0), new int[]{to[0], to[1]});
+                    if (pathIndex != 0) {
+                        for (int extra = 1; extra < members.size(); extra++) {
+                            overflowedDuplicates.add(members.get(extra));
+                        }
+                    }
+                    occupied[to[1]][to[0]] = true;
+                }
+                for (int extra = 1; extra < targetOccupants.size(); extra++) {
+                    overflowedDuplicates.add(targetOccupants.get(extra));
+                }
+            } else {
+                int[] free = findLandscapeManualFreeGridSlot(page, primaryOccupant, occupied,
+                        columns, rows, cellWidth, cellHeight, targetCol, targetRow, pushX, pushY);
+                if (free == null) return false;
+                destinations.put(primaryOccupant, free);
+                occupied[free[1]][free[0]] = true;
+                for (int extra = 1; extra < targetOccupants.size(); extra++) {
+                    overflowedDuplicates.add(targetOccupants.get(extra));
+                }
+            }
+        }
+
+        java.util.IdentityHashMap<View, Boolean> duplicateSet =
+                new java.util.IdentityHashMap<View, Boolean>();
+        for (View duplicate : overflowedDuplicates) duplicateSet.put(duplicate, Boolean.TRUE);
+        for (View duplicate : duplicateSet.keySet()) {
+            int[] currentSlot = homeGridIconSlot(page, duplicate, cellHeight, rows);
+            int preferredCol = currentSlot == null ? targetCol : currentSlot[0];
+            int preferredRow = currentSlot == null ? targetRow : currentSlot[1];
+            int[] free = findLandscapeManualFreeGridSlot(page, duplicate, occupied,
+                    columns, rows, cellWidth, cellHeight, preferredCol, preferredRow,
+                    pushX, pushY);
+            if (free == null) return false;
+            destinations.put(duplicate, free);
+            occupied[free[1]][free[0]] = true;
+        }
+
+        destinations.put(movingView, new int[]{targetCol, targetRow});
+        // Nothing is written until the entire plan has enough legal cells.
+        for (java.util.Map.Entry<View, int[]> entry : destinations.entrySet()) {
+            View item = entry.getKey();
+            int[] slot = entry.getValue();
+            setLandscapeAppGridCell(page, item, slot[0], slot[1], rows, cellWidth, cellHeight);
+            String tag = String.valueOf(item.getTag());
+            String itemPackage = tag.substring("launcher_app:".length());
+            int itemPage = item == movingView ? destinationPage : pageIndex;
+            saveIconSlot(itemPackage, slot[0], slot[1], columns, page.getHeight());
+            prefs.edit().putInt(KEY_ICON_PAGE + itemPackage, itemPage).apply();
+        }
+        return true;
+    }
+
+    private void addLandscapePushDirection(java.util.ArrayList<int[]> directions,
+            java.util.HashSet<String> seen, int dx, int dy) {
+        if (dx == 0 && dy == 0) return;
+        String key = dx + "," + dy;
+        if (seen.add(key)) directions.add(new int[]{dx, dy});
+    }
+
+    private int[] findLandscapeManualFreeGridSlot(FrameLayout page, View appCell,
+            boolean[][] occupied, int columns, int rows, int cellWidth, int cellHeight,
+            int preferredCol, int preferredRow, int pushX, int pushY) {
+        int bestCol = -1;
+        int bestRow = -1;
+        long bestScore = Long.MAX_VALUE;
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < columns; col++) {
+                if (occupied[row][col] || landscapeAppSlotBlockedByFixedItem(
+                        page, appCell, col, row, columns, rows, cellWidth, cellHeight)) continue;
+                int dx = col - preferredCol;
+                int dy = row - preferredRow;
+                long distance = Math.abs(dx) + Math.abs(dy);
+                long projection = (long) dx * pushX + (long) dy * pushY;
+                long againstPushPenalty = (pushX != 0 || pushY != 0) && projection < 0L
+                        ? 10000L : 0L;
+                long score = distance * 1000L + againstPushPenalty + Math.abs(dy) * 10L + col;
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestCol = col;
+                    bestRow = row;
+                }
+            }
+        }
+        return bestCol < 0 ? null : new int[]{bestCol, bestRow};
+    }
+
+    private boolean landscapeAppSlotBlockedByFixedItem(FrameLayout page, View appCell,
+            int col, int row, int columns, int rows, int cellWidth, int cellHeight) {
+        if (page == null || appCell == null || col < 0 || col >= columns
+                || row < 0 || row >= rows || cellWidth <= 0 || cellHeight <= 0) return true;
+        int left = col * cellWidth;
+        int top = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+        if (left < 0 || top < 0 || left + cellWidth > page.getWidth()
+                || top + cellHeight > page.getHeight()) return true;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == appCell || other == workspaceTransferProxy
+                    || isWorkspaceAppIcon(other) || !isWorkspaceItem(other)) continue;
+            int[] geometry = itemGeometry(other);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+            android.graphics.Rect candidate = collisionRectAtForInteraction(
+                    appCell, left, top, cellWidth, cellHeight, other);
+            android.graphics.Rect obstacle =
+                    collisionRectForInteraction(other, geometry, appCell);
+            if (android.graphics.Rect.intersects(candidate, obstacle)) return true;
+        }
+        return false;
+    }
+
+    private void setLandscapeAppGridCell(FrameLayout page, View item, int col, int row,
+            int rows, int cellWidth, int cellHeight) {
+        if (page == null || item == null || !(item.getLayoutParams()
+                instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
+        lp.width = cellWidth;
+        lp.height = cellHeight;
+        lp.leftMargin = col * cellWidth;
+        lp.topMargin = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        item.setTranslationX(0f);
+        item.setTranslationY(0f);
+        item.setVisibility(View.VISIBLE);
+        item.setLayoutParams(lp);
     }
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
