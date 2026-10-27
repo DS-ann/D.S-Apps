@@ -9957,9 +9957,6 @@ public class MainActivity extends Activity {
                         }
                         return true;
                     }
-                    // The exact snapped destination already passed canPlaceWorkspaceItem above.
-                    // Do not carry a transient frame-level collision rejection into commit.
-                    liveDragRejectedMoves.remove(view);
                     int sourceConfiguredColumns = getHomeColumns();
                     int sourceCellWidth = homeGridCellWidthPx(
                             sourceView, sourceConfiguredColumns, sourceView.getWidth());
@@ -10083,9 +10080,13 @@ public class MainActivity extends Activity {
                         // solely its temporary destination-page proxy.
                         updateLiveDisplacements(targetPage, view);
                     }
+                    // The exact release rectangle passed canPlaceWorkspaceItem before this
+                    // transaction. Do not let a stale MOVE-frame rejection or a second collision
+                    // plan during neighbour animations roll that valid drop back to its old slot.
+                    liveDragRejectedMoves.remove(view);
                     finishWorkspaceTransferDrag(view, true);
                     int committedPage = destinationPage;
-                    boolean displacementAccepted = finishLiveDisplacements(true, view);
+                    boolean displacementAccepted = finishLiveDisplacements(true, view, false);
                     if (!displacementAccepted) {
                         // Do not persist a drop after the live displacement planner has
                         // rejected its transaction. In particular, undo an app/app swap
@@ -16260,11 +16261,22 @@ public class MainActivity extends Activity {
 
     /** Finalize temporary push-aside positions on drop, or roll them back on cancel. */
     private boolean finishLiveDisplacements(boolean commit, View movingView) {
+        return finishLiveDisplacements(commit, movingView, true);
+    }
+
+    /**
+     * Finalize a live displacement transaction. A caller that has already validated an
+     * exact release slot can disable the extra planner pass: during that pass, neighbours
+     * are still part-way through their animations and can cause a valid drop to be rejected.
+     */
+    private boolean finishLiveDisplacements(
+            boolean commit, View movingView, boolean revalidatePendingMove) {
         FrameLayout pendingPage = pendingLiveDisplacementPage;
         View pendingMover = pendingLiveDisplacementMover;
         cancelPendingLiveDisplacementUpdate();
         boolean rejected = commit && Boolean.TRUE.equals(liveDragRejectedMoves.get(movingView));
-        if (commit && !rejected && pendingPage != null && pendingMover == movingView
+        if (commit && revalidatePendingMove && !rejected
+                && pendingPage != null && pendingMover == movingView
                 && pendingMover.getParent() == pendingPage) {
             updateLiveDisplacements(pendingPage, pendingMover);
         }
