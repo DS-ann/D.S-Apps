@@ -14236,6 +14236,19 @@ public class MainActivity extends Activity {
         return isWorkspaceContactShortcut(item) ? 4 : Math.max(1, getHomeColumns());
     }
 
+    /**
+     * Landscape app icons use the preserved portrait cell pitch across the usable
+     * width. Keep this separate from the configured column count because the pitch
+     * helper must continue dividing by the configured grid, not the expanded count.
+     */
+    private int homeGridPlacementColumnsForItem(FrameLayout page, View item) {
+        int configuredColumns = homeGridColumnsForItem(item);
+        if (isWorkspaceAppIcon(item) && page != null && page.getWidth() > 0) {
+            return homeGridPlacementColumns(page, configuredColumns, page.getWidth());
+        }
+        return configuredColumns;
+    }
+
     private int homeGridIconLeftAt(View item, int col, int cellWidth, int fallbackWidth) {
         if (isWorkspaceAppIcon(item)) return col * cellWidth;
         int width = Math.max(1, fallbackWidth);
@@ -14256,9 +14269,10 @@ public class MainActivity extends Activity {
         if (page == null || item == null
                 || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return null;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) item.getLayoutParams();
-        int columns = homeGridColumnsForItem(item);
-        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
-        int col = Math.max(0, Math.min(columns - 1,
+        int configuredColumns = homeGridColumnsForItem(item);
+        int placementColumns = homeGridPlacementColumnsForItem(page, item);
+        int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
+        int col = Math.max(0, Math.min(placementColumns - 1,
                 Math.round(lp.leftMargin / (float) cellWidth)));
         int row = homeGridRowFromTop(lp.topMargin, rows, page.getHeight(), cellHeight);
         return new int[]{col, row};
@@ -15696,13 +15710,14 @@ public class MainActivity extends Activity {
         xs.add(0); ys.add(0); xs.add(maxX); ys.add(maxY);
         boolean appIcon = isHomeGridIcon(item);
         if (appIcon) {
-            int columns = homeGridColumnsForItem(item);
-            int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+            int configuredColumns = homeGridColumnsForItem(item);
+            int placementColumns = homeGridPlacementColumnsForItem(page, item);
+            int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
             int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             xs.clear(); ys.clear();
-            for (int col = 0; col < columns; col++) {
+            for (int col = 0; col < placementColumns; col++) {
                 int x = homeGridIconLeftAt(item, col, cellWidth, width);
                 if (x + width <= page.getWidth()) xs.add(x);
             }
@@ -15964,8 +15979,9 @@ public class MainActivity extends Activity {
                 // their origins can only be chosen from legal grid slots.
                 xs.clear();
                 ys.clear();
-                int columns = homeGridColumnsForItem(item);
-                int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+                int configuredColumns = homeGridColumnsForItem(item);
+                int placementColumns = homeGridPlacementColumnsForItem(page, item);
+                int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -15978,7 +15994,7 @@ public class MainActivity extends Activity {
                 }
                 maxX = Math.max(0, page.getWidth() - w);
                 maxY = Math.max(0, page.getHeight() - h);
-                for (int col = 0; col < columns; col++) {
+                for (int col = 0; col < placementColumns; col++) {
                     int x = homeGridIconLeftAt(item, col, cellWidth, w);
                     if (x <= maxX) xs.add(x);
                 }
@@ -15996,8 +16012,10 @@ public class MainActivity extends Activity {
                     && g[0] + w <= page.getWidth() && g[1] + h <= page.getHeight();
             boolean currentOnLegalGridSlot = true;
             if (isHomeGridIcon(item)) {
-                int gridColumns = homeGridColumnsForItem(item);
-                int gridCellWidth = homeGridCellWidthPx(page, gridColumns, page.getWidth());
+                int configuredGridColumns = homeGridColumnsForItem(item);
+                int gridColumns = homeGridPlacementColumnsForItem(page, item);
+                int gridCellWidth = homeGridCellWidthPx(
+                        page, configuredGridColumns, page.getWidth());
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int gridCellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int gridRows = homeGridRowsForHeight(page.getHeight(), gridCellHeight);
@@ -17748,7 +17766,8 @@ public class MainActivity extends Activity {
         }
         int width = pageViewport.getWidth();
         int height = pageViewport.getHeight();
-        if (width <= 0 || height <= 0) return false;
+        if (width <= 0 || height <= 0
+                || (width > height) != isLandscapeWorkspace()) return false;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
             View child = pagesStrip.getChildAt(i);
             if (!(child instanceof FrameLayout)
@@ -17773,7 +17792,8 @@ public class MainActivity extends Activity {
         final int expectedGeneration = workspaceViewportGeneration;
         final int expectedWidth = pageViewport.getWidth();
         final int expectedHeight = pageViewport.getHeight();
-        if (expectedWidth <= 0 || expectedHeight <= 0) return;
+        if (expectedWidth <= 0 || expectedHeight <= 0
+                || (expectedWidth > expectedHeight) != expectedLandscape) return;
         int pageCount = Math.min(2, pagesStrip.getChildCount());
         if (pageCount < 1) return;
         for (int i = 0; i < pageCount; i++) {
