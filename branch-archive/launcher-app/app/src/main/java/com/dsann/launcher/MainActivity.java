@@ -13553,8 +13553,9 @@ public class MainActivity extends Activity {
                 || !isHomeGridDragMover(movingView) || !isHomeGridIcon(seed)
                 || page.getWidth() <= 0 || page.getHeight() <= 0) return false;
 
-        int columns = homeGridColumnsForItem(seed);
-        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+        int configuredColumns = homeGridColumnsForItem(seed);
+        int columns = homeGridPlacementColumnsForItem(page, seed);
+        int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -13756,8 +13757,9 @@ public class MainActivity extends Activity {
         if (tryShiftHomeIconLaneCohort(page, movingView, seed,
                 preferredX, preferredY, pushDx, pushDy)) return true;
 
-        int columns = homeGridColumnsForItem(seed);
-        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+        int configuredColumns = homeGridColumnsForItem(seed);
+        int columns = homeGridPlacementColumnsForItem(page, seed);
+        int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -14385,8 +14387,9 @@ public class MainActivity extends Activity {
         if (page == null || appItem == null || page.getWidth() <= 0 || page.getHeight() <= 0) {
             return null;
         }
-        int columns = getHomeColumns();
-        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+        int configuredColumns = Math.max(1, getHomeColumns());
+        int columns = homeGridPlacementColumnsForItem(page, appItem);
+        int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
         int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
         int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
         int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
@@ -15343,8 +15346,9 @@ public class MainActivity extends Activity {
             long bestScore = Long.MAX_VALUE;
             if (isHomeGridIcon(other)) {
                 // App cells must remain snapped to the home grid during displacement.
-                int columns = homeGridColumnsForItem(other);
-                int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+                int configuredColumns = homeGridColumnsForItem(other);
+                int columns = homeGridPlacementColumnsForItem(page, other);
+                int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
                 int iconSize = prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48);
                 int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(iconSize));
                 int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
