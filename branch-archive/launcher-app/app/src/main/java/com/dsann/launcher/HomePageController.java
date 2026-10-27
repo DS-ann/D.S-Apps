@@ -1281,7 +1281,14 @@ final class HomePageController {
             View pageView = strip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pageView;
-            if (!pageMatchesCurrentViewport(page)) continue;
+            if (!pageMatchesCurrentViewport(page)) {
+                // Orientation transitions can briefly leave one page at its old bounds.
+                // Retry after that page adopts the current viewport; never leave its
+                // overflow icons hidden simply because this pass ran too early.
+                runAfterPageMatchesViewport(page, strip,
+                        () -> reflowLandscapeAppGrid(strip));
+                return;
+            }
             List<List<String>> allPages = host.getPages();
             if (allPages == null || pageIndex >= allPages.size()) continue;
             List<String> packages = allPages.get(pageIndex);
