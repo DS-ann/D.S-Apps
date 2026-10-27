@@ -367,8 +367,16 @@ final class HomePageController {
 
     private String workspaceGeometryKey(View item, boolean landscape) {
         if (item == null || !(item.getTag() instanceof String)) return null;
-        return (landscape ? LANDSCAPE_GEOMETRY_PREFIX : PORTRAIT_GEOMETRY_PREFIX)
-                + item.getTag();
+        String tag = (String) item.getTag();
+        if (tag.contains("shortcut")) {
+            CharSequence description = item.getContentDescription();
+            String value = description == null ? "" : description.toString();
+            String idPrefix = "launcher_shortcut_id:";
+            if (value.startsWith(idPrefix) && value.length() > idPrefix.length()) {
+                tag += ":" + value.substring(idPrefix.length());
+            }
+        }
+        return (landscape ? LANDSCAPE_GEOMETRY_PREFIX : PORTRAIT_GEOMETRY_PREFIX) + tag;
     }
 
     private int pageIndexOf(View item, LinearLayout strip) {
@@ -1575,6 +1583,60 @@ final class HomePageController {
                 }
             }
 
+            // Pin every valid saved landscape slot before allocating anything else.
+            // Without this first pass, an earlier stale/duplicate item could steal a later
+            // icon's saved cell and make some successful manual moves appear to revert.
+            java.util.HashSet<String> pinnedPackages = new java.util.HashSet<String>();
+            for (int itemIndex = 0; itemIndex < packages.size(); itemIndex++) {
+                String packageName = packages.get(itemIndex);
+                View appCell = null;
+                String wantedTag = "launcher_app:" + packageName;
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View child = page.getChildAt(childIndex);
+                    if (child != null && wantedTag.equals(child.getTag())) {
+                        appCell = child;
+                        break;
+                    }
+                }
+                if (appCell == null) continue;
+
+                int defaultCol = itemIndex % columns;
+                int defaultRow = Math.min(rows - 1, itemIndex / columns);
+                float savedY = savedAppCoordinate(packageName, false, true,
+                        defaultRow / (float) Math.max(1, rows - 1));
+                int preferredCol = savedAppColumn(packageName, true, columns,
+                        placementColumns, defaultCol);
+                int preferredRow = Math.max(0, Math.min(rows - 1,
+                        Math.round(savedY * Math.max(1, rows - 1))));
+                if (placedAppSlots[preferredRow][preferredCol]) continue;
+
+                int left = preferredCol * cellWidth;
+                int top = host.getHomeGridRowTop(preferredRow, rows, pageHeight, cellHeight);
+                if (left < 0 || top < 0 || left + cellWidth > pageWidth
+                        || top + cellHeight > pageHeight) continue;
+                Rect target = appVisibleBoundsAtPosition(
+                        appCell, left, top, cellWidth, cellHeight);
+                if (target.left < 0 || target.top < 0 || target.right > pageWidth
+                        || target.bottom > pageHeight || overlapsAny(target, fixedBounds)) continue;
+
+                FrameLayout.LayoutParams pinnedLp = appCell.getLayoutParams()
+                        instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) appCell.getLayoutParams()
+                        : new FrameLayout.LayoutParams(cellWidth, cellHeight,
+                                Gravity.TOP | Gravity.LEFT);
+                pinnedLp.width = cellWidth;
+                pinnedLp.height = cellHeight;
+                pinnedLp.leftMargin = left;
+                pinnedLp.topMargin = top;
+                pinnedLp.gravity = Gravity.TOP | Gravity.LEFT;
+                appCell.setLayoutParams(pinnedLp);
+                appCell.setVisibility(View.VISIBLE);
+                gridOverflowHiddenAppCells.remove(appCell);
+                placedAppSlots[preferredRow][preferredCol] = true;
+                pinnedPackages.add(packageName);
+                saveLandscapeAppColumn(packageName, preferredCol);
+            }
+
             // Reserve only actual fixed-item layout bounds. For each app, test its visible
             // icon/label footprint against those bounds instead of blocking a whole cell
             // because empty padding in that cell touches a widget or clock.
@@ -1590,6 +1652,7 @@ final class HomePageController {
                     }
                 }
                 if (appCell == null) continue;
+                if (pinnedPackages.contains(packageName)) continue;
 
                 int defaultCol = itemIndex % columns;
                 int defaultRow = Math.min(rows - 1, itemIndex / columns);

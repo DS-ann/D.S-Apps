@@ -9925,8 +9925,45 @@ public class MainActivity extends Activity {
                     view.setTranslationY(0f);
                     view.setLayoutParams(snappedCandidate);
                     if (boundaryHasMajorityCell) updateLiveDisplacements(targetPage, view);
-                    if (!boundaryHasMajorityCell || !canPlaceWorkspaceItem(targetPage, view,
-                            proposedIconLeft, proposedIconTop, cellWidth, cellHeight)) {
+                    boolean canPlaceDestination = boundaryHasMajorityCell
+                            && canPlaceWorkspaceItem(targetPage, view, proposedIconLeft,
+                                    proposedIconTop, cellWidth, cellHeight);
+                    View landscapeSwapFallbackOccupant = null;
+                    if (!canPlaceDestination && boundaryHasMajorityCell
+                            && isLandscapeWorkspace() && !movedAcrossPage) {
+                        View candidate = findLandscapeSwapFallbackOccupant(targetPage, view,
+                                proposedIconLeft, proposedIconTop, cellWidth, cellHeight,
+                                targetCol, targetRow, cellWidth, cellHeight, rows);
+                        if (candidate != null) {
+                            // Validate the reverse half of the swap using the same source
+                            // grid metrics. No other workspace item may occupy that source slot.
+                            int fallbackSourceConfiguredColumns = getHomeColumns();
+                            int fallbackSourceCellWidth = homeGridCellWidthPx(
+                                    sourceView, fallbackSourceConfiguredColumns, sourceView.getWidth());
+                            int fallbackSourceCellHeight = slotHeight;
+                            int fallbackSourceRows = homeGridRowsForHeight(
+                                    sourceView.getHeight(), fallbackSourceCellHeight);
+                            int fallbackSourcePlacementColumns = homeGridPlacementColumns(
+                                    sourceView, fallbackSourceConfiguredColumns, sourceView.getWidth());
+                            int fallbackSourceCol = Math.max(0, Math.min(
+                                    fallbackSourcePlacementColumns - 1,
+                                    Math.round(iconOriginalLeft / (float) fallbackSourceCellWidth)));
+                            int fallbackSourceRow = homeGridRowFromTop(
+                                    iconOriginalTop, fallbackSourceRows,
+                                    sourceView.getHeight(), fallbackSourceCellHeight);
+                            int fallbackSourceLeft = fallbackSourceCol * fallbackSourceCellWidth;
+                            int fallbackSourceTop = homeGridRowTop(fallbackSourceRow,
+                                    fallbackSourceRows, sourceView.getHeight(),
+                                    fallbackSourceCellHeight);
+                            if (canPlaceWorkspaceItem(sourceView, candidate,
+                                    fallbackSourceLeft, fallbackSourceTop,
+                                    fallbackSourceCellWidth, fallbackSourceCellHeight)) {
+                                landscapeSwapFallbackOccupant = candidate;
+                                canPlaceDestination = true;
+                            }
+                        }
+                    }
+                    if (!boundaryHasMajorityCell || !canPlaceDestination) {
                         FrameLayout.LayoutParams rollbackParams =
                                 (FrameLayout.LayoutParams) view.getLayoutParams();
                         rollbackParams.leftMargin = iconOriginalLeft;
@@ -9970,9 +10007,10 @@ public class MainActivity extends Activity {
                     int sourceRow = homeGridRowFromTop(
                             iconOriginalTop, sourceRows, sourceView.getHeight(), sourceCellHeight);
                     boolean[][] occupied = new boolean[rows][columns];
-                    View occupant = null;
-                    String otherPackage = null;
-                    for (int i = 0; i < targetPage.getChildCount(); i++) {
+                    View occupant = landscapeSwapFallbackOccupant;
+                    String otherPackage = occupant != null
+                            ? ((String) occupant.getTag()).substring("launcher_app:".length()) : null;
+                    if (occupant == null) for (int i = 0; i < targetPage.getChildCount(); i++) {
                         View candidate = targetPage.getChildAt(i);
                         if (candidate == view || !(candidate.getTag() instanceof String)
                                 || !((String) candidate.getTag()).startsWith("launcher_app:")) continue;
@@ -10001,6 +10039,12 @@ public class MainActivity extends Activity {
                     // searching for a free cell and leaving the original shortcut behind.
                     // For a cross-page move, the displaced shortcut returns to the source page.
                     if (occupant != null && otherPackage != null) {
+                        if (landscapeSwapFallbackOccupant == occupant) {
+                            // This app is now the explicit reverse half of the swap, not
+                            // a live-push participant; keep the finalizer from restoring it.
+                            liveDisplacedItems.remove(occupant);
+                            liveDisplacementTargets.remove(occupant);
+                        }
                         FrameLayout.LayoutParams otherLp =
                                 (FrameLayout.LayoutParams) occupant.getLayoutParams();
                         otherLp.width = sourceCellWidth;
@@ -14693,6 +14737,59 @@ public class MainActivity extends Activity {
      * Returns true only when the proposed visible footprint fits in its page and
      * does not intersect another workspace item. Neighbours are never shifted or resized.
      */
+
+    /**
+     * Landscape-only fallback for a manual app drop onto an app that the live
+     * displacement planner could not move. It allows the existing atomic swap path
+     * only when exactly one unreserved app icon occupies the requested grid cell.
+     */
+    private View findLandscapeSwapFallbackOccupant(
+            FrameLayout page, View movingView, int left, int top, int width, int height,
+            int targetCol, int targetRow, int cellWidth, int cellHeight, int rows) {
+        if (!isLandscapeWorkspace() || page == null || movingView == null
+                || !isWorkspaceAppIcon(movingView) || page.getWidth() <= 0
+                || page.getHeight() <= 0 || width <= 0 || height <= 0
+                || left < 0 || top < 0 || left + width > page.getWidth()
+                || top + height > page.getHeight() || cellWidth <= 0
+                || cellHeight <= 0 || rows <= 0) return null;
+
+        View swapOccupant = null;
+        for (int i = 0; i < page.getChildCount(); i++) {
+            View other = page.getChildAt(i);
+            if (other == movingView || other == workspaceTransferProxy
+                    || !isWorkspaceItem(other)) continue;
+            int[] geometry = itemGeometry(other);
+            if (geometry[2] <= 0 || geometry[3] <= 0) continue;
+
+            int[] reserved = liveDisplacementTargets.get(other);
+            android.graphics.Rect candidate = collisionRectAtForInteraction(
+                    movingView, left, top, width, height, other);
+            android.graphics.Rect obstacle = reserved == null
+                    ? collisionRectForInteraction(other, geometry, movingView)
+                    : collisionRectAtForInteraction(other, reserved[0], reserved[1],
+                            geometry[2], geometry[3], movingView);
+            if (!android.graphics.Rect.intersects(candidate, obstacle)) continue;
+
+            if (reserved == null && isWorkspaceAppIcon(other)
+                    && other.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams otherLp =
+                        (FrameLayout.LayoutParams) other.getLayoutParams();
+                int otherCol = Math.max(0, Math.round(
+                        otherLp.leftMargin / (float) cellWidth));
+                int otherRow = homeGridRowFromTop(otherLp.topMargin, rows,
+                        page.getHeight(), cellHeight);
+                if (otherCol == targetCol && otherRow == targetRow) {
+                    if (swapOccupant != null) return null;
+                    swapOccupant = other;
+                    continue;
+                }
+            }
+            // Never bypass a widget, shortcut, app group, or a second colliding app.
+            return null;
+        }
+        return swapOccupant;
+    }
+
     private boolean canPlaceWorkspaceItem(FrameLayout page, View movingView,
             int left, int top, int width, int height) {
         if (page == null || movingView == null || width <= 0 || height <= 0
