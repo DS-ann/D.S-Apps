@@ -195,7 +195,10 @@ public class MainActivity extends Activity {
     private boolean homeRoleRequestAttempted = false;
     private int lastWorkspaceViewportWidth = -1;
     private int lastWorkspaceViewportHeight = -1;
-    private boolean workspaceViewportRefreshPending;
+    private int lastWorkspaceViewportOrientation = -1;
+    // Invalidate viewport callbacks queued before a later rotation or resize.
+    private int workspaceViewportGeneration;
+    private int workspaceViewportRefreshToken;
     // Registered on Android 13+ because targetSdk 37 no longer relies on legacy Back dispatch.
     private Object backInvokedCallback;
     private final java.util.Map<TextView, Integer> appliedClockStyles = new java.util.WeakHashMap<>();
@@ -4225,33 +4228,42 @@ public class MainActivity extends Activity {
         if (pageViewport == null) return;
         lastWorkspaceViewportWidth = pageViewport.getWidth();
         lastWorkspaceViewportHeight = pageViewport.getHeight();
+        lastWorkspaceViewportOrientation = getResources().getConfiguration().orientation;
         pageViewport.addOnLayoutChangeListener((view, left, top, right, bottom,
                 oldLeft, oldTop, oldRight, oldBottom) -> {
             int measuredWidth = right - left;
             int measuredHeight = bottom - top;
+            int measuredOrientation = getResources().getConfiguration().orientation;
             if (measuredWidth <= 0 || measuredHeight <= 0) return;
             if (measuredWidth == lastWorkspaceViewportWidth
-                    && measuredHeight == lastWorkspaceViewportHeight) return;
+                    && measuredHeight == lastWorkspaceViewportHeight
+                    && measuredOrientation == lastWorkspaceViewportOrientation) return;
             lastWorkspaceViewportWidth = measuredWidth;
             lastWorkspaceViewportHeight = measuredHeight;
+            lastWorkspaceViewportOrientation = measuredOrientation;
+            final int generation = ++workspaceViewportGeneration;
+            final int refreshToken = ++workspaceViewportRefreshToken;
+            final int expectedOrientation = measuredOrientation;
 
-            // Do this in the layout callback, not a later post, so no frame uses the
-            // previous orientation's page width or an in-flight transition transform.
+            // Align synchronously so no frame uses the previous orientation's page width.
             alignWorkspaceStripToViewport(measuredWidth);
-            if (workspaceViewportRefreshPending || homePageController == null
-                    || pagesStrip == null || isFinishing()
+            if (homePageController == null || pagesStrip == null || isFinishing()
                     || isChangingConfigurations() || isDestroyed()) return;
-            workspaceViewportRefreshPending = true;
             pageViewport.post(() -> {
-                workspaceViewportRefreshPending = false;
-                if (isFinishing() || isChangingConfigurations() || isDestroyed()
+                // A second rotation can happen before this callback runs. Only the newest
+                // callback may render or persist layout for the settled viewport.
+                if (refreshToken != workspaceViewportRefreshToken
+                        || generation != workspaceViewportGeneration
+                        || isFinishing() || isChangingConfigurations() || isDestroyed()
                         || pageViewport == null || pagesStrip == null
-                        || homePageController == null || pageViewport.getWidth() <= 0
-                        || pageViewport.getHeight() <= 0) return;
-                alignWorkspaceStripToViewport(pageViewport.getWidth());
+                        || homePageController == null
+                        || getResources().getConfiguration().orientation != expectedOrientation
+                        || pageViewport.getWidth() != measuredWidth
+                        || pageViewport.getHeight() != measuredHeight) return;
+                alignWorkspaceStripToViewport(measuredWidth);
                 renderHomePages(false);
                 showPage(currentPage, false);
-                alignWorkspaceStripToViewport(pageViewport.getWidth());
+                alignWorkspaceStripToViewport(measuredWidth);
             });
         });
     }
@@ -8143,6 +8155,7 @@ public class MainActivity extends Activity {
             if (attachedShortcutForRepair.getParent() == attachedPageForRepair
                     && pagesStrip != null
                     && attachedPageForRepair.getParent() == pagesStrip
+                    && isWorkspacePageReadyForCurrentOrientation(attachedPageForRepair)
                     && !homeIconResizeRepairPending) {
                 repairContactShortcutGridPositions(attachedPageForRepair);
                 resolveAllWorkspaceOverlaps(attachedPageForRepair, attachedShortcutForRepair);
@@ -8446,7 +8459,8 @@ public class MainActivity extends Activity {
                 }
             }
             page.post(() -> {
-                if (pagesStrip == null || page.getParent() != pagesStrip) return;
+                if (pagesStrip == null || page.getParent() != pagesStrip
+                        || !isWorkspacePageReadyForCurrentOrientation(page)) return;
                 if (!homeIconResizeRepairPending) {
                     repairContactShortcutGridPositions(page);
                     resolveAllWorkspaceOverlaps(page, null);
@@ -9995,7 +10009,7 @@ public class MainActivity extends Activity {
                         } else {
                             occupant.setLayoutParams(otherLp);
                         }
-                        saveIconSlot(otherPackage, sourceCol, sourceRow, columns);
+                        saveIconSlot(otherPackage, sourceCol, sourceRow, sourcePlacementColumns, sourceView.getHeight());
                         if (movedAcrossPage) {
                             prefs.edit().putInt(KEY_ICON_PAGE + otherPackage, sourcePage).apply();
                         }
@@ -10072,11 +10086,11 @@ public class MainActivity extends Activity {
                         // rejected its transaction. In particular, undo an app/app swap
                         // before rebuilding, or the rejected destination can be reflowed
                         // into a neighbouring cell and appear to have ignored the drop.
-                        saveIconSlot(packageName, sourceCol, sourceRow, columns);
+                        saveIconSlot(packageName, sourceCol, sourceRow, sourcePlacementColumns, sourceView.getHeight());
                         android.content.SharedPreferences.Editor restoreSlots = prefs.edit()
                                 .putInt(KEY_ICON_PAGE + packageName, sourcePage);
                         if (otherPackage != null) {
-                            saveIconSlot(otherPackage, targetCol, targetRow, columns);
+                            saveIconSlot(otherPackage, targetCol, targetRow, columns, targetHeight);
                             restoreSlots.putInt(KEY_ICON_PAGE + otherPackage, destinationPage);
                         }
                         restoreSlots.apply();
@@ -10094,7 +10108,7 @@ public class MainActivity extends Activity {
                         showPage(sourcePage, false);
                         return true;
                     }
-                    saveIconSlot(packageName, targetCol, targetRow, columns);
+                    saveIconSlot(packageName, targetCol, targetRow, columns, targetHeight);
                     prefs.edit().putInt(KEY_ICON_PAGE + packageName, committedPage).apply();
                     ensurePageExists(committedPage);
                     // The saved page index changed, but the in-memory page lists still
@@ -10842,7 +10856,8 @@ public class MainActivity extends Activity {
             if (!(targetView instanceof FrameLayout)) return;
             FrameLayout targetFrame = (FrameLayout) targetView;
             targetFrame.post(() -> {
-                if (targetFrame.getParent() == pagesStrip) {
+                if (targetFrame.getParent() == pagesStrip
+                        && isWorkspacePageReadyForCurrentOrientation(targetFrame)) {
                     resolveAllWorkspaceOverlaps(targetFrame, null);
                 }
             });
@@ -16179,7 +16194,7 @@ public class MainActivity extends Activity {
             int col = Math.max(0, Math.min(placementColumns - 1, Math.round((float) x / cellWidth)));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             int row = homeGridRowFromTop(y, rows, page.getHeight(), cellHeight);
-            saveIconSlot(pkg, col, row, placementColumns);
+            saveIconSlot(pkg, col, row, placementColumns, page.getHeight());
             prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
         } else if ("launcher_contact_shortcut".equals(tag)) {
             int cellHeight = LauncherUiUtils.dp(this,
@@ -16766,9 +16781,20 @@ public class MainActivity extends Activity {
             return;
         }
         final int[] remaining = {targetPages.size()};
+        final boolean expectedLandscape = isLandscapeWorkspace();
+        final int expectedViewportGeneration = workspaceViewportGeneration;
+        final int expectedViewportWidth = pageViewport == null ? -1 : pageViewport.getWidth();
+        final int expectedViewportHeight = pageViewport == null ? -1 : pageViewport.getHeight();
         for (FrameLayout page : targetPages) {
             page.post(() -> {
-                if (pagesStrip == null || page.getParent() != pagesStrip) {
+                if (pagesStrip == null || page.getParent() != pagesStrip
+                        || isFinishing() || isChangingConfigurations() || isDestroyed()
+                        || workspaceViewportGeneration != expectedViewportGeneration
+                        || isLandscapeWorkspace() != expectedLandscape
+                        || pageViewport == null
+                        || pageViewport.getWidth() != expectedViewportWidth
+                        || pageViewport.getHeight() != expectedViewportHeight
+                        || !isWorkspacePageReadyForCurrentOrientation(page)) {
                     if (--remaining[0] == 0) homeIconResizeRepairPending = false;
                     return;
                 }
@@ -17715,37 +17741,81 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void validateWorkspacePagesAfterLayout() {
-        if (pagesStrip == null || homeIconResizeRepairPending) return;
-        // The HomePageController performs one bounded orientation-specific pass when the
-        // page geometry changes. Do not simultaneously run the generic resolver against the
-        // old page dimensions; that pass may scan hundreds of coarse pixel positions per item.
-        String lastAppliedOrientationKey = "__workspace_geometry_last_applied_landscape";
-        boolean currentLandscape = isLandscapeWorkspace();
-        // On initial setup or during a rotation, let the bounded orientation solver own
-        // placement. The generic collision resolver can otherwise run a second expensive
-        // search before the page has settled, especially on a cold landscape launch.
-        if (!prefs.contains(lastAppliedOrientationKey)
-                || prefs.getBoolean(lastAppliedOrientationKey, currentLandscape) != currentLandscape) return;
+    private boolean isWorkspacePageReadyForCurrentOrientation(FrameLayout page) {
+        if (page == null || isFinishing() || isChangingConfigurations() || isDestroyed()
+                || pagesStrip == null || pageViewport == null || page.getParent() != pagesStrip) {
+            return false;
+        }
+        int width = pageViewport.getWidth();
+        int height = pageViewport.getHeight();
+        if (width <= 0 || height <= 0) return false;
         for (int i = 0; i < Math.min(2, pagesStrip.getChildCount()); i++) {
+            View child = pagesStrip.getChildAt(i);
+            if (!(child instanceof FrameLayout)
+                    || child.getWidth() != width || child.getHeight() != height) return false;
+        }
+        if (page.getWidth() != width || page.getHeight() != height) return false;
+        String key = "__workspace_geometry_last_applied_landscape";
+        boolean landscape = isLandscapeWorkspace();
+        // During first launch there is not yet a saved orientation marker. A fully
+        // measured page is safe; once a marker exists it must agree with this orientation.
+        return !prefs.contains(key) || prefs.getBoolean(key, !landscape) == landscape;
+    }
+
+    private void validateWorkspacePagesAfterLayout() {
+        if (pagesStrip == null || pageViewport == null || homeIconResizeRepairPending
+                || isFinishing() || isChangingConfigurations() || isDestroyed()) return;
+        String lastAppliedOrientationKey = "__workspace_geometry_last_applied_landscape";
+        final boolean expectedLandscape = isLandscapeWorkspace();
+        if (!prefs.contains(lastAppliedOrientationKey)
+                || prefs.getBoolean(lastAppliedOrientationKey, !expectedLandscape)
+                        != expectedLandscape) return;
+        final int expectedGeneration = workspaceViewportGeneration;
+        final int expectedWidth = pageViewport.getWidth();
+        final int expectedHeight = pageViewport.getHeight();
+        if (expectedWidth <= 0 || expectedHeight <= 0) return;
+        int pageCount = Math.min(2, pagesStrip.getChildCount());
+        if (pageCount < 1) return;
+        for (int i = 0; i < pageCount; i++) {
             View pageView = pagesStrip.getChildAt(i);
-            if (!(pageView instanceof FrameLayout)) continue;
+            if (!(pageView instanceof FrameLayout)) return;
             FrameLayout page = (FrameLayout) pageView;
+            if (page.getWidth() != expectedWidth || page.getHeight() != expectedHeight) return;
+        }
+        for (int i = 0; i < pageCount; i++) {
+            FrameLayout page = (FrameLayout) pagesStrip.getChildAt(i);
             page.post(() -> {
-                if (pagesStrip != null && page.getParent() == pagesStrip) {
-                    resolveAllWorkspaceOverlaps(page, null);
-                }
+                if (isFinishing() || isChangingConfigurations() || isDestroyed()
+                        || homeIconResizeRepairPending || pagesStrip == null
+                        || pageViewport == null || page.getParent() != pagesStrip
+                        || workspaceViewportGeneration != expectedGeneration
+                        || isLandscapeWorkspace() != expectedLandscape
+                        || pageViewport.getWidth() != expectedWidth
+                        || pageViewport.getHeight() != expectedHeight
+                        || page.getWidth() != expectedWidth || page.getHeight() != expectedHeight
+                        || !prefs.contains(lastAppliedOrientationKey)
+                        || prefs.getBoolean(lastAppliedOrientationKey, !expectedLandscape)
+                                != expectedLandscape) return;
+                resolveAllWorkspaceOverlaps(page, null);
             });
         }
     }
 
     private void saveIconSlot(String packageName, int col, int row, int columns) {
+        int viewportHeight = pageViewport != null && pageViewport.getHeight() > 0
+                ? pageViewport.getHeight() : -1;
+        saveIconSlot(packageName, col, row, columns, viewportHeight);
+    }
+
+    /** Persist normalized rows using the destination page's measured height, not a stale viewport. */
+    private void saveIconSlot(String packageName, int col, int row, int columns, int pageHeightPx) {
         int slotHeight = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-        int usableHeight = pageViewport != null && pageViewport.getHeight() > 0
-                ? pageViewport.getHeight()
-                : Math.max(slotHeight, getResources().getDisplayMetrics().heightPixels
-                        - LauncherUiUtils.dp(this, 260));
+        int usableHeight = pageHeightPx > 0 ? pageHeightPx
+                : (pageViewport != null && pageViewport.getHeight() > 0
+                        ? pageViewport.getHeight()
+                        : Math.max(slotHeight, getResources().getDisplayMetrics().heightPixels
+                                - LauncherUiUtils.dp(this, 260)));
         int rows = homeGridRowsForHeight(usableHeight, slotHeight);
         int safeRow = Math.max(0, Math.min(rows - 1, row));
         float normalizedX = col / (float) Math.max(1, columns - 1);
