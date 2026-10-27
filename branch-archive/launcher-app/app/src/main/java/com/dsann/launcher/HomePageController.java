@@ -129,6 +129,19 @@ final class HomePageController {
         prefs.edit().putFloat(PORTRAIT_APP_ROW_WIDTH_DP_KEY, rowWidthDp).apply();
     }
 
+    /**
+     * Landscape normally preserves the portrait row width. If that compact row runs
+     * out of cells, use the otherwise-unused horizontal part of the measured page for
+     * overflow apps instead of hiding them. Existing preferred columns remain based on
+     * the user's configured grid, so this expansion is only used after those cells fill.
+     */
+    private int landscapeAppPlacementColumns(int configuredColumns, int pageWidth, int cellWidth) {
+        int baseColumns = Math.max(1, configuredColumns);
+        if (pageWidth <= 0 || cellWidth <= 0) return baseColumns;
+        int pageColumns = Math.max(1, (pageWidth + cellWidth - 1) / cellWidth);
+        return Math.max(baseColumns, pageColumns);
+    }
+
     private static final class WorkspaceGeometry {
         final int page, left, top, width, height;
         final float scaleX, scaleY, translationX, translationY, rotationX, rotationY;
@@ -1473,7 +1486,8 @@ final class HomePageController {
             int pageHeight = page.getHeight();
             int rows = Math.max(1, host.getHomeGridRowsForHeight(pageHeight, cellHeight));
             int cellWidth = homeAppCellWidthPx(page, strip, columns, pageWidth);
-            boolean[][] placedAppSlots = new boolean[rows][columns];
+            int placementColumns = landscapeAppPlacementColumns(columns, pageWidth, cellWidth);
+            boolean[][] placedAppSlots = new boolean[rows][placementColumns];
             ArrayList<Rect> fixedBounds = collectFixedWorkspaceLayoutBounds(page);
 
             // Every app icon will be allocated again below. Hide their stale cell
@@ -1517,7 +1531,7 @@ final class HomePageController {
                 int row = preferredRow;
                 int col = preferredCol;
                 int[] freeCell = findNearestFreeAppVisualSlot(appCell, placedAppSlots,
-                        fixedBounds, rows, columns, pageWidth, pageHeight,
+                        fixedBounds, rows, placementColumns, pageWidth, pageHeight,
                         cellWidth, cellHeight, preferredRow, preferredCol);
 
                 // If fixed items block every remaining visible footprint, try relocating
@@ -1529,7 +1543,7 @@ final class HomePageController {
                     for (int candidateRow = 0; candidateRow < rows && !repaired; candidateRow++) {
                         int candidateTop = host.getHomeGridRowTop(candidateRow, rows,
                                 pageHeight, cellHeight);
-                        for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                        for (int candidateCol = 0; candidateCol < placementColumns; candidateCol++) {
                             if (placedAppSlots[candidateRow][candidateCol]) continue;
                             int candidateLeft = candidateCol * cellWidth;
                             Rect target = appVisibleBoundsAtPosition(appCell,
@@ -1547,7 +1561,7 @@ final class HomePageController {
                     }
                     if (!repaired) break;
                     freeCell = findNearestFreeAppVisualSlot(appCell, placedAppSlots,
-                            fixedBounds, rows, columns, pageWidth, pageHeight,
+                            fixedBounds, rows, placementColumns, pageWidth, pageHeight,
                             cellWidth, cellHeight, preferredRow, preferredCol);
                 }
 
@@ -1578,7 +1592,8 @@ final class HomePageController {
                 lp.gravity = Gravity.TOP | Gravity.LEFT;
                 appCell.setLayoutParams(lp);
 
-                if (row != preferredRow || col != preferredCol) {
+                if ((row != preferredRow || col != preferredCol) && col < columns) {
+                    // Overflow-only columns are recalculated from capacity every render.
                     saveReflowedAppPosition(packageName, finalSavedX, finalSavedY, true);
                 }
             }
@@ -2059,10 +2074,13 @@ final class HomePageController {
             // Each app owns one fixed-height grid slot. Row capacity reserves the
             // label-enabled 25dp clearance above the dock through the shared host rule.
             final int rows = host.getHomeGridRowsForHeight(pageHeight, cellHeight);
-            boolean[][] occupiedSlots = new boolean[rows][columns];
             int initialPageWidth = pageMeasuredForViewport ? page.getWidth() : pageWidth;
             final int appCellWidth = homeAppCellWidthPx(page, strip, columns, initialPageWidth);
-            reserveFixedWorkspaceGridSlots(page, occupiedSlots, columns, rows,
+            final int placementColumns = renderLandscape
+                    ? landscapeAppPlacementColumns(columns, initialPageWidth, appCellWidth)
+                    : columns;
+            boolean[][] occupiedSlots = new boolean[rows][placementColumns];
+            reserveFixedWorkspaceGridSlots(page, occupiedSlots, placementColumns, rows,
                     pageHeight, appCellWidth, cellHeight);
             LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
@@ -2113,7 +2131,7 @@ final class HomePageController {
                 if (!hasFreeSlot) {
                     int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
                     for (int candidateRow = 0; candidateRow < rows; candidateRow++) {
-                        for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                        for (int candidateCol = 0; candidateCol < placementColumns; candidateCol++) {
                             if (occupiedSlots[candidateRow][candidateCol]) continue;
                             int distance = Math.abs(candidateCol - col) + Math.abs(candidateRow - row);
                             if (distance < bestDistance) {
@@ -2129,7 +2147,7 @@ final class HomePageController {
                         savedY = row / (float) Math.max(1, rows - 1);
                         // Do not persist collisions found using a fallback page height.
                         // The measured post-layout pass saves the final legal cell instead.
-                        if (pageMatchesCurrentViewport(page)) {
+                        if (pageMatchesCurrentViewport(page) && col < columns) {
                             saveReflowedAppPosition(packageName, savedX, savedY,
                                     isLandscapeOrientation(strip));
                         }
@@ -2170,9 +2188,12 @@ final class HomePageController {
                 // The measured page can have fewer rows than the first render calculated.
                 // Re-map normalized positions only through an occupied-slot grid so two
                 // portrait rows can never collapse onto the same landscape cell.
-                boolean[][] laidOutSlots = new boolean[actualRows][columns];
-                boolean[][] placedAppSlots = new boolean[actualRows][columns];
                 final boolean landscapeAllocation = isLandscapeOrientation(strip);
+                int placementColumns = landscapeAllocation
+                        ? landscapeAppPlacementColumns(columns, page.getWidth(), actualCellWidth)
+                        : columns;
+                boolean[][] laidOutSlots = new boolean[actualRows][placementColumns];
+                boolean[][] placedAppSlots = new boolean[actualRows][placementColumns];
                 ArrayList<Rect> landscapeFixedBounds = landscapeAllocation
                         ? collectFixedWorkspaceLayoutBounds(page) : null;
                 final boolean[] noFreeMeasuredSlot = {false};
@@ -2204,7 +2225,7 @@ final class HomePageController {
                     int requestedRow = row;
                     int[] freeCell = landscapeAllocation
                             ? findNearestFreeAppVisualSlot(child, placedAppSlots,
-                                    landscapeFixedBounds, actualRows, columns,
+                                    landscapeFixedBounds, actualRows, placementColumns,
                                     page.getWidth(), page.getHeight(), actualCellWidth,
                                     actualCellHeight, row, col)
                             : findNearestFreeGridSlot(laidOutSlots, actualRows, columns, row, col);
@@ -2217,7 +2238,7 @@ final class HomePageController {
                         boolean repaired = false;
                         for (int candidateRow = 0; candidateRow < actualRows && !repaired;
                                 candidateRow++) {
-                            for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                            for (int candidateCol = 0; candidateCol < placementColumns; candidateCol++) {
                                 if (!laidOutSlots[candidateRow][candidateCol]
                                         || placedAppSlots[candidateRow][candidateCol]) continue;
                                 int slotLeft = candidateCol * actualCellWidth;
@@ -2262,7 +2283,8 @@ final class HomePageController {
                     gridOverflowHiddenAppCells.remove(child);
                     laidOutSlots[row][col] = true;
                     placedAppSlots[row][col] = true;
-                    if (col != requestedCol || row != requestedRow) {
+                    if ((col != requestedCol || row != requestedRow)
+                            && (col < columns || !landscapeAllocation)) {
                         float finalSavedX = col / (float) Math.max(1, columns - 1);
                         float finalSavedY = row / (float) Math.max(1, actualRows - 1);
                         saveReflowedAppPosition(childPackage, finalSavedX, finalSavedY,
