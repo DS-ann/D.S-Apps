@@ -83,6 +83,8 @@ final class HomePageController {
 
     private static final String PORTRAIT_APP_ROW_WIDTH_DP_KEY =
             "__portrait_home_app_row_width_dp";
+    private static final String LANDSCAPE_APP_COLUMN_PREFIX =
+            "__landscape_icon_column__";
 
     /**
      * Keeps the full app grid row at its portrait physical width in landscape.
@@ -140,6 +142,16 @@ final class HomePageController {
         if (pageWidth <= 0 || cellWidth <= 0) return baseColumns;
         int pageColumns = Math.max(1, (pageWidth + cellWidth - 1) / cellWidth);
         return Math.max(baseColumns, pageColumns);
+    }
+
+    /** The logical column count must match the pitch used by icon drag/drop. */
+    int homeGridPlacementColumns(FrameLayout page, LinearLayout strip,
+            int configuredColumns, int fallbackPageWidth) {
+        int safeColumns = Math.max(1, configuredColumns);
+        if (!isLandscapeOrientation(strip)) return safeColumns;
+        int width = pageMatchesCurrentViewport(page) ? page.getWidth() : fallbackPageWidth;
+        int cellWidth = homeAppCellWidthPx(page, strip, safeColumns, fallbackPageWidth);
+        return landscapeAppPlacementColumns(safeColumns, width, cellWidth);
     }
 
     private static final class WorkspaceGeometry {
@@ -211,6 +223,37 @@ final class HomePageController {
         String legacyKey = (xAxis ? iconXKey : iconYKey) + packageName;
         return LauncherUiUtils.getFloatPreferenceCompat(prefs,
                 prefs.contains(orientationKey) ? orientationKey : legacyKey, fallback);
+    }
+
+    /**
+     * Older landscape coordinates were normalized against the configured grid. Prefer
+     * the absolute landscape column saved by the current drag path, falling back to that
+     * legacy mapping so existing layouts do not shift on upgrade.
+     */
+    private int savedAppColumn(String packageName, boolean landscape, int configuredColumns,
+            int placementColumns, int fallbackColumn) {
+        int safeConfigured = Math.max(1, configuredColumns);
+        int safePlacement = Math.max(1, placementColumns);
+        if (landscape) {
+            String key = LANDSCAPE_APP_COLUMN_PREFIX + packageName;
+            if (prefs.contains(key)) {
+                return Math.max(0, Math.min(safePlacement - 1,
+                        prefs.getInt(key, fallbackColumn)));
+            }
+        }
+        float fallbackX = Math.max(0f, Math.min(1f,
+                fallbackColumn / (float) Math.max(1, safeConfigured - 1)));
+        float savedX = savedAppCoordinate(packageName, true, landscape, fallbackX);
+        int legacyColumn = Math.round(savedX * Math.max(1, safeConfigured - 1));
+        return Math.max(0, Math.min(safePlacement - 1, legacyColumn));
+    }
+
+    private void saveLandscapeAppColumn(String packageName, int column) {
+        if (packageName == null || packageName.isEmpty() || column < 0) return;
+        String key = LANDSCAPE_APP_COLUMN_PREFIX + packageName;
+        if (prefs.getInt(key, Integer.MIN_VALUE) != column) {
+            prefs.edit().putInt(key, column).apply();
+        }
     }
 
     /**
@@ -1486,7 +1529,7 @@ final class HomePageController {
             int pageHeight = page.getHeight();
             int rows = Math.max(1, host.getHomeGridRowsForHeight(pageHeight, cellHeight));
             int cellWidth = homeAppCellWidthPx(page, strip, columns, pageWidth);
-            int placementColumns = landscapeAppPlacementColumns(columns, pageWidth, cellWidth);
+            int placementColumns = homeGridPlacementColumns(page, strip, columns, pageWidth);
             boolean[][] placedAppSlots = new boolean[rows][placementColumns];
             ArrayList<Rect> fixedBounds = collectFixedWorkspaceLayoutBounds(page);
 
@@ -1524,8 +1567,8 @@ final class HomePageController {
                         defaultCol / (float) Math.max(1, columns - 1));
                 float savedY = savedAppCoordinate(packageName, false, true,
                         defaultRow / (float) Math.max(1, rows - 1));
-                int preferredCol = Math.max(0, Math.min(columns - 1,
-                        Math.round(savedX * Math.max(1, columns - 1))));
+                int preferredCol = savedAppColumn(packageName, true, columns,
+                        placementColumns, defaultCol);
                 int preferredRow = Math.max(0, Math.min(rows - 1,
                         Math.round(savedY * Math.max(1, rows - 1))));
                 int row = preferredRow;
@@ -1578,7 +1621,7 @@ final class HomePageController {
                 gridOverflowHiddenAppCells.remove(appCell);
                 placedAppSlots[row][col] = true;
 
-                float finalSavedX = col / (float) Math.max(1, columns - 1);
+                float finalSavedX = col / (float) Math.max(1, placementColumns - 1);
                 float finalSavedY = row / (float) Math.max(1, rows - 1);
                 FrameLayout.LayoutParams lp = appCell.getLayoutParams()
                         instanceof FrameLayout.LayoutParams
@@ -1592,10 +1635,10 @@ final class HomePageController {
                 lp.gravity = Gravity.TOP | Gravity.LEFT;
                 appCell.setLayoutParams(lp);
 
-                if ((row != preferredRow || col != preferredCol) && col < columns) {
-                    // Overflow-only columns are recalculated from capacity every render.
+                if (row != preferredRow || col != preferredCol) {
                     saveReflowedAppPosition(packageName, finalSavedX, finalSavedY, true);
                 }
+                saveLandscapeAppColumn(packageName, col);
             }
         }
 
@@ -2080,8 +2123,13 @@ final class HomePageController {
                     ? landscapeAppPlacementColumns(columns, initialPageWidth, appCellWidth)
                     : columns;
             boolean[][] occupiedSlots = new boolean[rows][placementColumns];
-            reserveFixedWorkspaceGridSlots(page, occupiedSlots, placementColumns, rows,
-                    pageHeight, appCellWidth, cellHeight);
+            // A full cell can overlap a widget's transparent padding while the visible
+            // app artwork is clear. On landscape, let the measured visual-footprint pass
+            // decide collisions instead of relocating and persisting the manual slot here.
+            if (!renderLandscape) {
+                reserveFixedWorkspaceGridSlots(page, occupiedSlots, placementColumns, rows,
+                        pageHeight, appCellWidth, cellHeight);
+            }
             LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
                     false, iconSizeKey, fontSizeKey, showLabelsKey,
@@ -2123,8 +2171,10 @@ final class HomePageController {
                         defaultCol / (float) Math.max(1, columns - 1));
                 float savedY = savedAppCoordinate(packageName, false, renderLandscape,
                         defaultRow / (float) Math.max(1, rows - 1));
-                int col = Math.max(0, Math.min(columns - 1,
-                        Math.round(savedX * Math.max(1, columns - 1))));
+                int col = renderLandscape
+                        ? savedAppColumn(packageName, true, columns, placementColumns, defaultCol)
+                        : Math.max(0, Math.min(columns - 1,
+                                Math.round(savedX * Math.max(1, columns - 1))));
                 int row = Math.max(0, Math.min(rows - 1,
                         Math.round(savedY * Math.max(1, rows - 1))));
                 boolean hasFreeSlot = !occupiedSlots[row][col];
@@ -2143,13 +2193,13 @@ final class HomePageController {
                         col = bestCol;
                         row = bestRow;
                         hasFreeSlot = true;
-                        savedX = col / (float) Math.max(1, columns - 1);
+                        savedX = col / (float) Math.max(1, placementColumns - 1);
                         savedY = row / (float) Math.max(1, rows - 1);
                         // Do not persist collisions found using a fallback page height.
                         // The measured post-layout pass saves the final legal cell instead.
-                        if (pageMatchesCurrentViewport(page) && col < columns) {
-                            saveReflowedAppPosition(packageName, savedX, savedY,
-                                    isLandscapeOrientation(strip));
+                        if (pageMatchesCurrentViewport(page)) {
+                            saveReflowedAppPosition(packageName, savedX, savedY, renderLandscape);
+                            if (renderLandscape) saveLandscapeAppColumn(packageName, col);
                         }
                     }
                     // Never draw an existing icon on top of another workspace item just
@@ -2217,8 +2267,11 @@ final class HomePageController {
                             defaultCol / (float) Math.max(1, columns - 1));
                     float savedY = savedAppCoordinate(childPackage, false, landscapeAllocation,
                             defaultRow / (float) Math.max(1, actualRows - 1));
-                    int col = Math.max(0, Math.min(columns - 1,
-                            Math.round(savedX * Math.max(1, columns - 1))));
+                    int col = landscapeAllocation
+                            ? savedAppColumn(childPackage, true, columns,
+                                    measuredPlacementColumns, defaultCol)
+                            : Math.max(0, Math.min(columns - 1,
+                                    Math.round(savedX * Math.max(1, columns - 1))));
                     int row = Math.max(0, Math.min(actualRows - 1,
                             Math.round(savedY * Math.max(1, actualRows - 1))));
                     int requestedCol = col;
@@ -2283,12 +2336,13 @@ final class HomePageController {
                     gridOverflowHiddenAppCells.remove(child);
                     laidOutSlots[row][col] = true;
                     placedAppSlots[row][col] = true;
-                    if ((col != requestedCol || row != requestedRow)
-                            && (col < columns || !landscapeAllocation)) {
-                        float finalSavedX = col / (float) Math.max(1, columns - 1);
+                    if (col != requestedCol || row != requestedRow) {
+                        float finalSavedX = col / (float) Math.max(1,
+                                landscapeAllocation ? measuredPlacementColumns - 1 : columns - 1);
                         float finalSavedY = row / (float) Math.max(1, actualRows - 1);
                         saveReflowedAppPosition(childPackage, finalSavedX, finalSavedY,
                                 landscapeAllocation);
+                        if (landscapeAllocation) saveLandscapeAppColumn(childPackage, col);
                     }
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
