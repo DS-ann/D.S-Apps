@@ -132,16 +132,14 @@ final class HomePageController {
     }
 
     /**
-     * Landscape normally preserves the portrait row width. If that compact row runs
-     * out of cells, use the otherwise-unused horizontal part of the measured page for
-     * overflow apps instead of hiding them. Existing preferred columns remain based on
-     * the user's configured grid, so this expansion is only used after those cells fill.
+     * Landscape reuses the portrait cell pitch but may expose extra columns. Count
+     * only complete cells that fit on the measured page: rounding up created a partial
+     * last column that rendering accepted while drag/drop and overlap repair rejected.
      */
     private int landscapeAppPlacementColumns(int configuredColumns, int pageWidth, int cellWidth) {
-        int baseColumns = Math.max(1, configuredColumns);
-        if (pageWidth <= 0 || cellWidth <= 0) return baseColumns;
-        int pageColumns = Math.max(1, (pageWidth + cellWidth - 1) / cellWidth);
-        return Math.max(baseColumns, pageColumns);
+        int safeColumns = Math.max(1, configuredColumns);
+        if (pageWidth <= 0 || cellWidth <= 0) return safeColumns;
+        return Math.max(1, pageWidth / cellWidth);
     }
 
     /** The logical column count must match the pitch used by icon drag/drop. */
@@ -226,25 +224,40 @@ final class HomePageController {
     }
 
     /**
-     * Older landscape coordinates were normalized against the configured grid. Prefer
-     * the absolute landscape column saved by the current drag path, falling back to that
-     * legacy mapping so existing layouts do not shift on upgrade.
+     * Resolve a saved icon column in the active coordinate system. New landscape X
+     * values are normalized against the expanded landscape placement grid, not the
+     * configured portrait column count. Shared legacy X values still use portrait
+     * normalization until a landscape-specific value has been saved.
      */
     private int savedAppColumn(String packageName, boolean landscape, int configuredColumns,
             int placementColumns, int fallbackColumn) {
         int safeConfigured = Math.max(1, configuredColumns);
         int safePlacement = Math.max(1, placementColumns);
-        if (landscape) {
-            String key = LANDSCAPE_APP_COLUMN_PREFIX + packageName;
-            if (prefs.contains(key)) {
-                return Math.max(0, Math.min(safePlacement - 1,
-                        prefs.getInt(key, fallbackColumn)));
-            }
-        }
         float fallbackX = Math.max(0f, Math.min(1f,
                 fallbackColumn / (float) Math.max(1, safeConfigured - 1)));
+        if (landscape) {
+            String absoluteKey = LANDSCAPE_APP_COLUMN_PREFIX + packageName;
+            if (prefs.contains(absoluteKey)) {
+                return Math.max(0, Math.min(safePlacement - 1,
+                        prefs.getInt(absoluteKey, fallbackColumn)));
+            }
+
+            String landscapeXKey = appCoordinatePreferenceKey(packageName, true, true);
+            if (prefs.contains(landscapeXKey)) {
+                float savedLandscapeX = LauncherUiUtils.getFloatPreferenceCompat(
+                        prefs, landscapeXKey, fallbackX);
+                if (Float.isNaN(savedLandscapeX) || Float.isInfinite(savedLandscapeX)) {
+                    savedLandscapeX = fallbackX;
+                }
+                int landscapeColumn = Math.round(
+                        Math.max(0f, Math.min(1f, savedLandscapeX))
+                                * Math.max(0, safePlacement - 1));
+                return Math.max(0, Math.min(safePlacement - 1, landscapeColumn));
+            }
+        }
+
         float savedX = savedAppCoordinate(packageName, true, landscape, fallbackX);
-        int legacyColumn = Math.round(savedX * Math.max(1, safeConfigured - 1));
+        int legacyColumn = Math.round(savedX * Math.max(0, safeConfigured - 1));
         return Math.max(0, Math.min(safePlacement - 1, legacyColumn));
     }
 
@@ -890,6 +903,11 @@ final class HomePageController {
             for (int col = 0; col < columns; col++) {
                 if (placedSlots[row][col]) continue;
                 int left = col * cellWidth;
+                // Keep slot legality identical to drag/drop and MainActivity's
+                // collision resolver: the complete cell must fit, even when its
+                // artwork alone would remain visible inside a clipped partial cell.
+                if (left < 0 || top < 0 || left + cellWidth > pageWidth
+                        || top + cellHeight > pageHeight) continue;
                 Rect candidate = appVisibleBoundsAtPosition(
                         appCell, left, top, cellWidth, cellHeight);
                 if (candidate.left < 0 || candidate.top < 0
@@ -2354,8 +2372,11 @@ final class HomePageController {
                         float finalSavedY = row / (float) Math.max(1, actualRows - 1);
                         saveReflowedAppPosition(childPackage, finalSavedX, finalSavedY,
                                 landscapeAllocation);
-                        if (landscapeAllocation) saveLandscapeAppColumn(childPackage, col);
                     }
+                    // Every settled landscape slot gets an absolute column anchor.
+                    // This migrates old normalized preferences once and prevents a
+                    // later render from interpreting a landscape fraction as portrait.
+                    if (landscapeAllocation) saveLandscapeAppColumn(childPackage, col);
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
