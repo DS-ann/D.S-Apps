@@ -1279,7 +1279,7 @@ final class HomePageController {
                 // A rotation happened while this repair was queued. Do not apply stale
                 // landscape geometry; schedule a fresh repair only if landscape is still active.
                 if (isWorkspaceActivityUsable() && strip == host.getPagesStrip()
-                        && isLandscapeOrientation(strip)) {
+                        && strip.isAttachedToWindow() && isLandscapeOrientation(strip)) {
                     postLandscapeRepair(strip);
                 }
                 return;
@@ -1689,7 +1689,9 @@ final class HomePageController {
                     || isLandscapeOrientation(strip) != scheduledLandscape) {
                 // A later orientation render superseded this work. Re-queue against the
                 // current geometry instead of letting a stale callback save the wrong mode.
-                scheduleOrientationWorkspaceRepair(strip);
+                if (strip.isAttachedToWindow()) {
+                    scheduleOrientationWorkspaceRepair(strip);
+                }
                 return;
             }
             boolean landscape = scheduledLandscape;
