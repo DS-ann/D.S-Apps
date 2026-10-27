@@ -9957,6 +9957,9 @@ public class MainActivity extends Activity {
                         }
                         return true;
                     }
+                    // The exact snapped destination already passed canPlaceWorkspaceItem above.
+                    // Do not carry a transient frame-level collision rejection into commit.
+                    liveDragRejectedMoves.remove(view);
                     int sourceConfiguredColumns = getHomeColumns();
                     int sourceCellWidth = homeGridCellWidthPx(
                             sourceView, sourceConfiguredColumns, sourceView.getWidth());
@@ -10029,7 +10032,9 @@ public class MainActivity extends Activity {
 
                     if (!movedAcrossPage) {
                         view.setLayoutParams(finalIconParams);
-                        updateLiveDisplacements(sourceView, view);
+                        // This is the same slot validated above. Re-running live displacement
+                        // here while neighbors are mid-animation can mark an accepted drop
+                        // rejected; finishLiveDisplacements would then persist the old slot.
                     } else {
                         // Snap the destination-page collision proxy to the exact app-grid
                         // cell that will be committed. This catches overlap created by the
