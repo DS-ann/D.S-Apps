@@ -770,6 +770,11 @@ public class MainActivity extends Activity {
             new java.util.WeakHashMap<FrameLayout, Boolean>();
     // Defers generic overlap validation until resize-specific recovery completes.
     private boolean homeIconResizeRepairPending;
+    // IDs being inserted by the user must never use the temporary overlap fallback
+    // that is permitted while an existing workspace resize is being reconciled.
+    private final java.util.HashSet<String> shortcutsRequiringFreeSlot =
+            new java.util.HashSet<String>();
+    private boolean widgetRestorePassPending;
     private int resizeRepairCollisionCount;
     private int resizeRepairClockBackgroundCollisionCount;
     private int resizeRepairSpecialShrinkCount;
@@ -3363,6 +3368,11 @@ public class MainActivity extends Activity {
             applyClockPositionAndSize();
             attachClockPanelsToPages();
             updateClockResizeHandles();
+            // The first app-grid pass was scheduled while the clock panels were not yet
+            // attached to page containers. Rebuild the grid now that clocks are real
+            // collision obstacles; otherwise restart/rotation can leave an icon beneath
+            // the clock until the next unrelated render.
+            renderHomePages(false);
             // Build page 2's initial hardware texture after the first workspace frame,
             // rather than paying that cost on the final frames of the first forward swipe.
             root.postDelayed(() -> {
@@ -4106,6 +4116,57 @@ public class MainActivity extends Activity {
      * post-inset dimensions. A stale fallback width can offset page 2 incorrectly and
      * allow its children to bleed into the first page on some devices.
      */
+    /**
+     * Reset the horizontal page strip synchronously when rotation changes the viewport.
+     * A posted render is too late on some OEM layouts: the strip can retain the old page
+     * width/translation for a frame and expose fragments of page 2 on page 1.
+     */
+    private void alignWorkspaceStripToViewport(int viewportWidth) {
+        if (pagesStrip == null || pageViewport == null || viewportWidth <= 0) return;
+        pagesStrip.animate().cancel();
+        pagesStrip.setRotationX(0f);
+        pagesStrip.setRotationY(0f);
+        pagesStrip.setScaleX(1f);
+        pagesStrip.setScaleY(1f);
+        pagesStrip.setTranslationY(0f);
+        pagesStrip.setTranslationZ(0f);
+        pagesStrip.setClipChildren(true);
+        pagesStrip.setClipToPadding(true);
+        pageViewport.setClipChildren(true);
+        pageViewport.setClipToPadding(true);
+
+        for (int i = 0; i < pagesStrip.getChildCount(); i++) {
+            View child = pagesStrip.getChildAt(i);
+            if (child == null) continue;
+            child.animate().cancel();
+            child.setAlpha(1f);
+            child.setRotationX(0f);
+            child.setRotationY(0f);
+            child.setScaleX(1f);
+            child.setScaleY(1f);
+            child.setTranslationX(0f);
+            child.setTranslationY(0f);
+            child.setTranslationZ(0f);
+            if (child instanceof ViewGroup) {
+                ((ViewGroup) child).setClipChildren(true);
+                ((ViewGroup) child).setClipToPadding(true);
+            }
+            ViewGroup.LayoutParams pageParams = child.getLayoutParams();
+            if (pageParams != null) {
+                pageParams.width = viewportWidth;
+                pageParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+                child.setLayoutParams(pageParams);
+            }
+        }
+        ViewGroup.LayoutParams stripParams = pagesStrip.getLayoutParams();
+        if (stripParams != null) {
+            stripParams.width = viewportWidth * pagesStrip.getChildCount();
+            stripParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            pagesStrip.setLayoutParams(stripParams);
+        }
+        pagesStrip.setTranslationX(-Math.max(0, currentPage) * (float) viewportWidth);
+    }
+
     private void installPageViewportLayoutWatcher() {
         if (pageViewport == null) return;
         lastWorkspaceViewportWidth = pageViewport.getWidth();
@@ -4119,6 +4180,10 @@ public class MainActivity extends Activity {
                     && measuredHeight == lastWorkspaceViewportHeight) return;
             lastWorkspaceViewportWidth = measuredWidth;
             lastWorkspaceViewportHeight = measuredHeight;
+
+            // Do this in the layout callback, not a later post, so no frame uses the
+            // previous orientation's page width or an in-flight transition transform.
+            alignWorkspaceStripToViewport(measuredWidth);
             if (workspaceViewportRefreshPending || homePageController == null
                     || pagesStrip == null || isFinishing()) return;
             workspaceViewportRefreshPending = true;
@@ -4127,8 +4192,10 @@ public class MainActivity extends Activity {
                 if (isFinishing() || pageViewport == null || pagesStrip == null
                         || homePageController == null || pageViewport.getWidth() <= 0
                         || pageViewport.getHeight() <= 0) return;
+                alignWorkspaceStripToViewport(pageViewport.getWidth());
                 renderHomePages(false);
                 showPage(currentPage, false);
+                alignWorkspaceStripToViewport(pageViewport.getWidth());
             });
         });
     }
@@ -7333,6 +7400,7 @@ public class MainActivity extends Activity {
     }
 
     private void removeSavedShortcut(String id) {
+        shortcutsRequiringFreeSlot.remove(id);
         String[] keys = {KEY_SHORTCUT_INTENT, KEY_SHORTCUT_LABEL, KEY_SHORTCUT_PAGE,
                 KEY_SHORTCUT_ICON, KEY_SHORTCUT_SPAN_X, KEY_SHORTCUT_SPAN_Y,
                 KEY_SHORTCUT_WIDTH_DP, KEY_SHORTCUT_HEIGHT_DP, KEY_SHORTCUT_ICON_SIZE_DP,
@@ -7466,7 +7534,10 @@ public class MainActivity extends Activity {
         if (pagesStrip == null || prefs == null || shortcutId == null || shortcutId.isEmpty()) return;
         // A replacement/settings callback can race a pending render. Never attach a second
         // live tile for the same persisted shortcut ID.
-        if (hasRenderedContactShortcut(shortcutId)) return;
+        if (hasRenderedContactShortcut(shortcutId)) {
+            shortcutsRequiringFreeSlot.remove(shortcutId);
+            return;
+        }
         if (pageViewport == null) return;
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
             pageViewport.post(() -> renderSavedContactShortcut());
@@ -7498,7 +7569,9 @@ public class MainActivity extends Activity {
                 shortcutPrefKey(KEY_SHORTCUT_GRID_POSITION, shortcutId), false);
         int lastSavedLeft = -1;
         int lastSavedTop = -1;
-        final boolean deferShortcutCollisionRecovery = homeIconResizeRepairPending;
+        final boolean requireFreeSlot = shortcutsRequiringFreeSlot.contains(shortcutId);
+        final boolean deferShortcutCollisionRecovery =
+                homeIconResizeRepairPending && !requireFreeSlot;
         boolean provisionalCollisionFallback = false;
 
         if (savedX >= 0f && savedY >= 0f && desiredPage < pagesStrip.getChildCount()) {
@@ -7680,6 +7753,7 @@ public class MainActivity extends Activity {
         tileParams.leftMargin = tileLeft;
         tileParams.topMargin = tileTop;
         chosenPage.addView(tile, tileParams);
+        shortcutsRequiringFreeSlot.remove(shortcutId);
         label.post(() -> fitShortcutLabelWithDots(label));
         tile.setOnClickListener(v -> {
             try {
@@ -11257,6 +11331,7 @@ public class MainActivity extends Activity {
                     prefs.edit().remove(shortcutPrefKey(KEY_SHORTCUT_ICON, shortcutId)).apply();
                 }
                 handler.post(() -> {
+                    shortcutsRequiringFreeSlot.add(shortcutId);
                     renderSavedContactShortcut();
                     if (!hasRenderedContactShortcut(shortcutId)) {
                         removeSavedShortcut(shortcutId);
@@ -11809,10 +11884,12 @@ public class MainActivity extends Activity {
     }
 
     private void restoreWidgetsOnPages() {
-        if (pagesStrip == null) return;
+        if (pagesStrip == null || widgetRestorePassPending) return;
+        widgetRestorePassPending = true;
         // Restore only after layout: providers often need real dimensions to render
         // correctly, and zero-sized host views can make widgets look broken.
         pagesStrip.post(() -> {
+            widgetRestorePassPending = false;
             if (pagesStrip == null || isFinishing()) return;
             String stored = prefs.getString(KEY_WIDGET_IDS, "");
             if (stored.isEmpty()) {
@@ -11822,6 +11899,7 @@ public class MainActivity extends Activity {
                 return;
             }
             boolean retryNeeded = false;
+            boolean restoredAnyWidget = false;
             for (String entry : stored.split("\\n")) {
                 String[] parts = entry.split(":");
                 if (parts.length < 2) continue;
@@ -11883,6 +11961,7 @@ public class MainActivity extends Activity {
                         // Persist only the geometry actually restored (including any
                         // unavoidable page-bound clamp), without a second collision pass.
                         saveWidgetGeometry(id, resolvedPageIndex, (FrameLayout) candidate);
+                        restoredAnyWidget = true;
                     }
                 } catch (Exception ignored) {
                     // Failures during a provider refresh must be retried. The saved host ID
@@ -11896,6 +11975,17 @@ public class MainActivity extends Activity {
                 widgetRestoreRetryCount = 0;
                 widgetRestoreRetryScheduled = false;
                 handler.removeCallbacks(widgetRestoreRetry);
+            }
+            if (restoredAnyWidget) {
+                // App cells were initially rendered before delayed provider host views
+                // existed. Run one final measured layout after the widgets attach, so
+                // icons are positioned against the full, restored workspace occupancy.
+                pagesStrip.post(() -> {
+                    if (!isFinishing() && pagesStrip != null && homePageController != null) {
+                        renderHomePages(false);
+                        showPage(currentPage, false);
+                    }
+                });
             }
         });
     }

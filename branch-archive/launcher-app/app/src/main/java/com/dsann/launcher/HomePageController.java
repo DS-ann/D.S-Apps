@@ -87,7 +87,7 @@ final class HomePageController {
         android.util.DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
         float density = metrics.density > 0f ? metrics.density : 1f;
         int minimumCellWidth = LauncherUiUtils.dp(activity, 1);
-        int availablePageWidth = page != null && page.getWidth() > 0
+        int availablePageWidth = pageMatchesCurrentViewport(page)
                 ? page.getWidth() : fallbackPageWidth;
 
         if (!isLandscapeOrientation(strip)) {
@@ -143,22 +143,60 @@ final class HomePageController {
     }
 
     private boolean isLandscapeOrientation(LinearLayout strip) {
-        // Resources can report the new orientation before the workspace children have
-        // completed their layout pass. Prefer the measured page frame whenever available.
-        if (strip != null && strip.getChildCount() > 0) {
-            View page = strip.getChildAt(0);
-            if (page.getWidth() > 0 && page.getHeight() > 0) {
-                return page.getWidth() > page.getHeight();
-            }
-        }
+        // The Activity is recreated for orientation changes (configChanges is not
+        // intercepted). Its Configuration is therefore authoritative immediately.
+        // Measuring the old page first here made a newly-created portrait Activity
+        // temporarily write landscape positions, and vice versa, during first layout.
         int orientation = activity.getResources().getConfiguration().orientation;
         if (orientation == Configuration.ORIENTATION_LANDSCAPE) return true;
         if (orientation == Configuration.ORIENTATION_PORTRAIT) return false;
+        if (strip != null && strip.getChildCount() > 0) {
+            View page = strip.getChildAt(0);
+            return page.getWidth() > 0 && page.getHeight() > 0
+                    && page.getWidth() > page.getHeight();
+        }
         return false;
     }
 
     private boolean isPortraitOrientation() {
         return !isLandscapeOrientation(host.getPagesStrip());
+    }
+
+    /** True only after a page has adopted the current viewport's dimensions. */
+    private boolean pageMatchesCurrentViewport(FrameLayout page) {
+        FrameLayout viewport = host.getPageViewport();
+        return page != null && viewport != null
+                && page.getWidth() > 0 && page.getHeight() > 0
+                && viewport.getWidth() > 0 && viewport.getHeight() > 0
+                && page.getWidth() == viewport.getWidth()
+                && page.getHeight() == viewport.getHeight();
+    }
+
+    /**
+     * Defer geometry reconciliation until a page has completed layout for the current
+     * viewport. This prevents stale dimensions from being saved as stable positions.
+     */
+    private void runAfterPageMatchesViewport(
+            FrameLayout page, LinearLayout strip, Runnable action) {
+        if (page == null || strip == null || action == null) return;
+        if (page.getParent() != strip) return;
+        if (pageMatchesCurrentViewport(page)) {
+            action.run();
+            return;
+        }
+        final boolean[] delivered = {false};
+        final View.OnLayoutChangeListener[] watcher = new View.OnLayoutChangeListener[1];
+        Runnable deliver = () -> {
+            if (delivered[0] || page.getParent() != strip
+                    || !pageMatchesCurrentViewport(page)) return;
+            delivered[0] = true;
+            page.removeOnLayoutChangeListener(watcher[0]);
+            page.post(action);
+        };
+        watcher[0] = (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                deliver.run();
+        page.addOnLayoutChangeListener(watcher[0]);
+        page.post(deliver);
     }
 
     private boolean isOrientationManagedItem(View item) {
@@ -587,34 +625,39 @@ final class HomePageController {
         prefs.edit().putInt(widthKey, width).putInt(heightKey, height).apply();
     }
 
-    private void reserveAppGroupGridSlots(FrameLayout page, boolean[][] occupiedSlots,
+    private void reserveFixedWorkspaceGridSlots(FrameLayout page, boolean[][] occupiedSlots,
             int columns, int rows, int pageHeight, int cellWidth, int cellHeight) {
         if (page == null || occupiedSlots == null || columns <= 0 || rows <= 0
                 || cellWidth <= 0 || cellHeight <= 0) return;
         for (int index = 0; index < page.getChildCount(); index++) {
-            View group = page.getChildAt(index);
-            if (!isAppGroupWorkspaceItem(group) || group.getVisibility() != View.VISIBLE) continue;
-            int width = group.getWidth();
-            int height = group.getHeight();
-            int left = group.getLeft();
-            int top = group.getTop();
-            ViewGroup.LayoutParams raw = group.getLayoutParams();
+            View item = page.getChildAt(index);
+            if (item == null || item.getVisibility() == View.GONE || !isWorkspaceItem(item)) continue;
+            Object rawTag = item.getTag();
+            if (rawTag instanceof String && ((String) rawTag).startsWith("launcher_app:")) {
+                // App icons are resolved in pagePackages order below.
+                continue;
+            }
+            int width = item.getWidth();
+            int height = item.getHeight();
+            int left = item.getLeft();
+            int top = item.getTop();
+            ViewGroup.LayoutParams raw = item.getLayoutParams();
             if (raw instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
                 if (lp.width > 0) width = lp.width;
                 if (lp.height > 0) height = lp.height;
-                if (group.getWidth() <= 0) left = lp.leftMargin;
-                if (group.getHeight() <= 0) top = lp.topMargin;
+                if (item.isLayoutRequested() || item.getWidth() <= 0) left = lp.leftMargin;
+                if (item.isLayoutRequested() || item.getHeight() <= 0) top = lp.topMargin;
             }
             if (width <= 0 || height <= 0) continue;
-            Rect groupBounds = workspaceBounds(group, left, top, width, height);
+            Rect bounds = workspaceBounds(item, left, top, width, height);
             for (int row = 0; row < rows; row++) {
                 int slotTop = host.getHomeGridRowTop(row, rows, pageHeight, cellHeight);
                 for (int col = 0; col < columns; col++) {
                     int slotLeft = col * cellWidth;
                     Rect slot = new Rect(slotLeft, slotTop,
                             slotLeft + cellWidth, slotTop + cellHeight);
-                    if (Rect.intersects(groupBounds, slot)) occupiedSlots[row][col] = true;
+                    if (Rect.intersects(bounds, slot)) occupiedSlots[row][col] = true;
                 }
             }
         }
@@ -1491,11 +1534,13 @@ final class HomePageController {
             // Use the actual page dimensions whenever available. The post-layout
             // correction below also uses page.getHeight(); mixing viewport and page
             // heights reinterprets normalized Y positions as different grid rows.
-            int pageHeight = page.getHeight() > LauncherUiUtils.dp(activity, 100)
+            FrameLayout viewport = host.getPageViewport();
+            boolean pageMeasuredForViewport = pageMatchesCurrentViewport(page);
+            int pageHeight = pageMeasuredForViewport
                     ? page.getHeight()
-                    : (host.getPageViewport() != null
-                            && host.getPageViewport().getHeight() > LauncherUiUtils.dp(activity, 100)
-                                    ? host.getPageViewport().getHeight() : fallbackHeight);
+                    : (viewport != null
+                            && viewport.getHeight() > LauncherUiUtils.dp(activity, 100)
+                                    ? viewport.getHeight() : fallbackHeight);
             int configuredIconSize = prefs.getInt(iconSizeKey, 48);
             // Use the same label-aware slot height as dragging, snapping, capacity,
             // and collision checks. Added label height extends only below the icon.
@@ -1505,9 +1550,9 @@ final class HomePageController {
             // label-enabled 25dp clearance above the dock through the shared host rule.
             final int rows = host.getHomeGridRowsForHeight(pageHeight, cellHeight);
             boolean[][] occupiedSlots = new boolean[rows][columns];
-            int initialPageWidth = page.getWidth() > 0 ? page.getWidth() : pageWidth;
+            int initialPageWidth = pageMeasuredForViewport ? page.getWidth() : pageWidth;
             final int appCellWidth = homeAppCellWidthPx(page, strip, columns, initialPageWidth);
-            reserveAppGroupGridSlots(page, occupiedSlots, columns, rows,
+            reserveFixedWorkspaceGridSlots(page, occupiedSlots, columns, rows,
                     pageHeight, appCellWidth, cellHeight);
             LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
@@ -1545,7 +1590,7 @@ final class HomePageController {
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
-                int defaultRow = (itemIndex / columns) % rows;
+                int defaultRow = Math.min(rows - 1, itemIndex / columns);
                 float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + packageName,
                         defaultCol / (float) Math.max(1, columns - 1));
                 float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + packageName,
@@ -1554,7 +1599,8 @@ final class HomePageController {
                         Math.round(savedX * Math.max(1, columns - 1))));
                 int row = Math.max(0, Math.min(rows - 1,
                         Math.round(savedY * Math.max(1, rows - 1))));
-                if (occupiedSlots[row][col]) {
+                boolean hasFreeSlot = !occupiedSlots[row][col];
+                if (!hasFreeSlot) {
                     int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
                     for (int candidateRow = 0; candidateRow < rows; candidateRow++) {
                         for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
@@ -1568,12 +1614,12 @@ final class HomePageController {
                     if (bestCol >= 0) {
                         col = bestCol;
                         row = bestRow;
+                        hasFreeSlot = true;
                         savedX = col / (float) Math.max(1, columns - 1);
                         savedY = row / (float) Math.max(1, rows - 1);
                         // Do not persist collisions found using a fallback page height.
                         // The measured post-layout pass saves the final legal cell instead.
-                        if (page.getWidth() > 0
-                                && page.getHeight() > LauncherUiUtils.dp(activity, 100)) {
+                        if (pageMatchesCurrentViewport(page)) {
                             String activeXPrefix = isLandscapeOrientation(strip)
                                     ? "__landscape_icon_x__" : "__portrait_icon_x__";
                             String activeYPrefix = isLandscapeOrientation(strip)
@@ -1584,11 +1630,15 @@ final class HomePageController {
                                     .putFloat(activeYPrefix + packageName, savedY).apply();
                         }
                     }
-                    // If every slot is occupied, keep the app attached at its saved slot.
-                    // Size-change validation can then report/repair its real collision rather
-                    // than silently omitting this app from the rendered page.
+                    // Never draw an existing icon on top of another workspace item just
+                    // because the grid is full during the first, possibly unmeasured pass.
+                    // The measured pass below gets another chance with authoritative bounds.
                 }
-                occupiedSlots[row][col] = true;
+                if (hasFreeSlot) {
+                    occupiedSlots[row][col] = true;
+                } else {
+                    cell.setVisibility(View.INVISIBLE);
+                }
                 lp.leftMargin = col * cellWidth;
                 // Keep rows at their original fixed grid positions. In particular,
                 // the lowest row stays one cell above the workspace edge instead of
@@ -1597,8 +1647,8 @@ final class HomePageController {
                 page.addView(cell, lp);
                 host.installHomeIconTouch(cell, packageName);
             }
-            page.post(() -> {
-                if (page.getWidth() <= 0 || page.getHeight() <= 0) return;
+            page.post(() -> runAfterPageMatchesViewport(page, strip, () -> {
+                if (page.getParent() != strip || !pageMatchesCurrentViewport(page)) return;
                 int actualCellWidth = homeAppCellWidthPx(page, strip, columns, page.getWidth());
                 if (!isLandscapeOrientation(strip)) {
                     savePortraitHomeAppRowWidthDp(actualCellWidth, columns);
@@ -1613,28 +1663,12 @@ final class HomePageController {
                 // Re-map normalized positions only through an occupied-slot grid so two
                 // portrait rows can never collapse onto the same landscape cell.
                 boolean[][] laidOutSlots = new boolean[actualRows][columns];
-                // Group containers are fixed-size, not part of the resizable widget set.
-                // Reserve the grid slots they visually occupy before placing app cells.
-                for (int groupIndex = 0; groupIndex < page.getChildCount(); groupIndex++) {
-                    View groupChild = page.getChildAt(groupIndex);
-                    if (!isAppGroupWorkspaceItem(groupChild)
-                            || groupChild.getVisibility() != View.VISIBLE
-                            || groupChild.getWidth() <= 0 || groupChild.getHeight() <= 0) continue;
-                    Rect groupBounds = workspaceBounds(groupChild, groupChild.getLeft(),
-                            groupChild.getTop(), groupChild.getWidth(), groupChild.getHeight());
-                    for (int groupRow = 0; groupRow < actualRows; groupRow++) {
-                        int slotTop = host.getHomeGridRowTop(
-                                groupRow, actualRows, page.getHeight(), actualCellHeight);
-                        for (int groupCol = 0; groupCol < columns; groupCol++) {
-                            int slotLeft = groupCol * actualCellWidth;
-                            Rect slotBounds = new Rect(slotLeft, slotTop,
-                                    slotLeft + actualCellWidth, slotTop + actualCellHeight);
-                            if (Rect.intersects(groupBounds, slotBounds)) {
-                                laidOutSlots[groupRow][groupCol] = true;
-                            }
-                        }
-                    }
-                }
+                final boolean[] noFreeMeasuredSlot = {false};
+                // Reserve widgets, shortcuts, clocks and app groups before laying out
+                // app cells. Reserving only groups let the measured pass place app icons
+                // through other items, then move them again after restart/rotation.
+                reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
+                        page.getHeight(), actualCellWidth, actualCellHeight);
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
@@ -1644,7 +1678,7 @@ final class HomePageController {
                     int orderIndex = pagePackages.indexOf(childPackage);
                     if (orderIndex < 0) continue;
                     int defaultCol = orderIndex % columns;
-                    int defaultRow = (orderIndex / columns) % actualRows;
+                    int defaultRow = Math.min(actualRows - 1, orderIndex / columns);
                     float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + childPackage,
                             defaultCol / (float) Math.max(1, columns - 1));
                     float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + childPackage,
@@ -1653,6 +1687,8 @@ final class HomePageController {
                             Math.round(savedX * Math.max(1, columns - 1))));
                     int row = Math.max(0, Math.min(actualRows - 1,
                             Math.round(savedY * Math.max(1, actualRows - 1))));
+                    int requestedCol = col;
+                    int requestedRow = row;
                     if (laidOutSlots[row][col]) {
                         int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
                         for (int candidateRow = 0; candidateRow < actualRows; candidateRow++) {
@@ -1670,19 +1706,26 @@ final class HomePageController {
                         if (bestCol >= 0) {
                             col = bestCol;
                             row = bestRow;
+                        } else {
+                            child.setVisibility(View.INVISIBLE);
+                            noFreeMeasuredSlot[0] = true;
+                            continue;
                         }
                     }
+                    child.setVisibility(View.VISIBLE);
                     laidOutSlots[row][col] = true;
-                    float finalSavedX = col / (float) Math.max(1, columns - 1);
-                    float finalSavedY = row / (float) Math.max(1, actualRows - 1);
-                    String activeXPrefix = isLandscapeOrientation(strip)
-                            ? "__landscape_icon_x__" : "__portrait_icon_x__";
-                    String activeYPrefix = isLandscapeOrientation(strip)
-                            ? "__landscape_icon_y__" : "__portrait_icon_y__";
-                    prefs.edit().putFloat(iconXKey + childPackage, finalSavedX)
-                            .putFloat(iconYKey + childPackage, finalSavedY)
-                            .putFloat(activeXPrefix + childPackage, finalSavedX)
-                            .putFloat(activeYPrefix + childPackage, finalSavedY).apply();
+                    if (col != requestedCol || row != requestedRow) {
+                        float finalSavedX = col / (float) Math.max(1, columns - 1);
+                        float finalSavedY = row / (float) Math.max(1, actualRows - 1);
+                        String activeXPrefix = isLandscapeOrientation(strip)
+                                ? "__landscape_icon_x__" : "__portrait_icon_x__";
+                        String activeYPrefix = isLandscapeOrientation(strip)
+                                ? "__landscape_icon_y__" : "__portrait_icon_y__";
+                        prefs.edit().putFloat(iconXKey + childPackage, finalSavedX)
+                                .putFloat(iconYKey + childPackage, finalSavedY)
+                                .putFloat(activeXPrefix + childPackage, finalSavedX)
+                                .putFloat(activeYPrefix + childPackage, finalSavedY).apply();
+                    }
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
                     actual.height = actualCellHeight;
@@ -1691,7 +1734,12 @@ final class HomePageController {
                             row, actualRows, page.getHeight(), actualCellHeight);
                     child.setLayoutParams(actual);
                 }
-            });
+                if (noFreeMeasuredSlot[0]) {
+                    android.widget.Toast.makeText(activity,
+                            "Home grid is full. Remove an item to reveal the remaining app icons.",
+                            android.widget.Toast.LENGTH_LONG).show();
+                }
+            }));
         }
 
         host.restoreWidgetsOnPages();

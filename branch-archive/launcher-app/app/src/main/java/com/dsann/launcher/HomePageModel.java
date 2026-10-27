@@ -72,7 +72,7 @@ final class HomePageModel {
             for (int index = 0; index < items.size(); index++) {
                 String name = items.get(index);
                 int defaultCol = index % columns;
-                int defaultRow = (index / columns) % rows;
+                int defaultRow = Math.min(rows - 1, index / columns);
                 float defaultX = defaultCol / (float) Math.max(1, columns - 1);
                 float defaultY = defaultRow / (float) Math.max(1, rows - 1);
                 float storedX = LauncherUiUtils.getFloatPreferenceCompat(

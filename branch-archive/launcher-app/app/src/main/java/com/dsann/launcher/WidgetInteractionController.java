@@ -455,127 +455,18 @@ final class WidgetInteractionController {
             lp.leftMargin = Math.max(0, Math.min(Math.max(0, page.getWidth() - lp.width), x));
             lp.topMargin = Math.max(0, Math.min(Math.max(0, page.getHeight() - lp.height), y));
         }
-        if (!preserveGeometry && page.getWidth() > 0 && page.getHeight() > 0) {
-            int maxX = Math.max(0, page.getWidth() - lp.width);
-            int maxY = Math.max(0, page.getHeight() - lp.height);
-            int desiredX = Math.max(0, Math.min(maxX, x));
-            int desiredY = Math.max(0, Math.min(maxY, y));
-            int bestX = -1, bestY = -1;
-            long bestDistance = Long.MAX_VALUE;
-
-            // Cache occupied visual rectangles once. The old 24dp-step scan could
-            // skip narrow, valid gaps and incorrectly tell the user the page was full.
-            java.util.ArrayList<android.graphics.Rect> occupied =
-                    new java.util.ArrayList<android.graphics.Rect>();
-            for (int i = 0; i < page.getChildCount(); i++) {
-                View other = page.getChildAt(i);
-                if (!(other.getTag() instanceof String)) continue;
-                String tag = (String) other.getTag();
-                if (!(tag.startsWith("launcher_app:") || tag.startsWith("launcher_widget:")
-                        || "launcher_contact_shortcut".equals(tag)
-                        || "launcher_clock_widget".equals(tag))) continue;
-                android.graphics.Rect bounds = workspaceBounds(other);
-                if (!bounds.isEmpty()) occupied.add(bounds);
-            }
-
-            // Test the requested position and exact obstacle edges first. For
-            // axis-aligned rectangles these boundary candidates find narrow gaps
-            // without a dense full-screen scan on every widget addition.
-            java.util.TreeSet<Integer> xCandidates = new java.util.TreeSet<Integer>();
-            java.util.TreeSet<Integer> yCandidates = new java.util.TreeSet<Integer>();
-            xCandidates.add(desiredX);
-            yCandidates.add(desiredY);
-            xCandidates.add(0);
-            yCandidates.add(0);
-            xCandidates.add(maxX);
-            yCandidates.add(maxY);
-            for (android.graphics.Rect obstacle : occupied) {
-                xCandidates.add(Math.max(0, Math.min(maxX, obstacle.left - lp.width)));
-                xCandidates.add(Math.max(0, Math.min(maxX, obstacle.right)));
-                yCandidates.add(Math.max(0, Math.min(maxY, obstacle.top - lp.height)));
-                yCandidates.add(Math.max(0, Math.min(maxY, obstacle.bottom)));
-            }
-            for (Integer cy : yCandidates) {
-                for (Integer cx : xCandidates) {
-                    int candidateX = cx.intValue(), candidateY = cy.intValue();
-                    android.graphics.Rect candidate = new android.graphics.Rect(
-                            candidateX, candidateY, candidateX + lp.width, candidateY + lp.height);
-                    boolean blocked = false;
-                    for (android.graphics.Rect obstacle : occupied) {
-                        if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    if (blocked) continue;
-                    long distance = Math.abs((long) candidateX - desiredX)
-                            + Math.abs((long) candidateY - desiredY);
-                    if (distance < bestDistance) {
-                        bestDistance = distance;
-                        bestX = candidateX;
-                        bestY = candidateY;
-                    }
-                }
-            }
-
-            // Boundary combinations are usually sufficient, but scan at a finer
-            // interval as a fallback for irregular/rounded widget footprints.
-            if (bestX < 0) {
-                int step = Math.max(1, LauncherUiUtils.dp(activity, 6));
-                for (int cy = 0; cy <= maxY; cy += step) {
-                    int candidateY = Math.min(maxY, cy);
-                    for (int cx = 0; cx <= maxX; cx += step) {
-                        int candidateX = Math.min(maxX, cx);
-                        android.graphics.Rect candidate = new android.graphics.Rect(
-                                candidateX, candidateY,
-                                candidateX + lp.width, candidateY + lp.height);
-                        boolean blocked = false;
-                        for (android.graphics.Rect obstacle : occupied) {
-                            if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                                blocked = true;
-                                break;
-                            }
-                        }
-                        if (blocked) continue;
-                        long distance = Math.abs((long) candidateX - desiredX)
-                                + Math.abs((long) candidateY - desiredY);
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestX = candidateX;
-                            bestY = candidateY;
-                        }
-                    }
-                    if (candidateY == maxY) break;
-                }
-                int[][] edges = {{maxX, desiredY}, {desiredX, maxY}, {maxX, maxY}};
-                for (int[] edge : edges) {
-                    android.graphics.Rect candidate = new android.graphics.Rect(
-                            edge[0], edge[1], edge[0] + lp.width, edge[1] + lp.height);
-                    boolean blocked = false;
-                    for (android.graphics.Rect obstacle : occupied) {
-                        if (android.graphics.Rect.intersects(candidate, obstacle)) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    if (!blocked) {
-                        long distance = Math.abs((long) edge[0] - desiredX)
-                                + Math.abs((long) edge[1] - desiredY);
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestX = edge[0];
-                            bestY = edge[1];
-                        }
-                    }
-                }
-            }
-            if (bestX >= 0) {
-                lp.leftMargin = bestX;
-                lp.topMargin = bestY;
-            } else {
-                // Do not intentionally place a new widget over existing content.
+        if (!preserveGeometry) {
+            // MainActivity's placement solver already searches for a legal rectangle,
+            // including the dock boundary and visual collision margins. Re-run the single
+            // authoritative workspace collision check on that exact rectangle here. The
+            // previous second, different scan could choose a conflicting position or
+            // reject/accept based on stale geometry, then still attach the widget.
+            if (page.getWidth() <= 0 || page.getHeight() <= 0
+                    || !listener.canPlaceWorkspaceItem(page, container,
+                            lp.leftMargin, lp.topMargin, lp.width, lp.height)) {
                 if (showNoSpaceToast) {
-                    Toast.makeText(activity, "No free space for this widget", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(activity, "No free space for this widget",
+                            Toast.LENGTH_SHORT).show();
                 }
                 return;
             }

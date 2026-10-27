@@ -8,8 +8,8 @@
 ARCHIVED	7377bd693467b75baf5003e94c8300bb0cea9d1d	app/build.gradle	branch-archive/launcher-app/app/build.gradle	100644
 ARCHIVED	bce5e8f7e5befd463b612778bf783f0a6e36de8b	app/src/main/AndroidManifest.xml	branch-archive/launcher-app/app/src/main/AndroidManifest.xml	100644
 ARCHIVED	efeee18469c2ebaf903178aaa748f9585b3658d6	app/src/main/java/com/dsann/launcher/BlankActivity.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/BlankActivity.java	100644
-ARCHIVED	3b65a1c63381a56fb8e5a83ae86215e5ab1efdaa	app/src/main/java/com/dsann/launcher/HomePageController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageController.java	100644
-ARCHIVED	5952b0260c5f3ae3b7c3ce5ebc85fb480d1664f7	app/src/main/java/com/dsann/launcher/HomePageModel.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageModel.java	100644
+ARCHIVED	fdcc6950b0638ac90a69efcfbfa370d906442b2e	app/src/main/java/com/dsann/launcher/HomePageController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageController.java	100644
+ARCHIVED	b7875240e3b09ad4ed13cb6613512b77baafd10a	app/src/main/java/com/dsann/launcher/HomePageModel.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageModel.java	100644
 ARCHIVED	3ca3acb5adb9de7436c002de3992878eb761541a	app/src/main/java/com/dsann/launcher/LauncherAppAdapter.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherAppAdapter.java	100644
 ARCHIVED	a16d8c0c1c082d4123453ba4f7c30714b979197c	app/src/main/java/com/dsann/launcher/LauncherClockStyler.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherClockStyler.java	100644
 ARCHIVED	d3f75754a5d5172537d9defbe1a14bc84c86f00b	app/src/main/java/com/dsann/launcher/LauncherDrawerController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherDrawerController.java	100644
@@ -18,12 +18,12 @@ ARCHIVED	a2aa464c5f67a3886f01f1bdfc8ba5d553d58be5	app/src/main/java/com/dsann/la
 ARCHIVED	945e69ae190d5ea788cd2b74875e062bc0452744	app/src/main/java/com/dsann/launcher/LauncherScreenTransitions.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherScreenTransitions.java	100644
 ARCHIVED	713a3157b109b8441e21e3cd09f72cec9f5a8a6c	app/src/main/java/com/dsann/launcher/LauncherUiUtils.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherUiUtils.java	100644
 ARCHIVED	f1e766d7abed346dc46741921b1b0ade17ace84c	app/src/main/java/com/dsann/launcher/LauncherWallpaperController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/LauncherWallpaperController.java	100644
-ARCHIVED	61cec565f1da58fe4ca820067ea745f97eebf778	app/src/main/java/com/dsann/launcher/MainActivity.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/MainActivity.java	100644
+ARCHIVED	0d565ee0ff5a22680687048cd692ffd8eb2735f6	app/src/main/java/com/dsann/launcher/MainActivity.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/MainActivity.java	100644
 ARCHIVED	17bde6ff2217e61bec763b44009953e90cea1bb0	app/src/main/java/com/dsann/launcher/NotificationShadeAccessibilityService.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/NotificationShadeAccessibilityService.java	100644
 ARCHIVED	18d42ac16b079349fe8ab72816fe5adf91a3ae6d	app/src/main/java/com/dsann/launcher/SevenSegmentClockTextView.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/SevenSegmentClockTextView.java	100644
 ARCHIVED	99e4072db558b3b8f7e95977daf859ed5137152e	app/src/main/java/com/dsann/launcher/WallpaperCropView.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/WallpaperCropView.java	100644
 ARCHIVED	c534dd1030b4135c21ee913439df9d1775fbdca1	app/src/main/java/com/dsann/launcher/WidgetController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/WidgetController.java	100644
-ARCHIVED	d74e0105db734965e75c6d8b3aa7488d46d2cadc	app/src/main/java/com/dsann/launcher/WidgetInteractionController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/WidgetInteractionController.java	100644
+ARCHIVED	413fb8c9cb09b5184e918e0ef99b82534ab6c372	app/src/main/java/com/dsann/launcher/WidgetInteractionController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/WidgetInteractionController.java	100644
 ARCHIVED	413c18336cd5d95395fb5c657aa893465314264d	app/src/main/java/com/dsann/launcher/WidgetPickerDialog.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/WidgetPickerDialog.java	100644
 ARCHIVED	80b8598e66d1749586a544c7569bce158cf4c7de	app/src/main/res/anim/launcher_task_close_enter.xml	branch-archive/launcher-app/app/src/main/res/anim/launcher_task_close_enter.xml	100644
 ARCHIVED	71302708cdc7a35192fedb19e9eebc9e8482266a	app/src/main/res/anim/launcher_task_close_exit.xml	branch-archive/launcher-app/app/src/main/res/anim/launcher_task_close_exit.xml	100644
