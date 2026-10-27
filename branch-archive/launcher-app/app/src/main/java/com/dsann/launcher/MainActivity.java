@@ -3848,6 +3848,18 @@ public class MainActivity extends Activity {
         return Math.max(1, width / safeColumns);
     }
 
+    /** Keep touch/drop placement on the same landscape column count as the renderer. */
+    private int homeGridPlacementColumns(View pageView, int configuredColumns,
+            int fallbackPageWidth) {
+        int safeColumns = Math.max(1, configuredColumns);
+        FrameLayout page = pageView instanceof FrameLayout ? (FrameLayout) pageView : null;
+        if (homePageController != null && pagesStrip != null) {
+            return homePageController.homeGridPlacementColumns(
+                    page, pagesStrip, safeColumns, fallbackPageWidth);
+        }
+        return safeColumns;
+    }
+
     /**
      * Fixed clearance between the bottom edge of the home grid and the dock.
      * This is deliberately independent of icon and label dimensions.
@@ -9803,6 +9815,7 @@ public class MainActivity extends Activity {
                     int[] viewportLocation = new int[2];
                     pageViewport.getLocationOnScreen(viewportLocation);
                     int cellWidth = homeGridCellWidthPx(targetPage, columns, targetWidth);
+                    columns = homeGridPlacementColumns(targetPage, columns, targetWidth);
                     int cellHeight = slotHeight;
                     rows = homeGridRowsForHeight(targetHeight, cellHeight);
 
@@ -9930,12 +9943,15 @@ public class MainActivity extends Activity {
                         }
                         return true;
                     }
+                    int sourceConfiguredColumns = getHomeColumns();
                     int sourceCellWidth = homeGridCellWidthPx(
-                            sourceView, columns, sourceView.getWidth());
+                            sourceView, sourceConfiguredColumns, sourceView.getWidth());
                     int sourceCellHeight = slotHeight;
                     int sourceRows = homeGridRowsForHeight(
                             sourceView.getHeight(), sourceCellHeight);
-                    int sourceCol = Math.max(0, Math.min(columns - 1,
+                    int sourcePlacementColumns = homeGridPlacementColumns(
+                            sourceView, sourceConfiguredColumns, sourceView.getWidth());
+                    int sourceCol = Math.max(0, Math.min(sourcePlacementColumns - 1,
                             Math.round(iconOriginalLeft / (float) sourceCellWidth)));
                     int sourceRow = homeGridRowFromTop(
                             iconOriginalTop, sourceRows, sourceView.getHeight(), sourceCellHeight);
@@ -16154,14 +16170,16 @@ public class MainActivity extends Activity {
             try { saveWidgetGeometry(Integer.parseInt(tag.substring("launcher_widget:".length())), pageIndex, (FrameLayout) item); }
             catch (NumberFormatException ignored) {}
         } else if (tag.startsWith("launcher_app:")) {
-            int columns = getHomeColumns();
-            int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
+            int configuredColumns = getHomeColumns();
+            int cellWidth = homeGridCellWidthPx(page, configuredColumns, page.getWidth());
+            int placementColumns = homeGridPlacementColumns(
+                    page, configuredColumns, page.getWidth());
             int cellHeight = LauncherUiUtils.dp(this, homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
             String pkg = tag.substring("launcher_app:".length());
-            int col = Math.max(0, Math.min(columns - 1, Math.round((float) x / cellWidth)));
+            int col = Math.max(0, Math.min(placementColumns - 1, Math.round((float) x / cellWidth)));
             int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
             int row = homeGridRowFromTop(y, rows, page.getHeight(), cellHeight);
-            saveIconSlot(pkg, col, row, columns);
+            saveIconSlot(pkg, col, row, placementColumns);
             prefs.edit().putInt(KEY_ICON_PAGE + pkg, pageIndex).apply();
         } else if ("launcher_contact_shortcut".equals(tag)) {
             int cellHeight = LauncherUiUtils.dp(this,
@@ -17736,10 +17754,17 @@ public class MainActivity extends Activity {
                 ? "__landscape_icon_x__" : "__portrait_icon_x__";
         String activeYPrefix = isLandscapeWorkspace()
                 ? "__landscape_icon_y__" : "__portrait_icon_y__";
-        prefs.edit().putFloat(KEY_ICON_X + packageName, normalizedX)
+        SharedPreferences.Editor edit = prefs.edit()
+                .putFloat(KEY_ICON_X + packageName, normalizedX)
                 .putFloat(KEY_ICON_Y + packageName, normalizedY)
                 .putFloat(activeXPrefix + packageName, normalizedX)
-                .putFloat(activeYPrefix + packageName, normalizedY).apply();
+                .putFloat(activeYPrefix + packageName, normalizedY);
+        if (isLandscapeWorkspace()) {
+            // Persist the absolute landscape column because landscape can expose columns
+            // outside the configured portrait grid. Keep normalized keys for compatibility.
+            edit.putInt("__landscape_icon_column__" + packageName, col);
+        }
+        edit.apply();
     }
 
     private GradientDrawable drawerBackground() {
