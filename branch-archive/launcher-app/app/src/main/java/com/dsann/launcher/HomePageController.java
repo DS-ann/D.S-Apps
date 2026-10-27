@@ -410,8 +410,13 @@ final class HomePageController {
         if (key == null) return null;
         WorkspaceGeometry current = parseWorkspaceGeometry(prefs.getString(key, null));
         if (current != null) return current;
-        // Seed a missing orientation from the other one once; after that their
-        // manual positions and sizes stay independent.
+        // A contact shortcut has its own orientation-scoped grid coordinates. Never
+        // substitute its other-orientation geometry: landscape anchors are not portrait
+        // anchors, and restoring them can pile shortcuts onto one another.
+        if (item.getTag() instanceof String
+                && ((String) item.getTag()).contains("shortcut")) return null;
+        // Widgets may seed a missing orientation from the other one once; after that
+        // their manual positions and sizes stay independent.
         String otherKey = workspaceGeometryKey(item, !landscape);
         return otherKey == null ? null : parseWorkspaceGeometry(prefs.getString(otherKey, null));
     }
