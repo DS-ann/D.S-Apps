@@ -18212,7 +18212,7 @@ public class MainActivity extends Activity {
             setLandscapeAppGridCell(page, item, slot[0], slot[1], rows, cellWidth, cellHeight);
             String tag = String.valueOf(item.getTag());
             String itemPackage = tag.substring("launcher_app:".length());
-            int itemPage = item == movingView ? destinationPage : pageIndex;
+            int itemPage = destinationPage;
             saveIconSlot(itemPackage, slot[0], slot[1], columns, page.getHeight());
             prefs.edit().putInt(KEY_ICON_PAGE + itemPackage, itemPage).apply();
         }
