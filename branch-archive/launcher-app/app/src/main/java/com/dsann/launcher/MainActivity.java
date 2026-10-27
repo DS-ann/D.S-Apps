@@ -9977,9 +9977,20 @@ public class MainActivity extends Activity {
                         if (candidate == view || !(candidate.getTag() instanceof String)
                                 || !((String) candidate.getTag()).startsWith("launcher_app:")) continue;
                         FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) candidate.getLayoutParams();
-                        int cc = Math.max(0, Math.min(columns - 1, Math.round((float) cp.leftMargin / cellWidth)));
+                        // In landscape, live displacement reserves a target before its animation
+                        // finishes; layout margins can still describe the old slot. Resolve the
+                        // occupant against that same reserved destination to avoid undoing a valid
+                        // drop by treating a visually vacated slot as still occupied.
+                        int[] reservedPosition = isLandscapeWorkspace()
+                                ? liveDisplacementTargets.get(candidate) : null;
+                        int effectiveLeft = reservedPosition != null
+                                ? reservedPosition[0] : cp.leftMargin;
+                        int effectiveTop = reservedPosition != null
+                                ? reservedPosition[1] : cp.topMargin;
+                        int cc = Math.max(0, Math.min(columns - 1,
+                                Math.round((float) effectiveLeft / cellWidth)));
                         int cr = homeGridRowFromTop(
-                                cp.topMargin, rows, targetHeight, cellHeight);
+                                effectiveTop, rows, targetHeight, cellHeight);
                         occupied[cr][cc] = true;
                         if (cc == targetCol && cr == targetRow) {
                             occupant = candidate;
