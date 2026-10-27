@@ -74,6 +74,8 @@ final class HomePageController {
     private boolean landscapeRepairScheduled;
     private boolean landscapeFitRunning;
     private boolean landscapeGridOverflowToastShown;
+    private int workspaceLayoutGeneration;
+    private Boolean lastRenderedLandscape;
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
     private static final String LANDSCAPE_GEOMETRY_PREFIX = "__landscape_workspace_geometry__";
 
@@ -162,6 +164,22 @@ final class HomePageController {
         return false;
     }
 
+    private boolean isWorkspaceActivityUsable() {
+        return !activity.isFinishing()
+                && !activity.isDestroyed()
+                && !activity.isChangingConfigurations();
+    }
+
+    private boolean isWorkspaceCallbackCurrent(LinearLayout strip,
+            boolean expectedLandscape, int expectedGeneration) {
+        return isWorkspaceActivityUsable()
+                && strip != null
+                && strip == host.getPagesStrip()
+                && strip.isAttachedToWindow()
+                && workspaceLayoutGeneration == expectedGeneration
+                && isLandscapeOrientation(strip) == expectedLandscape;
+    }
+
     private boolean isPortraitOrientation() {
         return !isLandscapeOrientation(host.getPagesStrip());
     }
@@ -182,7 +200,9 @@ final class HomePageController {
      */
     private void runAfterPageMatchesViewport(
             FrameLayout page, LinearLayout strip, Runnable action) {
-        if (page == null || strip == null || action == null) return;
+        if (!isWorkspaceActivityUsable()
+                || page == null || strip == null || strip != host.getPagesStrip()
+                || action == null) return;
         if (page.getParent() != strip) return;
         if (pageMatchesCurrentViewport(page)) {
             action.run();
@@ -191,8 +211,14 @@ final class HomePageController {
         final boolean[] delivered = {false};
         final View.OnLayoutChangeListener[] watcher = new View.OnLayoutChangeListener[1];
         Runnable deliver = () -> {
-            if (delivered[0] || page.getParent() != strip
-                    || !pageMatchesCurrentViewport(page)) return;
+            if (delivered[0]) return;
+            if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()
+                    || page.getParent() != strip) {
+                delivered[0] = true;
+                page.removeOnLayoutChangeListener(watcher[0]);
+                return;
+            }
+            if (!pageMatchesCurrentViewport(page)) return;
             delivered[0] = true;
             page.removeOnLayoutChangeListener(watcher[0]);
             page.post(action);
@@ -254,7 +280,9 @@ final class HomePageController {
     }
 
     private void saveCurrentOrientationGeometry(View item, LinearLayout strip) {
-        if (!isOrientationManagedItem(item)
+        if (!isWorkspaceActivityUsable()
+                || strip == null || strip != host.getPagesStrip()
+                || !isOrientationManagedItem(item)
                 || !(item.getLayoutParams() instanceof FrameLayout.LayoutParams)) return;
         boolean landscape = isLandscapeOrientation(strip);
         // Ignore transient layout/attach callbacks while the destination orientation is
@@ -1237,18 +1265,34 @@ final class HomePageController {
     }
 
     private void postLandscapeRepair(LinearLayout strip) {
-        if (strip == null || landscapeRepairScheduled || landscapeFitRunning) return;
+        if (!isWorkspaceActivityUsable() || strip == null
+                || strip != host.getPagesStrip()
+                || !isLandscapeOrientation(strip)
+                || landscapeRepairScheduled || landscapeFitRunning) return;
+        final int scheduledGeneration = workspaceLayoutGeneration;
+        final boolean scheduledLandscape = true;
         landscapeRepairScheduled = true;
         strip.post(() -> {
             landscapeRepairScheduled = false;
-            if (strip != host.getPagesStrip() || !isLandscapeOrientation(strip)
-                    || landscapeFitRunning) return;
+            if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()) return;
+            if (!isWorkspaceCallbackCurrent(strip, scheduledLandscape, scheduledGeneration)) {
+                // A rotation happened while this repair was queued. Do not apply stale
+                // landscape geometry; schedule a fresh repair only if landscape is still active.
+                if (isWorkspaceActivityUsable() && strip == host.getPagesStrip()
+                        && isLandscapeOrientation(strip)) {
+                    postLandscapeRepair(strip);
+                }
+                return;
+            }
+            if (landscapeFitRunning) return;
             adaptLandscapeWorkspace(strip);
         });
     }
 
     private void adaptLandscapeWorkspace(LinearLayout strip) {
-        if (strip == null || landscapeFitRunning || !isLandscapeOrientation(strip)) return;
+        if (!isWorkspaceActivityUsable() || strip == null
+                || strip != host.getPagesStrip()
+                || landscapeFitRunning || !isLandscapeOrientation(strip)) return;
         landscapeFitRunning = true;
         try {
             adaptLandscapeWorkspaceNow(strip);
@@ -1269,7 +1313,9 @@ final class HomePageController {
      * the landscape repair has had a chance to move or shrink widgets.
      */
     private void reflowLandscapeAppGrid(LinearLayout strip) {
-        if (strip == null || !isLandscapeOrientation(strip)) return;
+        if (!isWorkspaceActivityUsable() || strip == null
+                || strip != host.getPagesStrip() || !isLandscapeOrientation(strip)) return;
+        final int expectedGeneration = workspaceLayoutGeneration;
         int columns = Math.max(1, host.getHomeColumns());
         int configuredIconSize = prefs.getInt(iconSizeKey, 48);
         int cellHeight = LauncherUiUtils.dp(activity,
@@ -1285,8 +1331,11 @@ final class HomePageController {
                 // Orientation transitions can briefly leave one page at its old bounds.
                 // Retry after that page adopts the current viewport; never leave its
                 // overflow icons hidden simply because this pass ran too early.
-                runAfterPageMatchesViewport(page, strip,
-                        () -> reflowLandscapeAppGrid(strip));
+                runAfterPageMatchesViewport(page, strip, () -> {
+                    if (isWorkspaceCallbackCurrent(strip, true, expectedGeneration)) {
+                        reflowLandscapeAppGrid(strip);
+                    }
+                });
                 return;
             }
             List<List<String>> allPages = host.getPages();
@@ -1626,14 +1675,24 @@ final class HomePageController {
             "__workspace_geometry_last_applied_landscape";
 
     private void scheduleOrientationWorkspaceRepair(LinearLayout strip) {
-        if (strip == null || orientationRepairScheduled) return;
+        if (!isWorkspaceActivityUsable() || strip == null
+                || strip != host.getPagesStrip() || orientationRepairScheduled) return;
+        final boolean scheduledLandscape = isLandscapeOrientation(strip);
+        final int scheduledGeneration = workspaceLayoutGeneration;
         orientationRepairScheduled = true;
         // Coalesce renders during rotation into one measured repair; competing passes
         // previously overlapped work while Android was recalculating page bounds.
         strip.post(() -> strip.post(() -> {
             orientationRepairScheduled = false;
-            if (strip != host.getPagesStrip()) return;
-            boolean landscape = isLandscapeOrientation(strip);
+            if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()) return;
+            if (workspaceLayoutGeneration != scheduledGeneration
+                    || isLandscapeOrientation(strip) != scheduledLandscape) {
+                // A later orientation render superseded this work. Re-queue against the
+                // current geometry instead of letting a stale callback save the wrong mode.
+                scheduleOrientationWorkspaceRepair(strip);
+                return;
+            }
+            boolean landscape = scheduledLandscape;
             boolean hasPreviousOrientation = prefs.contains(LAST_GEOMETRY_LANDSCAPE_KEY);
             boolean previousLandscape = prefs.getBoolean(
                     LAST_GEOMETRY_LANDSCAPE_KEY, landscape);
@@ -1754,7 +1813,15 @@ final class HomePageController {
 
     void renderHomePages(boolean animate) {
         LinearLayout strip = host.getPagesStrip();
-        if (strip == null) return;
+        if (!isWorkspaceActivityUsable() || strip == null || strip != host.getPagesStrip()) return;
+
+        final boolean renderLandscape = isLandscapeOrientation(strip);
+        if (lastRenderedLandscape == null
+                || lastRenderedLandscape.booleanValue() != renderLandscape) {
+            workspaceLayoutGeneration++;
+            lastRenderedLandscape = renderLandscape;
+        }
+        final int renderGeneration = workspaceLayoutGeneration;
 
         // Match the page count to the persisted model without destroying the page strip.
         // Keeping page containers alive avoids detaching AppWidgetHostViews on every icon
@@ -1960,7 +2027,8 @@ final class HomePageController {
                 host.installHomeIconTouch(cell, packageName);
             }
             page.post(() -> runAfterPageMatchesViewport(page, strip, () -> {
-                if (page.getParent() != strip || !pageMatchesCurrentViewport(page)) return;
+                if (!isWorkspaceCallbackCurrent(strip, renderLandscape, renderGeneration)
+                        || page.getParent() != strip || !pageMatchesCurrentViewport(page)) return;
                 int actualCellWidth = homeAppCellWidthPx(page, strip, columns, page.getWidth());
                 if (!isLandscapeOrientation(strip)) {
                     savePortraitHomeAppRowWidthDp(actualCellWidth, columns);
