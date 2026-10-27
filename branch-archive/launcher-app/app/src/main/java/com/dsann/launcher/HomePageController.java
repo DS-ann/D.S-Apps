@@ -1254,6 +1254,157 @@ final class HomePageController {
         } finally {
             landscapeFitRunning = false;
         }
+        // Widget/clock repair can free cells after the first app-grid layout pass has
+        // already hidden overflow icons. Re-run the grid allocator against the final,
+        // fitted landscape geometry so freed cells are actually used in this same render.
+        if (strip == host.getPagesStrip() && isLandscapeOrientation(strip)) {
+            reflowLandscapeAppGrid(strip);
+        }
+    }
+
+    /**
+     * Reallocate app cells after landscape widgets and shortcuts have been fitted.
+     * This is separate from renderHomePages' initial pass because that pass runs before
+     * the landscape repair has had a chance to move or shrink widgets.
+     */
+    private void reflowLandscapeAppGrid(LinearLayout strip) {
+        if (strip == null || !isLandscapeOrientation(strip)) return;
+        int columns = Math.max(1, host.getHomeColumns());
+        int configuredIconSize = prefs.getInt(iconSizeKey, 48);
+        int cellHeight = LauncherUiUtils.dp(activity,
+                host.getHomeCellHeightDp(configuredIconSize));
+        boolean anyOverflow = false;
+
+        for (int pageIndex = 0; pageIndex < Math.min(HomePageModel.PAGE_COUNT,
+                strip.getChildCount()); pageIndex++) {
+            View pageView = strip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            if (!pageMatchesCurrentViewport(page)) continue;
+            List<List<String>> allPages = host.getPages();
+            if (allPages == null || pageIndex >= allPages.size()) continue;
+            List<String> packages = allPages.get(pageIndex);
+            int pageWidth = page.getWidth();
+            int pageHeight = page.getHeight();
+            int rows = Math.max(1, host.getHomeGridRowsForHeight(pageHeight, cellHeight));
+            int cellWidth = homeAppCellWidthPx(page, strip, columns, pageWidth);
+            boolean[][] occupied = new boolean[rows][columns];
+            boolean[][] placedAppSlots = new boolean[rows][columns];
+
+            // Use the post-repair widget/shortcut/clock/group footprints, not the
+            // pre-repair geometry that incorrectly made the landscape grid appear full.
+            reserveFixedWorkspaceGridSlots(page, occupied, columns, rows,
+                    pageHeight, cellWidth, cellHeight);
+
+            for (int itemIndex = 0; itemIndex < packages.size(); itemIndex++) {
+                String packageName = packages.get(itemIndex);
+                View appCell = null;
+                String wantedTag = "launcher_app:" + packageName;
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View child = page.getChildAt(childIndex);
+                    if (child != null && wantedTag.equals(child.getTag())) {
+                        appCell = child;
+                        break;
+                    }
+                }
+                if (appCell == null) continue;
+
+                int defaultCol = itemIndex % columns;
+                int defaultRow = Math.min(rows - 1, itemIndex / columns);
+                float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs,
+                        iconXKey + packageName,
+                        defaultCol / (float) Math.max(1, columns - 1));
+                float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs,
+                        iconYKey + packageName,
+                        defaultRow / (float) Math.max(1, rows - 1));
+                int preferredCol = Math.max(0, Math.min(columns - 1,
+                        Math.round(savedX * Math.max(1, columns - 1))));
+                int preferredRow = Math.max(0, Math.min(rows - 1,
+                        Math.round(savedY * Math.max(1, rows - 1))));
+                int row = preferredRow;
+                int col = preferredCol;
+                int[] freeCell = findNearestFreeGridSlot(
+                        occupied, rows, columns, preferredRow, preferredCol);
+
+                // Last-resort recovery: if all remaining cells are covered by a widget,
+                // try moving/shrinking that widget before deciding the grid is saturated.
+                int repairAttempts = 0;
+                while (freeCell == null && repairAttempts++ < page.getChildCount()) {
+                    boolean repaired = false;
+                    for (int candidateRow = 0; candidateRow < rows && !repaired; candidateRow++) {
+                        for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                            if (!occupied[candidateRow][candidateCol]
+                                    || placedAppSlots[candidateRow][candidateCol]) continue;
+                            int slotLeft = candidateCol * cellWidth;
+                            int slotTop = host.getHomeGridRowTop(candidateRow, rows,
+                                    pageHeight, cellHeight);
+                            Rect targetSlot = new Rect(slotLeft, slotTop,
+                                    slotLeft + cellWidth, slotTop + cellHeight);
+                            if (tryMoveWidgetAwayFromGridSlot(page, targetSlot,
+                                    pageWidth, pageHeight)) {
+                                repaired = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!repaired) break;
+
+                    for (boolean[] slotRow : occupied) java.util.Arrays.fill(slotRow, false);
+                    reserveFixedWorkspaceGridSlots(page, occupied, columns, rows,
+                            pageHeight, cellWidth, cellHeight);
+                    for (int usedRow = 0; usedRow < rows; usedRow++) {
+                        for (int usedCol = 0; usedCol < columns; usedCol++) {
+                            if (placedAppSlots[usedRow][usedCol]) {
+                                occupied[usedRow][usedCol] = true;
+                            }
+                        }
+                    }
+                    freeCell = findNearestFreeGridSlot(
+                            occupied, rows, columns, preferredRow, preferredCol);
+                }
+
+                if (freeCell == null) {
+                    appCell.setVisibility(View.INVISIBLE);
+                    gridOverflowHiddenAppCells.put(appCell, Boolean.TRUE);
+                    anyOverflow = true;
+                    continue;
+                }
+
+                row = freeCell[0];
+                col = freeCell[1];
+                appCell.setVisibility(View.VISIBLE);
+                gridOverflowHiddenAppCells.remove(appCell);
+                occupied[row][col] = true;
+                placedAppSlots[row][col] = true;
+
+                float finalSavedX = col / (float) Math.max(1, columns - 1);
+                float finalSavedY = row / (float) Math.max(1, rows - 1);
+                FrameLayout.LayoutParams lp = appCell.getLayoutParams()
+                        instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) appCell.getLayoutParams()
+                        : new FrameLayout.LayoutParams(cellWidth, cellHeight,
+                                Gravity.TOP | Gravity.LEFT);
+                lp.width = cellWidth;
+                lp.height = cellHeight;
+                lp.leftMargin = col * cellWidth;
+                lp.topMargin = host.getHomeGridRowTop(row, rows, pageHeight, cellHeight);
+                lp.gravity = Gravity.TOP | Gravity.LEFT;
+                appCell.setLayoutParams(lp);
+
+                if (row != preferredRow || col != preferredCol) {
+                    prefs.edit().putFloat(iconXKey + packageName, finalSavedX)
+                            .putFloat(iconYKey + packageName, finalSavedY)
+                            .putFloat("__landscape_icon_x__" + packageName, finalSavedX)
+                            .putFloat("__landscape_icon_y__" + packageName, finalSavedY).apply();
+                }
+            }
+        }
+
+        if (anyOverflow) {
+            android.widget.Toast.makeText(activity,
+                    "Home grid is full. Move items or free space to reveal the remaining app icons.",
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
     }
 
     private void adaptLandscapeWorkspaceNow(LinearLayout strip) {
@@ -1905,7 +2056,7 @@ final class HomePageController {
                             row, actualRows, page.getHeight(), actualCellHeight);
                     child.setLayoutParams(actual);
                 }
-                if (noFreeMeasuredSlot[0]) {
+                if (noFreeMeasuredSlot[0] && !isLandscapeOrientation(strip)) {
                     android.widget.Toast.makeText(activity,
                             "Home grid is full. Remove an item to reveal the remaining app icons.",
                             android.widget.Toast.LENGTH_LONG).show();
