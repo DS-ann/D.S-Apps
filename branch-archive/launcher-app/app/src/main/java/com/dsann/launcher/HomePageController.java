@@ -73,6 +73,7 @@ final class HomePageController {
     private boolean orientationRepairScheduled;
     private boolean landscapeRepairScheduled;
     private boolean landscapeFitRunning;
+    private boolean landscapeGridOverflowToastShown;
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
     private static final String LANDSCAPE_GEOMETRY_PREFIX = "__landscape_workspace_geometry__";
 
@@ -1400,10 +1401,13 @@ final class HomePageController {
             }
         }
 
-        if (anyOverflow) {
+        if (anyOverflow && !landscapeGridOverflowToastShown) {
+            landscapeGridOverflowToastShown = true;
             android.widget.Toast.makeText(activity,
                     "Home grid is full. Move items or free space to reveal the remaining app icons.",
                     android.widget.Toast.LENGTH_LONG).show();
+        } else if (!anyOverflow) {
+            landscapeGridOverflowToastShown = false;
         }
     }
 
