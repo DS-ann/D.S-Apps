@@ -291,11 +291,23 @@ final class HomePageController {
     /** True only after a page has adopted the current viewport's dimensions. */
     private boolean pageMatchesCurrentViewport(FrameLayout page) {
         FrameLayout viewport = host.getPageViewport();
-        return page != null && viewport != null
-                && page.getWidth() > 0 && page.getHeight() > 0
-                && viewport.getWidth() > 0 && viewport.getHeight() > 0
-                && page.getWidth() == viewport.getWidth()
-                && page.getHeight() == viewport.getHeight();
+        if (page == null || viewport == null
+                || page.getWidth() <= 0 || page.getHeight() <= 0
+                || viewport.getWidth() <= 0 || viewport.getHeight() <= 0
+                || page.getWidth() != viewport.getWidth()
+                || page.getHeight() != viewport.getHeight()) return false;
+
+        // Width/height can briefly still describe the previous orientation while
+        // Configuration has already changed. Treat matching page and viewport sizes
+        // as settled only when their aspect also agrees with the active configuration.
+        int orientation = activity.getResources().getConfiguration().orientation;
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            return page.getWidth() > page.getHeight();
+        }
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+            return page.getWidth() <= page.getHeight();
+        }
+        return true;
     }
 
     /**
