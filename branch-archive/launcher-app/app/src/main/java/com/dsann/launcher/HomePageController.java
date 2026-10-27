@@ -2189,11 +2189,11 @@ final class HomePageController {
                 // Re-map normalized positions only through an occupied-slot grid so two
                 // portrait rows can never collapse onto the same landscape cell.
                 final boolean landscapeAllocation = isLandscapeOrientation(strip);
-                int placementColumns = landscapeAllocation
+                int measuredPlacementColumns = landscapeAllocation
                         ? landscapeAppPlacementColumns(columns, page.getWidth(), actualCellWidth)
                         : columns;
-                boolean[][] laidOutSlots = new boolean[actualRows][placementColumns];
-                boolean[][] placedAppSlots = new boolean[actualRows][placementColumns];
+                boolean[][] laidOutSlots = new boolean[actualRows][measuredPlacementColumns];
+                boolean[][] placedAppSlots = new boolean[actualRows][measuredPlacementColumns];
                 ArrayList<Rect> landscapeFixedBounds = landscapeAllocation
                         ? collectFixedWorkspaceLayoutBounds(page) : null;
                 final boolean[] noFreeMeasuredSlot = {false};
@@ -2225,7 +2225,7 @@ final class HomePageController {
                     int requestedRow = row;
                     int[] freeCell = landscapeAllocation
                             ? findNearestFreeAppVisualSlot(child, placedAppSlots,
-                                    landscapeFixedBounds, actualRows, placementColumns,
+                                    landscapeFixedBounds, actualRows, measuredPlacementColumns,
                                     page.getWidth(), page.getHeight(), actualCellWidth,
                                     actualCellHeight, row, col)
                             : findNearestFreeGridSlot(laidOutSlots, actualRows, columns, row, col);
@@ -2238,7 +2238,7 @@ final class HomePageController {
                         boolean repaired = false;
                         for (int candidateRow = 0; candidateRow < actualRows && !repaired;
                                 candidateRow++) {
-                            for (int candidateCol = 0; candidateCol < placementColumns; candidateCol++) {
+                            for (int candidateCol = 0; candidateCol < measuredPlacementColumns; candidateCol++) {
                                 if (!laidOutSlots[candidateRow][candidateCol]
                                         || placedAppSlots[candidateRow][candidateCol]) continue;
                                 int slotLeft = candidateCol * actualCellWidth;
