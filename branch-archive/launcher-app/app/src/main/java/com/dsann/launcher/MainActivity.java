@@ -3312,6 +3312,9 @@ public class MainActivity extends Activity {
     }
 
     private void rebuildPages() {
+        // A destroyed/recreating Activity can still receive queued View callbacks.
+        // Do not let its old orientation rebuild the shared app-position preferences.
+        if (isFinishing() || isChangingConfigurations() || isDestroyed()) return;
         // The model always returns exactly two stable screens; it never compacts empty pages.
         HomePageModel.Result result = HomePageModel.rebuild(
                 prefs, homePackages, widgetManager, currentPage, pageCapacity(),
@@ -4224,11 +4227,13 @@ public class MainActivity extends Activity {
             // previous orientation's page width or an in-flight transition transform.
             alignWorkspaceStripToViewport(measuredWidth);
             if (workspaceViewportRefreshPending || homePageController == null
-                    || pagesStrip == null || isFinishing()) return;
+                    || pagesStrip == null || isFinishing()
+                    || isChangingConfigurations() || isDestroyed()) return;
             workspaceViewportRefreshPending = true;
             pageViewport.post(() -> {
                 workspaceViewportRefreshPending = false;
-                if (isFinishing() || pageViewport == null || pagesStrip == null
+                if (isFinishing() || isChangingConfigurations() || isDestroyed()
+                        || pageViewport == null || pagesStrip == null
                         || homePageController == null || pageViewport.getWidth() <= 0
                         || pageViewport.getHeight() <= 0) return;
                 alignWorkspaceStripToViewport(pageViewport.getWidth());
@@ -4240,6 +4245,10 @@ public class MainActivity extends Activity {
     }
 
     private void renderHomePages(boolean animate) {
+        // Check before rebuildPages(): that method writes orientation-specific and legacy
+        // coordinates. An old Activity must not publish landscape state after portrait
+        // has already been recreated.
+        if (isFinishing() || isChangingConfigurations() || isDestroyed()) return;
         // Every completed UI refresh rebuilds the page model from saved icons/widgets,
         // compacts away all empty pages, and remaps persisted page indexes before drawing.
         // This also cleans up pages left behind by widget removal or cross-page moves.
