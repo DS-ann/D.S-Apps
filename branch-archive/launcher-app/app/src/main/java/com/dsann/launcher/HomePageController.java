@@ -75,6 +75,8 @@ final class HomePageController {
     private boolean landscapeFitRunning;
     private boolean landscapeGridOverflowToastShown;
     private int workspaceLayoutGeneration;
+    // Invalidates queued per-page layout callbacks when a newer render supersedes them.
+    private int workspaceRenderSequence;
     private Boolean lastRenderedLandscape;
     private static final String PORTRAIT_GEOMETRY_PREFIX = "__portrait_workspace_geometry__";
     private static final String LANDSCAPE_GEOMETRY_PREFIX = "__landscape_workspace_geometry__";
@@ -182,6 +184,52 @@ final class HomePageController {
 
     private boolean isPortraitOrientation() {
         return !isLandscapeOrientation(host.getPagesStrip());
+    }
+
+    private String appCoordinatePreferenceKey(String packageName, boolean xAxis, boolean landscape) {
+        return (landscape
+                ? (xAxis ? "__landscape_icon_x__" : "__landscape_icon_y__")
+                : (xAxis ? "__portrait_icon_x__" : "__portrait_icon_y__")) + packageName;
+    }
+
+    private float savedAppCoordinate(String packageName, boolean xAxis, boolean landscape,
+            float fallback) {
+        String orientationKey = appCoordinatePreferenceKey(packageName, xAxis, landscape);
+        String legacyKey = (xAxis ? iconXKey : iconYKey) + packageName;
+        return LauncherUiUtils.getFloatPreferenceCompat(prefs,
+                prefs.contains(orientationKey) ? orientationKey : legacyKey, fallback);
+    }
+
+    /**
+     * Automatic collision repair is orientation-local. Mirroring landscape's calculated
+     * slot into the legacy shared key would make a rapid return to portrait inherit the
+     * temporary landscape arrangement.
+     */
+    private void saveReflowedAppPosition(String packageName, float x, float y, boolean landscape) {
+        String xKey = appCoordinatePreferenceKey(packageName, true, landscape);
+        String yKey = appCoordinatePreferenceKey(packageName, false, landscape);
+        SharedPreferences.Editor edit = prefs.edit().putFloat(xKey, x).putFloat(yKey, y);
+        if (!landscape) {
+            // Keep legacy consumers aligned with portrait without allowing landscape
+            // collision repair to overwrite portrait's independent anchor.
+            edit.putFloat(iconXKey + packageName, x).putFloat(iconYKey + packageName, y);
+        }
+        edit.apply();
+    }
+
+    private boolean pagesMatchCurrentViewport(LinearLayout strip) {
+        if (strip == null || strip != host.getPagesStrip()) return false;
+        FrameLayout viewport = host.getPageViewport();
+        if (viewport == null || viewport.getWidth() <= 0 || viewport.getHeight() <= 0) {
+            return false;
+        }
+        for (int i = 0; i < strip.getChildCount(); i++) {
+            View child = strip.getChildAt(i);
+            if (child instanceof FrameLayout && !pageMatchesCurrentViewport((FrameLayout) child)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** True only after a page has adopted the current viewport's dimensions. */
@@ -1453,11 +1501,9 @@ final class HomePageController {
 
                 int defaultCol = itemIndex % columns;
                 int defaultRow = Math.min(rows - 1, itemIndex / columns);
-                float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs,
-                        iconXKey + packageName,
+                float savedX = savedAppCoordinate(packageName, true, true,
                         defaultCol / (float) Math.max(1, columns - 1));
-                float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs,
-                        iconYKey + packageName,
+                float savedY = savedAppCoordinate(packageName, false, true,
                         defaultRow / (float) Math.max(1, rows - 1));
                 int preferredCol = Math.max(0, Math.min(columns - 1,
                         Math.round(savedX * Math.max(1, columns - 1))));
@@ -1528,10 +1574,7 @@ final class HomePageController {
                 appCell.setLayoutParams(lp);
 
                 if (row != preferredRow || col != preferredCol) {
-                    prefs.edit().putFloat(iconXKey + packageName, finalSavedX)
-                            .putFloat(iconYKey + packageName, finalSavedY)
-                            .putFloat("__landscape_icon_x__" + packageName, finalSavedX)
-                            .putFloat("__landscape_icon_y__" + packageName, finalSavedY).apply();
+                    saveReflowedAppPosition(packageName, finalSavedX, finalSavedY, true);
                 }
             }
         }
@@ -1746,6 +1789,7 @@ final class HomePageController {
                 || strip != host.getPagesStrip() || orientationRepairScheduled) return;
         final boolean scheduledLandscape = isLandscapeOrientation(strip);
         final int scheduledGeneration = workspaceLayoutGeneration;
+        final int scheduledRenderSequence = workspaceRenderSequence;
         orientationRepairScheduled = true;
         // Coalesce renders during rotation into one measured repair; competing passes
         // previously overlapped work while Android was recalculating page bounds.
@@ -1753,11 +1797,25 @@ final class HomePageController {
             orientationRepairScheduled = false;
             if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()) return;
             if (workspaceLayoutGeneration != scheduledGeneration
+                    || workspaceRenderSequence != scheduledRenderSequence
                     || isLandscapeOrientation(strip) != scheduledLandscape) {
-                // A later orientation render superseded this work. Re-queue against the
-                // current geometry instead of letting a stale callback save the wrong mode.
+                // A newer render/orientation superseded this work. Re-queue against the
+                // latest geometry instead of letting a stale callback save the wrong mode.
                 if (strip.isAttachedToWindow()) {
                     scheduleOrientationWorkspaceRepair(strip);
+                }
+                return;
+            }
+            if (!pagesMatchCurrentViewport(strip)) {
+                // Never restore or snapshot geometry while one page still has the previous
+                // orientation's dimensions; wait for all pages and then retry once.
+                for (int i = 0; i < strip.getChildCount(); i++) {
+                    View child = strip.getChildAt(i);
+                    if (child instanceof FrameLayout
+                            && !pageMatchesCurrentViewport((FrameLayout) child)) {
+                        runAfterPageMatchesViewport((FrameLayout) child, strip,
+                                () -> scheduleOrientationWorkspaceRepair(strip));
+                    }
                 }
                 return;
             }
@@ -1891,6 +1949,7 @@ final class HomePageController {
             lastRenderedLandscape = renderLandscape;
         }
         final int renderGeneration = workspaceLayoutGeneration;
+        final int renderSequence = ++workspaceRenderSequence;
 
         // Match the page count to the persisted model without destroying the page strip.
         // Keeping page containers alive avoids detaching AppWidgetHostViews on every icon
@@ -2037,9 +2096,9 @@ final class HomePageController {
                         cellWidth, cellHeight, Gravity.TOP | Gravity.LEFT);
                 int defaultCol = itemIndex % columns;
                 int defaultRow = Math.min(rows - 1, itemIndex / columns);
-                float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + packageName,
+                float savedX = savedAppCoordinate(packageName, true, renderLandscape,
                         defaultCol / (float) Math.max(1, columns - 1));
-                float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + packageName,
+                float savedY = savedAppCoordinate(packageName, false, renderLandscape,
                         defaultRow / (float) Math.max(1, rows - 1));
                 int col = Math.max(0, Math.min(columns - 1,
                         Math.round(savedX * Math.max(1, columns - 1))));
@@ -2066,14 +2125,8 @@ final class HomePageController {
                         // Do not persist collisions found using a fallback page height.
                         // The measured post-layout pass saves the final legal cell instead.
                         if (pageMatchesCurrentViewport(page)) {
-                            String activeXPrefix = isLandscapeOrientation(strip)
-                                    ? "__landscape_icon_x__" : "__portrait_icon_x__";
-                            String activeYPrefix = isLandscapeOrientation(strip)
-                                    ? "__landscape_icon_y__" : "__portrait_icon_y__";
-                            prefs.edit().putFloat(iconXKey + packageName, savedX)
-                                    .putFloat(iconYKey + packageName, savedY)
-                                    .putFloat(activeXPrefix + packageName, savedX)
-                                    .putFloat(activeYPrefix + packageName, savedY).apply();
+                            saveReflowedAppPosition(packageName, savedX, savedY,
+                                    isLandscapeOrientation(strip));
                         }
                     }
                     // Never draw an existing icon on top of another workspace item just
@@ -2097,6 +2150,7 @@ final class HomePageController {
             }
             page.post(() -> runAfterPageMatchesViewport(page, strip, () -> {
                 if (!isWorkspaceCallbackCurrent(strip, renderLandscape, renderGeneration)
+                        || workspaceRenderSequence != renderSequence
                         || page.getParent() != strip || !pageMatchesCurrentViewport(page)) return;
                 int actualCellWidth = homeAppCellWidthPx(page, strip, columns, page.getWidth());
                 if (!isLandscapeOrientation(strip)) {
@@ -2113,12 +2167,16 @@ final class HomePageController {
                 // portrait rows can never collapse onto the same landscape cell.
                 boolean[][] laidOutSlots = new boolean[actualRows][columns];
                 boolean[][] placedAppSlots = new boolean[actualRows][columns];
+                final boolean landscapeAllocation = isLandscapeOrientation(strip);
+                ArrayList<Rect> landscapeFixedBounds = landscapeAllocation
+                        ? collectFixedWorkspaceLayoutBounds(page) : null;
                 final boolean[] noFreeMeasuredSlot = {false};
-                // Reserve visible workspace items before laying out app cells. Invisible
-                // transient children no longer consume capacity, and a blocked cell can
-                // trigger a widget fit attempt before an app icon is hidden.
-                reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
-                        page.getHeight(), actualCellWidth, actualCellHeight);
+                // Portrait keeps its established whole-cell placement semantics. In
+                // landscape, only actual visible icon/label bounds block a candidate.
+                if (!landscapeAllocation) {
+                    reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
+                            page.getHeight(), actualCellWidth, actualCellHeight);
+                }
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
@@ -2129,9 +2187,9 @@ final class HomePageController {
                     if (orderIndex < 0) continue;
                     int defaultCol = orderIndex % columns;
                     int defaultRow = Math.min(actualRows - 1, orderIndex / columns);
-                    float savedX = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconXKey + childPackage,
+                    float savedX = savedAppCoordinate(childPackage, true, landscapeAllocation,
                             defaultCol / (float) Math.max(1, columns - 1));
-                    float savedY = LauncherUiUtils.getFloatPreferenceCompat(prefs, iconYKey + childPackage,
+                    float savedY = savedAppCoordinate(childPackage, false, landscapeAllocation,
                             defaultRow / (float) Math.max(1, actualRows - 1));
                     int col = Math.max(0, Math.min(columns - 1,
                             Math.round(savedX * Math.max(1, columns - 1))));
@@ -2139,15 +2197,18 @@ final class HomePageController {
                             Math.round(savedY * Math.max(1, actualRows - 1))));
                     int requestedCol = col;
                     int requestedRow = row;
-                    int[] freeCell = findNearestFreeGridSlot(
-                            laidOutSlots, actualRows, columns, row, col);
+                    int[] freeCell = landscapeAllocation
+                            ? findNearestFreeAppVisualSlot(child, placedAppSlots,
+                                    landscapeFixedBounds, actualRows, columns,
+                                    page.getWidth(), page.getHeight(), actualCellWidth,
+                                    actualCellHeight, row, col)
+                            : findNearestFreeGridSlot(laidOutSlots, actualRows, columns, row, col);
 
-                    // The previous pass can exhaust grid cells merely because a widget
-                    // touches a cell boundary. Before hiding an app, try freeing a cell
-                    // covered by exactly one widget; the fit routine preserves its size
-                    // when possible and shrinks it only when relocation alone cannot fit.
+                    // Portrait retains its existing widget-capacity repair. Landscape's
+                    // visual allocator must not be overwritten by a whole-slot test.
                     int repairAttempts = 0;
-                    while (freeCell == null && repairAttempts++ < page.getChildCount()) {
+                    while (!landscapeAllocation && freeCell == null
+                            && repairAttempts++ < page.getChildCount()) {
                         boolean repaired = false;
                         for (int candidateRow = 0; candidateRow < actualRows && !repaired;
                                 candidateRow++) {
@@ -2199,14 +2260,8 @@ final class HomePageController {
                     if (col != requestedCol || row != requestedRow) {
                         float finalSavedX = col / (float) Math.max(1, columns - 1);
                         float finalSavedY = row / (float) Math.max(1, actualRows - 1);
-                        String activeXPrefix = isLandscapeOrientation(strip)
-                                ? "__landscape_icon_x__" : "__portrait_icon_x__";
-                        String activeYPrefix = isLandscapeOrientation(strip)
-                                ? "__landscape_icon_y__" : "__portrait_icon_y__";
-                        prefs.edit().putFloat(iconXKey + childPackage, finalSavedX)
-                                .putFloat(iconYKey + childPackage, finalSavedY)
-                                .putFloat(activeXPrefix + childPackage, finalSavedX)
-                                .putFloat(activeYPrefix + childPackage, finalSavedY).apply();
+                        saveReflowedAppPosition(childPackage, finalSavedX, finalSavedY,
+                                landscapeAllocation);
                     }
                     FrameLayout.LayoutParams actual = (FrameLayout.LayoutParams) child.getLayoutParams();
                     actual.width = actualCellWidth;
