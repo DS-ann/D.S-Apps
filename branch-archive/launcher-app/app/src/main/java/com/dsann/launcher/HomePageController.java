@@ -1292,6 +1292,18 @@ final class HomePageController {
             boolean[][] occupied = new boolean[rows][columns];
             boolean[][] placedAppSlots = new boolean[rows][columns];
 
+            // Every app icon will be allocated again below. Hide their stale cell
+            // positions during repair so a widget can move into a cell that an icon is
+            // about to vacate; the final allocator then places icons around the fitted
+            // widget bounds. All of this runs on the UI thread within one frame.
+            for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                View child = page.getChildAt(childIndex);
+                Object tag = child == null ? null : child.getTag();
+                if (tag instanceof String && ((String) tag).startsWith("launcher_app:")) {
+                    child.setVisibility(View.INVISIBLE);
+                }
+            }
+
             // Use the post-repair widget/shortcut/clock/group footprints, not the
             // pre-repair geometry that incorrectly made the landscape grid appear full.
             reserveFixedWorkspaceGridSlots(page, occupied, columns, rows,
