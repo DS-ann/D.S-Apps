@@ -62,6 +62,9 @@ final class HomePageController {
             new java.util.WeakHashMap<View, Boolean>();
     private final java.util.WeakHashMap<View, Boolean> orientationGeometryWatchers =
             new java.util.WeakHashMap<View, Boolean>();
+    // Distinguish a deliberately hidden overflow icon from transient drag/attach invisibility.
+    private final java.util.WeakHashMap<View, Boolean> gridOverflowHiddenAppCells =
+            new java.util.WeakHashMap<View, Boolean>();
     private final java.util.WeakHashMap<View, float[]> landscapeClockBaseScales =
             new java.util.WeakHashMap<View, float[]>();
     private final java.util.WeakHashMap<View, View.OnLayoutChangeListener>
@@ -1518,7 +1521,10 @@ final class HomePageController {
     private void normalizeWorkspaceItemVisuals(View item, boolean afterReparent) {
         if (item == null) return;
         if (afterReparent) item.animate().cancel();
-        if (item.getVisibility() != View.VISIBLE) item.setVisibility(View.VISIBLE);
+        // Render cleanup may reveal items hidden temporarily by dragging, but it must
+        // not undo the grid allocator's no-overlap fallback for an overflow icon.
+        if (!gridOverflowHiddenAppCells.containsKey(item)
+                && item.getVisibility() != View.VISIBLE) item.setVisibility(View.VISIBLE);
         if (Math.abs(item.getAlpha() - 1f) > 0.001f) item.setAlpha(1f);
         if (Math.abs(item.getScaleX()) < 0.01f) item.setScaleX(1f);
         if (Math.abs(item.getScaleY()) < 0.01f) item.setScaleY(1f);
@@ -1766,8 +1772,10 @@ final class HomePageController {
                 }
                 if (hasFreeSlot) {
                     occupiedSlots[row][col] = true;
+                    gridOverflowHiddenAppCells.remove(cell);
                 } else {
                     cell.setVisibility(View.INVISIBLE);
+                    gridOverflowHiddenAppCells.put(cell, Boolean.TRUE);
                 }
                 lp.leftMargin = col * cellWidth;
                 // Keep rows at their original fixed grid positions. In particular,
@@ -1867,12 +1875,14 @@ final class HomePageController {
 
                     if (freeCell == null) {
                         child.setVisibility(View.INVISIBLE);
+                        gridOverflowHiddenAppCells.put(child, Boolean.TRUE);
                         noFreeMeasuredSlot[0] = true;
                         continue;
                     }
                     row = freeCell[0];
                     col = freeCell[1];
                     child.setVisibility(View.VISIBLE);
+                    gridOverflowHiddenAppCells.remove(child);
                     laidOutSlots[row][col] = true;
                     placedAppSlots[row][col] = true;
                     if (col != requestedCol || row != requestedRow) {
