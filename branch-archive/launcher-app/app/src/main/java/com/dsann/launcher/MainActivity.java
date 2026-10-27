@@ -7425,13 +7425,6 @@ public class MainActivity extends Activity {
         if (!KEY_SHORTCUT_X.equals(base) && !KEY_SHORTCUT_Y.equals(base)) return portraitKey;
         String activeKey = isLandscapeWorkspace()
                 ? "__landscape_" + base + "_" + id : portraitKey;
-        if (!prefs.contains(activeKey)) {
-            String otherKey = isLandscapeWorkspace()
-                    ? portraitKey : "__landscape_" + base + "_" + id;
-            if (prefs.contains(otherKey)) {
-                prefs.edit().putFloat(activeKey, prefs.getFloat(otherKey, -1f)).apply();
-            }
-        }
         return activeKey;
     }
 
@@ -7539,42 +7532,90 @@ public class MainActivity extends Activity {
     }
 
     private void syncShortcutCellsToPageGeometry(FrameLayout page) {
-        if (page == null || page.getWidth() <= 0 || page.getHeight() <= 0
+        if (page == null || prefs == null || page.getWidth() <= 0 || page.getHeight() <= 0
                 || pagesStrip == null || page.getParent() != pagesStrip) return;
-        int cellWidth = homeGridCellWidthPx(page, 4, page.getWidth());
+        // Wait for the current orientation's measured viewport; stale page sizes
+        // must not collapse multiple shortcut anchors into the same grid cells.
+        if (!pageMatchesCurrentViewport(page)) {
+            runAfterPageMatchesViewport(page, pagesStrip,
+                    () -> syncShortcutCellsToPageGeometry(page));
+            return;
+        }
+
+        final int columns = 4;
+        int cellWidth = homeGridCellWidthPx(page, columns, page.getWidth());
         int cellHeight = LauncherUiUtils.dp(this,
-                homeCellHeightDp(prefs == null ? 48 : prefs.getInt(KEY_ICON_SIZE, 48)));
-        int rows = homeGridRowsForHeight(page.getHeight(), cellHeight);
+                homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
+        int rows = Math.max(1, homeGridRowsForHeight(page.getHeight(), cellHeight));
+        java.util.HashSet<Integer> occupiedSlots = new java.util.HashSet<Integer>();
+        android.content.SharedPreferences.Editor corrected = prefs.edit();
+        boolean changed = false;
         boolean foundShortcut = false;
+
         for (int i = 0; i < page.getChildCount(); i++) {
             View child = page.getChildAt(i);
             if (!isWorkspaceContactShortcut(child) || !(child instanceof ViewGroup)
                     || !(child.getLayoutParams() instanceof FrameLayout.LayoutParams)) continue;
             foundShortcut = true;
             ViewGroup tile = (ViewGroup) child;
+            String id = shortcutIdFromTile(tile);
+            if (id.isEmpty()) continue;
+
+            float savedX = Math.max(0f, Math.min(1f, getFloatPreferenceCompat(
+                    shortcutPrefKey(KEY_SHORTCUT_X, id), 0f)));
+            float savedY = Math.max(0f, Math.min(1f, getFloatPreferenceCompat(
+                    shortcutPrefKey(KEY_SHORTCUT_Y, id), 0f)));
+            int preferredCol = Math.max(0, Math.min(columns - 1,
+                    Math.round(savedX * (columns - 1))));
+            int preferredRow = Math.max(0, Math.min(rows - 1,
+                    Math.round(savedY * Math.max(1, rows - 1))));
+            int col = preferredCol;
+            int row = preferredRow;
+
+            if (occupiedSlots.contains(row * columns + col)) {
+                int bestDistance = Integer.MAX_VALUE;
+                int bestCol = -1;
+                int bestRow = -1;
+                for (int candidateRow = 0; candidateRow < rows; candidateRow++) {
+                    for (int candidateCol = 0; candidateCol < columns; candidateCol++) {
+                        if (occupiedSlots.contains(candidateRow * columns + candidateCol)) continue;
+                        int distance = Math.abs(candidateCol - preferredCol)
+                                + Math.abs(candidateRow - preferredRow);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestCol = candidateCol;
+                            bestRow = candidateRow;
+                        }
+                    }
+                }
+                if (bestCol < 0) {
+                    // Never render two shortcut tiles on top of each other when the grid is full.
+                    tile.setVisibility(View.INVISIBLE);
+                    continue;
+                }
+                col = bestCol;
+                row = bestRow;
+            }
+            occupiedSlots.add(row * columns + col);
+            tile.setVisibility(View.VISIBLE);
+
             if (tile.getChildCount() < 2) continue;
             ImageView icon = tile.getChildAt(0) instanceof ImageView
                     ? (ImageView) tile.getChildAt(0) : null;
             TextView label = tile.getChildAt(1) instanceof TextView
                     ? (TextView) tile.getChildAt(1) : null;
             if (icon == null) continue;
-            String id = shortcutIdFromTile(tile);
-            if (id.isEmpty()) continue;
-            float savedX = Math.max(0f, Math.min(1f, getFloatPreferenceCompat(
-                    shortcutPrefKey(KEY_SHORTCUT_X, id), 0f)));
-            float savedY = Math.max(0f, Math.min(1f, getFloatPreferenceCompat(
-                    shortcutPrefKey(KEY_SHORTCUT_Y, id), 0f)));
-            int col = Math.max(0, Math.min(3, Math.round(savedX * 3f)));
-            int row = Math.max(0, Math.min(rows - 1,
-                    Math.round(savedY * Math.max(1, rows - 1))));
-            int iconSize = shortcutIconSizePx(cellWidth, cellHeight);
-            FrameLayout.LayoutParams tileParams = (FrameLayout.LayoutParams) tile.getLayoutParams();
+
+            FrameLayout.LayoutParams tileParams =
+                    (FrameLayout.LayoutParams) tile.getLayoutParams();
             tileParams.width = cellWidth;
             tileParams.height = cellHeight;
             tileParams.leftMargin = col * cellWidth;
             tileParams.topMargin = homeGridRowTop(row, rows, page.getHeight(), cellHeight);
             tileParams.gravity = Gravity.TOP | Gravity.LEFT;
             tile.setLayoutParams(tileParams);
+
+            int iconSize = shortcutIconSizePx(cellWidth, cellHeight);
             if (icon.getLayoutParams() instanceof FrameLayout.LayoutParams) {
                 FrameLayout.LayoutParams iconParams =
                         (FrameLayout.LayoutParams) icon.getLayoutParams();
@@ -7594,11 +7635,23 @@ public class MainActivity extends Activity {
                 label.setLayoutParams(labelParams);
                 label.post(() -> fitShortcutLabelWithDots(label));
             }
+
+            if (col != preferredCol || row != preferredRow) {
+                corrected.putFloat(shortcutPrefKey(KEY_SHORTCUT_X, id),
+                                col / (float) Math.max(1, columns - 1))
+                        .putFloat(shortcutPrefKey(KEY_SHORTCUT_Y, id),
+                                row / (float) Math.max(1, rows - 1));
+                changed = true;
+            }
         }
+        if (changed) corrected.apply();
         if (!foundShortcut) return;
         page.post(() -> {
-            // Do not reassign saved shortcut slots or run widget auto-shrink because a page
-            // was remeasured during a package update. Explicit shortcut moves still repair.
+            if (!pageMatchesCurrentViewport(page)) {
+                runAfterPageMatchesViewport(page, pagesStrip,
+                        () -> syncShortcutCellsToPageGeometry(page));
+                return;
+            }
             ensureShortcutLabelsNotClipped();
         });
     }
@@ -9916,15 +9969,6 @@ public class MainActivity extends Activity {
                                         moveHomeAppIntoGroup(dropTargetGroupId, packageName));
                         return true;
                     }
-                    // Landscape app placement uses a deterministic grid transaction at release.
-                    // The live push planner is only a preview: its animation-frame geometry
-                    // must not decide whether the committed grid slot is accepted.
-                    if (isLandscapeWorkspace()) {
-                        finishLandscapeManualAppDrop(view, sourceView, targetPage,
-                                sourcePage, destinationPage, movedAcrossPage, targetCol, targetRow,
-                                columns, rows, cellWidth, cellHeight, boundaryHasMajorityCell);
-                        return true;
-                    }
                     int proposedIconLeft = targetCol * cellWidth;
                     int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
                     FrameLayout.LayoutParams snappedCandidate =
@@ -9939,40 +9983,6 @@ public class MainActivity extends Activity {
                             && canPlaceWorkspaceItem(targetPage, view, proposedIconLeft,
                                     proposedIconTop, cellWidth, cellHeight);
                     View landscapeSwapFallbackOccupant = null;
-                    if (!canPlaceDestination && boundaryHasMajorityCell
-                            && isLandscapeWorkspace() && !movedAcrossPage) {
-                        View candidate = findLandscapeSwapFallbackOccupant(targetPage, view,
-                                proposedIconLeft, proposedIconTop, cellWidth, cellHeight,
-                                targetCol, targetRow, cellWidth, cellHeight, rows);
-                        if (candidate != null) {
-                            // Validate the reverse half of the swap using the same source
-                            // grid metrics. No other workspace item may occupy that source slot.
-                            int fallbackSourceConfiguredColumns = getHomeColumns();
-                            int fallbackSourceCellWidth = homeGridCellWidthPx(
-                                    sourceView, fallbackSourceConfiguredColumns, sourceView.getWidth());
-                            int fallbackSourceCellHeight = slotHeight;
-                            int fallbackSourceRows = homeGridRowsForHeight(
-                                    sourceView.getHeight(), fallbackSourceCellHeight);
-                            int fallbackSourcePlacementColumns = homeGridPlacementColumns(
-                                    sourceView, fallbackSourceConfiguredColumns, sourceView.getWidth());
-                            int fallbackSourceCol = Math.max(0, Math.min(
-                                    fallbackSourcePlacementColumns - 1,
-                                    Math.round(iconOriginalLeft / (float) fallbackSourceCellWidth)));
-                            int fallbackSourceRow = homeGridRowFromTop(
-                                    iconOriginalTop, fallbackSourceRows,
-                                    sourceView.getHeight(), fallbackSourceCellHeight);
-                            int fallbackSourceLeft = fallbackSourceCol * fallbackSourceCellWidth;
-                            int fallbackSourceTop = homeGridRowTop(fallbackSourceRow,
-                                    fallbackSourceRows, sourceView.getHeight(),
-                                    fallbackSourceCellHeight);
-                            if (canPlaceWorkspaceItem(sourceView, candidate,
-                                    fallbackSourceLeft, fallbackSourceTop,
-                                    fallbackSourceCellWidth, fallbackSourceCellHeight)) {
-                                landscapeSwapFallbackOccupant = candidate;
-                                canPlaceDestination = true;
-                            }
-                        }
-                    }
                     if (!boundaryHasMajorityCell || !canPlaceDestination) {
                         FrameLayout.LayoutParams rollbackParams =
                                 (FrameLayout.LayoutParams) view.getLayoutParams();
@@ -10029,8 +10039,7 @@ public class MainActivity extends Activity {
                         // finishes; layout margins can still describe the old slot. Resolve the
                         // occupant against that same reserved destination to avoid undoing a valid
                         // drop by treating a visually vacated slot as still occupied.
-                        int[] reservedPosition = isLandscapeWorkspace()
-                                ? liveDisplacementTargets.get(candidate) : null;
+                        int[] reservedPosition = liveDisplacementTargets.get(candidate);
                         int effectiveLeft = reservedPosition != null
                                 ? reservedPosition[0] : cp.leftMargin;
                         int effectiveTop = reservedPosition != null
