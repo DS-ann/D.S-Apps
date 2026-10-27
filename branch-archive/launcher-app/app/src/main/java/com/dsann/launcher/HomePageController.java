@@ -1393,14 +1393,16 @@ final class HomePageController {
                 || !isLandscapeOrientation(strip)
                 || landscapeRepairScheduled || landscapeFitRunning) return;
         final int scheduledGeneration = workspaceLayoutGeneration;
+        final int scheduledRenderSequence = workspaceRenderSequence;
         final boolean scheduledLandscape = true;
         landscapeRepairScheduled = true;
         strip.post(() -> {
             landscapeRepairScheduled = false;
             if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()) return;
-            if (!isWorkspaceCallbackCurrent(strip, scheduledLandscape, scheduledGeneration)) {
-                // A rotation happened while this repair was queued. Do not apply stale
-                // landscape geometry; schedule a fresh repair only if landscape is still active.
+            if (!isWorkspaceCallbackCurrent(strip, scheduledLandscape, scheduledGeneration)
+                    || workspaceRenderSequence != scheduledRenderSequence) {
+                // A rotation or newer render superseded this queued fit. Do not apply stale
+                // geometry; schedule a fresh repair only if landscape is still active.
                 if (isWorkspaceActivityUsable() && strip == host.getPagesStrip()
                         && strip.isAttachedToWindow() && isLandscapeOrientation(strip)) {
                     postLandscapeRepair(strip);
@@ -1439,6 +1441,7 @@ final class HomePageController {
         if (!isWorkspaceActivityUsable() || strip == null
                 || strip != host.getPagesStrip() || !isLandscapeOrientation(strip)) return;
         final int expectedGeneration = workspaceLayoutGeneration;
+        final int expectedRenderSequence = workspaceRenderSequence;
         int columns = Math.max(1, host.getHomeColumns());
         int configuredIconSize = prefs.getInt(iconSizeKey, 48);
         int cellHeight = LauncherUiUtils.dp(activity,
@@ -1447,6 +1450,7 @@ final class HomePageController {
 
         for (int pageIndex = 0; pageIndex < Math.min(HomePageModel.PAGE_COUNT,
                 strip.getChildCount()); pageIndex++) {
+            if (workspaceRenderSequence != expectedRenderSequence) return;
             View pageView = strip.getChildAt(pageIndex);
             if (!(pageView instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pageView;
@@ -1455,7 +1459,8 @@ final class HomePageController {
                 // Retry after that page adopts the current viewport; never leave its
                 // overflow icons hidden simply because this pass ran too early.
                 runAfterPageMatchesViewport(page, strip, () -> {
-                    if (isWorkspaceCallbackCurrent(strip, true, expectedGeneration)) {
+                    if (isWorkspaceCallbackCurrent(strip, true, expectedGeneration)
+                            && workspaceRenderSequence == expectedRenderSequence) {
                         reflowLandscapeAppGrid(strip);
                     }
                 });
