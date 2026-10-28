@@ -7423,8 +7423,18 @@ public class MainActivity extends Activity {
     private String shortcutPrefKey(String base, String id) {
         String portraitKey = base + "_" + id;
         if (!KEY_SHORTCUT_X.equals(base) && !KEY_SHORTCUT_Y.equals(base)) return portraitKey;
-        String activeKey = isLandscapeWorkspace()
-                ? "__landscape_" + base + "_" + id : portraitKey;
+        boolean landscape = isLandscapeWorkspace();
+        String activeKey = landscape ? "__landscape_" + base + "_" + id : portraitKey;
+        String otherKey = landscape ? portraitKey : "__landscape_" + base + "_" + id;
+
+        // Each orientation owns its own position after its first use. Seed a missing
+        // orientation from the last known position once; otherwise every shortcut with
+        // no orientation-specific key would default to (0, 0) during the first rotation.
+        if (prefs != null && !prefs.contains(activeKey)) {
+            float seed = getFloatPreferenceCompat(prefs, otherKey, 0f);
+            seed = Math.max(0f, Math.min(1f, seed));
+            prefs.edit().putFloat(activeKey, seed).apply();
+        }
         return activeKey;
     }
 
@@ -7529,6 +7539,62 @@ public class MainActivity extends Activity {
                     && bottom - top == oldBottom - oldTop) return;
             syncShortcutCellsToPageGeometry((FrameLayout) view);
         });
+    }
+
+    /**
+     * True only after a workspace page has adopted the active orientation's viewport.
+     * Shortcut reconciliation must never persist cell positions calculated with stale bounds.
+     */
+    private boolean pageMatchesCurrentViewport(FrameLayout page) {
+        if (page == null || pagesStrip == null || pageViewport == null
+                || page.getParent() != pagesStrip
+                || page.getWidth() <= 0 || page.getHeight() <= 0
+                || pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0
+                || page.getWidth() != pageViewport.getWidth()
+                || page.getHeight() != pageViewport.getHeight()) return false;
+        int orientation = getResources().getConfiguration().orientation;
+        if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            return page.getWidth() > page.getHeight();
+        }
+        if (orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+            return page.getWidth() <= page.getHeight();
+        }
+        return true;
+    }
+
+    /**
+     * Retry shortcut layout only after the page and viewport dimensions agree.
+     * A one-shot layout listener avoids saving portrait rows from landscape geometry,
+     * or landscape rows from the previous portrait frame.
+     */
+    private void runAfterPageMatchesViewport(
+            FrameLayout page, LinearLayout strip, Runnable action) {
+        if (page == null || strip == null || strip != pagesStrip || action == null
+                || isFinishing() || isChangingConfigurations() || isDestroyed()
+                || page.getParent() != strip) return;
+        if (pageMatchesCurrentViewport(page)) {
+            action.run();
+            return;
+        }
+        final boolean[] delivered = {false};
+        final View.OnLayoutChangeListener[] watcher = new View.OnLayoutChangeListener[1];
+        Runnable deliver = () -> {
+            if (delivered[0]) return;
+            if (isFinishing() || isChangingConfigurations() || isDestroyed()
+                    || strip != pagesStrip || page.getParent() != strip) {
+                delivered[0] = true;
+                page.removeOnLayoutChangeListener(watcher[0]);
+                return;
+            }
+            if (!pageMatchesCurrentViewport(page)) return;
+            delivered[0] = true;
+            page.removeOnLayoutChangeListener(watcher[0]);
+            page.post(action);
+        };
+        watcher[0] = (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                deliver.run();
+        page.addOnLayoutChangeListener(watcher[0]);
+        page.post(deliver);
     }
 
     private void syncShortcutCellsToPageGeometry(FrameLayout page) {
@@ -9969,6 +10035,18 @@ public class MainActivity extends Activity {
                                         moveHomeAppIntoGroup(dropTargetGroupId, packageName));
                         return true;
                     }
+                    // Landscape manual drops are committed by one atomic grid transaction.
+                    // Do not let the generic live-displacement finalizer re-plan the same drop
+                    // while neighbouring icons are animating; that path was restoring some
+                    // valid landscape drops to their original positions.
+                    if (isLandscapeWorkspace() && action == MotionEvent.ACTION_UP) {
+                        finishLandscapeManualAppDrop(view, sourceView, targetPage,
+                                sourcePage, destinationPage, movedAcrossPage,
+                                targetCol, targetRow, columns, rows, cellWidth, cellHeight,
+                                boundaryHasMajorityCell);
+                        return true;
+                    }
+
                     int proposedIconLeft = targetCol * cellWidth;
                     int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
                     FrameLayout.LayoutParams snappedCandidate =

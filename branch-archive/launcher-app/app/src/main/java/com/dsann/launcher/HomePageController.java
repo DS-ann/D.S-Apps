@@ -634,6 +634,17 @@ final class HomePageController {
         String landscapeY = "__landscape_contact_shortcut_y_" + id;
         String activeX = landscape ? landscapeX : portraitX;
         String activeY = landscape ? landscapeY : portraitY;
+        String otherX = landscape ? portraitX : landscapeX;
+        String otherY = landscape ? portraitY : landscapeY;
+        SharedPreferences.Editor seed = prefs.edit();
+        if (!prefs.contains(activeX)) {
+            seed.putFloat(activeX, LauncherUiUtils.getFloatPreferenceCompat(prefs, otherX, 0f));
+        }
+        if (!prefs.contains(activeY)) {
+            seed.putFloat(activeY, LauncherUiUtils.getFloatPreferenceCompat(prefs, otherY, 0f));
+        }
+        seed.apply();
+
         final int columns = 4;
         int cellWidth = Math.max(1,
                 homeAppCellWidthPx(page, strip, columns, page.getWidth()));
@@ -1661,6 +1672,9 @@ final class HomePageController {
             if (!(pageView instanceof FrameLayout)) continue;
             FrameLayout page = (FrameLayout) pageView;
             if (!pageMatchesCurrentViewport(page)) {
+                // Orientation transitions can briefly leave one page at its old bounds.
+                // Retry after that page adopts the current viewport; never leave its
+                // overflow icons hidden simply because this pass ran too early.
                 runAfterPageMatchesViewport(page, strip, () -> {
                     if (isWorkspaceCallbackCurrent(strip, true, expectedGeneration)
                             && workspaceRenderSequence == expectedRenderSequence) {
@@ -1669,7 +1683,6 @@ final class HomePageController {
                 });
                 return;
             }
-
             List<List<String>> allPages = host.getPages();
             if (allPages == null || pageIndex >= allPages.size()) continue;
             List<String> packages = allPages.get(pageIndex);
@@ -1678,16 +1691,26 @@ final class HomePageController {
             int rows = Math.max(1, host.getHomeGridRowsForHeight(pageHeight, cellHeight));
             int cellWidth = homeAppCellWidthPx(page, strip, columns, pageWidth);
             int placementColumns = homeGridPlacementColumns(page, strip, columns, pageWidth);
-            boolean[][] occupied = new boolean[rows][placementColumns];
-            boolean[][] placedApps = new boolean[rows][placementColumns];
+            boolean[][] placedAppSlots = new boolean[rows][placementColumns];
+            ArrayList<Rect> fixedBounds = collectFixedWorkspaceLayoutBounds(page);
 
-            // This pass runs after widget fitting, but uses the exact grid allocator used
-            // by portrait and the primary landscape render. It must not reassign by artwork bounds.
-            reserveFixedWorkspaceGridSlots(page, occupied, placementColumns, rows,
-                    pageHeight, cellWidth, cellHeight);
+            // Every app icon will be allocated again below. Hide their stale cell
+            // positions during repair so a widget can move into a cell that an icon is
+            // about to vacate; the final allocator then places icons around the fitted
+            // widget bounds. All of this runs on the UI thread within one frame.
+            for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                View child = page.getChildAt(childIndex);
+                Object tag = child == null ? null : child.getTag();
+                if (tag instanceof String && ((String) tag).startsWith("launcher_app:")) {
+                    child.setVisibility(View.INVISIBLE);
+                }
+            }
 
+            // Pin every valid saved landscape slot before allocating anything else.
+            // Without this first pass, an earlier stale/duplicate item could steal a later
+            // icon's saved cell and make some successful manual moves appear to revert.
+            java.util.HashSet<String> pinnedPackages = new java.util.HashSet<String>();
             for (int itemIndex = 0; itemIndex < packages.size(); itemIndex++) {
-                if (workspaceRenderSequence != expectedRenderSequence) return;
                 String packageName = packages.get(itemIndex);
                 View appCell = null;
                 String wantedTag = "launcher_app:" + packageName;
@@ -1708,42 +1731,97 @@ final class HomePageController {
                         placementColumns, defaultCol);
                 int preferredRow = Math.max(0, Math.min(rows - 1,
                         Math.round(savedY * Math.max(1, rows - 1))));
-                int[] freeCell = findNearestFreeGridSlot(
-                        occupied, rows, placementColumns, preferredRow, preferredCol);
+                if (placedAppSlots[preferredRow][preferredCol]) continue;
 
-                // Only when no cell is available do we try relocating fixed widgets away
-                // from occupied cells, then recalculate the shared grid occupancy.
+                int left = preferredCol * cellWidth;
+                int top = host.getHomeGridRowTop(preferredRow, rows, pageHeight, cellHeight);
+                if (left < 0 || top < 0 || left + cellWidth > pageWidth
+                        || top + cellHeight > pageHeight) continue;
+                Rect target = appVisibleBoundsAtPosition(
+                        appCell, left, top, cellWidth, cellHeight);
+                if (target.left < 0 || target.top < 0 || target.right > pageWidth
+                        || target.bottom > pageHeight || overlapsAny(target, fixedBounds)) continue;
+
+                FrameLayout.LayoutParams pinnedLp = appCell.getLayoutParams()
+                        instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) appCell.getLayoutParams()
+                        : new FrameLayout.LayoutParams(cellWidth, cellHeight,
+                                Gravity.TOP | Gravity.LEFT);
+                pinnedLp.width = cellWidth;
+                pinnedLp.height = cellHeight;
+                pinnedLp.leftMargin = left;
+                pinnedLp.topMargin = top;
+                pinnedLp.gravity = Gravity.TOP | Gravity.LEFT;
+                appCell.setLayoutParams(pinnedLp);
+                appCell.setVisibility(View.VISIBLE);
+                gridOverflowHiddenAppCells.remove(appCell);
+                placedAppSlots[preferredRow][preferredCol] = true;
+                pinnedPackages.add(packageName);
+                saveLandscapeAppColumn(packageName, preferredCol);
+            }
+
+            // Reserve only actual fixed-item layout bounds. For each app, test its visible
+            // icon/label footprint against those bounds instead of blocking a whole cell
+            // because empty padding in that cell touches a widget or clock.
+            for (int itemIndex = 0; itemIndex < packages.size(); itemIndex++) {
+                String packageName = packages.get(itemIndex);
+                View appCell = null;
+                String wantedTag = "launcher_app:" + packageName;
+                for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
+                    View child = page.getChildAt(childIndex);
+                    if (child != null && wantedTag.equals(child.getTag())) {
+                        appCell = child;
+                        break;
+                    }
+                }
+                if (appCell == null) continue;
+                if (pinnedPackages.contains(packageName)) continue;
+
+                int defaultCol = itemIndex % columns;
+                int defaultRow = Math.min(rows - 1, itemIndex / columns);
+                float savedX = savedAppCoordinate(packageName, true, true,
+                        defaultCol / (float) Math.max(1, columns - 1));
+                float savedY = savedAppCoordinate(packageName, false, true,
+                        defaultRow / (float) Math.max(1, rows - 1));
+                int preferredCol = savedAppColumn(packageName, true, columns,
+                        placementColumns, defaultCol);
+                int preferredRow = Math.max(0, Math.min(rows - 1,
+                        Math.round(savedY * Math.max(1, rows - 1))));
+                int row = preferredRow;
+                int col = preferredCol;
+                int[] freeCell = findNearestFreeAppVisualSlot(appCell, placedAppSlots,
+                        fixedBounds, rows, placementColumns, pageWidth, pageHeight,
+                        cellWidth, cellHeight, preferredRow, preferredCol);
+
+                // If fixed items block every remaining visible footprint, try relocating
+                // an intersecting widget. Do not attempt this when an unused, collision-free
+                // slot exists; in particular, do not reject a slot for transparent padding.
                 int repairAttempts = 0;
                 while (freeCell == null && repairAttempts++ < page.getChildCount()) {
                     boolean repaired = false;
                     for (int candidateRow = 0; candidateRow < rows && !repaired; candidateRow++) {
-                        int candidateTop = host.getHomeGridRowTop(
-                                candidateRow, rows, pageHeight, cellHeight);
+                        int candidateTop = host.getHomeGridRowTop(candidateRow, rows,
+                                pageHeight, cellHeight);
                         for (int candidateCol = 0; candidateCol < placementColumns; candidateCol++) {
-                            if (!occupied[candidateRow][candidateCol]
-                                    || placedApps[candidateRow][candidateCol]) continue;
+                            if (placedAppSlots[candidateRow][candidateCol]) continue;
                             int candidateLeft = candidateCol * cellWidth;
-                            Rect slotBounds = new Rect(candidateLeft, candidateTop,
-                                    candidateLeft + cellWidth, candidateTop + cellHeight);
-                            if (tryMoveWidgetAwayFromGridSlot(
-                                    page, slotBounds, pageWidth, pageHeight)) {
+                            Rect target = appVisibleBoundsAtPosition(appCell,
+                                    candidateLeft, candidateTop, cellWidth, cellHeight);
+                            if (target.left < 0 || target.top < 0
+                                    || target.right > pageWidth || target.bottom > pageHeight
+                                    || !overlapsAny(target, fixedBounds)) continue;
+                            if (tryMoveWidgetAwayFromGridSlot(page, target,
+                                    pageWidth, pageHeight)) {
+                                fixedBounds = collectFixedWorkspaceLayoutBounds(page);
                                 repaired = true;
                                 break;
                             }
                         }
                     }
                     if (!repaired) break;
-
-                    for (boolean[] slotRow : occupied) java.util.Arrays.fill(slotRow, false);
-                    reserveFixedWorkspaceGridSlots(page, occupied, placementColumns, rows,
-                            pageHeight, cellWidth, cellHeight);
-                    for (int usedRow = 0; usedRow < rows; usedRow++) {
-                        for (int usedCol = 0; usedCol < placementColumns; usedCol++) {
-                            if (placedApps[usedRow][usedCol]) occupied[usedRow][usedCol] = true;
-                        }
-                    }
-                    freeCell = findNearestFreeGridSlot(
-                            occupied, rows, placementColumns, preferredRow, preferredCol);
+                    freeCell = findNearestFreeAppVisualSlot(appCell, placedAppSlots,
+                            fixedBounds, rows, placementColumns, pageWidth, pageHeight,
+                            cellWidth, cellHeight, preferredRow, preferredCol);
                 }
 
                 if (freeCell == null) {
@@ -1753,12 +1831,11 @@ final class HomePageController {
                     continue;
                 }
 
-                int row = freeCell[0];
-                int col = freeCell[1];
-                occupied[row][col] = true;
-                placedApps[row][col] = true;
+                row = freeCell[0];
+                col = freeCell[1];
                 appCell.setVisibility(View.VISIBLE);
                 gridOverflowHiddenAppCells.remove(appCell);
+                placedAppSlots[row][col] = true;
 
                 float finalSavedX = col / (float) Math.max(1, placementColumns - 1);
                 float finalSavedY = row / (float) Math.max(1, rows - 1);
@@ -2262,10 +2339,13 @@ final class HomePageController {
                     ? landscapeAppPlacementColumns(columns, initialPageWidth, appCellWidth)
                     : columns;
             boolean[][] occupiedSlots = new boolean[rows][placementColumns];
-            // Both orientations use the same whole-cell obstacle reservation. Only
-            // the column count is orientation-specific.
-            reserveFixedWorkspaceGridSlots(page, occupiedSlots, placementColumns, rows,
-                    pageHeight, appCellWidth, cellHeight);
+            // A full cell can overlap a widget's transparent padding while the visible
+            // app artwork is clear. On landscape, let the measured visual-footprint pass
+            // decide collisions instead of relocating and persisting the manual slot here.
+            if (!renderLandscape) {
+                reserveFixedWorkspaceGridSlots(page, occupiedSlots, placementColumns, rows,
+                        pageHeight, appCellWidth, cellHeight);
+            }
             LauncherAppAdapter homeAdapter = new LauncherAppAdapter(activity, prefs, packageManager,
                     host.getAllApps(), host.getDrawerApps(), pagePackages,
                     false, iconSizeKey, fontSizeKey, showLabelsKey,
@@ -2380,11 +2460,15 @@ final class HomePageController {
                         : columns;
                 boolean[][] laidOutSlots = new boolean[actualRows][measuredPlacementColumns];
                 boolean[][] placedAppSlots = new boolean[actualRows][measuredPlacementColumns];
+                ArrayList<Rect> landscapeFixedBounds = landscapeAllocation
+                        ? collectFixedWorkspaceLayoutBounds(page) : null;
                 final boolean[] noFreeMeasuredSlot = {false};
-                // Use the same fixed-slot occupancy model as portrait, over every
-                // complete column that fits in the current orientation.
-                reserveFixedWorkspaceGridSlots(page, laidOutSlots, measuredPlacementColumns,
-                        actualRows, page.getHeight(), actualCellWidth, actualCellHeight);
+                // Portrait keeps its established whole-cell placement semantics. In
+                // landscape, only actual visible icon/label bounds block a candidate.
+                if (!landscapeAllocation) {
+                    reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
+                            page.getHeight(), actualCellWidth, actualCellHeight);
+                }
                 for (int childIndex = 0; childIndex < page.getChildCount(); childIndex++) {
                     View child = page.getChildAt(childIndex);
                     Object childTag = child.getTag();
@@ -2408,13 +2492,18 @@ final class HomePageController {
                             Math.round(savedY * Math.max(1, actualRows - 1))));
                     int requestedCol = col;
                     int requestedRow = row;
-                    int[] freeCell = findNearestFreeGridSlot(
-                            laidOutSlots, actualRows, measuredPlacementColumns, row, col);
+                    int[] freeCell = landscapeAllocation
+                            ? findNearestFreeAppVisualSlot(child, placedAppSlots,
+                                    landscapeFixedBounds, actualRows, measuredPlacementColumns,
+                                    page.getWidth(), page.getHeight(), actualCellWidth,
+                                    actualCellHeight, row, col)
+                            : findNearestFreeGridSlot(laidOutSlots, actualRows, columns, row, col);
 
                     // Portrait retains its existing widget-capacity repair. Landscape's
                     // visual allocator must not be overwritten by a whole-slot test.
                     int repairAttempts = 0;
-                    while (freeCell == null && repairAttempts++ < page.getChildCount()) {
+                    while (!landscapeAllocation && freeCell == null
+                            && repairAttempts++ < page.getChildCount()) {
                         boolean repaired = false;
                         for (int candidateRow = 0; candidateRow < actualRows && !repaired;
                                 candidateRow++) {
@@ -2438,17 +2527,17 @@ final class HomePageController {
                         for (boolean[] slotRow : laidOutSlots) {
                             java.util.Arrays.fill(slotRow, false);
                         }
-                        reserveFixedWorkspaceGridSlots(page, laidOutSlots, measuredPlacementColumns,
-                                actualRows, page.getHeight(), actualCellWidth, actualCellHeight);
+                        reserveFixedWorkspaceGridSlots(page, laidOutSlots, columns, actualRows,
+                                page.getHeight(), actualCellWidth, actualCellHeight);
                         for (int usedRow = 0; usedRow < actualRows; usedRow++) {
-                            for (int usedCol = 0; usedCol < measuredPlacementColumns; usedCol++) {
+                            for (int usedCol = 0; usedCol < columns; usedCol++) {
                                 if (placedAppSlots[usedRow][usedCol]) {
                                     laidOutSlots[usedRow][usedCol] = true;
                                 }
                             }
                         }
                         freeCell = findNearestFreeGridSlot(
-                                laidOutSlots, actualRows, measuredPlacementColumns, row, col);
+                                laidOutSlots, actualRows, columns, row, col);
                     }
 
                     if (freeCell == null) {
@@ -2482,7 +2571,7 @@ final class HomePageController {
                             row, actualRows, page.getHeight(), actualCellHeight);
                     child.setLayoutParams(actual);
                 }
-                if (noFreeMeasuredSlot[0]) {
+                if (noFreeMeasuredSlot[0] && !isLandscapeOrientation(strip)) {
                     android.widget.Toast.makeText(activity,
                             "Home grid is full. Remove an item to reveal the remaining app icons.",
                             android.widget.Toast.LENGTH_LONG).show();
