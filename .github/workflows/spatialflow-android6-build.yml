@@ -1,4 +1,4 @@
-name: Build signed ARM64-v8a SpatialFlow APK (Android 6+)
+name: Build temporary-key-signed ARM64-v8a SpatialFlow APK (Android 6+)
 
 on:
   push:
@@ -22,18 +22,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: spatialflow-android6-signed-build-${{ github.run_id }}
+  group: spatialflow-arm64-build-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Build SpatialFlow using the launcher signing key
+    name: Build SpatialFlow with a per-run temporary key
     uses: DS-ann/SpatialFlow/.github/workflows/android6-apk.yml@master
     with:
       source_ref: ${{ inputs.source_ref || 'master' }}
       run_api23_smoke_test: ${{ inputs.run_api23_smoke_test || false }}
-    secrets:
-      BATTERYPULSE_KEYSTORE_BASE64: ${{ secrets.BATTERYPULSE_KEYSTORE_BASE64 }}
-      BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
-      BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
-      BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
