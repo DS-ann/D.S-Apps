@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: SpatialFlow branch, tag, or commit to build
+        description: SpatialFlow source ref to build for the ARM64-v8a release
         required: true
         type: string
         default: master
