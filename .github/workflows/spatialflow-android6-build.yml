@@ -12,12 +12,17 @@ on:
         required: true
         type: string
         default: master
+      run_api23_smoke_test:
+        description: Run optional Android 6 emulator smoke test
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: spatialflow-android6-signed-build
+  group: spatialflow-android6-signed-build-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -26,6 +31,7 @@ jobs:
     uses: DS-ann/SpatialFlow/.github/workflows/android6-apk.yml@master
     with:
       source_ref: ${{ inputs.source_ref || 'master' }}
+      run_api23_smoke_test: ${{ inputs.run_api23_smoke_test || false }}
     secrets:
       BATTERYPULSE_KEYSTORE_BASE64: ${{ secrets.BATTERYPULSE_KEYSTORE_BASE64 }}
       BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
