@@ -1,0 +1,25 @@
+name: Build signed SpatialFlow APK (Android 6+)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/spatialflow-android6-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spatialflow-android6-signed-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build SpatialFlow using the launcher signing key
+    uses: DS-ann/SpatialFlow/.github/workflows/android6-apk.yml@master
+    secrets:
+      BATTERYPULSE_KEYSTORE_BASE64: ${{ secrets.BATTERYPULSE_KEYSTORE_BASE64 }}
+      BATTERYPULSE_STORE_PASSWORD: ${{ secrets.BATTERYPULSE_STORE_PASSWORD }}
+      BATTERYPULSE_KEY_ALIAS: ${{ secrets.BATTERYPULSE_KEY_ALIAS }}
+      BATTERYPULSE_KEY_PASSWORD: ${{ secrets.BATTERYPULSE_KEY_PASSWORD }}
