@@ -1,4 +1,4 @@
-name: Build signed SpatialFlow APK (Android 6+)
+name: Build signed ARM64-v8a SpatialFlow APK (Android 6+)
 
 on:
   push:
