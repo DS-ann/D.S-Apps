@@ -7497,6 +7497,19 @@ public class MainActivity extends Activity {
             pageViewport.post(this::renderSavedContactShortcut);
             return;
         }
+        // Wait until the current orientation's measured page bounds have settled before
+        // restoring any shortcut. During rotation, pageViewport can be new-sized while a
+        // page still has its previous orientation's dimensions.
+        for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            if (!pageMatchesCurrentViewport(page)) {
+                runAfterPageMatchesViewport(page, pagesStrip,
+                        () -> renderSavedContactShortcut());
+                return;
+            }
+        }
 
         // Keep already-rendered contact shortcuts attached during ordinary workspace
         // refreshes. Recreating them on every setting change could make them vanish
@@ -7527,6 +7540,21 @@ public class MainActivity extends Activity {
         // existing shortcut is controlled by an explicit drag, not by a redraw.
         for (String id : shortcutIds) {
             if (!renderedIds.contains(id)) renderSavedContactShortcut(id);
+        }
+        // Reconcile the complete set after every missing tile has been attached.
+        // A partial per-tile pass can run during rotation and leave old duplicate slots.
+        for (int pageIndex = 0; pageIndex < pagesStrip.getChildCount(); pageIndex++) {
+            View pageView = pagesStrip.getChildAt(pageIndex);
+            if (!(pageView instanceof FrameLayout)) continue;
+            FrameLayout page = (FrameLayout) pageView;
+            page.post(() -> {
+                if (pageMatchesCurrentViewport(page)) {
+                    syncShortcutCellsToPageGeometry(page);
+                } else {
+                    runAfterPageMatchesViewport(page, pagesStrip,
+                            () -> syncShortcutCellsToPageGeometry(page));
+                }
+            });
         }
     }
 
@@ -7732,24 +7760,29 @@ public class MainActivity extends Activity {
         }
         if (pageViewport == null) return;
         if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) {
-            pageViewport.post(() -> renderSavedContactShortcut());
+            pageViewport.post(() -> renderSavedContactShortcut(shortcutId));
             return;
         }
         String savedUri = prefs.getString(shortcutPrefKey(KEY_SHORTCUT_INTENT, shortcutId), null);
         if (savedUri == null || savedUri.isEmpty() || pagesStrip.getChildCount() == 0) return;
         int desiredPage = Math.max(0, Math.min(pagesStrip.getChildCount() - 1,
                 prefs.getInt(shortcutPrefKey(KEY_SHORTCUT_PAGE, shortcutId), 0)));
+        if (!(pagesStrip.getChildAt(desiredPage) instanceof FrameLayout)) return;
+        FrameLayout measuredShortcutPage = (FrameLayout) pagesStrip.getChildAt(desiredPage);
+        if (!pageMatchesCurrentViewport(measuredShortcutPage)) {
+            runAfterPageMatchesViewport(measuredShortcutPage, pagesStrip,
+                    () -> renderSavedContactShortcut(shortcutId));
+            return;
+        }
         // Contact shortcuts use four columns, but the real tile is exactly icon-sized.
-        // Grid-slot coordinates are separate from the actual icon bounds.
+        // Compute all grid geometry from the same measured page, never a stale viewport.
         int columns = 4;
-        int rows = getHomeGridRows();
-        int cellW = homeGridCellWidthPx(
-                pagesStrip.getChildAt(desiredPage) instanceof FrameLayout
-                        ? (View) pagesStrip.getChildAt(desiredPage) : null,
-                columns, pageViewport.getWidth());
         int cellH = LauncherUiUtils.dp(this,
                 homeCellHeightDp(prefs.getInt(KEY_ICON_SIZE, 48)));
-        if (pageViewport.getWidth() <= 0 || pageViewport.getHeight() <= 0) return;
+        int cellW = homeGridCellWidthPx(measuredShortcutPage, columns,
+                measuredShortcutPage.getWidth());
+        int rows = Math.max(1,
+                homeGridRowsForHeight(measuredShortcutPage.getHeight(), cellH));
 
         FrameLayout chosenPage = null;
         int chosenLeft = 0, chosenTop = 0; // Logical grid-cell origin.
@@ -7946,6 +7979,12 @@ public class MainActivity extends Activity {
         tileParams.topMargin = tileTop;
         chosenPage.addView(tile, tileParams);
         shortcutsRequiringFreeSlot.remove(shortcutId);
+        // Enforce unique shortcut slots only after measured geometry is valid.
+        chosenPage.post(() -> {
+            if (pageMatchesCurrentViewport(chosenPage)) {
+                syncShortcutCellsToPageGeometry(chosenPage);
+            }
+        });
         label.post(() -> fitShortcutLabelWithDots(label));
         tile.setOnClickListener(v -> {
             try {
@@ -10035,17 +10074,10 @@ public class MainActivity extends Activity {
                                         moveHomeAppIntoGroup(dropTargetGroupId, packageName));
                         return true;
                     }
-                    // Landscape manual drops are committed by one atomic grid transaction.
-                    // Do not let the generic live-displacement finalizer re-plan the same drop
-                    // while neighbouring icons are animating; that path was restoring some
-                    // valid landscape drops to their original positions.
-                    if (isLandscapeWorkspace() && action == MotionEvent.ACTION_UP) {
-                        finishLandscapeManualAppDrop(view, sourceView, targetPage,
-                                sourcePage, destinationPage, movedAcrossPage,
-                                targetCol, targetRow, columns, rows, cellWidth, cellHeight,
-                                boundaryHasMajorityCell);
-                        return true;
-                    }
+                    // App icons use the same live-displacement transaction as app groups.
+                    // Landscape's expanded column count and preserved portrait cell pitch
+                    // have already been applied above; do not bypass collision planning with
+                    // a separate landscape-only assignment path.
 
                     int proposedIconLeft = targetCol * cellWidth;
                     int proposedIconTop = homeGridRowTop(targetRow, rows, targetHeight, cellHeight);
