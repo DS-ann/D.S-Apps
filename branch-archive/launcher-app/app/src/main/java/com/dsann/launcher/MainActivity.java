@@ -7980,9 +7980,10 @@ public class MainActivity extends Activity {
         chosenPage.addView(tile, tileParams);
         shortcutsRequiringFreeSlot.remove(shortcutId);
         // Enforce unique shortcut slots only after measured geometry is valid.
-        chosenPage.post(() -> {
-            if (pageMatchesCurrentViewport(chosenPage)) {
-                syncShortcutCellsToPageGeometry(chosenPage);
+        final FrameLayout attachedShortcutPage = chosenPage;
+        attachedShortcutPage.post(() -> {
+            if (pageMatchesCurrentViewport(attachedShortcutPage)) {
+                syncShortcutCellsToPageGeometry(attachedShortcutPage);
             }
         });
         label.post(() -> fitShortcutLabelWithDots(label));
