@@ -7431,7 +7431,7 @@ public class MainActivity extends Activity {
         // orientation from the last known position once; otherwise every shortcut with
         // no orientation-specific key would default to (0, 0) during the first rotation.
         if (prefs != null && !prefs.contains(activeKey)) {
-            float seed = getFloatPreferenceCompat(prefs, otherKey, 0f);
+            float seed = getFloatPreferenceCompat(otherKey, 0f);
             seed = Math.max(0f, Math.min(1f, seed));
             prefs.edit().putFloat(activeKey, seed).apply();
         }
