@@ -2539,8 +2539,11 @@ public class MainActivity extends Activity {
         } else if (!sevenSegment) {
             // Preserve the established 5dp visual offset in normal-height clocks and
             // restore the requested scale when the user expands a compact row.
-            clockText.setPivotY(rowHeight / 2f);
-            clockText.setTranslationY(LauncherUiUtils.dp(this, 5));
+            clockText.setPivotY(naturalRowHeight / 2f);
+            // The native TextView keeps naturalRowHeight even when the row expands.
+            // Translate its center to the enlarged row center to preserve the old layout.
+            clockText.setTranslationY(LauncherUiUtils.dp(this, 5)
+                    + Math.max(0, rowHeight - naturalRowHeight) / 2f);
             clockText.setScaleY(requestedScale);
         }
     }
@@ -2749,7 +2752,7 @@ public class MainActivity extends Activity {
                         }
                         resizeText.setPivotY(sevenSegmentResize
                                 || targetRowHeight < naturalRowHeightForResize
-                                ? 0f : targetRowHeight / 2f);
+                                ? 0f : naturalRowHeightForResize / 2f);
                         resizeText.setScaleY(sevenSegmentResize
                                 ? targetRowHeight / (float) Math.max(1, naturalRowHeightForResize)
                                 : clockWidgetStartTextScaleY * targetRowHeight
@@ -20031,7 +20034,7 @@ public class MainActivity extends Activity {
         // by breadthScale explicitly; otherwise layout/background breadth changes
         // while the LED glyph view can retain stale measured bounds during a drag.
         clockText.setPivotY(sevenSegment || rowHeight < naturalRowHeight
-                ? 0f : rowHeight / 2f);
+                ? 0f : naturalRowHeight / 2f);
         // The typography colon must use the same vertical center as this transformed row.
         syncClockColonVerticalCenter();
         // Normalize non-seven-segment glyph height across typography presets.
@@ -20082,7 +20085,7 @@ public class MainActivity extends Activity {
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(clockGroupWidth / 2f);
         clockText.setPivotY(sevenSegment || rowHeight < naturalRowHeight
-                ? 0f : rowHeight / 2f);
+                ? 0f : naturalRowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
