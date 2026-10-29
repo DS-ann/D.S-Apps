@@ -1112,7 +1112,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onCreate(Bundle state) {
-        super.onCreate(Bundle state);
+        super.onCreate(state);
         if (Build.VERSION.SDK_INT >= 33) {
             backInvokedCallback = Api33BackDispatcher.register(this);
         }
@@ -1229,16 +1229,19 @@ public class MainActivity extends Activity {
         buildInterface();
         if (launcherInstalledUpdateTime > 0L) {
             final long settledInstallTime = launcherInstalledUpdateTime;
-            // Keep the preservation guard active through widget restoration and the
-            // measured workspace pass. If startup fails before settling, the old marker
-            // remains so the next launch receives the same protection.
+            // Keep the preservation guard active through AppWidgetHost startup and the
+            // first measured workspace layout. Once settled, run one fresh allocation pass.
             handler.postDelayed(() -> {
                 if (prefs != null) {
                     prefs.edit().putLong(KEY_LAST_LAUNCHER_INSTALL_TIME,
                             settledInstallTime).apply();
                 }
                 launcherUpdatedSinceLastRun = false;
-            }, 3200L);
+                if (!isFinishing() && !isChangingConfigurations() && !isDestroyed()
+                        && root != null && pagesStrip != null) {
+                    renderHomePages(false);
+                }
+            }, 4200L);
         }
     }
 
@@ -18107,6 +18110,7 @@ public class MainActivity extends Activity {
 
     private void validateWorkspacePagesAfterLayout() {
         if (pagesStrip == null || pageViewport == null || homeIconResizeRepairPending
+                || launcherUpdatedSinceLastRun
                 || isFinishing() || isChangingConfigurations() || isDestroyed()) return;
         String lastAppliedOrientationKey = "__workspace_geometry_last_applied_landscape";
         final boolean expectedLandscape = isLandscapeWorkspace();

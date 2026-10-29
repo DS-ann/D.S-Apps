@@ -2081,6 +2081,10 @@ final class HomePageController {
         Runnable repairPass = () -> strip.post(() -> strip.post(() -> {
             orientationRepairScheduled = false;
             if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()) return;
+            if (host.preserveSavedHomePositionsAfterLauncherUpdate()) {
+                strip.postDelayed(() -> scheduleOrientationWorkspaceRepair(strip), 750L);
+                return;
+            }
             if (workspaceLayoutGeneration != scheduledGeneration
                     || workspaceRenderSequence != scheduledRenderSequence
                     || isLandscapeOrientation(strip) != scheduledLandscape) {
@@ -2454,6 +2458,11 @@ final class HomePageController {
                 if (!isWorkspaceCallbackCurrent(strip, renderLandscape, renderGeneration)
                         || workspaceRenderSequence != renderSequence
                         || page.getParent() != strip || !pageMatchesCurrentViewport(page)) return;
+                // The first measured pass can still see transient empty widget hosts after an
+                // APK update. Keep the saved coordinates authoritative until the main activity
+                // releases its upgrade guard and triggers a new render against settled widgets.
+                if (deferUpgradeGeometryRepair
+                        && host.preserveSavedHomePositionsAfterLauncherUpdate()) return;
                 int actualCellWidth = homeAppCellWidthPx(page, strip, columns, page.getWidth());
                 if (!isLandscapeOrientation(strip)) {
                     savePortraitHomeAppRowWidthDp(actualCellWidth, columns);
