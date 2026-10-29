@@ -6,7 +6,7 @@
 # Duplicate paths mapped to existing content: 0
 # Format: STATUS<TAB>BLOB_SHA<TAB>ORIGINAL_PATH<TAB>CANONICAL_PATH<TAB>MODE
 ARCHIVED	7377bd693467b75baf5003e94c8300bb0cea9d1d	app/build.gradle	branch-archive/launcher-app/app/build.gradle	100644
-ARCHIVED	bce5e8f7e5befd463b612778bf783f0a6e36de8b	app/src/main/AndroidManifest.xml	branch-archive/launcher-app/app/src/main/AndroidManifest.xml	100644
+ARCHIVED	d354b615e36d5f0c1374c92504984e0cd6bd2ec9	app/src/main/AndroidManifest.xml	branch-archive/launcher-app/app/src/main/AndroidManifest.xml	100644
 ARCHIVED	efeee18469c2ebaf903178aaa748f9585b3658d6	app/src/main/java/com/dsann/launcher/BlankActivity.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/BlankActivity.java	100644
 ARCHIVED	4511e316c367b1062c4f7b0b63bd0b616659f928	app/src/main/java/com/dsann/launcher/HomePageController.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageController.java	100644
 ARCHIVED	b7875240e3b09ad4ed13cb6613512b77baafd10a	app/src/main/java/com/dsann/launcher/HomePageModel.java	branch-archive/launcher-app/app/src/main/java/com/dsann/launcher/HomePageModel.java	100644
