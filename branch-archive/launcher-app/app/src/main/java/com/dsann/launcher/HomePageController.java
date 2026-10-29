@@ -33,6 +33,7 @@ final class HomePageController {
         List<ResolveInfo> getAllApps();
         List<ResolveInfo> getDrawerApps();
         int getCurrentPage();
+        boolean preserveSavedHomePositionsAfterLauncherUpdate();
         void rebuildPages();
         int getHomeColumns();
         int getHomeCellHeightDp(int iconSize);
@@ -71,6 +72,7 @@ final class HomePageController {
             pendingLandscapeClockFitListeners =
                     new java.util.WeakHashMap<View, View.OnLayoutChangeListener>();
     private boolean orientationRepairScheduled;
+    private boolean startupUpgradeRepairDelayApplied;
     private boolean landscapeRepairScheduled;
     private boolean landscapeFitRunning;
     private boolean landscapeGridOverflowToastShown;
@@ -2069,17 +2071,21 @@ final class HomePageController {
         final boolean scheduledLandscape = isLandscapeOrientation(strip);
         final int scheduledGeneration = workspaceLayoutGeneration;
         final int scheduledRenderSequence = workspaceRenderSequence;
+        final boolean deferForUpgrade = host.preserveSavedHomePositionsAfterLauncherUpdate()
+                && !startupUpgradeRepairDelayApplied;
+        if (deferForUpgrade) startupUpgradeRepairDelayApplied = true;
         orientationRepairScheduled = true;
-        // Coalesce renders during rotation into one measured repair; competing passes
-        // previously overlapped work while Android was recalculating page bounds.
-        strip.post(() -> strip.post(() -> {
+        // An upgraded launcher can be recreated before AppWidgetHost has started listening.
+        // Running the orientation/collision repair first lets temporary widget bounds push
+        // home icons into new cells and save those temporary positions. Wait for restoration.
+        Runnable repairPass = () -> strip.post(() -> strip.post(() -> {
             orientationRepairScheduled = false;
             if (!isWorkspaceActivityUsable() || strip != host.getPagesStrip()) return;
             if (workspaceLayoutGeneration != scheduledGeneration
                     || workspaceRenderSequence != scheduledRenderSequence
                     || isLandscapeOrientation(strip) != scheduledLandscape) {
                 // A newer render/orientation superseded this work. Re-queue against the
-                // latest geometry instead of letting a stale callback save the wrong mode.
+                // latest geometry; the startup grace delay is consumed only once.
                 if (strip.isAttachedToWindow()) {
                     scheduleOrientationWorkspaceRepair(strip);
                 }
@@ -2114,6 +2120,8 @@ final class HomePageController {
             prefs.edit().putBoolean(LAST_GEOMETRY_LANDSCAPE_KEY, landscape).apply();
             if (!landscape) snapshotPortraitWorkspaceGeometry(strip);
         }));
+        if (deferForUpgrade) strip.postDelayed(repairPass, 900L);
+        else repairPass.run();
     }
 
     HomePageController(Activity activity, SharedPreferences prefs, PackageManager packageManager,
@@ -2229,6 +2237,8 @@ final class HomePageController {
         }
         final int renderGeneration = workspaceLayoutGeneration;
         final int renderSequence = ++workspaceRenderSequence;
+        final boolean deferUpgradeGeometryRepair =
+                host.preserveSavedHomePositionsAfterLauncherUpdate();
 
         // Match the page count to the persisted model without destroying the page strip.
         // Keeping page containers alive avoids detaching AppWidgetHostViews on every icon
@@ -2342,7 +2352,7 @@ final class HomePageController {
             // A full cell can overlap a widget's transparent padding while the visible
             // app artwork is clear. On landscape, let the measured visual-footprint pass
             // decide collisions instead of relocating and persisting the manual slot here.
-            if (!renderLandscape) {
+            if (!renderLandscape && !deferUpgradeGeometryRepair) {
                 reserveFixedWorkspaceGridSlots(page, occupiedSlots, placementColumns, rows,
                         pageHeight, appCellWidth, cellHeight);
             }
@@ -2393,7 +2403,10 @@ final class HomePageController {
                                 Math.round(savedX * Math.max(1, columns - 1))));
                 int row = Math.max(0, Math.min(rows - 1,
                         Math.round(savedY * Math.max(1, rows - 1))));
-                boolean hasFreeSlot = !occupiedSlots[row][col];
+                // On a package update, use the stored app anchors for the first render.
+                // Widget/clock restoration and the stable-viewport pass will resolve any
+                // genuine collisions later; a transient obstacle must not rewrite positions.
+                boolean hasFreeSlot = deferUpgradeGeometryRepair || !occupiedSlots[row][col];
                 if (!hasFreeSlot) {
                     int bestCol = -1, bestRow = -1, bestDistance = Integer.MAX_VALUE;
                     for (int candidateRow = 0; candidateRow < rows; candidateRow++) {
@@ -2437,7 +2450,7 @@ final class HomePageController {
                 page.addView(cell, lp);
                 host.installHomeIconTouch(cell, packageName);
             }
-            page.post(() -> runAfterPageMatchesViewport(page, strip, () -> {
+            page.postDelayed(() -> runAfterPageMatchesViewport(page, strip, () -> {
                 if (!isWorkspaceCallbackCurrent(strip, renderLandscape, renderGeneration)
                         || workspaceRenderSequence != renderSequence
                         || page.getParent() != strip || !pageMatchesCurrentViewport(page)) return;
@@ -2576,7 +2589,7 @@ final class HomePageController {
                             "Home grid is full. Remove an item to reveal the remaining app icons.",
                             android.widget.Toast.LENGTH_LONG).show();
                 }
-            }));
+            }), deferUpgradeGeometryRepair ? 1400L : 0L);
         }
 
         host.restoreWidgetsOnPages();

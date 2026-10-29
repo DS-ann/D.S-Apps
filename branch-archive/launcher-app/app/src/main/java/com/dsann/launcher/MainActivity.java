@@ -82,6 +82,7 @@ public class MainActivity extends Activity {
 
     private static final int HOST_ID = 1407;
     private static final String PREFS = "ds_launcher_prefs";
+    private static final String KEY_LAST_LAUNCHER_INSTALL_TIME = "last_launcher_install_time_for_workspace";
     private static final String KEY_HOME_APPS = "home_apps";
     private static final String KEY_APP_GROUP_IDS = "home_app_group_ids";
     private static final String APP_GROUP_TAG_PREFIX = "launcher_app_group:";
@@ -855,6 +856,8 @@ public class MainActivity extends Activity {
     };
     private boolean drawerAtTopOnGestureDown = true;
     private boolean packageReceiverRegistered = false;
+    private boolean launcherUpdatedSinceLastRun;
+    private long launcherInstalledUpdateTime;
     private final BroadcastReceiver packageChangesReceiver = new BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, Intent intent) {
             if (intent == null) return;
@@ -862,6 +865,10 @@ public class MainActivity extends Activity {
             if (Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
                 String replacedPackage = intent.getData() == null ? null
                         : intent.getData().getSchemeSpecificPart();
+                // This Activity may still be alive while its own APK is being replaced.
+                // Do not run stale package/drawer/clock refreshes against the new package.
+                // The new Activity instance will load the updated metadata from scratch.
+                if (getPackageName().equals(replacedPackage)) return;
                 invalidatePackageArtwork(replacedPackage, true);
                 // Reset bounded retries after every replacement. Provider metadata and
                 // AppWidgetHostView state can be briefly unavailable during app updates.
@@ -1086,13 +1093,32 @@ public class MainActivity extends Activity {
         }
     };
 
+    private void detectLauncherInstallUpdate() {
+        try {
+            android.content.pm.PackageInfo info =
+                    packageManager.getPackageInfo(getPackageName(), 0);
+            launcherInstalledUpdateTime = info.lastUpdateTime;
+            long previouslySettledInstallTime =
+                    prefs.getLong(KEY_LAST_LAUNCHER_INSTALL_TIME, 0L);
+            // A missing marker also gets one protected first startup. This covers users
+            // upgrading from builds that did not yet record the package install time.
+            launcherUpdatedSinceLastRun = launcherInstalledUpdateTime > 0L
+                    && (previouslySettledInstallTime <= 0L
+                            || previouslySettledInstallTime != launcherInstalledUpdateTime);
+        } catch (PackageManager.NameNotFoundException ignored) {
+            launcherInstalledUpdateTime = 0L;
+            launcherUpdatedSinceLastRun = false;
+        }
+    }
+
     @Override protected void onCreate(Bundle state) {
-        super.onCreate(state);
+        super.onCreate(Bundle state);
         if (Build.VERSION.SDK_INT >= 33) {
             backInvokedCallback = Api33BackDispatcher.register(this);
         }
         packageManager = getPackageManager();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        detectLauncherInstallUpdate();
         normalizeAppIconSettings();
         LauncherIconDrawable.configurePersistentArtworkCache(this,
                 prefs.getInt(KEY_ICON_ARTWORK_THEME, LauncherIconDrawable.ARTWORK_ORIGINAL));
@@ -1201,6 +1227,19 @@ public class MainActivity extends Activity {
         loadApps();
         restoreHomeApps();
         buildInterface();
+        if (launcherInstalledUpdateTime > 0L) {
+            final long settledInstallTime = launcherInstalledUpdateTime;
+            // Keep the preservation guard active through widget restoration and the
+            // measured workspace pass. If startup fails before settling, the old marker
+            // remains so the next launch receives the same protection.
+            handler.postDelayed(() -> {
+                if (prefs != null) {
+                    prefs.edit().putLong(KEY_LAST_LAUNCHER_INSTALL_TIME,
+                            settledInstallTime).apply();
+                }
+                launcherUpdatedSinceLastRun = false;
+            }, 3200L);
+        }
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
@@ -2508,25 +2547,28 @@ public class MainActivity extends Activity {
     private void applyClockDigitOverflowPolicy(int rowHeight) {
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
         final boolean compactRow = rowHeight < naturalRowHeight;
-        // Fit glyphs by scaling their natural renderer, rather than clipping its pixels.
-        if (clockRow != null) {
-            clockRow.setClipChildren(false);
-            clockRow.setClipToPadding(false);
-        }
-        if (clockGroup != null) {
-            clockGroup.setClipChildren(false);
-            clockGroup.setClipToPadding(false);
-        }
         if (clockText == null) return;
 
-        final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
-                && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+        final int style = prefs == null ? 0 : prefs.getInt(KEY_CLOCK_STYLE, 0);
+        final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView && style == 5;
+        final boolean neonCircuit = !sevenSegment && style == 2;
+        final boolean dateVisible = prefs == null || prefs.getBoolean(KEY_SHOW_DATE, true);
         final float requestedScale = Math.max(0.01f, Math.abs(clockText.getScaleY()));
         clockDesiredVerticalScales.put(clockText, requestedScale);
 
-        if (compactRow && !sevenSegment) {
-            // Keep TextView at its natural measured height, then scale the complete font
-            // line box into the smaller row. A short TextView clips glyphs before scaling.
+        // Keep clipping behavior unchanged for other presets. Neon Circuit alone draws
+        // from its natural-height TextView and scales the glyph ink into compact rows.
+        boolean clipCompactRow = compactRow && !neonCircuit;
+        if (clockRow != null) {
+            clockRow.setClipChildren(clipCompactRow);
+            clockRow.setClipToPadding(clipCompactRow);
+        }
+        if (clockGroup != null) {
+            clockGroup.setClipChildren(clipCompactRow);
+            clockGroup.setClipToPadding(clipCompactRow);
+        }
+
+        if (compactRow && neonCircuit) {
             android.graphics.Paint.FontMetrics metrics = clockText.getPaint().getFontMetrics();
             float fontLineHeight = Math.max(1f, metrics.descent - metrics.ascent);
             float availableHeight = Math.max(1f,
@@ -2536,14 +2578,26 @@ public class MainActivity extends Activity {
             clockText.setPivotY(0f);
             clockText.setTranslationY(0f);
             clockText.setScaleY(Math.min(requestedScale, maxScale));
+        } else if (compactRow && dateVisible && !sevenSegment) {
+            // Preserve the original compact-row fitting for other typography presets.
+            android.graphics.Paint.FontMetrics metrics = clockText.getPaint().getFontMetrics();
+            float fontLineHeight = Math.max(1f, metrics.descent - metrics.ascent);
+            float availableHeight = Math.max(1f,
+                    rowHeight - LauncherUiUtils.dp(this, 2));
+            float maxScale = Math.max(0.1f,
+                    Math.min(1f, availableHeight / fontLineHeight));
+            clockText.setPivotY(rowHeight / 2f);
+            clockText.setTranslationY(0f);
+            clockText.setScaleY(Math.min(requestedScale, maxScale));
         } else if (!sevenSegment) {
-            // Preserve the established 5dp visual offset in normal-height clocks and
-            // restore the requested scale when the user expands a compact row.
-            clockText.setPivotY(naturalRowHeight / 2f);
-            // The native TextView keeps naturalRowHeight even when the row expands.
-            // Translate its center to the enlarged row center to preserve the old layout.
-            clockText.setTranslationY(LauncherUiUtils.dp(this, 5)
-                    + Math.max(0, rowHeight - naturalRowHeight) / 2f);
+            if (neonCircuit) {
+                clockText.setPivotY(naturalRowHeight / 2f);
+                clockText.setTranslationY(LauncherUiUtils.dp(this, 5)
+                        + Math.max(0, rowHeight - naturalRowHeight) / 2f);
+            } else {
+                clockText.setPivotY(rowHeight / 2f);
+                clockText.setTranslationY(LauncherUiUtils.dp(this, 5));
+            }
             clockText.setScaleY(requestedScale);
         }
     }
@@ -2709,6 +2763,8 @@ public class MainActivity extends Activity {
                 boolean sevenSegmentResize = clockTextsByPage[resizePage]
                         instanceof SevenSegmentClockTextView
                         && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
+                boolean neonCircuitResize = !sevenSegmentResize
+                        && prefs.getInt(KEY_CLOCK_STYLE, 0) == 2;
 
                 if (horizontalResize) {
                     // A length drag is a panel transform; avoid remeasuring every child.
@@ -2729,10 +2785,6 @@ public class MainActivity extends Activity {
                             rowHeightParams.height = targetRowHeight;
                             clockRow.setLayoutParams(rowHeightParams);
                         }
-                        // Keep natural text bounds and scale the rendering into the row;
-                        // shrinking the TextView first clips glyph pixels before scaling.
-                        clockRow.setClipChildren(false);
-                        clockRow.setClipToPadding(false);
                     }
                     if (clockGroup != null) {
                         ViewGroup.LayoutParams groupHeightParams = clockGroup.getLayoutParams();
@@ -2740,19 +2792,20 @@ public class MainActivity extends Activity {
                             groupHeightParams.height = targetRowHeight;
                             clockGroup.setLayoutParams(groupHeightParams);
                         }
-                        clockGroup.setClipChildren(false);
-                        clockGroup.setClipToPadding(false);
                     }
                     TextView resizeText = clockTextsByPage[resizePage];
                     if (resizeText != null) {
                         ViewGroup.LayoutParams textHeightParams = resizeText.getLayoutParams();
                         if (textHeightParams != null) {
-                            textHeightParams.height = naturalRowHeightForResize;
+                            textHeightParams.height = (sevenSegmentResize || neonCircuitResize)
+                                    ? naturalRowHeightForResize : targetRowHeight;
                             resizeText.setLayoutParams(textHeightParams);
                         }
                         resizeText.setPivotY(sevenSegmentResize
-                                || targetRowHeight < naturalRowHeightForResize
-                                ? 0f : naturalRowHeightForResize / 2f);
+                                || (neonCircuitResize
+                                        && targetRowHeight < naturalRowHeightForResize)
+                                ? 0f : (neonCircuitResize
+                                        ? naturalRowHeightForResize : targetRowHeight) / 2f);
                         resizeText.setScaleY(sevenSegmentResize
                                 ? targetRowHeight / (float) Math.max(1, naturalRowHeightForResize)
                                 : clockWidgetStartTextScaleY * targetRowHeight
@@ -3383,6 +3436,9 @@ public class MainActivity extends Activity {
                     @Override public List<ResolveInfo> getAllApps() { return allApps; }
                     @Override public List<ResolveInfo> getDrawerApps() { return drawerApps; }
                     @Override public int getCurrentPage() { return currentPage; }
+                    @Override public boolean preserveSavedHomePositionsAfterLauncherUpdate() {
+                        return launcherUpdatedSinceLastRun;
+                    }
                     @Override public void rebuildPages() { MainActivity.this.rebuildPages(); }
                     @Override public int getHomeColumns() { return MainActivity.this.getHomeColumns(); }
                     @Override public int getHomeCellHeightDp(int iconSize) {
@@ -19766,8 +19822,7 @@ public class MainActivity extends Activity {
         String widthClockValue = clockText.getText() == null
                 ? "" : clockText.getText().toString();
         // Keep this reservation stable while the hour changes digit count.
-        final boolean reserveTwoDigitStandardWidth = !sevenSegment
-                && selectedClockStyle != 2;
+        final boolean reserveTwoDigitStandardWidth = !sevenSegment;
         float baseTrackingWidth = clockText.getTextSize()
                 * clockPresetLetterSpacing(selectedClockStyle)
                 * Math.max(0, widthClockValue.length() - 1);
@@ -19782,7 +19837,8 @@ public class MainActivity extends Activity {
                 - nonLedDigitScale * customColonAdvanceReduction
                 - customDigitGroupReduction - markerWidth - LauncherUiUtils.dp(this, 5f);
         final int twoDigitStandardWidthClearance = reserveTwoDigitStandardWidth
-                ? Math.max(0, (int) Math.ceil(requiredExtraWidth))
+                ? Math.max(Math.max(0, (int) Math.ceil(requiredExtraWidth)),
+                        selectedClockStyle == 2 ? LauncherUiUtils.dp(this, 24f) : 0)
                 : 0;
         final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
         // The LED glyphs are drawn 12.6dp wider than their natural segment geometry.
@@ -19859,6 +19915,9 @@ public class MainActivity extends Activity {
         // the drawing left its background short and caused the clock to look detached.
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
         final int rowHeight = Math.max(1, Math.round(naturalRowHeight * breadthScale));
+        final boolean compactNeonCircuitRow = neonCircuitStyle && rowHeight < naturalRowHeight;
+        final int clockTextLayoutHeight = (sevenSegment || neonCircuitStyle)
+                ? naturalRowHeight : rowHeight;
 
         clockPanel.setGravity(alignment);
         clockPanel.setPivotY(0f);
@@ -20033,8 +20092,8 @@ public class MainActivity extends Activity {
         // Keep that view at the natural 114dp height and scale the rendered digits
         // by breadthScale explicitly; otherwise layout/background breadth changes
         // while the LED glyph view can retain stale measured bounds during a drag.
-        clockText.setPivotY(sevenSegment || rowHeight < naturalRowHeight
-                ? 0f : naturalRowHeight / 2f);
+        clockText.setPivotY(sevenSegment || compactNeonCircuitRow
+                ? 0f : clockTextLayoutHeight / 2f);
         // The typography colon must use the same vertical center as this transformed row.
         syncClockColonVerticalCenter();
         // Normalize non-seven-segment glyph height across typography presets.
@@ -20084,8 +20143,8 @@ public class MainActivity extends Activity {
                 : nonLedDigitScale * neonCircuitWidthScale * neonCircuitDateScaleCompensation);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(clockGroupWidth / 2f);
-        clockText.setPivotY(sevenSegment || rowHeight < naturalRowHeight
-                ? 0f : naturalRowHeight / 2f);
+        clockText.setPivotY(sevenSegment || compactNeonCircuitRow
+                ? 0f : clockTextLayoutHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
@@ -20100,7 +20159,10 @@ public class MainActivity extends Activity {
         // extends downward; preserve a net 5 dp upward offset from the original center.
         // The panel itself no longer uses scaleY, so this offset must remain a
         // fixed physical distance rather than being inversely scaled with breadth.
-        clockText.setTranslationY(sevenSegment ? 0f : LauncherUiUtils.dp(this, 5));
+        clockText.setTranslationY(sevenSegment || compactNeonCircuitRow ? 0f
+                : LauncherUiUtils.dp(this, 5)
+                        + (neonCircuitStyle
+                                ? Math.max(0, rowHeight - naturalRowHeight) / 2f : 0f));
         ViewGroup.LayoutParams rawClockParams = clockText.getLayoutParams();
         if (rawClockParams instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams textParams = (FrameLayout.LayoutParams) rawClockParams;
@@ -20111,7 +20173,7 @@ public class MainActivity extends Activity {
             // Keep the seven-segment renderer at its natural measured height
             // and scale the glyphs separately from the background. Non-LED clocks
             // continue to use the actual resized row height.
-            textParams.height = naturalRowHeight;
+            textParams.height = clockTextLayoutHeight;
             textParams.gravity = Gravity.LEFT | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
