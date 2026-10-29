@@ -2508,33 +2508,32 @@ public class MainActivity extends Activity {
     private void applyClockDigitOverflowPolicy(int rowHeight) {
         final int naturalRowHeight = LauncherUiUtils.dp(this, 114);
         final boolean compactRow = rowHeight < naturalRowHeight;
+        // Fit glyphs by scaling their natural renderer, rather than clipping its pixels.
         if (clockRow != null) {
-            clockRow.setClipChildren(compactRow);
-            clockRow.setClipToPadding(compactRow);
+            clockRow.setClipChildren(false);
+            clockRow.setClipToPadding(false);
         }
         if (clockGroup != null) {
-            clockGroup.setClipChildren(compactRow);
-            clockGroup.setClipToPadding(compactRow);
+            clockGroup.setClipChildren(false);
+            clockGroup.setClipToPadding(false);
         }
         if (clockText == null) return;
 
         final boolean sevenSegment = clockText instanceof SevenSegmentClockTextView
                 && prefs != null && prefs.getInt(KEY_CLOCK_STYLE, 0) == 5;
-        final boolean dateVisible = prefs == null || prefs.getBoolean(KEY_SHOW_DATE, true);
         final float requestedScale = Math.max(0.01f, Math.abs(clockText.getScaleY()));
         clockDesiredVerticalScales.put(clockText, requestedScale);
 
-        if (compactRow && dateVisible && !sevenSegment) {
-            // A centered TextView is transformed around its center. Fit its font line box
-            // (rather than merely its view bounds) above the date line, and remove the
-            // normal-height downward offset that would otherwise use up that clearance.
+        if (compactRow && !sevenSegment) {
+            // Keep TextView at its natural measured height, then scale the complete font
+            // line box into the smaller row. A short TextView clips glyphs before scaling.
             android.graphics.Paint.FontMetrics metrics = clockText.getPaint().getFontMetrics();
             float fontLineHeight = Math.max(1f, metrics.descent - metrics.ascent);
             float availableHeight = Math.max(1f,
                     rowHeight - LauncherUiUtils.dp(this, 2));
-            float maxScale = Math.max(0.1f,
+            float maxScale = Math.max(0.01f,
                     Math.min(1f, availableHeight / fontLineHeight));
-            clockText.setPivotY(rowHeight / 2f);
+            clockText.setPivotY(0f);
             clockText.setTranslationY(0f);
             clockText.setScaleY(Math.min(requestedScale, maxScale));
         } else if (!sevenSegment) {
@@ -2727,6 +2726,10 @@ public class MainActivity extends Activity {
                             rowHeightParams.height = targetRowHeight;
                             clockRow.setLayoutParams(rowHeightParams);
                         }
+                        // Keep natural text bounds and scale the rendering into the row;
+                        // shrinking the TextView first clips glyph pixels before scaling.
+                        clockRow.setClipChildren(false);
+                        clockRow.setClipToPadding(false);
                     }
                     if (clockGroup != null) {
                         ViewGroup.LayoutParams groupHeightParams = clockGroup.getLayoutParams();
@@ -2734,16 +2737,19 @@ public class MainActivity extends Activity {
                             groupHeightParams.height = targetRowHeight;
                             clockGroup.setLayoutParams(groupHeightParams);
                         }
+                        clockGroup.setClipChildren(false);
+                        clockGroup.setClipToPadding(false);
                     }
                     TextView resizeText = clockTextsByPage[resizePage];
                     if (resizeText != null) {
                         ViewGroup.LayoutParams textHeightParams = resizeText.getLayoutParams();
                         if (textHeightParams != null) {
-                            textHeightParams.height = sevenSegmentResize
-                                    ? naturalRowHeightForResize : targetRowHeight;
+                            textHeightParams.height = naturalRowHeightForResize;
                             resizeText.setLayoutParams(textHeightParams);
                         }
-                        resizeText.setPivotY(sevenSegmentResize ? 0f : targetRowHeight / 2f);
+                        resizeText.setPivotY(sevenSegmentResize
+                                || targetRowHeight < naturalRowHeightForResize
+                                ? 0f : targetRowHeight / 2f);
                         resizeText.setScaleY(sevenSegmentResize
                                 ? targetRowHeight / (float) Math.max(1, naturalRowHeightForResize)
                                 : clockWidgetStartTextScaleY * targetRowHeight
@@ -19776,9 +19782,14 @@ public class MainActivity extends Activity {
                 ? Math.max(0, (int) Math.ceil(requiredExtraWidth))
                 : 0;
         final int ledGroupSpacing = sevenSegment ? LauncherUiUtils.dp(this, 30) : 0;
+        // The LED glyphs are drawn 12.6dp wider than their natural segment geometry.
+        // Reserve that same width in the layout/background so the final digit keeps
+        // visible clearance instead of sitting against the panel edge.
+        final float sevenSegmentExtraWidthDp = LauncherUiUtils.dp(this, 12.6f);
         final int clockWithMarkerWidth = (int) Math.ceil(naturalClockWidth)
                 + twoDigitStandardWidthClearance
-                + markerWidth + LauncherUiUtils.dp(this, 1) + ledGroupSpacing;
+                + markerWidth + LauncherUiUtils.dp(this, 1) + ledGroupSpacing
+                + (sevenSegment ? (int) Math.ceil(sevenSegmentExtraWidthDp) : 0);
         // Keep the digit group's layout width independent from the date-line width.
         // Enlarging date/AM-PM text may widen the background, but must not move the digits.
         final int clockGroupWidth = clockWithMarkerWidth + LauncherUiUtils.dp(this, 4);
@@ -20019,7 +20030,8 @@ public class MainActivity extends Activity {
         // Keep that view at the natural 114dp height and scale the rendered digits
         // by breadthScale explicitly; otherwise layout/background breadth changes
         // while the LED glyph view can retain stale measured bounds during a drag.
-        clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
+        clockText.setPivotY(sevenSegment || rowHeight < naturalRowHeight
+                ? 0f : rowHeight / 2f);
         // The typography colon must use the same vertical center as this transformed row.
         syncClockColonVerticalCenter();
         // Normalize non-seven-segment glyph height across typography presets.
@@ -20045,7 +20057,6 @@ public class MainActivity extends Activity {
         // Increase only the seven-segment glyph width by 0.2 cm. At 360 dpi,
         // 0.2 cm is 28.35 physical pixels, or about 12.6 dp. Scale the glyph view
         // around its center so the panel/background, date, and AM/PM stay unchanged.
-        float sevenSegmentExtraWidthDp = LauncherUiUtils.dp(this, 12.6f);
         float sevenSegmentWidthScale = sevenSegment
                 ? (naturalClockWidth + sevenSegmentExtraWidthDp) / Math.max(1f, naturalClockWidth)
                 : 1f;
@@ -20070,7 +20081,8 @@ public class MainActivity extends Activity {
                 : nonLedDigitScale * neonCircuitWidthScale * neonCircuitDateScaleCompensation);
         // Keep the pivot tied to the newly calculated layout dimensions even during live resizing.
         clockText.setPivotX(clockGroupWidth / 2f);
-        clockText.setPivotY(sevenSegment ? 0f : rowHeight / 2f);
+        clockText.setPivotY(sevenSegment || rowHeight < naturalRowHeight
+                ? 0f : rowHeight / 2f);
         // Extend non-seven-segment digits another 10 dp downward while keeping
         // their upper edge anchored to its existing position against the background.
         // The added scale is based on the fixed 114 dp clock row; a 5 dp translation
@@ -20096,7 +20108,7 @@ public class MainActivity extends Activity {
             // Keep the seven-segment renderer at its natural measured height
             // and scale the glyphs separately from the background. Non-LED clocks
             // continue to use the actual resized row height.
-            textParams.height = sevenSegment ? naturalRowHeight : rowHeight;
+            textParams.height = naturalRowHeight;
             textParams.gravity = Gravity.LEFT | Gravity.TOP;
             clockText.setLayoutParams(textParams);
         }
